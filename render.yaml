@@ -61,6 +61,10 @@ services:
     envVars:
       - key: PYTHONPATH
         value: /opt/render/project/src/ml-service
+      - key: CARGO_HOME
+        value: /tmp/cargo
+      - key: RUSTUP_HOME
+        value: /tmp/rustup
       - key: ML_SERVICE_API_KEY
         generateValue: true
       - key: ML_MODEL_RELEASE_APPROVED
