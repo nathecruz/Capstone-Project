@@ -1,0 +1,131 @@
+import { Ionicons } from '@expo/vector-icons';
+import * as SystemUI from 'expo-system-ui';
+import { Tabs } from 'expo-router';
+import React, { useEffect } from 'react';
+import { StatusBar, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAppColorScheme } from '@/hooks/color-scheme-context';
+
+export default function TabLayout() {
+  const { isDarkMode, t } = useAppColorScheme();
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const compact = width < 370;
+  const tabBarHeight = compact ? 74 : 78;
+  const systemBarColor = isDarkMode ? '#111018' : '#F3F2F8';
+
+  useEffect(() => {
+    void SystemUI.setBackgroundColorAsync(systemBarColor);
+  }, [isDarkMode, systemBarColor]);
+
+  return (
+    <>
+      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} backgroundColor={systemBarColor} />
+      <Tabs
+        screenOptions={{
+          headerShown: false,
+          tabBarShowLabel: false,
+          tabBarHideOnKeyboard: true,
+          tabBarStyle: [
+            styles.tabBar,
+            {
+              backgroundColor: isDarkMode ? '#1D1A24' : '#FFFFFF',
+              height: tabBarHeight + insets.bottom,
+              paddingBottom: insets.bottom + 10,
+            },
+          ],
+          tabBarActiveTintColor: '#4F2AC8',
+          tabBarInactiveTintColor: isDarkMode ? '#B6B0C3' : '#7A7D8A',
+          tabBarItemStyle: styles.item,
+        }}>
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: t('home'),
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'home' : 'home-outline'} size={22} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="habits"
+        options={{
+          title: t('habits'),
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'list' : 'list-outline'} size={22} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="add"
+        options={{
+          title: t('add'),
+          tabBarIcon: () => (
+            <View style={styles.addButtonWrap}>
+              <Ionicons name="add" size={28} color="#FFFFFF" />
+            </View>
+          ),
+          tabBarLabelStyle: { fontSize: 10, color: '#4F2AC8', marginTop: 2 },
+        }}
+      />
+      <Tabs.Screen
+        name="insights"
+        options={{
+          title: t('insights'),
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'bar-chart' : 'bar-chart-outline'} size={22} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: t('profile'),
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'person' : 'person-outline'} size={22} color={color} />
+          ),
+        }}
+      />
+      </Tabs>
+    </>
+  );
+}
+
+const styles = StyleSheet.create({
+  tabBar: {
+    height: 78,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E7E5EC',
+    paddingTop: 10,
+    paddingBottom: 10,
+    paddingHorizontal: 10,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    elevation: 10,
+  },
+  item: {
+    paddingVertical: 2,
+  },
+  label: {
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  addButtonWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#5B42D8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: -18,
+    shadowColor: '#5B42D8',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+});

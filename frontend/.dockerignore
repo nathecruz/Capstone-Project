@@ -1,0 +1,11 @@
+node_modules
+.expo
+.expo-web-build
+dist
+build
+android/.gradle
+android/build
+android/app/build
+.env
+.env.*
+npm-debug.log

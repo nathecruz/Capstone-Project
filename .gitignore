@@ -1,0 +1,33 @@
+# Dependencies and generated output
+node_modules/
+dist/
+build/
+.expo/
+.expo-web-build/
+*.log
+
+# Local configuration and secrets
+**/.env
+**/.env.*
+!.env.example
+!backend/.env.example
+!frontend/.env.example
+
+# Editor and operating-system files
+.vscode/*.log
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Python backend artifacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.sqlite3
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+backend/data/backups/
+backend/data/uploads/

@@ -1,0 +1,1 @@
+globalThis.__HABITAI_ORIGINAL_FETCH__ = globalThis.fetch;

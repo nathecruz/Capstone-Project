@@ -1,0 +1,92 @@
+services:
+  - type: web
+    name: habitai-backend
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: NODE_ENV=production node server.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8787
+      - key: DATABASE_URL
+        sync: false
+      - key: AUTH_URL
+        sync: false
+      - key: JWKS_URL
+        sync: false
+      - key: ML_SERVICE_URL
+        fromService:
+          type: web
+          name: habitai-ml
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: ML_SERVICE_API_KEY
+        fromService:
+          type: web
+          name: habitai-ml
+          envVarKey: ML_SERVICE_API_KEY
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: EXTERNAL_REQUEST_TIMEOUT_MS
+        value: 15000
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.8-flash
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_SECURE
+        value: true
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+
+  - type: web
+    name: habitai-ml
+    runtime: python
+    plan: free
+    rootDir: ml-service
+    buildCommand: pip install --no-cache-dir -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHONPATH
+        value: /opt/render/project/src/ml-service
+      - key: ML_SERVICE_API_KEY
+        generateValue: true
+      - key: ML_MODEL_RELEASE_APPROVED
+        value: false
+      - key: ML_SERVICE_HOST
+        value: 0.0.0.0
+      - key: ML_SERVICE_PORT
+        value: 8000
+      - key: NODE_ENV
+        value: production
+
+  - type: web
+    name: habitai-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run export:web
+    staticPublishPath: dist
+    envVars:
+      - key: EXPO_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: habitai-backend
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: EXPO_PUBLIC_AI_API_URL
+        fromService:
+          type: web
+          name: habitai-backend
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: EXPO_PUBLIC_AUTH_URL
+        sync: false

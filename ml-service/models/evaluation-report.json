@@ -1,0 +1,38 @@
+{
+  "dataset_rows": 250,
+  "feature_names": [
+    "streak",
+    "completion_rate",
+    "missed_days",
+    "recent_completion_rate",
+    "average_session_minutes",
+    "priority_score",
+    "goal_type_score"
+  ],
+  "training_source": "synthetic demo scenarios; not approved for production",
+  "training_dataset_sha256": "e81194d336cd63f06b27944f62e2a523a9718656a45269fac1e0d734244c8ac3",
+  "evaluation_dataset_sha256": "37cac3ab94516d1b5a395ef8197cd7e2ffc9322b3cad6e18fc78fa0ebdfc122a",
+  "artifact_sha256": "575ff7d9392b736c2746ef1f40b77651685972589c2e18a12b61ebd4cb575c60",
+  "approved": false,
+  "synthetic_demo": true,
+  "minimum_evaluation_rows": 100,
+  "minimum_f1": 0.65,
+  "minimum_roc_auc": 0.7,
+  "quality_passed": false,
+  "models": {
+    "logistic_regression": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "roc_auc": 1.0
+    },
+    "random_forest": {
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "roc_auc": 1.0
+    }
+  }
+}

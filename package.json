@@ -1,0 +1,33 @@
+{
+  "name": "habitai-monorepo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "npm run lint:backend && npm run lint:frontend",
+    "lint:backend": "npm --prefix backend run lint",
+    "lint:frontend": "npm --prefix frontend run lint",
+    "setup:env": "node scripts/setup-env.js",
+    "check:env": "node scripts/check-env.js",
+    "check:env:deployment": "cross-env NODE_ENV=production node scripts/check-env.js --deployment",
+    "check:env:production": "node scripts/check-env.js --production",
+    "test": "npm run test:backend && npm run test:frontend && npm run test:ml && npm run test:env",
+    "test:backend": "npm --prefix backend test",
+    "test:frontend": "npm --prefix frontend test",
+    "test:ml": "cross-env PYTHONPATH=ml-service python -m unittest discover -s ml-service/tests",
+    "test:env": "node --test scripts/check-env.test.js",
+    "backend": "npm --prefix backend run start",
+    "frontend": "cross-env CI=1 npm --prefix frontend run web:clear -- --port 8082",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:ml": "cross-env PYTHONPATH=ml-service python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload",
+    "dev:frontend": "cross-env CI=1 npm --prefix frontend run web:clear -- --port 8082",
+    "dev": "cross-env ML_SERVICE_API_KEY=dev-only-local-key concurrently -k \"npm run dev:backend\" \"npm run dev:ml\" \"npm run dev:frontend\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.4",
+    "cross-env": "^10.1.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "react-native-otp-entry": "^1.8.6"
+  }
+}

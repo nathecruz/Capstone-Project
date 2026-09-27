@@ -1,0 +1,209 @@
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  full_name TEXT NOT NULL,
+  username TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL UNIQUE,
+  date_of_birth TEXT NOT NULL DEFAULT '',
+  gender TEXT NOT NULL DEFAULT '',
+  region TEXT NOT NULL DEFAULT '',
+  about TEXT NOT NULL DEFAULT '',
+  password_hash TEXT NOT NULL,
+  created_at BIGINT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique
+  ON users (LOWER(username)) WHERE username <> '';
+
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS sessions_expires_at_idx ON sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS login_activity (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  device TEXT NOT NULL,
+  created_at BIGINT NOT NULL,
+  login_date_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS login_activity_user_created_idx ON login_activity(user_id, created_at DESC);
+ALTER TABLE login_activity ADD COLUMN IF NOT EXISTS login_date_time TIMESTAMPTZ;
+UPDATE login_activity SET login_date_time = to_timestamp(created_at / 1000.0) WHERE login_date_time IS NULL;
+ALTER TABLE login_activity ALTER COLUMN login_date_time SET DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE login_activity ALTER COLUMN login_date_time SET NOT NULL;
+
+CREATE TABLE IF NOT EXISTS password_reset_requests (
+  email TEXT PRIMARY KEY,
+  otp_hash TEXT NOT NULL,
+  expires_at BIGINT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  verified_at BIGINT,
+  created_at BIGINT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS leaderboard_users (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  points INTEGER NOT NULL DEFAULT 0 CHECK (points >= 0),
+  avatar TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS leaderboard_snapshots (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  points INTEGER NOT NULL CHECK (points >= 0),
+  avatar TEXT NOT NULL DEFAULT '',
+  recorded_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS leaderboard_snapshots_recorded_idx ON leaderboard_snapshots(recorded_at DESC);
+
+CREATE TABLE IF NOT EXISTS leaderboard_daily_points (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  recorded_date DATE NOT NULL,
+  points INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, recorded_date)
+);
+ALTER TABLE leaderboard_daily_points DROP CONSTRAINT IF EXISTS leaderboard_daily_points_points_check;
+CREATE INDEX IF NOT EXISTS leaderboard_daily_points_date_idx ON leaderboard_daily_points(recorded_date);
+
+CREATE TABLE IF NOT EXISTS user_app_state (
+  id UUID PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  state_json JSONB NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS user_app_state_user_updated_idx ON user_app_state(user_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS habits (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  label TEXT NOT NULL,
+  meta TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL,
+  icon TEXT NOT NULL,
+  color TEXT NOT NULL,
+  goal INTEGER NOT NULL DEFAULT 1,
+  progress INTEGER NOT NULL DEFAULT 0,
+  total TEXT NOT NULL DEFAULT '',
+  streak INTEGER NOT NULL DEFAULT 0,
+  done BOOLEAN NOT NULL DEFAULT FALSE,
+  reminder_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  reminder_time TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS habits_user_sort_idx ON habits(user_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS goals (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  category TEXT NOT NULL,
+  progress INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'Fresh plan',
+  details_json JSONB NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS goals_user_updated_idx ON goals(user_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS goal_steps (
+  id TEXT PRIMARY KEY,
+  goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+  step_index INTEGER NOT NULL,
+  description TEXT NOT NULL,
+  due_date TEXT NOT NULL DEFAULT '',
+  completed BOOLEAN NOT NULL DEFAULT FALSE,
+  UNIQUE (goal_id, step_index)
+);
+
+CREATE TABLE IF NOT EXISTS user_preferences (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  preferences_json JSONB NOT NULL,
+  ring_interval INTEGER NOT NULL DEFAULT 30,
+  snooze_frequency TEXT NOT NULL DEFAULT 'Once',
+  updated_at BIGINT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS token_transactions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  amount INTEGER NOT NULL,
+  label TEXT NOT NULL,
+  transaction_date TEXT NOT NULL,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS token_transactions_user_date_idx ON token_transactions(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS achievements (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_achievements (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  achievement_id TEXT NOT NULL REFERENCES achievements(id) ON DELETE CASCADE,
+  earned_at BIGINT NOT NULL,
+  PRIMARY KEY (user_id, achievement_id)
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  read_at BIGINT,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS notifications_user_created_idx ON notifications(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS rewards (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  token_cost INTEGER NOT NULL CHECK (token_cost >= 0),
+  description TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS reward_redemptions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  reward_id TEXT NOT NULL REFERENCES rewards(id),
+  token_cost INTEGER NOT NULL,
+  redeemed_at BIGINT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS habit_completions (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  habit_id TEXT NOT NULL,
+  completed_date DATE NOT NULL,
+  completed_at BIGINT NOT NULL,
+  PRIMARY KEY (user_id, habit_id, completed_date)
+);
+CREATE INDEX IF NOT EXISTS habit_completions_user_date_idx
+  ON habit_completions(user_id, completed_date);
+
+CREATE TABLE IF NOT EXISTS issue_reports (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  topic TEXT NOT NULL,
+  timing TEXT NOT NULL,
+  description TEXT NOT NULL,
+  attachment_name TEXT,
+  attachment_uri TEXT,
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS issue_reports_user_created_idx ON issue_reports(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS feature_suggestions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  suggestion TEXT NOT NULL,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS feature_suggestions_user_created_idx ON feature_suggestions(user_id, created_at DESC);
