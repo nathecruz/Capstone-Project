@@ -52,6 +52,7 @@ services:
   - type: web
     name: habitai-ml
     runtime: python
+    pythonVersion: "3.11"
     plan: free
     rootDir: ml-service
     buildCommand: pip install --no-cache-dir -r requirements.txt
