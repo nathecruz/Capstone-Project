@@ -55,7 +55,12 @@ services:
     pythonVersion: "3.11"
     plan: free
     rootDir: ml-service
-    buildCommand: pip install --no-cache-dir -r requirements.txt
+    buildCommand: >
+      mkdir -p /tmp/cargo /tmp/rustup &&
+      export CARGO_HOME=/tmp/cargo &&
+      export RUSTUP_HOME=/tmp/rustup &&
+      python -m pip install --upgrade pip setuptools wheel &&
+      python -m pip install --no-cache-dir --prefer-binary -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port 8000
     healthCheckPath: /healthz
     envVars:
