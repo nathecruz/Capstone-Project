@@ -64,6 +64,16 @@ function isLocalUrl(value: string) {
   }
 }
 
+function isLocalWebHost() {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
+  const hostname = window.location.hostname;
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
+
+function isAllowedLocalWebApiUrl(value: string) {
+  return isLocalWebHost() && isLocalUrl(value);
+}
+
 function isPlaceholderUrl(value: string) {
   const normalized = value.trim().toLowerCase();
   return normalized.includes('replace-with')
@@ -79,16 +89,17 @@ function isPlaceholderUrl(value: string) {
 export function getApiBaseUrl() {
   const envUrl = (process.env.EXPO_PUBLIC_API_URL || process.env.EXPO_PUBLIC_AI_API_URL)?.trim();
   if (envUrl) {
-    if (process.env.NODE_ENV === 'production' && !envUrl.startsWith('https://')) {
-      throw new Error('Production API is not configured. Set EXPO_PUBLIC_API_URL to the deployed backend URL.');
-    }
-    if (process.env.NODE_ENV === 'production' && (isPlaceholderUrl(envUrl) || isLocalUrl(envUrl))) {
+    const hasInvalidProductionUrl = !envUrl.startsWith('https://') || isPlaceholderUrl(envUrl) || isLocalUrl(envUrl);
+    if (process.env.NODE_ENV === 'production' && hasInvalidProductionUrl && !isAllowedLocalWebApiUrl(envUrl)) {
       throw new Error('Production API is not configured. Set EXPO_PUBLIC_API_URL to the deployed backend URL.');
     }
     return envUrl.replace(/\/$/, '');
   }
 
   if (process.env.NODE_ENV === 'production') {
+    if (isLocalWebHost()) {
+      return `http://${window.location.hostname}:8787`;
+    }
     throw new Error('Production API is not configured. Set EXPO_PUBLIC_API_URL to the deployed backend URL.');
   }
 

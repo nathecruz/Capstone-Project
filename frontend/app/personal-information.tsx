@@ -66,13 +66,14 @@ export default function PersonalInformationScreen() {
     setIsGenderPickerOpen(false);
   };
 
-  const handleBirthDateValueChange = (_event: DateTimePickerChangeEvent, selectedDate: Date) => {
-    if (Platform.OS === 'android') setIsDatePickerOpen(false);
+  const handleBirthDateValueChange = (_event: DateTimePickerChangeEvent, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setIsDatePickerOpen(false);
+    }
+    if (!selectedDate) return;
     setDraftBirthDate(selectedDate);
     setDraftProfile((current) => ({ ...current, dateOfBirth: formatDateOfBirth(selectedDate) }));
   };
-
-  const handleBirthDateDismiss = () => setIsDatePickerOpen(false);
 
   const saveProfile = async () => {
     if (isSaving) return;
@@ -232,8 +233,7 @@ export default function PersonalInformationScreen() {
                             mode="date"
                             display="spinner"
                             maximumDate={new Date()}
-                            onValueChange={handleBirthDateValueChange}
-                            onDismiss={handleBirthDateDismiss}
+                            onChange={handleBirthDateValueChange}
                             themeVariant={isDarkMode ? 'dark' : 'light'}
                           />
                         </View>
@@ -244,8 +244,7 @@ export default function PersonalInformationScreen() {
                           mode="date"
                           display="calendar"
                           maximumDate={new Date()}
-                          onValueChange={handleBirthDateValueChange}
-                          onDismiss={handleBirthDateDismiss}
+                          onChange={handleBirthDateValueChange}
                         />
                       )}
                     </>

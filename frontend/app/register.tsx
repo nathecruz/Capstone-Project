@@ -33,13 +33,6 @@ const formatDateOfBirth = (date: Date) => date.toLocaleDateString('en-US', {
   year: 'numeric',
 });
 
-const formatDateInput = (date: Date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
 export default function RegisterScreen() {
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
@@ -50,6 +43,7 @@ export default function RegisterScreen() {
   const [birthDate, setBirthDate] = useState(new Date(1998, 4, 14));
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isGenderPickerOpen, setIsGenderPickerOpen] = useState(false);
+  const isWeb = Platform.OS === 'web';
   const [isRegionPickerOpen, setIsRegionPickerOpen] = useState(false);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -68,7 +62,9 @@ export default function RegisterScreen() {
   };
 
   const handleBirthDateValueChange = (_event: DateTimePickerChangeEvent, selectedDate?: Date) => {
-    if (Platform.OS === 'android') setIsDatePickerOpen(false);
+    if (Platform.OS === 'android') {
+      setIsDatePickerOpen(false);
+    }
     if (!selectedDate) return;
     setBirthDate(selectedDate);
     setDateOfBirth(formatDateOfBirth(selectedDate));
@@ -193,61 +189,57 @@ export default function RegisterScreen() {
           />
 
           <Text style={styles.label}>Date of Birth</Text>
-          {Platform.OS === 'web' ? (
-            <input
-              type="date"
-              aria-label="Date of birth"
-              value={dateOfBirth ? formatDateInput(birthDate) : ''}
-              max={formatDateInput(new Date())}
-              onChange={(event) => {
-                if (!event.currentTarget.value) return;
-                const selectedDate = new Date(`${event.currentTarget.value}T00:00:00`);
-                setBirthDate(selectedDate);
-                setDateOfBirth(formatDateOfBirth(selectedDate));
+          {isWeb ? (
+            <TextInput
+              value={dateOfBirth}
+              onChangeText={(value) => {
+                setDateOfBirth(value);
+                const parsedDate = new Date(value);
+                if (!Number.isNaN(parsedDate.getTime())) {
+                  setBirthDate(parsedDate);
+                }
               }}
-              style={{
-                backgroundColor: '#f7f9ff',
-                border: '1px solid #e3eaff',
-                borderRadius: 14,
-                boxSizing: 'border-box',
-                color: '#1a1a1e',
-                fontFamily: 'inherit',
-                fontSize: 15,
-                marginBottom: 12,
-                padding: '13px 14px',
-                width: '100%',
-              }}
+              placeholder="MM/DD/YYYY"
+              keyboardType="numeric"
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.input}
             />
           ) : (
-            <Pressable style={[styles.input, styles.selectorInput]} onPress={() => setIsDatePickerOpen(true)} accessibilityRole="button" accessibilityLabel="Select date of birth">
-              <Text style={[styles.selectorText, !dateOfBirth && styles.placeholderText]}>{dateOfBirth || 'Select your birth date'}</Text>
-              <Ionicons name="calendar-outline" size={19} color="#657089" />
-            </Pressable>
-          )}
-          {isDatePickerOpen && Platform.OS === 'ios' && (
-            <View style={styles.datePickerContainer}>
-              <DateTimePicker
-                value={birthDate}
-                mode="date"
-                display="inline"
-                maximumDate={new Date()}
-                onValueChange={handleBirthDateValueChange}
-                onDismiss={() => setIsDatePickerOpen(false)}
-              />
-              <Pressable style={styles.pickerDoneButton} onPress={() => setIsDatePickerOpen(false)}>
-                <Text style={styles.pickerDoneText}>Done</Text>
+            <>
+              <Pressable
+                style={[styles.input, styles.selectorInput]}
+                onPress={() => setIsDatePickerOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Select date of birth"
+              >
+                <Text style={[styles.selectorText, !dateOfBirth && styles.placeholderText]}>{dateOfBirth || 'Select your birth date'}</Text>
+                <Ionicons name="calendar-outline" size={19} color="#657089" />
               </Pressable>
-            </View>
-          )}
-          {isDatePickerOpen && Platform.OS === 'android' && (
-            <DateTimePicker
-              value={birthDate}
-              mode="date"
-              display="calendar"
-              maximumDate={new Date()}
-              onValueChange={handleBirthDateValueChange}
-              onDismiss={() => setIsDatePickerOpen(false)}
-            />
+              {isDatePickerOpen && Platform.OS === 'ios' && (
+                <View style={styles.datePickerContainer}>
+                  <DateTimePicker
+                    value={birthDate}
+                    mode="date"
+                    display="inline"
+                    maximumDate={new Date()}
+                    onChange={handleBirthDateValueChange}
+                  />
+                  <Pressable style={styles.pickerDoneButton} onPress={() => setIsDatePickerOpen(false)}>
+                    <Text style={styles.pickerDoneText}>Done</Text>
+                  </Pressable>
+                </View>
+              )}
+              {isDatePickerOpen && Platform.OS === 'android' && (
+                <DateTimePicker
+                  value={birthDate}
+                  mode="date"
+                  display="calendar"
+                  maximumDate={new Date()}
+                  onChange={handleBirthDateValueChange}
+                />
+              )}
+            </>
           )}
 
           <Text style={styles.label}>Gender</Text>
@@ -318,7 +310,8 @@ export default function RegisterScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-      <Modal visible={isGenderPickerOpen} animationType="fade" transparent onRequestClose={() => setIsGenderPickerOpen(false)}>
+      {isGenderPickerOpen && (
+      <Modal visible animationType="fade" transparent onRequestClose={() => setIsGenderPickerOpen(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.genderCard}>
             <View style={styles.modalHeader}>
@@ -336,7 +329,9 @@ export default function RegisterScreen() {
           </View>
         </View>
       </Modal>
-      <Modal visible={isRegionPickerOpen} animationType="fade" transparent onRequestClose={() => setIsRegionPickerOpen(false)}>
+      )}
+      {isRegionPickerOpen && (
+      <Modal visible animationType="fade" transparent onRequestClose={() => setIsRegionPickerOpen(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.genderCard}>
             <View style={styles.modalHeader}>
@@ -356,6 +351,7 @@ export default function RegisterScreen() {
           </View>
         </View>
       </Modal>
+      )}
       <AppDialog
         visible={dialog !== null}
         title={dialog?.title ?? ''}

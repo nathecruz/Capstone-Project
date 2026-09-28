@@ -5,6 +5,10 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
+ENV CARGO_HOME=/tmp/cargo
+ENV RUSTUP_HOME=/tmp/rustup
+
+RUN mkdir -p /tmp/cargo /tmp/rustup
 
 COPY requirements.txt ./
 RUN python -m pip install --upgrade pip setuptools wheel && \

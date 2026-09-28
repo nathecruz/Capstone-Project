@@ -2,5 +2,8 @@
   "version": 2,
   "buildCommand": "npm run export:web",
   "outputDirectory": "dist",
-  "installCommand": "npm ci"
+  "installCommand": "npm ci",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }

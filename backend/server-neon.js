@@ -175,7 +175,7 @@ function parse(schema, request, response) {
 function normalizeEmail(value) { return String(value).trim().toLowerCase(); }
 function hashToken(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
 function authToken(request) { const header = request.headers.authorization || ''; return header.startsWith('Bearer ') ? header.slice(7).trim() : ''; }
-function userFromRow(row) { return { id: row.id, fullName: row.fullName, username: row.username || '', email: row.email, dateOfBirth: row.dateOfBirth || '', gender: row.gender || '', region: row.region || '', about: row.about || '' }; }
+function userFromRow(row) { return { id: row.id ?? row.userId, fullName: row.fullName, username: row.username || '', email: row.email, dateOfBirth: row.dateOfBirth || '', gender: row.gender || '', region: row.region || '', about: row.about || '' }; }
 function passwordStrength(value, context = {}) {
   const pass = String(value || '').trim();
   if (!pass) return 'Password is required.';

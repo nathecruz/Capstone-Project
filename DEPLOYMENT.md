@@ -42,7 +42,7 @@ For Vercel frontend-only hosting, set the project root to `frontend` and add the
 - `EXPO_PUBLIC_API_URL`: deployed backend HTTPS URL
 - `EXPO_PUBLIC_AUTH_URL`: Neon Auth client endpoint
 
-The Vercel config runs `npm ci` and `npm run export:web`, publishing `dist`. Expo Router statically exports its routes, so no catch-all SPA rewrite is required.
+The Vercel config runs `npm ci` and `npm run export:web`, publishing `dist`. The web output is a single-page app, so `frontend/vercel.json` rewrites direct route requests such as `/login` to `index.html`.
 
 ## 3) Important production notes
 

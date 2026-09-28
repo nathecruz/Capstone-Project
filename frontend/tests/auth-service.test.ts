@@ -181,4 +181,62 @@ describe('auth service offline behavior', () => {
       if (previousAuthUrl === undefined) delete process.env.EXPO_PUBLIC_AUTH_URL; else process.env.EXPO_PUBLIC_AUTH_URL = previousAuthUrl;
     }
   });
+
+  it('allows localhost web previews in production without a deployed backend URL', () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousApiUrl = process.env.EXPO_PUBLIC_API_URL;
+    const previousAiApiUrl = process.env.EXPO_PUBLIC_AI_API_URL;
+    const previousAuthUrl = process.env.EXPO_PUBLIC_AUTH_URL;
+    const previousLocation = window.location;
+
+    process.env.NODE_ENV = 'production';
+    delete process.env.EXPO_PUBLIC_API_URL;
+    delete process.env.EXPO_PUBLIC_AI_API_URL;
+    delete process.env.EXPO_PUBLIC_AUTH_URL;
+
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...previousLocation, hostname: 'localhost' },
+    });
+
+    try {
+      expect(getApiBaseUrl()).toBe('http://localhost:8787');
+    } finally {
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: previousLocation,
+      });
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
+      if (previousApiUrl === undefined) delete process.env.EXPO_PUBLIC_API_URL; else process.env.EXPO_PUBLIC_API_URL = previousApiUrl;
+      if (previousAiApiUrl === undefined) delete process.env.EXPO_PUBLIC_AI_API_URL; else process.env.EXPO_PUBLIC_AI_API_URL = previousAiApiUrl;
+      if (previousAuthUrl === undefined) delete process.env.EXPO_PUBLIC_AUTH_URL; else process.env.EXPO_PUBLIC_AUTH_URL = previousAuthUrl;
+    }
+  });
+
+  it('allows an explicitly configured localhost API in production localhost previews', () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousApiUrl = process.env.EXPO_PUBLIC_API_URL;
+    const previousAiApiUrl = process.env.EXPO_PUBLIC_AI_API_URL;
+    const previousLocation = window.location;
+
+    process.env.NODE_ENV = 'production';
+    process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8787';
+    delete process.env.EXPO_PUBLIC_AI_API_URL;
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...previousLocation, hostname: 'localhost' },
+    });
+
+    try {
+      expect(getApiBaseUrl()).toBe('http://localhost:8787');
+    } finally {
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: previousLocation,
+      });
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
+      if (previousApiUrl === undefined) delete process.env.EXPO_PUBLIC_API_URL; else process.env.EXPO_PUBLIC_API_URL = previousApiUrl;
+      if (previousAiApiUrl === undefined) delete process.env.EXPO_PUBLIC_AI_API_URL; else process.env.EXPO_PUBLIC_AI_API_URL = previousAiApiUrl;
+    }
+  });
 });

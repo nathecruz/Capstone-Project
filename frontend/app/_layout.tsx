@@ -110,7 +110,7 @@ function RootNavigator() {
         <View
           accessibilityLabel="Checking your session"
           accessibilityRole="progressbar"
-          pointerEvents="auto"
+          pointerEvents="none"
           style={[StyleSheet.absoluteFill, { backgroundColor: colorScheme === 'dark' ? '#111018' : '#F3F2F8' }]}
         >
           <ActivityIndicator color="#5B42D8" style={styles.sessionLoader} />
