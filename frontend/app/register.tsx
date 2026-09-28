@@ -33,6 +33,13 @@ const formatDateOfBirth = (date: Date) => date.toLocaleDateString('en-US', {
   year: 'numeric',
 });
 
+const formatDateInputValue = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export default function RegisterScreen() {
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
@@ -190,20 +197,29 @@ export default function RegisterScreen() {
 
           <Text style={styles.label}>Date of Birth</Text>
           {isWeb ? (
-            <TextInput
-              value={dateOfBirth}
-              onChangeText={(value) => {
-                setDateOfBirth(value);
-                const parsedDate = new Date(value);
-                if (!Number.isNaN(parsedDate.getTime())) {
-                  setBirthDate(parsedDate);
-                }
+            <input
+              type="date"
+              aria-label="Date of birth"
+              value={dateOfBirth ? formatDateInputValue(birthDate) : ''}
+              max={formatDateInputValue(new Date())}
+              onChange={(event) => {
+                if (!event.currentTarget.value) return;
+                const selectedDate = new Date(`${event.currentTarget.value}T00:00:00`);
+                setBirthDate(selectedDate);
+                setDateOfBirth(formatDateOfBirth(selectedDate));
               }}
-              placeholder="MM/DD/YYYY"
-              keyboardType="numeric"
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={styles.input}
+              style={{
+                backgroundColor: '#f7f9ff',
+                border: '1px solid #e3eaff',
+                borderRadius: 14,
+                boxSizing: 'border-box',
+                color: '#1a1a1e',
+                fontFamily: 'inherit',
+                fontSize: 15,
+                marginBottom: 12,
+                padding: '13px 14px',
+                width: '100%',
+              }}
             />
           ) : (
             <>
