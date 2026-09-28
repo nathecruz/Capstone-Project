@@ -1,4 +1,5 @@
 import { Stack, router, useSegments } from 'expo-router';
+import Head from 'expo-router/head';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, LogBox, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -76,6 +77,11 @@ function RootNavigator() {
 
   return (
     <>
+      <Head>
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content="HabitMind" />
+        <meta name="mobile-web-app-capable" content="yes" />
+      </Head>
       <Stack>
         <Stack.Screen name="login" options={{ headerShown: false }} />
         <Stack.Screen name="register" options={{ headerShown: false }} />

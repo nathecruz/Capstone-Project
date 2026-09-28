@@ -3,6 +3,12 @@
   "buildCommand": "npm run export:web",
   "outputDirectory": "dist",
   "installCommand": "npm ci",
+  "headers": [
+    {
+      "source": "/service-worker.js",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+    }
+  ],
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ]

@@ -73,12 +73,23 @@ export async function getNotificationsModule() {
   }
 }
 
+async function getBrowserNotificationRegistration() {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return null;
+  try {
+    await navigator.serviceWorker.register('/service-worker.js', { scope: '/' });
+    return await navigator.serviceWorker.ready;
+  } catch {
+    return null;
+  }
+}
+
 export async function requestNotificationAccess() {
   if (Platform.OS === 'web') {
     if (typeof window === 'undefined' || typeof window.Notification === 'undefined') return false;
-    if (window.Notification.permission === 'granted') return true;
-    if (window.Notification.permission === 'denied') return false;
-    return (await window.Notification.requestPermission()) === 'granted';
+    let permission = window.Notification.permission;
+    if (permission === 'default') permission = await window.Notification.requestPermission();
+    if (permission !== 'granted') return false;
+    return Boolean(await getBrowserNotificationRegistration());
   }
   const Notifications = await getNotificationsModule();
   if (!Notifications) return false;
@@ -622,6 +633,8 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       if (cancelled) return;
       if (Platform.OS === 'web') {
         if (!preferences.notificationsEnabled || typeof window === 'undefined' || typeof window.Notification === 'undefined' || window.Notification.permission !== 'granted') return;
+        const registration = await getBrowserNotificationRegistration();
+        if (!registration) return;
         const reminders = habits
           .map((habit) => ({ habit, times: getHabitReminderTimes(habit) }))
           .filter((entry) => entry.habit.reminderEnabled && entry.times.length > 0);
@@ -641,10 +654,10 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
               const key = `${habit.id}|${today}|${time.hour}:${time.minute}`;
               if (sentBrowserRemindersRef.current.has(key)) continue;
               sentBrowserRemindersRef.current.add(key);
-              new window.Notification(`${habit.label} reminder`, {
+              void registration.showNotification(`${habit.label} reminder`, {
                 body: 'A small step today keeps your streak moving.',
                 tag: key,
-              });
+              }).catch(() => undefined);
             }
           }
         };
