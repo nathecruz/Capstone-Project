@@ -197,30 +197,35 @@ export default function RegisterScreen() {
 
           <Text style={styles.label}>Date of Birth</Text>
           {isWeb ? (
-            <input
-              type="date"
-              aria-label="Date of birth"
-              value={dateOfBirth ? formatDateInputValue(birthDate) : ''}
-              max={formatDateInputValue(new Date())}
-              onChange={(event) => {
-                if (!event.currentTarget.value) return;
-                const selectedDate = new Date(`${event.currentTarget.value}T00:00:00`);
-                setBirthDate(selectedDate);
-                setDateOfBirth(formatDateOfBirth(selectedDate));
-              }}
-              style={{
-                backgroundColor: '#f7f9ff',
-                border: '1px solid #e3eaff',
-                borderRadius: 14,
-                boxSizing: 'border-box',
-                color: '#1a1a1e',
-                fontFamily: 'inherit',
-                fontSize: 15,
-                marginBottom: 12,
-                padding: '13px 14px',
-                width: '100%',
-              }}
-            />
+            <View style={[styles.input, styles.selectorInput, styles.webDateInput]}>
+              <Text style={[styles.selectorText, !dateOfBirth && styles.placeholderText]}>
+                {dateOfBirth || 'Select your birth date'}
+              </Text>
+              <Ionicons name="calendar-outline" size={19} color="#657089" />
+              <input
+                type="date"
+                aria-label="Select date of birth"
+                value={dateOfBirth ? formatDateInputValue(birthDate) : ''}
+                max={formatDateInputValue(new Date())}
+                onChange={(event) => {
+                  if (!event.currentTarget.value) return;
+                  const selectedDate = new Date(`${event.currentTarget.value}T00:00:00`);
+                  setBirthDate(selectedDate);
+                  setDateOfBirth(formatDateOfBirth(selectedDate));
+                }}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  right: 0,
+                  bottom: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  opacity: 0,
+                  cursor: 'pointer',
+                }}
+              />
+            </View>
           ) : (
             <>
               <Pressable
@@ -516,6 +521,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  webDateInput: {
+    position: 'relative',
+    overflow: 'hidden',
   },
   selectorText: {
     fontSize: 15,
