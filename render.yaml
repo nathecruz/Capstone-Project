@@ -15,9 +15,9 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: AUTH_URL
-        sync: false
+        value: https://ep-plain-flower-b3ie6u23.neonauth.c-4.ap-southeast-1.aws.neon.tech/habit_tracker_db/auth
       - key: JWKS_URL
-        sync: false
+        value: https://ep-plain-flower-b3ie6u23.neonauth.c-4.ap-southeast-1.aws.neon.tech/habit_tracker_db/auth/.well-known/jwks.json
       - key: ML_SERVICE_URL
         fromService:
           type: web
@@ -29,7 +29,7 @@ services:
           name: habitai-ml
           envVarKey: ML_SERVICE_API_KEY
       - key: ALLOWED_ORIGINS
-        sync: false
+        value: https://capstone-project-bn2m.vercel.app
       - key: EXTERNAL_REQUEST_TIMEOUT_MS
         value: 15000
       - key: GEMINI_API_KEY
@@ -37,17 +37,17 @@ services:
       - key: GEMINI_MODEL
         value: gemini-3.8-flash
       - key: SMTP_HOST
-        sync: false
+        value: smtp.gmail.com
       - key: SMTP_PORT
-        sync: false
+        value: "465"
       - key: SMTP_SECURE
-        value: true
+        value: "true"
       - key: SMTP_USER
-        sync: false
+        value: adrielleestacio00@gmail.com
       - key: SMTP_PASSWORD
         sync: false
       - key: SMTP_FROM
-        sync: false
+        value: adrielleestacio00@gmail.com
 
   - type: web
     name: habitai-ml
@@ -82,6 +82,10 @@ services:
     rootDir: frontend
     buildCommand: npm ci && npm run export:web
     staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
     envVars:
       - key: EXPO_PUBLIC_API_URL
         fromService:
@@ -94,4 +98,4 @@ services:
           name: habitai-backend
           envVarKey: RENDER_EXTERNAL_URL
       - key: EXPO_PUBLIC_AUTH_URL
-        sync: false
+        value: https://ep-plain-flower-b3ie6u23.neonauth.c-4.ap-southeast-1.aws.neon.tech/habit_tracker_db/auth
