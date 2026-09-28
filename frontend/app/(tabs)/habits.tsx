@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { isHabitMissedToday, useAppColorScheme } from '@/hooks/color-scheme-context';
@@ -105,14 +105,14 @@ export default function HabitsScreen() {
         containerStyle={styles.draggableListContainer}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
-        activationDistance={10}
+        activationDistance={Platform.OS === 'web' ? 1_000_000 : 10}
         autoscrollThreshold={20}
         autoscrollSpeed={40}
         onDragEnd={({ data }) => reorderHabits(data)}
         renderItem={({ item, drag, isActive }) => (
           <ScaleDecorator>
             <Pressable
-              onLongPress={drag}
+              onLongPress={Platform.OS === 'web' ? undefined : drag}
               style={[styles.habitCard, isDarkMode && styles.darkCard, isHabitMissedToday(item, currentTime) && styles.missedHabitCard, isActive && styles.habitCardDragging]}
             >
               <View style={styles.habitCardHeader}>
@@ -367,16 +367,16 @@ const styles = StyleSheet.create({
   },
   draggableList: {
     flex: 1,
+    minHeight: 0,
   },
   draggableListContainer: {
-    flexGrow: 1,
+    flex: 1,
   },
   content: {
     flexGrow: 1,
     paddingBottom: 20,
   },
   container: {
-    flex: 1,
     paddingHorizontal: 18,
     paddingTop: 6,
   },
