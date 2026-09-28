@@ -240,7 +240,7 @@ app.use(cors({ origin: (origin, callback) => callback(null, !origin || origins.h
 app.use(express.json({ limit: '2mb' }));
 app.use('/api', rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: 'draft-8', legacyHeaders: false }));
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false });
-const resetLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: 'draft-8', legacyHeaders: false, message: { ok: false, message: 'Too many password reset requests. Please try again later.' } });
+const resetLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false, message: { ok: false, message: 'Too many password reset requests. Please try again later.' } });
 const resetRequestLimiter = resetLimiter;
 const resetVerificationLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 15, standardHeaders: 'draft-8', legacyHeaders: false, message: { ok: false, message: 'Too many OTP verification attempts. Please try again later.' } });
 
