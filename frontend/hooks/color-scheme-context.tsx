@@ -31,6 +31,30 @@ function parseReminderTime(value: string) {
   return { hour, minute };
 }
 
+export function getHabitReminderTimes(habit: Pick<Habit, 'reminderTime' | 'reminderTimes'>) {
+  const values = habit.reminderTimes?.length ? habit.reminderTimes : [habit.reminderTime];
+  return values.map(parseReminderTime).filter((time): time is { hour: number; minute: number } => Boolean(time));
+}
+
+const reminderDayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+const reminderDayNumbers: Record<(typeof reminderDayLabels)[number], number> = {
+  Sun: 1, Mon: 2, Tue: 3, Wed: 4, Thu: 5, Fri: 6, Sat: 7,
+};
+
+export function getHabitReminderDays(habit: Pick<Habit, 'frequency' | 'meta' | 'reminderDays'>) {
+  const metaParts = habit.meta.split(' • ');
+  const configuredDays = habit.reminderDays?.length
+    ? habit.reminderDays
+    : habit.frequency === 'Custom'
+      ? (metaParts[metaParts.length - 1] || '').split(',').map((day) => day.trim())
+      : [];
+  return configuredDays.filter((day): day is (typeof reminderDayLabels)[number] => reminderDayLabels.includes(day as (typeof reminderDayLabels)[number]));
+}
+
+export function isHabitReminderDay(habit: Pick<Habit, 'frequency' | 'meta' | 'reminderDays'>, date: Date) {
+  return habit.frequency !== 'Custom' || getHabitReminderDays(habit).includes(reminderDayLabels[date.getDay()]);
+}
+
 export async function getNotificationsModule() {
   if (Platform.OS === 'web') return null;
   try {
@@ -50,6 +74,12 @@ export async function getNotificationsModule() {
 }
 
 export async function requestNotificationAccess() {
+  if (Platform.OS === 'web') {
+    if (typeof window === 'undefined' || typeof window.Notification === 'undefined') return false;
+    if (window.Notification.permission === 'granted') return true;
+    if (window.Notification.permission === 'denied') return false;
+    return (await window.Notification.requestPermission()) === 'granted';
+  }
   const Notifications = await getNotificationsModule();
   if (!Notifications) return false;
   const permission = await Notifications.getPermissionsAsync();
@@ -109,6 +139,8 @@ export type Habit = {
   completionDates: string[];
   reminderEnabled: boolean;
   reminderTime: string;
+  reminderTimes?: string[];
+  reminderDays?: string[];
   smartReminderEnabled?: boolean;
 };
 
@@ -376,6 +408,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   const [activeUserEmail, setActiveUserEmail] = useState('');
   const [stateHydrated, setStateHydrated] = useState(false);
   const syncBaseRef = useRef<AppStateSyncBase | null>(null);
+  const sentBrowserRemindersRef = useRef(new Set<string>());
   const colorScheme: ColorScheme = darkModeOverride === null
     ? systemScheme === 'dark'
       ? 'dark'
@@ -584,15 +617,49 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     let cancelled = false;
+    let browserReminderTimer: ReturnType<typeof setInterval> | undefined;
     const scheduleReminders = async () => {
       if (cancelled) return;
+      if (Platform.OS === 'web') {
+        if (!preferences.notificationsEnabled || typeof window === 'undefined' || typeof window.Notification === 'undefined' || window.Notification.permission !== 'granted') return;
+        const reminders = habits
+          .map((habit) => ({ habit, times: getHabitReminderTimes(habit) }))
+          .filter((entry) => entry.habit.reminderEnabled && entry.times.length > 0);
+        if (!reminders.length) return;
+
+        const notifyDueReminders = () => {
+          if (cancelled) return;
+          const now = new Date();
+          const today = getLocalDateKey(now);
+          for (const key of sentBrowserRemindersRef.current) {
+            if (key.split('|')[1] !== today) sentBrowserRemindersRef.current.delete(key);
+          }
+          for (const { habit, times } of reminders) {
+            if ((habit.startDate && habit.startDate > today) || !isHabitReminderDay(habit, now)) continue;
+            for (const time of times) {
+              if (now.getHours() !== time.hour || now.getMinutes() !== time.minute) continue;
+              const key = `${habit.id}|${today}|${time.hour}:${time.minute}`;
+              if (sentBrowserRemindersRef.current.has(key)) continue;
+              sentBrowserRemindersRef.current.add(key);
+              new window.Notification(`${habit.label} reminder`, {
+                body: 'A small step today keeps your streak moving.',
+                tag: key,
+              });
+            }
+          }
+        };
+
+        notifyDueReminders();
+        browserReminderTimer = setInterval(notifyDueReminders, 15000);
+        return;
+      }
       const Notifications = await getNotificationsModule();
       if (!Notifications) return;
       await Notifications.cancelAllScheduledNotificationsAsync();
       if (!preferences.notificationsEnabled) return;
       const reminders = habits
-        .map((habit) => ({ habit, time: parseReminderTime(habit.reminderTime) }))
-        .filter((entry): entry is { habit: Habit; time: { hour: number; minute: number } } => entry.habit.reminderEnabled && Boolean(entry.time) && (!entry.habit.startDate || entry.habit.startDate <= getLocalDateKey()));
+        .map((habit) => ({ habit, times: getHabitReminderTimes(habit) }))
+        .filter((entry): entry is { habit: Habit; times: { hour: number; minute: number }[] } => entry.habit.reminderEnabled && entry.times.length > 0 && (!entry.habit.startDate || entry.habit.startDate <= getLocalDateKey()));
       if (!reminders.length) return;
       const permission = await Notifications.getPermissionsAsync();
       if (permission.status !== 'granted') {
@@ -605,16 +672,30 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         });
       }
       const smartReminders = reminders.filter(({ habit }) => habit.smartReminderEnabled);
-      for (const { habit, time } of reminders.filter(({ habit }) => !habit.smartReminderEnabled)) {
-        if (cancelled) return;
-        await Notifications.scheduleNotificationAsync({
-          content: { title: `${habit.label} reminder`, body: 'A small step today keeps your streak moving.', sound: 'reminder_sound.mp3', data: { habitId: habit.id } },
-          trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: time.hour, minute: time.minute, ...(Platform.OS === 'android' ? { channelId: 'habit-reminders' } : {}) },
-        });
+      for (const { habit, times } of reminders.filter(({ habit }) => !habit.smartReminderEnabled)) {
+        for (const time of times) {
+          if (cancelled) return;
+          const content = { title: `${habit.label} reminder`, body: 'A small step today keeps your streak moving.', sound: 'reminder_sound.mp3', data: { habitId: habit.id } };
+          const channel = Platform.OS === 'android' ? { channelId: 'habit-reminders' } : {};
+          if (habit.frequency === 'Custom') {
+            for (const day of getHabitReminderDays(habit)) {
+              await Notifications.scheduleNotificationAsync({
+                content,
+                trigger: { type: Notifications.SchedulableTriggerInputTypes.WEEKLY, weekday: reminderDayNumbers[day], hour: time.hour, minute: time.minute, ...channel },
+              });
+            }
+          } else {
+            await Notifications.scheduleNotificationAsync({
+              content,
+              trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: time.hour, minute: time.minute, ...channel },
+            });
+          }
+        }
 
-        if (cancelled) return;
+        if (habit.frequency === 'Custom') continue;
+        const lastReminderTime = times.reduce((latest, time) => time.hour * 60 + time.minute > latest.hour * 60 + latest.minute ? time : latest);
         const missedAt = new Date();
-        missedAt.setHours(time.hour, time.minute + 1, 0, 0);
+        missedAt.setHours(lastReminderTime.hour, lastReminderTime.minute + 1, 0, 0);
         if (missedAt <= new Date()) missedAt.setDate(missedAt.getDate() + 1);
         await Notifications.scheduleNotificationAsync({
           content: {
@@ -650,7 +731,10 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       }
     };
     void scheduleReminders().catch(() => undefined);
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (browserReminderTimer) clearInterval(browserReminderTimer);
+    };
   }, [habits, preferences.notificationsEnabled]);
 
   const addHabit = (habit: Omit<Habit, 'id' | 'goal' | 'progress' | 'total' | 'streak' | 'done' | 'completionDates'> & { goal: number }) => {
@@ -672,6 +756,8 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       completionDates: [],
       reminderEnabled: habit.reminderEnabled,
       reminderTime: habit.reminderTime,
+      reminderTimes: habit.reminderTimes ?? [habit.reminderTime],
+      reminderDays: habit.reminderDays ?? [],
       smartReminderEnabled: habit.smartReminderEnabled ?? false,
     }]);
   };

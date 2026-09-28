@@ -5,7 +5,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
-import { useAppColorScheme } from '@/hooks/color-scheme-context';
+import { requestNotificationAccess, useAppColorScheme } from '@/hooks/color-scheme-context';
 
 const categories = [
   { label: 'Health', icon: 'heart-outline' }, { label: 'Mind', icon: 'bulb-outline' },
@@ -71,6 +71,14 @@ export default function AddScreen() {
     setMessageVisible(true);
   };
 
+  const toggleReminder = async () => {
+    if (!reminder && Platform.OS === 'web' && !(await requestNotificationAccess())) {
+      showAlert('Browser notifications unavailable', 'Allow notifications in your browser settings, then try again.');
+      return;
+    }
+    setReminder(!reminder);
+  };
+
   const addHabit = () => {
     if (!name.trim()) { showMessage('Habit name required', 'Give your new habit a name first.'); return; }
     if (frequency === 'Custom' && !repeatDays.length) { showMessage('Choose repeat days', 'Select at least one day for a custom schedule.'); return; }
@@ -84,8 +92,10 @@ export default function AddScreen() {
       icon: (selectedCategory?.icon || 'ellipse-outline') as keyof typeof Ionicons.glyphMap,
       color: category === 'Health' ? '#E58D8D' : category === 'Mind' ? '#7A6AED' : category === 'Productivity' ? '#4BA3FF' : '#57B991',
       goal: Number.parseInt(goal, 10) || 1,
-      reminderEnabled: Platform.OS !== 'web' && reminder && reminderTimes.length > 0,
+      reminderEnabled: reminder && reminderTimes.length > 0,
       reminderTime: reminderTimes[0] || '07:00 AM',
+      reminderTimes: reminderTimes,
+      reminderDays: frequency === 'Custom' ? repeatDays : [],
       smartReminderEnabled: smartReminder,
     });
     setAddedHabitSummary({
@@ -184,10 +194,10 @@ export default function AddScreen() {
           <View style={styles.reminderIcon}><Ionicons name="notifications-outline" size={24} color="#5B42D8" /></View>
           <View>
             <Text style={styles.reminderTitle}>Custom Reminders</Text>
-            <Text style={styles.reminderDescription}>{Platform.OS === 'web' ? 'Device reminders require the native iOS or Android app.' : 'Get reminded to stay consistent with your habit.'}</Text>
+            <Text style={styles.reminderDescription}>{Platform.OS === 'web' ? 'Browser reminders work while this app is open.' : 'Get reminded to stay consistent with your habit.'}</Text>
           </View>
         </View>
-        <Pressable disabled={Platform.OS === 'web'} style={[styles.toggle, reminder && styles.toggleOn, Platform.OS === 'web' && { opacity: 0.5 }]} onPress={() => setReminder(!reminder)} accessibilityRole="switch" accessibilityState={{ checked: reminder, disabled: Platform.OS === 'web' }} accessibilityLabel="Toggle custom reminders">
+        <Pressable style={[styles.toggle, reminder && styles.toggleOn]} onPress={() => void toggleReminder()} accessibilityRole="switch" accessibilityState={{ checked: reminder }} accessibilityLabel="Toggle custom reminders">
           <View style={[styles.knob, reminder && styles.knobOn]} />
         </Pressable>
       </View>
