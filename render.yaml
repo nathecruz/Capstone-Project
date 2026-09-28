@@ -59,8 +59,11 @@ services:
       mkdir -p /tmp/cargo /tmp/rustup &&
       export CARGO_HOME=/tmp/cargo &&
       export RUSTUP_HOME=/tmp/rustup &&
+      export PIP_NO_CACHE_DIR=1 &&
+      export PIP_DISABLE_PIP_VERSION_CHECK=1 &&
+      python -m pip uninstall -y pydantic pydantic-core fastapi starlette || true &&
       python -m pip install --upgrade pip setuptools wheel &&
-      python -m pip install --no-cache-dir --prefer-binary -r requirements.txt
+      python -m pip install --no-cache-dir --prefer-binary "fastapi==0.95.2" "uvicorn==0.32.1" "pydantic==1.10.22" "scikit-learn==1.6.1" "joblib==1.4.2" "xgboost==2.1.3" "statsmodels==0.14.5" "pandas<3" "pytest==9.1.1"
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port 8000
     healthCheckPath: /healthz
     envVars:
