@@ -29,7 +29,7 @@ services:
           name: habitai-ml
           envVarKey: ML_SERVICE_API_KEY
       - key: ALLOWED_ORIGINS
-        value: https://capstone-project-bn2m.vercel.app
+        value: https://capstone-project-b3gc.vercel.app
       - key: EXTERNAL_REQUEST_TIMEOUT_MS
         value: 15000
       - key: GEMINI_API_KEY
