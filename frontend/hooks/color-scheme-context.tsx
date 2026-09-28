@@ -661,15 +661,15 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         .map((habit) => ({ habit, times: getHabitReminderTimes(habit) }))
         .filter((entry): entry is { habit: Habit; times: { hour: number; minute: number }[] } => entry.habit.reminderEnabled && entry.times.length > 0 && (!entry.habit.startDate || entry.habit.startDate <= getLocalDateKey()));
       if (!reminders.length) return;
-      const permission = await Notifications.getPermissionsAsync();
-      if (permission.status !== 'granted') {
-        const requested = await Notifications.requestPermissionsAsync();
-        if (requested.status !== 'granted') return;
-      }
       if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync('habit-reminders', {
           name: 'Habit reminders', importance: Notifications.AndroidImportance.HIGH, sound: 'reminder_sound.mp3',
         });
+      }
+      const permission = await Notifications.getPermissionsAsync();
+      if (permission.status !== 'granted') {
+        const requested = await Notifications.requestPermissionsAsync();
+        if (requested.status !== 'granted') return;
       }
       const smartReminders = reminders.filter(({ habit }) => habit.smartReminderEnabled);
       for (const { habit, times } of reminders.filter(({ habit }) => !habit.smartReminderEnabled)) {
