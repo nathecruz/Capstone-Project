@@ -814,7 +814,7 @@ app.get('/healthz', (_request, response) => {
 });
 
 app.get('/health', async (_request, response) => {
-  const geminiConfigured = Boolean(gemini);
+  const geminiConfigured = ['goals', 'coach', 'assistant'].some((profile) => isGeminiConfigured(profile));
   const mlConfigured = isConfiguredSecret(ML_SERVICE_API_KEY, !isProduction);
   const mlServiceReady = !isProduction || await isMlServiceReady();
   const ready = !isProduction || (geminiConfigured && mlConfigured && mlServiceReady);

@@ -157,9 +157,10 @@ function isValidCompletionDate(date) {
 }
 
 let userAppStateHasId;
-async function saveUserAppState(userId, state, updatedAt) {
+async function saveUserAppState(userId, state, updatedAt, connection = null) {
+  const runQuery = connection ? connection.query.bind(connection) : query;
   if (userAppStateHasId === undefined) {
-    const result = await query(`
+    const result = await runQuery(`
       SELECT 1
       FROM information_schema.columns
       WHERE table_schema = 'public' AND table_name = 'user_app_state' AND column_name = 'id'
@@ -167,11 +168,11 @@ async function saveUserAppState(userId, state, updatedAt) {
     userAppStateHasId = result.rows.length > 0;
   }
   if (userAppStateHasId) {
-    await query('INSERT INTO user_app_state(id,user_id,state_json,updated_at) VALUES($1,$2,$3,$4)', [crypto.randomUUID(), userId, state, updatedAt]);
+    await runQuery('INSERT INTO user_app_state(id,user_id,state_json,updated_at) VALUES($1,$2,$3,$4)', [crypto.randomUUID(), userId, state, updatedAt]);
     return;
   }
-  const updated = await query('UPDATE user_app_state SET state_json=$1,updated_at=$2 WHERE user_id=$3', [state, updatedAt, userId]);
-  if (updated.rowCount === 0) await query('INSERT INTO user_app_state(user_id,state_json,updated_at) VALUES($1,$2,$3)', [userId, state, updatedAt]);
+  const updated = await runQuery('UPDATE user_app_state SET state_json=$1,updated_at=$2 WHERE user_id=$3', [state, updatedAt, userId]);
+  if (updated.rowCount === 0) await runQuery('INSERT INTO user_app_state(user_id,state_json,updated_at) VALUES($1,$2,$3)', [userId, state, updatedAt]);
 }
 
 function parse(schema, request, response) {
@@ -273,7 +274,7 @@ app.get('/healthz', (_request, response) => {
 app.get('/health', async (_request, response) => {
   try {
     await query('SELECT 1');
-    const aiConfigured = Boolean(gemini);
+    const aiConfigured = ['goals', 'coach', 'assistant'].some((profile) => isGeminiConfigured(profile));
     const mlConfigured = isConfiguredSecret(mlKey, !isProduction);
     const mlServiceReady = !isProduction || await isMlServiceReady();
     const ready = !isProduction || (aiConfigured && mlConfigured && mlServiceReady);
@@ -300,8 +301,9 @@ app.get('/api/auth/login-activity', async (request, response) => { const session
 app.put('/api/auth/profile', async (request, response) => { const session = await requireAuth(request, response); if (!session) return; const input = parse(profileSchema, request, response); if (!input) return; const emailAddress = normalizeEmail(input.email); const duplicate = await query('SELECT id FROM users WHERE (email = $1 OR lower(username) = lower($2)) AND id <> $3', [emailAddress, input.username, session.userId]); if (duplicate.rows[0]) return response.status(409).json({ ok: false, message: 'This email or username is already in use.' }); await query('UPDATE users SET full_name=$1,username=$2,email=$3,date_of_birth=$4,gender=$5,about=$6 WHERE id=$7', [input.fullName, input.username, emailAddress, input.dateOfBirth, input.gender, input.about, session.userId]); const user = await findUser(emailAddress); response.json({ ok: true, message: 'Profile updated successfully.', user: userFromRow(user) }); });
 
 app.get('/api/app-state', async (request, response) => { const session = await requireAuth(request, response); if (!session) return; const result = await query('SELECT state_json AS "stateJson", updated_at AS "updatedAt" FROM user_app_state WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 1', [session.userId]); const row = result.rows[0]; response.json({ ok: true, state: row?.stateJson || null, updatedAt: row ? Number(row.updatedAt) : null }); });
-async function syncNormalizedState(userId, state, updatedAt) {
-  await withTransaction(async (connection) => {
+async function syncNormalizedState(userId, state, updatedAt, connection = null) {
+  const runInTransaction = connection ? (callback) => callback(connection) : withTransaction;
+  await runInTransaction(async (connection) => {
     const rawHabits = Array.isArray(state.habits) ? state.habits : [];
     const seenHabitIds = new Set();
     const habits = rawHabits.filter((habit) => {
@@ -380,17 +382,21 @@ app.put('/api/app-state', async (request, response) => {
   const session = await requireAuth(request, response); if (!session) return;
   const input = parse(stateSchema, request, response); if (!input) return;
   const { clientUpdatedAt, baseUpdatedAt, baseState, ...incomingState } = input;
-  const existingResult = await query('SELECT state_json AS "stateJson", updated_at AS "updatedAt" FROM user_app_state WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 1', [session.userId]);
-  const existing = existingResult.rows[0];
-  const existingUpdatedAt = existing ? Number(existing.updatedAt) : null;
-  const currentState = existing?.stateJson || null;
-  const merged = Boolean(existing && baseState && Number(baseUpdatedAt) !== existingUpdatedAt);
-  const state = merged ? mergeAppState(baseState, currentState, incomingState) : normalizeAppState(incomingState);
-  const updatedAt = Math.max(clientUpdatedAt || 0, Date.now());
-  const savedUpdatedAt = Math.max(updatedAt, existingUpdatedAt || 0) + (existingUpdatedAt === updatedAt ? 1 : 0);
-  await saveUserAppState(session.userId, state, savedUpdatedAt);
-  await syncNormalizedState(session.userId, state, savedUpdatedAt);
-  response.json({ ok: true, state, updatedAt: savedUpdatedAt, merged });
+  const result = await withTransaction(async (connection) => {
+    await connection.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
+    const existingResult = await connection.query('SELECT state_json AS "stateJson", updated_at AS "updatedAt" FROM user_app_state WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 1 FOR UPDATE', [session.userId]);
+    const existing = existingResult.rows[0];
+    const existingUpdatedAt = existing ? Number(existing.updatedAt) : null;
+    const currentState = existing?.stateJson || null;
+    const merged = Boolean(existing && baseState && Number(baseUpdatedAt) !== existingUpdatedAt);
+    const state = merged ? mergeAppState(baseState, currentState, incomingState) : normalizeAppState(incomingState);
+    const updatedAt = Math.max(clientUpdatedAt || 0, Date.now());
+    const savedUpdatedAt = Math.max(updatedAt, existingUpdatedAt || 0) + (existingUpdatedAt === updatedAt ? 1 : 0);
+    await saveUserAppState(session.userId, state, savedUpdatedAt, connection);
+    await syncNormalizedState(session.userId, state, savedUpdatedAt, connection);
+    return { state, updatedAt: savedUpdatedAt, merged };
+  });
+  response.json({ ok: true, ...result });
 });
 app.get('/api/habit-completions', async (request, response) => { const session = await requireAuth(request, response); if (!session) return; response.json({ ok: true, completions: await getServerCompletions(session.userId) }); });
 app.put('/api/habit-completions', async (request, response) => {
