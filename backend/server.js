@@ -53,6 +53,7 @@ if (process.env.DATABASE_URL?.trim()) {
 }
 
 const app = express();
+app.set('trust proxy', 1);
 const port = Number(process.env.PORT || 8787);
 const isProduction = process.env.NODE_ENV === 'production';
 const configuredMlServiceUrl = process.env.ML_SERVICE_URL?.trim();
