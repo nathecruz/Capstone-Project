@@ -20,11 +20,14 @@ jest.mock('@/authentication', () => ({
 
 describe('LoginScreen', () => {
   const originalNodeEnv = process.env.NODE_ENV;
+  const unsetEnv = (key: string) => {
+    delete (process.env as Record<string, string | undefined>)[key];
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
     if (originalNodeEnv === undefined) {
-      delete process.env.NODE_ENV;
+      unsetEnv('NODE_ENV');
     } else {
       process.env.NODE_ENV = originalNodeEnv;
     }
@@ -32,7 +35,7 @@ describe('LoginScreen', () => {
 
   afterEach(() => {
     if (originalNodeEnv === undefined) {
-      delete process.env.NODE_ENV;
+      unsetEnv('NODE_ENV');
     } else {
       process.env.NODE_ENV = originalNodeEnv;
     }

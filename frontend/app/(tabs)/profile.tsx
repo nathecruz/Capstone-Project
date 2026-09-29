@@ -22,6 +22,7 @@ export default function ProfileScreen() {
   const showAlert = useAppDialog();
   const { isDarkMode, avatarImage, setAvatarImage, habits, profile, points, tokens, addTokens, t } = useAppColorScheme();
   const { width } = useWindowDimensions();
+  const compactLayout = width < 360;
   const { averageProgress, maxStreak, completed } = getHabitProgressSummary(habits);
   const isNewUser = habits.length === 0 && points === 0;
   const firstActionLabel = isNewUser ? 'Start your first goal' : completed === 0 ? 'Complete a task' : 'Keep your momentum';
@@ -130,7 +131,7 @@ export default function ProfileScreen() {
   return (
     <SafeAreaView style={[styles.screen, isDarkMode && styles.darkScreen]}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={[styles.container, width >= 700 && styles.wideContainer]}>
+        <View style={[styles.container, width >= 700 && styles.wideContainer, { paddingHorizontal: compactLayout ? 12 : 20 }]}>
           <View style={styles.headerRow}>
             <Text style={styles.headerTitle}>{t('profile')}</Text>
             <Pressable style={styles.headerButton} onPress={() => router.push('/settings-preferences')} accessibilityLabel={t('profileSettings')}>
@@ -535,7 +536,9 @@ const styles = StyleSheet.create({
     paddingBottom: 110,
   },
   container: {
-    paddingHorizontal: 20,
+    width: '100%',
+    maxWidth: 680,
+    alignSelf: 'center',
   },
   wideContainer: {
     width: '100%',

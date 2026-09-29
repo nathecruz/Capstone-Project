@@ -14,6 +14,9 @@ import {
 import { isAuthenticated } from '@/authorization';
 
 const fetchMock = jest.fn();
+const unsetEnv = (key: string) => {
+  delete (process.env as Record<string, string | undefined>)[key];
+};
 
 jest.mock('@/authentication/session', () => ({
   completePasswordReset: jest.fn(),
@@ -49,9 +52,9 @@ describe('auth service offline behavior', () => {
     try {
       expect(getApiBaseUrl()).toBe('https://api.example.org');
     } finally {
-      if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
-      if (previousApiUrl === undefined) delete process.env.EXPO_PUBLIC_API_URL; else process.env.EXPO_PUBLIC_API_URL = previousApiUrl;
-      if (previousAuthUrl === undefined) delete process.env.EXPO_PUBLIC_AUTH_URL; else process.env.EXPO_PUBLIC_AUTH_URL = previousAuthUrl;
+      if (previousNodeEnv === undefined) unsetEnv('NODE_ENV'); else process.env.NODE_ENV = previousNodeEnv;
+      if (previousApiUrl === undefined) unsetEnv('EXPO_PUBLIC_API_URL'); else process.env.EXPO_PUBLIC_API_URL = previousApiUrl;
+      if (previousAuthUrl === undefined) unsetEnv('EXPO_PUBLIC_AUTH_URL'); else process.env.EXPO_PUBLIC_AUTH_URL = previousAuthUrl;
     }
   });
 
@@ -165,8 +168,8 @@ describe('auth service offline behavior', () => {
     const previousAiApiUrl = process.env.EXPO_PUBLIC_AI_API_URL;
     const previousAuthUrl = process.env.EXPO_PUBLIC_AUTH_URL;
     process.env.NODE_ENV = 'production';
-    delete process.env.EXPO_PUBLIC_API_URL;
-    delete process.env.EXPO_PUBLIC_AI_API_URL;
+    unsetEnv('EXPO_PUBLIC_API_URL');
+    unsetEnv('EXPO_PUBLIC_AI_API_URL');
     process.env.EXPO_PUBLIC_AUTH_URL = 'https://your-production-auth.example.com';
 
     try {
@@ -175,10 +178,10 @@ describe('auth service offline behavior', () => {
         message: expect.stringContaining('Production API is not configured'),
       });
     } finally {
-      if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
-      if (previousApiUrl === undefined) delete process.env.EXPO_PUBLIC_API_URL; else process.env.EXPO_PUBLIC_API_URL = previousApiUrl;
-      if (previousAiApiUrl === undefined) delete process.env.EXPO_PUBLIC_AI_API_URL; else process.env.EXPO_PUBLIC_AI_API_URL = previousAiApiUrl;
-      if (previousAuthUrl === undefined) delete process.env.EXPO_PUBLIC_AUTH_URL; else process.env.EXPO_PUBLIC_AUTH_URL = previousAuthUrl;
+      if (previousNodeEnv === undefined) unsetEnv('NODE_ENV'); else process.env.NODE_ENV = previousNodeEnv;
+      if (previousApiUrl === undefined) unsetEnv('EXPO_PUBLIC_API_URL'); else process.env.EXPO_PUBLIC_API_URL = previousApiUrl;
+      if (previousAiApiUrl === undefined) unsetEnv('EXPO_PUBLIC_AI_API_URL'); else process.env.EXPO_PUBLIC_AI_API_URL = previousAiApiUrl;
+      if (previousAuthUrl === undefined) unsetEnv('EXPO_PUBLIC_AUTH_URL'); else process.env.EXPO_PUBLIC_AUTH_URL = previousAuthUrl;
     }
   });
 
@@ -190,9 +193,9 @@ describe('auth service offline behavior', () => {
     const previousLocation = window.location;
 
     process.env.NODE_ENV = 'production';
-    delete process.env.EXPO_PUBLIC_API_URL;
-    delete process.env.EXPO_PUBLIC_AI_API_URL;
-    delete process.env.EXPO_PUBLIC_AUTH_URL;
+    unsetEnv('EXPO_PUBLIC_API_URL');
+    unsetEnv('EXPO_PUBLIC_AI_API_URL');
+    unsetEnv('EXPO_PUBLIC_AUTH_URL');
 
     Object.defineProperty(window, 'location', {
       configurable: true,
@@ -206,10 +209,10 @@ describe('auth service offline behavior', () => {
         configurable: true,
         value: previousLocation,
       });
-      if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
-      if (previousApiUrl === undefined) delete process.env.EXPO_PUBLIC_API_URL; else process.env.EXPO_PUBLIC_API_URL = previousApiUrl;
-      if (previousAiApiUrl === undefined) delete process.env.EXPO_PUBLIC_AI_API_URL; else process.env.EXPO_PUBLIC_AI_API_URL = previousAiApiUrl;
-      if (previousAuthUrl === undefined) delete process.env.EXPO_PUBLIC_AUTH_URL; else process.env.EXPO_PUBLIC_AUTH_URL = previousAuthUrl;
+      if (previousNodeEnv === undefined) unsetEnv('NODE_ENV'); else process.env.NODE_ENV = previousNodeEnv;
+      if (previousApiUrl === undefined) unsetEnv('EXPO_PUBLIC_API_URL'); else process.env.EXPO_PUBLIC_API_URL = previousApiUrl;
+      if (previousAiApiUrl === undefined) unsetEnv('EXPO_PUBLIC_AI_API_URL'); else process.env.EXPO_PUBLIC_AI_API_URL = previousAiApiUrl;
+      if (previousAuthUrl === undefined) unsetEnv('EXPO_PUBLIC_AUTH_URL'); else process.env.EXPO_PUBLIC_AUTH_URL = previousAuthUrl;
     }
   });
 
@@ -221,7 +224,7 @@ describe('auth service offline behavior', () => {
 
     process.env.NODE_ENV = 'production';
     process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8787';
-    delete process.env.EXPO_PUBLIC_AI_API_URL;
+    unsetEnv('EXPO_PUBLIC_AI_API_URL');
     Object.defineProperty(window, 'location', {
       configurable: true,
       value: { ...previousLocation, hostname: 'localhost' },
@@ -234,9 +237,9 @@ describe('auth service offline behavior', () => {
         configurable: true,
         value: previousLocation,
       });
-      if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
-      if (previousApiUrl === undefined) delete process.env.EXPO_PUBLIC_API_URL; else process.env.EXPO_PUBLIC_API_URL = previousApiUrl;
-      if (previousAiApiUrl === undefined) delete process.env.EXPO_PUBLIC_AI_API_URL; else process.env.EXPO_PUBLIC_AI_API_URL = previousAiApiUrl;
+      if (previousNodeEnv === undefined) unsetEnv('NODE_ENV'); else process.env.NODE_ENV = previousNodeEnv;
+      if (previousApiUrl === undefined) unsetEnv('EXPO_PUBLIC_API_URL'); else process.env.EXPO_PUBLIC_API_URL = previousApiUrl;
+      if (previousAiApiUrl === undefined) unsetEnv('EXPO_PUBLIC_AI_API_URL'); else process.env.EXPO_PUBLIC_AI_API_URL = previousAiApiUrl;
     }
   });
 });

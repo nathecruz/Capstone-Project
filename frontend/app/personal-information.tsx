@@ -3,7 +3,7 @@ import DateTimePicker, { type DateTimePickerChangeEvent } from '@react-native-co
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { updateAuthenticatedProfile } from '@/authentication';
@@ -32,6 +32,8 @@ const genderOptions = ['Female', 'Male', 'Non-binary', 'Prefer not to say'];
 
 export default function PersonalInformationScreen() {
   const showAlert = useAppDialog();
+  const { width } = useWindowDimensions();
+  const compactLayout = width < 360;
   const { isDarkMode, avatarImage, setAvatarImage, habits, profile, updateProfile } = useAppColorScheme();
   const [draftProfile, setDraftProfile] = useState(profile);
   const [isEditing, setIsEditing] = useState(false);
@@ -122,7 +124,7 @@ export default function PersonalInformationScreen() {
   return (
     <SafeAreaView style={[styles.screen, isDarkMode && styles.darkScreen]}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.container}>
+        <View style={[styles.container, { paddingHorizontal: compactLayout ? 12 : 20 }]}>
           <View style={styles.headerRow}>
             <Pressable style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back">
               <Ionicons name="chevron-back" size={20} color={isDarkMode ? '#F2EFF8' : '#292633'} />
@@ -313,7 +315,7 @@ export default function PersonalInformationScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#F5F4F9', paddingTop: 16 }, darkScreen: { backgroundColor: '#111018' },
   content: { paddingBottom: 110, paddingTop: 4 },
-  container: { width: '100%', maxWidth: 680, alignSelf: 'center', paddingHorizontal: 20 },
+  container: { width: '100%', maxWidth: 680, alignSelf: 'center' },
   headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 18 },
   backButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', marginRight: 12, shadowColor: '#30245F', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.08, shadowRadius: 7, elevation: 2 },
   headerCopy: { flex: 1 },

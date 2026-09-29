@@ -106,6 +106,7 @@ export default function GoalsScreen() {
   const { isDarkMode } = useAppColorScheme();
   const { width } = useWindowDimensions();
   const compact = width < 380;
+  const compactPadding = compact ? 12 : 20;
   const [activeTab, setActiveTab] = useState<GoalTab>('Planner');
   const [goalInput, setGoalInput] = useState('');
   const [generatedGoal, setGeneratedGoal] = useState<GoalInsight | null>(null);

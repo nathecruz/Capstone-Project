@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { supportedLanguages, supportedRegions, type TranslationKey } from '@/constants/i18n';
@@ -51,6 +51,8 @@ function PasswordField({ value, onChangeText, placeholder, showPassword, onToggl
 
 export default function SettingsPreferencesScreen() {
   const showAlert = useAppDialog();
+  const { width } = useWindowDimensions();
+  const compactLayout = width < 360;
   const { isDarkMode, setDarkMode, clearLocalData, profile, preferences, updatePreferences, t } = useAppColorScheme();
   const [option, setOption] = useState<'language' | 'region' | null>(null);
   const [passwordOpen, setPasswordOpen] = useState(false);
@@ -189,9 +191,9 @@ export default function SettingsPreferencesScreen() {
     ? new Date(loginActivities[0].createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
     : 'the latest sign-in';
 
-  return <SafeAreaView style={[styles.screen, isDarkMode && styles.darkScreen]}><ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}><View style={styles.container}>
+  return <SafeAreaView style={[styles.screen, isDarkMode && styles.darkScreen]}><ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}><View style={[styles.container, { paddingHorizontal: compactLayout ? 12 : 16 }]}>
     <View style={styles.topBar}><Pressable style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back"><Ionicons name="chevron-back" size={22} color={isDarkMode ? '#F5F2FA' : '#192044'} /></Pressable><View style={styles.topIcon}><Ionicons name="settings" size={22} color="#6844D8" /></View></View>
-    <View style={styles.hero}><Text style={[styles.heroTitle, isDarkMode && styles.darkText]}>{t('settingsPreferences')}</Text><Text style={[styles.heroSubtitle, isDarkMode && styles.darkMutedText]}>Customize your experience and{`\n`}manage your app settings.</Text></View>
+    <View style={[styles.hero, { paddingHorizontal: compactLayout ? 18 : 50 }]}><Text style={[styles.heroTitle, isDarkMode && styles.darkText]}>{t('settingsPreferences')}</Text><Text style={[styles.heroSubtitle, isDarkMode && styles.darkMutedText]}>Customize your experience and{`\n`}manage your app settings.</Text></View>
     <Pressable style={[styles.progressBanner, isDarkMode && styles.darkBanner]} onPress={() => router.push('/progress')} accessibilityRole="button"><View style={styles.bannerIcon}><Ionicons name="trending-up" size={23} color="#6844D8" /></View><View style={styles.bannerCopy}><Text style={[styles.bannerTitle, isDarkMode && styles.darkText]}>Your Progress &amp; Goals</Text><Text style={[styles.bannerSubtitle, isDarkMode && styles.darkMutedText]}>Stay consistent. Build a better you.</Text></View><Ionicons name="chevron-forward" size={20} color="#5E6178" /></Pressable>
     <SectionHeader icon="options-outline" title={t('preferences')} subtitle={t('setHowAppWorks')} isDarkMode={isDarkMode} /><View style={[styles.card, isDarkMode && styles.darkCard]}>
       <SettingRow icon="notifications" iconColor="#6C51DC" title={t('notifications')} subtitle={t('receiveUpdates')} trailing={<Toggle enabled={preferences.notificationsEnabled} onPress={() => updatePreferences({ notificationsEnabled: !preferences.notificationsEnabled })} label={t('notifications')} isDarkMode={isDarkMode} />} isDarkMode={isDarkMode} />
@@ -220,7 +222,7 @@ export default function SettingsPreferencesScreen() {
 }
 
 const styles: Record<string, any> = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#F7F8FC' }, darkScreen: { backgroundColor: '#111018' }, content: { paddingBottom: 110 }, container: { width: '100%', maxWidth: 680, alignSelf: 'center', paddingHorizontal: 16 },
+  screen: { flex: 1, backgroundColor: '#F7F8FC' }, darkScreen: { backgroundColor: '#111018' }, content: { paddingBottom: 110 }, container: { width: '100%', maxWidth: 680, alignSelf: 'center' },
   topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4, marginBottom: 10 }, backButton: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#EEF0FA', alignItems: 'center', justifyContent: 'center' }, topIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#EDE7FF', alignItems: 'center', justifyContent: 'center' },
   hero: { paddingHorizontal: 50, marginBottom: 20 }, heroTitle: { fontSize: 25, lineHeight: 30, fontWeight: '900', color: '#172043' }, heroSubtitle: { fontSize: 14, lineHeight: 19, color: '#7A8298', marginTop: 5, fontWeight: '600' }, darkText: { color: '#F5F2FA' }, darkMutedText: { color: '#AAA4B7' },
   progressBanner: { minHeight: 78, flexDirection: 'row', alignItems: 'center', backgroundColor: '#E8E6FF', borderRadius: 16, padding: 14, marginBottom: 23 }, darkBanner: { backgroundColor: '#292340' }, bannerIcon: { width: 46, height: 46, borderRadius: 23, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center', marginRight: 12 }, bannerCopy: { flex: 1 }, bannerTitle: { color: '#172043', fontSize: 14, fontWeight: '900' }, bannerSubtitle: { color: '#7A8298', fontSize: 11, marginTop: 4, fontWeight: '600' },

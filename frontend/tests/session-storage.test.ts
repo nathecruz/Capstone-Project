@@ -25,6 +25,9 @@ const webSessionStorage = {
   setItem: jest.fn<void, [string, string]>(),
   removeItem: jest.fn<void, [string]>(),
 };
+const unsetEnv = (key: string) => {
+  delete (process.env as Record<string, string | undefined>)[key];
+};
 
 function setPlatform(platform: string) {
   Object.defineProperty(Platform, 'OS', { configurable: true, value: platform });
@@ -116,9 +119,9 @@ describe('session token storage', () => {
         expect.any(Object),
       );
     } finally {
-      if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
-      if (previousApiUrl === undefined) delete process.env.EXPO_PUBLIC_API_URL; else process.env.EXPO_PUBLIC_API_URL = previousApiUrl;
-      if (previousAuthUrl === undefined) delete process.env.EXPO_PUBLIC_AUTH_URL; else process.env.EXPO_PUBLIC_AUTH_URL = previousAuthUrl;
+      if (previousNodeEnv === undefined) unsetEnv('NODE_ENV'); else process.env.NODE_ENV = previousNodeEnv;
+      if (previousApiUrl === undefined) unsetEnv('EXPO_PUBLIC_API_URL'); else process.env.EXPO_PUBLIC_API_URL = previousApiUrl;
+      if (previousAuthUrl === undefined) unsetEnv('EXPO_PUBLIC_AUTH_URL'); else process.env.EXPO_PUBLIC_AUTH_URL = previousAuthUrl;
       globalThis.fetch = previousFetch;
     }
   });

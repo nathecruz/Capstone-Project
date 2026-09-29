@@ -146,7 +146,7 @@ const styles = StyleSheet.create({
   groupTitle: { fontSize: 15, fontWeight: '800', color: '#302B3B' },
   groupDescription: { fontSize: 9, color: '#827C8C', fontWeight: '600', marginTop: 3 },
   habitGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 9 },
-  habitCard: { width: '48.5%', minHeight: 70, borderRadius: 13, borderWidth: 1, borderColor: '#EEEAF5', padding: 10, flexDirection: 'row', alignItems: 'center' },
+  habitCard: { flexBasis: '48%', flexGrow: 1, minWidth: 140, minHeight: 70, borderRadius: 13, borderWidth: 1, borderColor: '#EEEAF5', padding: 10, flexDirection: 'row', alignItems: 'center' },
   habitCopy: { flex: 1, marginHorizontal: 7 },
   habitTitle: { fontSize: 10, fontWeight: '800', color: '#393440' },
   habitHint: { fontSize: 8, color: '#888291', marginTop: 3, lineHeight: 11 },

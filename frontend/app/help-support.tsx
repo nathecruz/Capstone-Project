@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getApiBaseUrl, getAuthenticatedHeaders, submitFeatureSuggestion } from '@/authentication';
 import { useAppDialog } from '@/components/ui/app-dialog';
@@ -16,6 +16,8 @@ const assistantSuggestions = [
 
 export default function HelpSupportScreen() {
   const { isDarkMode } = useAppColorScheme();
+  const { width } = useWindowDimensions();
+  const compactLayout = width < 360;
   const showAlert = useAppDialog();
   const helpItems = [
     { title: 'FAQ', subtitle: 'Find answers to common questions', icon: 'help-circle-outline', action: () => router.push('/help-support-faq') },
@@ -60,7 +62,7 @@ export default function HelpSupportScreen() {
   return (
     <SafeAreaView style={[styles.screen, isDarkMode && styles.darkScreen]}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.container}>
+        <View style={[styles.container, { paddingHorizontal: compactLayout ? 12 : 20 }]}>
           <View style={styles.headerRow}>
             <Pressable style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back">
               <Ionicons name="chevron-back" size={21} color="#292633" />
@@ -230,7 +232,7 @@ const styles = StyleSheet.create({
   modalSubmit: { backgroundColor: '#5B42D8', borderRadius: 10, paddingHorizontal: 18, paddingVertical: 10 },
   modalSubmitText: { color: '#FFFFFF', fontWeight: '800' },
   content: { paddingBottom: 110 },
-  container: { width: '100%', maxWidth: 680, alignSelf: 'center', paddingHorizontal: 20 },
+  container: { width: '100%', maxWidth: 680, alignSelf: 'center' },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 },
   backButton: { width: 38, height: 38, justifyContent: 'center' },
   headerSpacer: { width: 38 },

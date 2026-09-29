@@ -2,13 +2,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View, type DimensionValue } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View, type DimensionValue, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getHabitCompletionHistory, getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
 
 const tabs = ['Overview', 'Habits', 'Activity'] as const;
 export default function StatsProgressScreen() {
   const { isDarkMode, habits, preferences } = useAppColorScheme();
+  const { width } = useWindowDimensions();
+  const compactLayout = width < 360;
   const { averageProgress, completed, completionPercent, maxStreak } = getHabitProgressSummary(habits);
   const completionHistory = getHabitCompletionHistory(habits, 7, preferences.weekStartsOn);
   const maximumDailyCompletions = Math.max(1, ...completionHistory.map((entry) => entry.count));
@@ -29,7 +31,7 @@ export default function StatsProgressScreen() {
       <StatusBar style={isDarkMode ? 'light' : 'dark'} />
       <SafeAreaView style={[styles.screen, isDarkMode && styles.darkScreen]}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <View style={styles.container}>
+          <View style={[styles.container, { paddingHorizontal: compactLayout ? 12 : 20 }]}>
             <View style={styles.headerRow}>
               <Pressable style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back">
                 <Ionicons name="chevron-back" size={21} color={isDarkMode ? '#F2EFF8' : '#292633'} />
@@ -137,7 +139,7 @@ const styles = StyleSheet.create({
   darkText: { color: '#F2EFF8' },
   darkMutedText: { color: '#AAA4B7' },
   content: { paddingBottom: 110 },
-  container: { width: '100%', maxWidth: 680, alignSelf: 'center', paddingHorizontal: 20 },
+  container: { width: '100%', maxWidth: 680, alignSelf: 'center' },
   headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 18 },
   backButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   headerCopy: { flex: 1 },

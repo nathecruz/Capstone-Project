@@ -613,7 +613,7 @@ const styles = StyleSheet.create({
   quickPopularHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   quickViewAll: { color: '#C084FF', fontSize: 11, fontWeight: '800' },
   quickPopularGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 7 },
-  quickPopularItem: { width: '48.5%', minHeight: 38, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#1B2247', borderRadius: 9, paddingHorizontal: 9, borderWidth: 1, borderColor: '#29315B' },
+  quickPopularItem: { flexBasis: '48%', flexGrow: 1, minWidth: 120, minHeight: 38, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#1B2247', borderRadius: 9, paddingHorizontal: 9, borderWidth: 1, borderColor: '#29315B' },
   quickPopularText: { flex: 1, color: '#E6E1F5', fontSize: 10, fontWeight: '700', marginRight: 5 },
   quickSaveButton: { height: 46, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: '#7B2FE5', borderRadius: 12, marginTop: 8 },
   quickSaveText: { fontSize: 14, color: '#FFFFFF', fontWeight: '800' },

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 
@@ -55,6 +55,8 @@ const faqList = [
 
 export default function HelpSupportFaqScreen() {
   const { isDarkMode } = useAppColorScheme();
+  const { width } = useWindowDimensions();
+  const compactLayout = width < 360;
   const [search, setSearch] = useState('');
   const [openSection, setOpenSection] = useState<string>('Getting Started');
   const [openQuestion, setOpenQuestion] = useState<string | null>(null);
@@ -72,7 +74,7 @@ export default function HelpSupportFaqScreen() {
   return (
     <SafeAreaView style={[styles.screen, isDarkMode && styles.darkScreen]}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.container}>
+        <View style={[styles.container, { paddingHorizontal: compactLayout ? 12 : 20 }]}>
           <View style={styles.headerRow}>
             <Pressable style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back">
               <Ionicons name="chevron-back" size={22} color="#1F1F29" />
