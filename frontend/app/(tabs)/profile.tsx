@@ -20,7 +20,7 @@ const settings = [
 
 export default function ProfileScreen() {
   const showAlert = useAppDialog();
-  const { isDarkMode, avatarImage, setAvatarImage, habits, profile, points, tokens, addTokens, t } = useAppColorScheme();
+  const { isDarkMode, avatarImage, setAvatarImage, habits, goals, profile, points, tokens, addTokens, t } = useAppColorScheme();
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
   const { averageProgress, maxStreak, completed } = getHabitProgressSummary(habits);
@@ -170,6 +170,53 @@ export default function ProfileScreen() {
               <Text style={styles.firstActionButtonText}>{firstActionLabel}</Text>
               <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
             </Pressable>
+          </View>
+
+          <View style={styles.profileGoalsSection}>
+            <View style={styles.profileGoalsHeader}>
+              <View>
+                <Text style={[styles.profileGoalsTitle, isDarkMode && styles.darkText]}>My Goals</Text>
+                <Text style={[styles.profileGoalsSubtitle, isDarkMode && styles.darkMutedText]}>{goals.length ? 'Your plans and next steps.' : 'Turn an intention into a plan.'}</Text>
+              </View>
+              <Pressable onPress={() => router.push('/goals')} accessibilityRole="button" accessibilityLabel="View all goals">
+                <View style={styles.profileGoalsViewAll}>
+                  <Text style={styles.profileGoalsViewAllText}>View all</Text>
+                  <Ionicons name="chevron-forward" size={15} color="#5B42D8" />
+                </View>
+              </Pressable>
+            </View>
+            {goals.length ? goals.slice(0, 2).map((goal) => (
+              <Pressable
+                key={goal.id}
+                style={[styles.profileGoalCard, isDarkMode && styles.darkCard]}
+                onPress={() => router.push('/goals')}
+                accessibilityRole="button"
+                accessibilityLabel={`Open goal ${goal.title}`}
+              >
+                <View style={styles.profileGoalHeader}>
+                  <View style={styles.profileGoalCopy}>
+                    <Text style={[styles.profileGoalCategory, isDarkMode && styles.darkMutedText]}>{goal.category}</Text>
+                    <Text style={[styles.profileGoalTitle, isDarkMode && styles.darkText]} numberOfLines={2}>{goal.title}</Text>
+                  </View>
+                  <Text style={styles.profileGoalPercent}>{Math.max(0, Math.min(100, goal.progress))}%</Text>
+                </View>
+                <View style={styles.profileGoalTrack}>
+                  <View style={[styles.profileGoalFill, { width: `${Math.max(0, Math.min(100, goal.progress))}%` }]} />
+                </View>
+                <Text style={[styles.profileGoalStatus, isDarkMode && styles.darkMutedText]}>{goal.status}</Text>
+              </Pressable>
+            )) : (
+              <Pressable
+                style={[styles.profileGoalsEmpty, isDarkMode && styles.darkCard]}
+                onPress={() => router.push('/goals')}
+                accessibilityRole="button"
+                accessibilityLabel="Create your first goal"
+              >
+                <View style={styles.profileGoalsEmptyIcon}><Ionicons name="flag-outline" size={19} color="#5B42D8" /></View>
+                <Text style={[styles.profileGoalsEmptyText, isDarkMode && styles.darkText]}>Create your first goal</Text>
+                <Ionicons name="chevron-forward" size={17} color="#8C8498" />
+              </Pressable>
+            )}
           </View>
 
           <View style={[styles.statsCard, isDarkMode && styles.darkCard]}>
@@ -668,6 +715,24 @@ const styles = StyleSheet.create({
   firstActionCard: { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#DDD4F7' },
   firstActionIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: '#EEE8FF', alignItems: 'center', justifyContent: 'center', marginBottom: 11 },
   firstActionCopy: { marginBottom: 14 },
+  profileGoalsSection: { marginBottom: 14 },
+  profileGoalsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  profileGoalsTitle: { color: '#292531', fontSize: 15, fontWeight: '800' },
+  profileGoalsSubtitle: { color: '#777180', fontSize: 10, lineHeight: 15, marginTop: 2 },
+  profileGoalsViewAll: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  profileGoalsViewAllText: { color: '#5B42D8', fontSize: 11, fontWeight: '800' },
+  profileGoalCard: { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: '#E8E4EF' },
+  profileGoalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  profileGoalCopy: { flex: 1 },
+  profileGoalCategory: { color: '#777180', fontSize: 9, fontWeight: '800', textTransform: 'uppercase' },
+  profileGoalTitle: { color: '#292531', fontSize: 12, fontWeight: '800', lineHeight: 17, marginTop: 3 },
+  profileGoalPercent: { color: '#5B42D8', fontSize: 13, fontWeight: '800' },
+  profileGoalTrack: { height: 6, backgroundColor: '#E9E3F7', borderRadius: 3, overflow: 'hidden', marginTop: 10 },
+  profileGoalFill: { height: '100%', backgroundColor: '#5B42D8', borderRadius: 3 },
+  profileGoalStatus: { color: '#777180', fontSize: 9, fontWeight: '700', marginTop: 6 },
+  profileGoalsEmpty: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 14, padding: 12, borderWidth: 1, borderColor: '#E8E4EF' },
+  profileGoalsEmptyIcon: { width: 36, height: 36, borderRadius: 11, backgroundColor: '#EEE8FF', alignItems: 'center', justifyContent: 'center', marginRight: 10 },
+  profileGoalsEmptyText: { flex: 1, color: '#292531', fontSize: 12, fontWeight: '800' },
   firstActionEyebrow: { color: '#7A6AE7', fontSize: 9, fontWeight: '900', letterSpacing: 1.2, marginBottom: 4 },
   firstActionTitle: { color: '#292531', fontSize: 16, fontWeight: '800', lineHeight: 21 },
   firstActionBody: { color: '#6E6878', fontSize: 11.5, lineHeight: 17, marginTop: 4 },
