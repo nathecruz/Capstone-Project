@@ -10,3 +10,19 @@ self.addEventListener('notificationclick', (event) => {
     await self.clients.openWindow('/');
   })());
 });
+
+self.addEventListener('push', (event) => {
+  event.waitUntil((async () => {
+    let payload = {};
+    try {
+      payload = event.data?.json() ?? {};
+    } catch {
+      payload = { body: event.data?.text() ?? '' };
+    }
+    await self.registration.showNotification(payload.title || 'Habit reminder', {
+      body: payload.body || 'A small step today keeps your streak moving.',
+      tag: payload.tag,
+      data: payload.data,
+    });
+  })());
+});

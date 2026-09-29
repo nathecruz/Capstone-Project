@@ -5,7 +5,7 @@ import { getLocales } from 'expo-localization';
 import { AppState, Appearance, Platform, useColorScheme as useRNColorScheme } from 'react-native';
 import { translate, type SupportedLanguage } from '@/constants/i18n';
 import { getCurrentSession, subscribeToAuthChanges, type SessionUser } from '@/authentication/session';
-import { getApiBaseUrl, getAuthenticatedHeaders, getRemoteAppState, getRemoteHabitCompletions, saveRemoteAppState, saveRemoteHabitCompletion, type AppStateSyncBase, type AppStateSyncPayload } from '@/authentication/authService';
+import { getApiBaseUrl, getAuthenticatedHeaders, getRemoteAppState, getRemoteHabitCompletions, getWebPushVapidPublicKey, saveRemoteAppState, saveRemoteHabitCompletion, saveWebPushSubscription, type AppStateSyncBase, type AppStateSyncPayload } from '@/authentication/authService';
 import { normalizeHabitFields } from '@/utils/habit-data';
 
 type ColorScheme = 'light' | 'dark';
@@ -83,13 +83,41 @@ async function getBrowserNotificationRegistration() {
   }
 }
 
+function decodeVapidPublicKey(value: string) {
+  const padded = `${value}${'='.repeat((4 - value.length % 4) % 4)}`;
+  const base64 = padded.replace(/-/g, '+').replace(/_/g, '/');
+  return Uint8Array.from(window.atob(base64), (character) => character.charCodeAt(0));
+}
+
 export async function requestNotificationAccess() {
   if (Platform.OS === 'web') {
-    if (typeof window === 'undefined' || typeof window.Notification === 'undefined') return false;
-    let permission = window.Notification.permission;
-    if (permission === 'default') permission = await window.Notification.requestPermission();
-    if (permission !== 'granted') return false;
-    return Boolean(await getBrowserNotificationRegistration());
+    try {
+      if (typeof window === 'undefined' || typeof window.Notification === 'undefined') return false;
+      let permission = window.Notification.permission;
+      if (permission === 'default') permission = await window.Notification.requestPermission();
+      if (permission !== 'granted') return false;
+      const registration = await getBrowserNotificationRegistration();
+      if (!registration) return false;
+      const publicKey = await getWebPushVapidPublicKey();
+      if (!publicKey) return false;
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: decodeVapidPublicKey(publicKey).buffer as ArrayBuffer,
+        });
+      }
+      const serialized = subscription.toJSON();
+      if (!serialized.endpoint || !serialized.keys?.auth || !serialized.keys.p256dh) return false;
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      return saveWebPushSubscription({
+        endpoint: serialized.endpoint,
+        expirationTime: serialized.expirationTime,
+        keys: { auth: serialized.keys.auth, p256dh: serialized.keys.p256dh },
+      }, timeZone);
+    } catch {
+      return false;
+    }
   }
   const Notifications = await getNotificationsModule();
   if (!Notifications) return false;
@@ -635,6 +663,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         if (!preferences.notificationsEnabled || typeof window === 'undefined' || typeof window.Notification === 'undefined' || window.Notification.permission !== 'granted') return;
         const registration = await getBrowserNotificationRegistration();
         if (!registration) return;
+        if (await registration.pushManager.getSubscription()) return;
         const reminders = habits
           .map((habit) => ({ habit, times: getHabitReminderTimes(habit) }))
           .filter((entry) => entry.habit.reminderEnabled && entry.times.length > 0);

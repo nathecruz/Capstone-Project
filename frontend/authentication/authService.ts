@@ -374,6 +374,33 @@ export async function getAuthenticatedHeaders(): Promise<Record<string, string>>
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+export async function getWebPushVapidPublicKey() {
+  try {
+    const payload = await apiRequest<{ ok: boolean; publicKey?: string }>('/api/web-push/public-key');
+    return payload.publicKey || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveWebPushSubscription(
+  subscription: { endpoint: string; expirationTime?: number | null; keys: { p256dh: string; auth: string } },
+  timeZone: string,
+) {
+  const token = await getSessionToken();
+  if (!token) return false;
+  try {
+    await apiRequest('/api/web-push/subscriptions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ subscription, timeZone }),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function getRemoteAppState() {
   const token = await getSessionToken();
   if (!token) return null;

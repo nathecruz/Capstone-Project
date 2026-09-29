@@ -36,9 +36,12 @@ import {
   resetPasswordSchema,
   suggestionSchema,
   notificationReadSchema,
+  webPushSubscriptionRequestSchema,
+  webPushUnsubscribeSchema,
   verifyOtpSchema,
 } from './schemas.js';
 import { achievementSeeds, rewardSeeds } from './db/seed-data.js';
+import { getConfiguredVapidPublicKey, isAllowedWebPushEndpoint } from './services/web-push-reminders.js';
 
 const { generateGeminiText, gemini } = await import('./services/gemini.js');
 
@@ -219,6 +222,9 @@ database.exec(`
   CREATE TABLE IF NOT EXISTS user_achievements (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, achievement_id TEXT NOT NULL REFERENCES achievements(id) ON DELETE CASCADE, earned_at INTEGER NOT NULL, PRIMARY KEY (user_id, achievement_id));
   CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, type TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, read_at INTEGER, created_at INTEGER NOT NULL);
   CREATE INDEX IF NOT EXISTS notifications_user_created_idx ON notifications(user_id, created_at DESC);
+  CREATE TABLE IF NOT EXISTS web_push_subscriptions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, endpoint TEXT NOT NULL UNIQUE, subscription_json TEXT NOT NULL, time_zone TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+  CREATE INDEX IF NOT EXISTS web_push_subscriptions_user_idx ON web_push_subscriptions(user_id);
+  CREATE TABLE IF NOT EXISTS web_push_deliveries (subscription_id TEXT NOT NULL REFERENCES web_push_subscriptions(id) ON DELETE CASCADE, habit_id TEXT NOT NULL, reminder_date TEXT NOT NULL, reminder_time TEXT NOT NULL, attempted_at INTEGER NOT NULL DEFAULT 0, sent_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (subscription_id, habit_id, reminder_date, reminder_time));
   CREATE TABLE IF NOT EXISTS rewards (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, token_cost INTEGER NOT NULL CHECK (token_cost >= 0), description TEXT NOT NULL DEFAULT '');
   CREATE TABLE IF NOT EXISTS reward_redemptions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, reward_id TEXT NOT NULL REFERENCES rewards(id), token_cost INTEGER NOT NULL, redeemed_at INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS habit_completions (
@@ -330,13 +336,12 @@ function syncNormalizedState(userId, state, updatedAt) {
     const insertEarned = database.prepare('INSERT INTO user_achievements (user_id, achievement_id, earned_at) VALUES (?, ?, ?)');
     for (const achievementId of earned) insertEarned.run(userId, achievementId, updatedAt);
 
-    database.prepare('DELETE FROM notifications WHERE user_id = ? AND type = ?').run(userId, 'habit-reminder');
-    const insertNotification = database.prepare('INSERT INTO notifications (id, user_id, type, title, body, created_at) VALUES (?, ?, ?, ?, ?, ?)');
-    for (const habit of habitList.filter((item) => item.reminderEnabled)) insertNotification.run(`${userId}:notification:habit:${habit.id}`, userId, 'habit-reminder', `${habit.label || habit.id} reminder`, `Reminder set for ${habit.reminderTime || 'your schedule'}.`, updatedAt);
+    database.prepare("DELETE FROM notifications WHERE user_id = ? AND type = ? AND body LIKE 'Reminder set for %'").run(userId, 'habit-reminder');
     database.prepare('DELETE FROM notifications WHERE user_id = ? AND type = ?').run(userId, 'achievement');
+    const insertAchievementNotification = database.prepare('INSERT INTO notifications (id, user_id, type, title, body, created_at) VALUES (?, ?, ?, ?, ?, ?)');
     for (const achievementId of earned) {
       const achievement = database.prepare('SELECT name, description FROM achievements WHERE id = ?').get(achievementId);
-      if (achievement) insertNotification.run(`${userId}:notification:achievement:${achievementId}`, userId, 'achievement', achievement.name, achievement.description, updatedAt);
+      if (achievement) insertAchievementNotification.run(`${userId}:notification:achievement:${achievementId}`, userId, 'achievement', achievement.name, achievement.description, updatedAt);
     }
 
     const insertReward = database.prepare('INSERT OR IGNORE INTO rewards (id, name, token_cost, description) VALUES (?, ?, ?, ?)');
@@ -1268,6 +1273,40 @@ app.patch('/api/notifications/:id', (request, response) => {
   if (!input) return;
   const result = database.prepare('UPDATE notifications SET read_at = ? WHERE id = ? AND user_id = ?').run(input.read ? Date.now() : null, request.params.id, session.userId);
   if (!result.changes) return response.status(404).json({ ok: false, message: 'Notification not found.' });
+  response.json({ ok: true });
+});
+
+app.get('/api/web-push/public-key', (request, response) => {
+  const publicKey = getConfiguredVapidPublicKey();
+  if (!publicKey) return response.status(503).json({ ok: false, message: 'Web Push is not configured.' });
+  response.json({ ok: true, publicKey });
+});
+
+app.post('/api/web-push/subscriptions', (request, response) => {
+  const session = requireAuthentication(request, response);
+  if (!session) return;
+  const input = parseRequest(webPushSubscriptionRequestSchema, request, response);
+  if (!input) return;
+  if (!isAllowedWebPushEndpoint(input.subscription.endpoint)) return response.status(400).json({ ok: false, message: 'Unsupported Web Push endpoint.' });
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: input.timeZone });
+  } catch {
+    return response.status(400).json({ ok: false, message: 'A valid device timezone is required.' });
+  }
+  const now = Date.now();
+  database.prepare(`INSERT INTO web_push_subscriptions(id,user_id,endpoint,subscription_json,time_zone,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?)
+    ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id,subscription_json=excluded.subscription_json,time_zone=excluded.time_zone,updated_at=excluded.updated_at`)
+    .run(crypto.randomUUID(), session.userId, input.subscription.endpoint, JSON.stringify(input.subscription), input.timeZone, now, now);
+  response.json({ ok: true });
+});
+
+app.delete('/api/web-push/subscriptions', (request, response) => {
+  const session = requireAuthentication(request, response);
+  if (!session) return;
+  const input = parseRequest(webPushUnsubscribeSchema, request, response);
+  if (!input) return;
+  database.prepare('DELETE FROM web_push_subscriptions WHERE user_id=? AND endpoint=?').run(session.userId, input.endpoint);
   response.json({ ok: true });
 });
 

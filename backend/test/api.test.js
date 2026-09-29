@@ -25,6 +25,9 @@ const server = spawn(process.execPath, ['server.js'], {
     GEMINI_API_KEY: 'replace-with-test-key',
     ML_SERVICE_API_KEY: 'dev-only-local-key',
     ML_SERVICE_URL: `http://127.0.0.1:${mlPort}`,
+    WEB_PUSH_VAPID_PUBLIC_KEY: 'test-vapid-public-key',
+    WEB_PUSH_VAPID_PRIVATE_KEY: 'test-vapid-private-key',
+    WEB_PUSH_VAPID_SUBJECT: 'mailto:test@example.com',
   },
   stdio: 'ignore',
 });
@@ -146,6 +149,42 @@ test('auth, login activity, leaderboard sync, periods, and account deletion work
   const token = login.body.token;
   assert.ok(token);
   const authHeaders = { Authorization: `Bearer ${token}` };
+
+  const pushPublicKey = await request('/api/web-push/public-key');
+  assert.equal(pushPublicKey.response.status, 200);
+  assert.equal(pushPublicKey.body.publicKey, 'test-vapid-public-key');
+
+  const pushSubscription = {
+    endpoint: 'https://fcm.googleapis.com/fcm/send/test-endpoint',
+    expirationTime: null,
+    keys: { p256dh: 'test-p256dh-key', auth: 'test-auth-key' },
+  };
+  const anonymousPushSubscription = await request('/api/web-push/subscriptions', {
+    method: 'POST',
+    body: JSON.stringify({ subscription: pushSubscription, timeZone: 'UTC' }),
+  });
+  assert.equal(anonymousPushSubscription.response.status, 401);
+
+  const savedPushSubscription = await request('/api/web-push/subscriptions', {
+    method: 'POST',
+    headers: authHeaders,
+    body: JSON.stringify({ subscription: pushSubscription, timeZone: 'America/Los_Angeles' }),
+  });
+  assert.equal(savedPushSubscription.response.status, 200, JSON.stringify(savedPushSubscription.body));
+
+  const invalidPushSubscription = await request('/api/web-push/subscriptions', {
+    method: 'POST',
+    headers: authHeaders,
+    body: JSON.stringify({ subscription: { ...pushSubscription, endpoint: 'https://attacker.example/push' }, timeZone: 'UTC' }),
+  });
+  assert.equal(invalidPushSubscription.response.status, 400);
+
+  const removePushSubscription = await request('/api/web-push/subscriptions', {
+    method: 'DELETE',
+    headers: authHeaders,
+    body: JSON.stringify({ endpoint: pushSubscription.endpoint }),
+  });
+  assert.equal(removePushSubscription.response.status, 200);
 
   const currentUser = await request('/api/auth/me', { headers: authHeaders });
   assert.equal(currentUser.response.status, 200);

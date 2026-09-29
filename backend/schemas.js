@@ -30,3 +30,13 @@ export const issueReportSchema = issueSchema;
 export const suggestionSchema = z.object({ suggestion: z.string().trim().min(3).max(500) }).strict();
 export const rewardRedemptionSchema = z.object({ rewardId: z.string().trim().min(1).max(80), rewardName: z.string().trim().min(1).max(120), tokenCost: z.number().int().positive().max(100000) }).strict();
 export const notificationReadSchema = z.object({ read: z.boolean() }).strict();
+export const webPushSubscriptionSchema = z.object({
+	endpoint: z.string().url().max(2048).refine((value) => value.startsWith('https://')),
+	expirationTime: z.number().positive().nullable().optional(),
+	keys: z.object({ p256dh: z.string().min(1).max(512), auth: z.string().min(1).max(512) }).strict(),
+}).strict();
+export const webPushSubscriptionRequestSchema = z.object({
+	subscription: webPushSubscriptionSchema,
+	timeZone: z.string().trim().min(1).max(80),
+}).strict();
+export const webPushUnsubscribeSchema = z.object({ endpoint: z.string().url().max(2048).refine((value) => value.startsWith('https://')) }).strict();

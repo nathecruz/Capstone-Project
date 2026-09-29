@@ -162,6 +162,27 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 CREATE INDEX IF NOT EXISTS notifications_user_created_idx ON notifications(user_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS web_push_subscriptions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint TEXT NOT NULL UNIQUE,
+  subscription_json JSONB NOT NULL,
+  time_zone TEXT NOT NULL,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS web_push_subscriptions_user_idx ON web_push_subscriptions(user_id);
+
+CREATE TABLE IF NOT EXISTS web_push_deliveries (
+  subscription_id TEXT NOT NULL REFERENCES web_push_subscriptions(id) ON DELETE CASCADE,
+  habit_id TEXT NOT NULL,
+  reminder_date DATE NOT NULL,
+  reminder_time TEXT NOT NULL,
+  attempted_at BIGINT NOT NULL DEFAULT 0,
+  sent_at BIGINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (subscription_id, habit_id, reminder_date, reminder_time)
+);
+
 CREATE TABLE IF NOT EXISTS rewards (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,

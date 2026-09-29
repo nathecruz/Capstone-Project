@@ -17,6 +17,7 @@ import { closeDatabase, query, withTransaction } from './db/client.js';
 import { seedCatalog } from './db/seed-data.js';
 import { mergeAppState, normalizeAppState } from './services/app-state-sync.js';
 import { hasValidFileSignature, removeUploadedFile, uploadIssueAttachment } from './services/file-upload.js';
+import { getConfiguredVapidPublicKey, isAllowedWebPushEndpoint } from './services/web-push-reminders.js';
 import {
   assistantSchema,
   emailSchema as email,
@@ -35,6 +36,8 @@ import {
   stateSchema,
   suggestionSchema,
   notificationReadSchema,
+  webPushSubscriptionRequestSchema,
+  webPushUnsubscribeSchema,
 } from './schemas.js';
 
 const { generateGeminiText, gemini } = await import('./services/gemini.js');
@@ -124,6 +127,7 @@ async function ensureNeonSchema() {
   await query('UPDATE login_activity SET login_date_time = to_timestamp(created_at / 1000.0) WHERE login_date_time IS NULL');
   await query('ALTER TABLE login_activity ALTER COLUMN login_date_time SET DEFAULT CURRENT_TIMESTAMP');
   await query('ALTER TABLE login_activity ALTER COLUMN login_date_time SET NOT NULL');
+  await query("DELETE FROM notifications WHERE type='habit-reminder' AND body LIKE 'Reminder set for %'");
   await withTransaction(seedCatalog);
 }
 
@@ -361,8 +365,6 @@ async function syncNormalizedState(userId, state, updatedAt) {
     if (habitList.some((habit) => habit.category === 'Mind' && habit.done)) earned.add('focus-master');
     if (habitList.some((habit) => Number(habit.streak) >= 7)) earned.add('streak-week');
     for (const achievementId of earned) await connection.query('INSERT INTO user_achievements(user_id,achievement_id,earned_at) VALUES($1,$2,$3)', [userId, achievementId, updatedAt]);
-    await connection.query('DELETE FROM notifications WHERE user_id=$1 AND type=$2', [userId, 'habit-reminder']);
-    for (const habit of habitList.filter((item) => item.reminderEnabled)) await connection.query('INSERT INTO notifications(id,user_id,type,title,body,created_at) VALUES($1,$2,$3,$4,$5,$6)', [`${userId}:notification:habit:${habit.id}`, userId, 'habit-reminder', `${habit.label || habit.id} reminder`, `Reminder set for ${habit.reminderTime || 'your schedule'}.`, updatedAt]);
     await connection.query('DELETE FROM notifications WHERE user_id=$1 AND type=$2', [userId, 'achievement']);
     for (const achievementId of earned) {
       const achievement = (await connection.query('SELECT name,description FROM achievements WHERE id=$1', [achievementId])).rows[0];
@@ -520,6 +522,33 @@ app.post('/api/support/reports', uploadIssueAttachment, async (request, response
 app.post('/api/support/suggestions', async (request, response) => { const session = await requireAuth(request, response); if (!session) return; const input = parse(suggestionSchema, request, response); if (!input) return; await query('INSERT INTO feature_suggestions(id,user_id,suggestion,created_at) VALUES($1,$2,$3,$4)', [crypto.randomUUID(), session.userId, input.suggestion, Date.now()]); response.status(201).json({ ok: true, message: 'Your suggestion was submitted successfully.' }); });
 app.get('/api/notifications', async (request, response) => { const session = await requireAuth(request, response); if (!session) return; const result = await query('SELECT id,type,title,body AS message,read_at AS "readAt",created_at AS "createdAt" FROM notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100', [session.userId]); response.json({ ok: true, notifications: result.rows }); });
 app.patch('/api/notifications/:id', async (request, response) => { const session = await requireAuth(request, response); if (!session) return; const input = parse(notificationReadSchema, request, response); if (!input) return; const result = await query('UPDATE notifications SET read_at=$1 WHERE id=$2 AND user_id=$3', [input.read ? Date.now() : null, request.params.id, session.userId]); if (!result.rowCount) return response.status(404).json({ ok: false, message: 'Notification not found.' }); response.json({ ok: true }); });
+app.get('/api/web-push/public-key', (request, response) => {
+  const publicKey = getConfiguredVapidPublicKey();
+  if (!publicKey) return response.status(503).json({ ok: false, message: 'Web Push is not configured.' });
+  response.json({ ok: true, publicKey });
+});
+app.post('/api/web-push/subscriptions', async (request, response) => {
+  const session = await requireAuth(request, response); if (!session) return;
+  const input = parse(webPushSubscriptionRequestSchema, request, response); if (!input) return;
+  if (!isAllowedWebPushEndpoint(input.subscription.endpoint)) return response.status(400).json({ ok: false, message: 'Unsupported Web Push endpoint.' });
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: input.timeZone });
+  } catch {
+    return response.status(400).json({ ok: false, message: 'A valid device timezone is required.' });
+  }
+  const now = Date.now();
+  await query(`INSERT INTO web_push_subscriptions(id,user_id,endpoint,subscription_json,time_zone,created_at,updated_at)
+    VALUES($1,$2,$3,$4,$5,$6,$6)
+    ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id,subscription_json=excluded.subscription_json,time_zone=excluded.time_zone,updated_at=excluded.updated_at`,
+  [crypto.randomUUID(), session.userId, input.subscription.endpoint, input.subscription, input.timeZone, now]);
+  response.json({ ok: true });
+});
+app.delete('/api/web-push/subscriptions', async (request, response) => {
+  const session = await requireAuth(request, response); if (!session) return;
+  const input = parse(webPushUnsubscribeSchema, request, response); if (!input) return;
+  await query('DELETE FROM web_push_subscriptions WHERE user_id=$1 AND endpoint=$2', [session.userId, input.endpoint]);
+  response.json({ ok: true });
+});
 app.post('/api/rewards/redeem', async (request, response) => { const session = await requireAuth(request, response); if (!session) return; const input = parse(rewardRedemptionSchema, request, response); if (!input) return; const reward = (await query('SELECT id,name,token_cost AS "tokenCost" FROM rewards WHERE id=$1', [input.rewardId])).rows[0]; if (!reward || reward.name !== input.rewardName || Number(reward.tokenCost) !== input.tokenCost) return response.status(400).json({ ok: false, message: 'This reward is not available.' }); const balance = Number((await query('SELECT COALESCE(SUM(amount),0) AS balance FROM token_transactions WHERE user_id=$1', [session.userId])).rows[0].balance); const permanent = ['plant-buddy', 'premium-theme', 'custom-title'].includes(reward.id); if (permanent && (await query('SELECT 1 FROM reward_redemptions WHERE user_id=$1 AND reward_id=$2 LIMIT 1', [session.userId, reward.id])).rowCount) return response.status(409).json({ ok: false, message: 'This reward has already been redeemed.' }); if (balance < input.tokenCost) return response.status(409).json({ ok: false, message: 'You do not have enough tokens.' }); await withTransaction(async (db) => { const now = Date.now(); await db.query('INSERT INTO reward_redemptions(id,user_id,reward_id,token_cost,redeemed_at) VALUES($1,$2,$3,$4,$5)', [crypto.randomUUID(), session.userId, reward.id, input.tokenCost, now]); await db.query('INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,$3,$4,$5,$6)', [crypto.randomUUID(), session.userId, -input.tokenCost, `Redeemed ${reward.name}`, new Date(now).toISOString(), now]); }); response.json({ ok: true, tokens: balance - input.tokenCost }); });
 app.delete('/api/auth/account', async (request, response) => { const session = await requireAuth(request, response); if (!session) return; const input = parse(z.object({ currentPassword: z.string().min(1).max(128) }).strict(), request, response); if (!input) return; const user = await findUser(session.email); if (!user || !bcrypt.compareSync(input.currentPassword, user.passwordHash)) return response.status(401).json({ ok: false, message: 'The current password is incorrect.' }); await query('DELETE FROM users WHERE id=$1', [user.id]); response.json({ ok: true, message: 'Your account and associated data have been permanently deleted.' }); });
 

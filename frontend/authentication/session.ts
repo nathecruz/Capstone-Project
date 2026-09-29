@@ -388,6 +388,15 @@ export async function getSessionToken(): Promise<string> {
 
 export async function logoutUser() {
   const webStorage = getWebSessionStorage();
+  if (isWebSessionAvailable() && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    try {
+      const registration = await navigator.serviceWorker.getRegistration();
+      const subscription = await registration?.pushManager.getSubscription();
+      if (subscription) await subscription.unsubscribe();
+    } catch {
+      // Continue clearing the session if browser push cleanup is unavailable.
+    }
+  }
   try {
     webStorage?.removeItem(SESSION_TOKEN_KEY);
   } catch {
