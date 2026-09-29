@@ -46,7 +46,7 @@ import { achievementSeeds, rewardSeeds } from './db/seed-data.js';
 import { getConfiguredVapidPublicKey, getWebPushSnoozeSettings, hashWebPushSnoozeToken, isAllowedWebPushEndpoint } from './services/web-push-reminders.js';
 import { forwardSupportIssue } from './services/support-email.js';
 
-const { generateGeminiText, gemini } = await import('./services/gemini.js');
+const { generateGeminiText, isGeminiConfigured } = await import('./services/gemini.js');
 
 if (process.env.NODE_ENV === 'production' && !process.env.DATABASE_URL?.trim()) {
   throw new Error('DATABASE_URL must be configured in production.');
@@ -1529,19 +1529,20 @@ app.post('/api/insights/assistant', expensiveApiLimiter, async (request, respons
     return;
   }
 
-  if (!gemini) {
+  const input = parseRequest(assistantSchema, request, response);
+  if (!input) return;
+  const { question, summary, mode } = input;
+  if (!isGeminiConfigured(mode)) {
     response.status(503).json({ error: 'AI service is not configured on the server.' });
     return;
   }
-
-  const input = parseRequest(assistantSchema, request, response);
-  if (!input) return;
-  const { question, summary } = input;
   const safeSummary = JSON.stringify(summary ?? {}).slice(0, 6000);
-  const prompt = `You are a concise habit coach. Use only this user summary: ${safeSummary}. Answer this question in 2-4 helpful sentences: ${String(question || 'What should I focus on next?').slice(0, 500)}`;
+  const prompt = mode === 'coach'
+    ? `You are HabitMind's personal habit coach. Use only the user's progress data below. Answer the user's question with one specific, realistic next action and one brief reason. Do not invent habits, scores, or personal facts. Keep the answer to 2-4 helpful sentences. User progress: ${safeSummary}. Question: ${String(question || 'What should I focus on next?').slice(0, 500)}`
+    : `You are HabitMind's support and progress assistant. Use only the supplied app context and user progress. Answer the question directly in 2-4 concise, practical sentences. Do not invent account details or claim actions were completed. App context: ${safeSummary}. Question: ${String(question || 'What should I focus on next?').slice(0, 500)}`;
 
   try {
-    const answer = z.string().trim().min(1).max(4000).safeParse(await generateGeminiText(prompt, { maxOutputTokens: 180 }));
+    const answer = z.string().trim().min(1).max(4000).safeParse(await generateGeminiText(prompt, { maxOutputTokens: 180, profile: mode }));
     if (!answer.success) {
       response.status(502).json({ error: 'The AI service returned an invalid response.' });
       return;
@@ -1558,7 +1559,7 @@ app.post('/api/goals/generate', expensiveApiLimiter, async (request, response) =
     return;
   }
 
-  if (!gemini) {
+  if (!isGeminiConfigured('goals')) {
     response.status(503).json({ error: 'AI service is not configured on the server.' });
     return;
   }
@@ -1581,7 +1582,7 @@ timeline (one of 7-14 days, 30-60 days, 90 days), nextCheckIn (a specific date 7
 status (Fresh plan). Do not include progress; the app calculates progress from completed steps. Keep every action realistic, specific to the exact goal, and avoid generic advice.`;
 
   try {
-    const completionText = await generateGeminiText(prompt, { json: true, maxOutputTokens: 700 });
+    const completionText = await generateGeminiText(prompt, { json: true, maxOutputTokens: 700, profile: 'goals' });
     let rawPlan;
     try {
       rawPlan = JSON.parse(completionText);

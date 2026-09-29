@@ -33,7 +33,7 @@ The root `render.yaml` deploys all three services as one Blueprint:
 1. Create or connect a Neon project and have its `DATABASE_URL`, `AUTH_URL`, `JWKS_URL`, and public Neon Auth base URL ready. The JWKS URL must end in `/.well-known/jwks.json`. The frontend auth URL is the Neon Auth base URL used by the client, not the backend API URL.
 2. Push the repository to GitHub.
 3. In Render, select **New** -> **Blueprint** and connect this repository.
-4. Provide the prompted values, including backend Neon credentials, `ALLOWED_ORIGINS`, Gemini API key, SMTP settings, and the frontend `EXPO_PUBLIC_AUTH_URL`. `SUPPORT_EMAIL` is optional; if omitted, issue reports go to the configured SMTP sender. For `ALLOWED_ORIGINS`, enter the frontend's Render origin (for example, `https://habitai-frontend.onrender.com`). If Render assigns a different URL, update it in the backend after the first sync.
+4. Provide the prompted values, including backend Neon credentials, `ALLOWED_ORIGINS`, Gemini API keys, SMTP settings, and the frontend `EXPO_PUBLIC_AUTH_URL`. Use `GEMINI_API_KEY_GOALS`, `GEMINI_API_KEY_COACH`, and `GEMINI_API_KEY_ASSISTANT` for the goal planner, habit coach, and support/progress assistant; the generic `GEMINI_API_KEY` remains a fallback. `SUPPORT_EMAIL` is optional; if omitted, issue reports go to the configured SMTP sender. For `ALLOWED_ORIGINS`, enter the frontend's Render origin (for example, `https://habitai-frontend.onrender.com`). If Render assigns a different URL, update it in the backend after the first sync.
 5. Deploy the Blueprint. Keep `ML_MODEL_RELEASE_APPROVED=false` until real approved training outcomes and an independent holdout report have been verified.
 6. `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_AI_API_URL` are injected from the backend URL. `EXPO_PUBLIC_AUTH_URL` must point to the Neon Auth client endpoint. It is compiled into the public web bundle, so it must be a public URL, never a secret. Render only prompts for `sync: false` values when a Blueprint is first created; add or update this value in the service's Environment settings after that.
 
@@ -68,10 +68,10 @@ The Vercel config runs `npm ci` and `npm run export:web`, publishing `dist`. The
 - The ML service returns HTTP 503 until `ML_MODEL_RELEASE_APPROVED=true` and a valid evaluated model is present. The included synthetic demo data is not production training data.
 - Render uses `/healthz` to verify that each service is running; `/health` reports dependency/model readiness and may return HTTP 503 until the ML release is approved.
 - The backend requires `AUTH_URL` and `JWKS_URL` when using the production Neon database.
-- Full production readiness validation also requires `GEMINI_API_KEY` and an SMTP username/password pair; without them, AI or password-reset email features are unavailable and the production readiness check fails.
+- Full production readiness validation requires at least one of `GEMINI_API_KEY`, `GEMINI_API_KEY_GOALS`, `GEMINI_API_KEY_COACH`, or `GEMINI_API_KEY_ASSISTANT`, plus an SMTP username/password pair; without them, AI or password-reset email features are unavailable and the production readiness check fails.
 - The app validates that `ML_SERVICE_API_KEY` is a real secret and not a placeholder.
 - The backend also expects `ALLOWED_ORIGINS` to be defined in production.
-- If you want AI features, set `GEMINI_API_KEY`.
+- If you want AI features, set the dedicated Gemini keys when possible: `GEMINI_API_KEY_GOALS`, `GEMINI_API_KEY_COACH`, and `GEMINI_API_KEY_ASSISTANT`.
 
 After the first Blueprint sync assigns the Render service URLs, run `npm run check:env:deployment` with the production values set in the process environment or local ignored `.env`. It verifies the required database, auth, origins, and HTTPS URLs while warning if Gemini/email features are unavailable and confirming ML remains disabled. Do not commit the local `.env`. After a real model passes the independent holdout requirements, run `npm run check:env:production` as the stricter ML-release gate.
 

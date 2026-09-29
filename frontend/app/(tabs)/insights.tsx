@@ -229,7 +229,7 @@ export default function InsightsScreen() {
       const response = await fetch(`${apiUrl}/api/insights/assistant`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify({ question: assistantQuestion || 'What should I focus on next?', summary: { completionPercent, averageProgress, completed, missedHabits, maxStreak, habits: habits.map((habit) => ({ label: habit.label, progress: habit.progress, streak: habit.streak, done: habit.done })) } }),
+        body: JSON.stringify({ question: assistantQuestion || 'What should I focus on next?', mode: 'assistant', summary: { completionPercent, averageProgress, completed, missedHabits, maxStreak, habits: habits.map((habit) => ({ label: habit.label, progress: habit.progress, streak: habit.streak, done: habit.done })) } }),
       });
       if (response.ok) {
         const result = await response.json() as { answer?: string };

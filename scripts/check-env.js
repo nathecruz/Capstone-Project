@@ -147,8 +147,11 @@ const publicSecretVariables = Object.keys(values).filter((name) => (
 if (publicSecretVariables.length > 0) {
   deployIssues.push('Do not expose API keys, secrets, passwords, or tokens in EXPO_PUBLIC_ variables.');
 }
-if (!values.GEMINI_API_KEY || isPlaceholderValue(values.GEMINI_API_KEY)) {
-  if (isStrictProduction) deployIssues.push('GEMINI_API_KEY must be set for the production AI feature.');
+const configuredGeminiKeys = ['GEMINI_API_KEY', 'GEMINI_API_KEY_GOALS', 'GEMINI_API_KEY_COACH', 'GEMINI_API_KEY_ASSISTANT']
+  .map((name) => values[name])
+  .filter((value) => value && !isPlaceholderValue(value));
+if (configuredGeminiKeys.length === 0) {
+  if (isStrictProduction) deployIssues.push('At least one Gemini API key must be set for the production AI feature.');
   else if (isDeployment) warnings.push('GEMINI_API_KEY is missing; Gemini Coach, Assistant, and Goal generation will be unavailable.');
   else warnings.push('GEMINI_API_KEY is missing or placeholder; AI features will fall back locally.');
 }

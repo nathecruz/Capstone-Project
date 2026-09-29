@@ -2,22 +2,29 @@ import { GoogleGenAI } from '@google/genai';
 
 export const geminiModel = process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
 
-const createGeminiClient = () => {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
+const keyByProfile = {
+  goals: 'GEMINI_API_KEY_GOALS',
+  coach: 'GEMINI_API_KEY_COACH',
+  assistant: 'GEMINI_API_KEY_ASSISTANT',
+};
+
+const getGeminiApiKey = (profile = 'default') => {
+  const profileKey = keyByProfile[profile] ? process.env[keyByProfile[profile]]?.trim() : '';
+  const apiKey = profileKey || process.env.GEMINI_API_KEY?.trim();
   if (!apiKey || apiKey.startsWith('replace-with-')) {
     return null;
   }
 
-  return new GoogleGenAI({ apiKey });
+  return apiKey;
 };
 
-export const gemini = createGeminiClient();
+export const isGeminiConfigured = (profile = 'default') => Boolean(getGeminiApiKey(profile));
 
-export async function generateGeminiText(prompt, { json = false, maxOutputTokens = 700 } = {}) {
-  const geminiClient = createGeminiClient();
-  if (!geminiClient) return null;
+export async function generateGeminiText(prompt, { json = false, maxOutputTokens = 700, profile = 'default' } = {}) {
+  const apiKey = getGeminiApiKey(profile);
+  if (!apiKey) return null;
 
-  const response = await geminiClient.models.generateContent({
+  const response = await new GoogleGenAI({ apiKey }).models.generateContent({
     model: geminiModel,
     contents: prompt,
     config: {

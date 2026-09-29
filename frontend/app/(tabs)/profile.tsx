@@ -68,6 +68,7 @@ export default function ProfileScreen() {
           body: JSON.stringify({
             question,
             summary,
+            mode: 'coach',
           }),
         });
 

@@ -34,6 +34,12 @@ services:
         value: 15000
       - key: GEMINI_API_KEY
         sync: false
+      - key: GEMINI_API_KEY_GOALS
+        sync: false
+      - key: GEMINI_API_KEY_COACH
+        sync: false
+      - key: GEMINI_API_KEY_ASSISTANT
+        sync: false
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
       - key: SMTP_HOST

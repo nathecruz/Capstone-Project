@@ -45,7 +45,7 @@ export default function HelpSupportScreen() {
       const response = await fetch(`${getApiBaseUrl()}/api/insights/assistant`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(await getAuthenticatedHeaders()) },
-        body: JSON.stringify({ question: assistantQuestion.trim(), summary: { context: 'Help and Support for AI Habit Tracker' } }),
+        body: JSON.stringify({ question: assistantQuestion.trim(), mode: 'assistant', summary: { context: 'Help and Support for AI Habit Tracker' } }),
       });
       if (response.ok) {
         const result = await response.json() as { answer?: string };

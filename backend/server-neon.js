@@ -42,7 +42,7 @@ import {
   webPushUnsubscribeSchema,
 } from './schemas.js';
 
-const { generateGeminiText, gemini } = await import('./services/gemini.js');
+const { generateGeminiText, isGeminiConfigured } = await import('./services/gemini.js');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -656,21 +656,24 @@ app.post('/api/leaderboard/sync', async (request, response) => { const session =
 
 app.post('/api/insights/assistant', async (request, response) => {
   if (!(await requireAuth(request, response))) return;
-  if (!gemini) return response.status(503).json({ error: 'Gemini AI service is not configured on the server.' });
   const input = parse(assistantSchema, request, response); if (!input) return;
+  if (!isGeminiConfigured(input.mode)) return response.status(503).json({ error: 'Gemini AI service is not configured on the server.' });
   const safeSummary = JSON.stringify(input.summary || {}).slice(0, 6000);
+  const prompt = input.mode === 'coach'
+    ? `You are HabitMind's personal habit coach. Use only the user's progress data below. Answer the user's question with one specific, realistic next action and one brief reason. Do not invent habits, scores, or personal facts. Keep the answer to 2-4 helpful sentences. User progress: ${safeSummary}. Question: ${String(input.question || 'What should I focus on next?').slice(0, 500)}`
+    : `You are HabitMind's support and progress assistant. Use only the supplied app context and user progress. Answer the question directly in 2-4 concise, practical sentences. Do not invent account details or claim actions were completed. App context: ${safeSummary}. Question: ${String(input.question || 'What should I focus on next?').slice(0, 500)}`;
   try {
-    const answer = z.string().trim().min(1).max(4000).safeParse(await generateGeminiText(`You are a concise habit coach. Use only this user summary: ${safeSummary}. Answer this question in 2-4 helpful sentences: ${String(input.question || 'What should I focus on next?').slice(0, 500)}`, { maxOutputTokens: 180 }));
+    const answer = z.string().trim().min(1).max(4000).safeParse(await generateGeminiText(prompt, { maxOutputTokens: 180, profile: input.mode }));
     if (!answer.success) return response.status(502).json({ error: 'The AI service returned an invalid response.' });
     response.json({ answer: answer.data });
   } catch { response.status(502).json({ error: 'The AI service is temporarily unavailable.' }); }
 });
 app.post('/api/goals/generate', async (request, response) => {
   if (!(await requireAuth(request, response))) return;
-  if (!gemini) return response.status(503).json({ error: 'Gemini AI service is not configured on the server.' });
+  if (!isGeminiConfigured('goals')) return response.status(503).json({ error: 'Gemini AI service is not configured on the server.' });
   const input = parse(goalGenerationSchema, request, response); if (!input) return;
   try {
-    const completionText = await generateGeminiText(`Create a practical personal growth plan for this goal: ${input.goal}. The user prefers a focus of ${input.focusTarget || '4 habits'} and a timeline of ${input.timeline || '30-60 days'}. Return valid JSON with category, summary, intensity, focusAreas, actionPlan, actionDueDates, nextMilestone, risk, riskAction, timeline, nextCheckIn, status. Do not include numerical scores or confidence claims.`, { json: true, maxOutputTokens: 700 });
+    const completionText = await generateGeminiText(`Create a practical personal growth plan for this exact goal: ${input.goal}. The user prefers a focus of ${input.focusTarget || '4 habits'} and a timeline of ${input.timeline || '30-60 days'}. Return valid JSON with category, summary, intensity, focusAreas, actionPlan, actionDueDates, nextMilestone, risk, riskAction, timeline, nextCheckIn, status. Make every action specific to the goal, realistic, and measurable. Do not include numerical scores or confidence claims.`, { json: true, maxOutputTokens: 700, profile: 'goals' });
     let rawPlan;
     try { rawPlan = JSON.parse(completionText); } catch { return response.status(502).json({ error: 'The AI goal planner returned invalid JSON.' }); }
     const plan = goalPlanSchema.safeParse(rawPlan);
