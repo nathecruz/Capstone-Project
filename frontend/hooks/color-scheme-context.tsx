@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { getLocales } from 'expo-localization';
@@ -450,8 +450,8 @@ type ColorSchemeContextValue = {
   tokenHistory: TokenTransaction[];
   addTokens: (amount: number, label?: string) => void;
   getAppStateSnapshot: () => PersistedAppState;
-  syncAppState: () => Promise<{ state: PersistedAppState; ok: boolean; merged: boolean }>;
-  refreshAppState: () => Promise<void>;
+  syncAppState: (state?: PersistedAppState) => Promise<{ state: PersistedAppState; ok: boolean; merged: boolean }>;
+  refreshAppState: () => Promise<boolean>;
   clearLocalData: () => void;
 };
 
@@ -475,6 +475,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   const [stateHydrated, setStateHydrated] = useState(false);
   const syncBaseRef = useRef<AppStateSyncBase | null>(null);
   const refreshAppStateRef = useRef<(() => Promise<void>) | null>(null);
+  const syncAppStateRef = useRef<(() => Promise<{ state: PersistedAppState; ok: boolean; merged: boolean }>) | null>(null);
   const sentBrowserRemindersRef = useRef(new Set<string>());
   const handledSnoozeActionsRef = useRef(new Set<string>());
   const colorScheme: ColorScheme = darkModeOverride === null
@@ -699,18 +700,29 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     };
 
     refreshAppStateRef.current = refreshRemoteState;
+    const syncThenRefresh = async () => {
+      const result = await syncAppStateRef.current?.();
+      if (result?.ok) await refreshRemoteState();
+    };
     const handleVisibilityChange = () => {
       appIsActive = !document.hidden;
-      if (appIsActive) void refreshRemoteState();
+      if (appIsActive) void syncThenRefresh();
+    };
+    const handleOnline = () => {
+      if (appIsActive) void syncThenRefresh();
+      else void syncAppStateRef.current?.();
     };
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.addEventListener('online', handleOnline);
     }
 
     const refreshTimer = setInterval(() => void refreshRemoteState(), 1000);
     const appStateSubscription = AppState.addEventListener('change', (nextState) => {
       appIsActive = nextState === 'active';
-      if (appIsActive) void refreshRemoteState();
+      if (appIsActive) void syncThenRefresh();
     });
     void refreshRemoteState();
 
@@ -720,6 +732,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       appStateSubscription.remove();
       if (Platform.OS === 'web' && typeof document !== 'undefined') {
         document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.removeEventListener('online', handleOnline);
       }
       if (refreshAppStateRef.current === refreshRemoteState) refreshAppStateRef.current = null;
     };
@@ -1048,7 +1063,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     setGoals([]);
   };
 
-  const getAppStateSnapshot = (): PersistedAppState => ({
+  const getAppStateSnapshot = useCallback((): PersistedAppState => ({
     avatarImage,
     profile,
     preferences,
@@ -1060,14 +1075,30 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     ringInterval,
     snoozeFrequency,
     goals,
-  });
+  }), [avatarImage, darkModeOverride, goals, habits, points, preferences, profile, ringInterval, snoozeFrequency, tokenHistory, tokens]);
 
-  const syncAppState = async () => {
-    const state = getAppStateSnapshot();
+  const syncAppState = useCallback(async (state = getAppStateSnapshot()) => {
     const result = await saveRemoteAppState(state as AppStateSyncPayload, syncBaseRef.current);
-    if (result?.state && result.updatedAt) syncBaseRef.current = { updatedAt: result.updatedAt, state: result.state };
-    return { state, ok: Boolean(result?.state), merged: Boolean(result?.merged) };
-  };
+    const savedState = result?.state as PersistedAppState | undefined;
+    if (savedState && result.updatedAt) syncBaseRef.current = { updatedAt: result.updatedAt, state: result.state! };
+    if (savedState && result.merged) {
+      setAvatarImage(savedState.avatarImage ?? null);
+      setProfile(savedState.profile as Profile);
+      setPreferences(savedState.preferences as Preferences);
+      setHabits(savedState.habits as Habit[]);
+      setPoints(savedState.points);
+      setTokens(savedState.tokens);
+      setTokenHistory(savedState.tokenHistory as TokenTransaction[]);
+      setDarkModeOverride(savedState.darkModeOverride);
+      setRingInterval(savedState.ringInterval);
+      setSnoozeFrequency(savedState.snoozeFrequency);
+      setGoals(Array.isArray(savedState.goals) ? savedState.goals as Goal[] : []);
+    }
+    return { state: savedState ?? state, ok: Boolean(savedState), merged: Boolean(result?.merged) };
+  }, [getAppStateSnapshot]);
+  useEffect(() => {
+    syncAppStateRef.current = syncAppState;
+  }, [syncAppState]);
 
   const value = useMemo(
     () => ({
@@ -1098,10 +1129,15 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       addTokens,
       getAppStateSnapshot,
       syncAppState,
-      refreshAppState: () => refreshAppStateRef.current?.() ?? Promise.resolve(),
+      refreshAppState: async () => {
+        const result = await syncAppStateRef.current?.();
+        if (!result?.ok) return false;
+        await refreshAppStateRef.current?.();
+        return true;
+      },
       clearLocalData,
     }),
-    [avatarImage, colorScheme, goals, habits, points, preferences, profile, ringInterval, snoozeFrequency, tokenHistory, tokens],
+    [avatarImage, colorScheme, darkModeOverride, getAppStateSnapshot, goals, habits, points, preferences, profile, ringInterval, snoozeFrequency, syncAppState, tokenHistory, tokens],
   );
 
   return <ColorSchemeContext.Provider value={value}>{children}</ColorSchemeContext.Provider>;

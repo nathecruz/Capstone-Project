@@ -103,7 +103,7 @@ const getGoalStatus = (progress: number) => progress >= 100 ? 'Completed' : prog
 
 export default function GoalsScreen() {
   const showAlert = useAppDialog();
-  const { isDarkMode } = useAppColorScheme();
+  const { isDarkMode, getAppStateSnapshot, syncAppState } = useAppColorScheme();
   const { width } = useWindowDimensions();
   const compact = width < 380;
   const compactPadding = compact ? 12 : 20;
@@ -112,6 +112,7 @@ export default function GoalsScreen() {
   const [generatedGoal, setGeneratedGoal] = useState<GoalInsight | null>(null);
   const { goals: savedGoals, updateGoals } = useAppColorScheme();
   const [saveConfirmationVisible, setSaveConfirmationVisible] = useState(false);
+  const [isSavingGoal, setIsSavingGoal] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [clearConfirmationVisible, setClearConfirmationVisible] = useState(false);
   const [clearUndoText, setClearUndoText] = useState<string | null>(null);
@@ -181,7 +182,8 @@ export default function GoalsScreen() {
     }
   };
 
-  const saveGoal = () => {
+  const saveGoal = async () => {
+    if (isSavingGoal) return;
     if (!activeGoal) {
       showAlert('No plan generated yet', 'Generate a plan before saving it.');
       return;
@@ -194,13 +196,21 @@ export default function GoalsScreen() {
       status: getGoalStatus(getProgressFromSteps(activeGoal.completedSteps)),
     };
 
-    updateGoals((previous) => {
-      const exists = previous.some((goal) => goal.title === goalToSave.title);
-      if (exists) return previous;
-      return [goalToSave, ...previous];
-    });
-
-    setSaveConfirmationVisible(true);
+    const nextGoals = savedGoals.some((goal) => goal.title === goalToSave.title)
+      ? savedGoals
+      : [goalToSave, ...savedGoals];
+    setIsSavingGoal(true);
+    try {
+      const result = await syncAppState({ ...getAppStateSnapshot(), goals: nextGoals });
+      if (!result.ok) {
+        showAlert('Goal not synced', 'The goal was not saved to your account database. Check your connection and try again.');
+        return;
+      }
+      updateGoals(result.state.goals);
+      setSaveConfirmationVisible(true);
+    } finally {
+      setIsSavingGoal(false);
+    }
   };
 
   const confirmClearGoal = () => {

@@ -69,7 +69,10 @@ export default function HomeScreen() {
     if (isRefreshing) return;
     setIsRefreshing(true);
     try {
-      await refreshAppState();
+      const synced = await refreshAppState();
+      if (!synced) {
+        showAlert('Sync unavailable', 'Could not reach your account database. Your changes remain on this device and will retry when the connection returns.');
+      }
     } finally {
       setIsRefreshing(false);
     }
