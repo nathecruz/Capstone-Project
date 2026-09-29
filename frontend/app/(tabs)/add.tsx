@@ -129,7 +129,6 @@ export default function AddScreen() {
       showAlert('Reminder limit reached', 'You can add up to 2 reminder times only.');
       return;
     }
-    setReminder(Platform.OS !== 'web');
     setEditingReminderTime(null);
     setTimeModalVisible(false);
   };
