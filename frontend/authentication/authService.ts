@@ -313,7 +313,7 @@ export async function getSession() {
 
 export async function redeemReward(reward: { id: string; title: string; cost: number }) {
   const token = await getSessionToken();
-  if (!token) return { ok: false, message: 'You are not signed in.' };
+  if (!token) return { ok: false, message: 'You are not signed in.', forwarded: false };
   try {
     return await apiRequest<{ ok: boolean; tokens?: number; message?: string }>('/api/rewards/redeem', {
       method: 'POST',
@@ -508,9 +508,9 @@ export async function submitIssueReport(report: {
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new ApiRequestError(payload?.message || 'Request failed.', response.status);
-    return { ok: payload.ok, message: payload.message };
+    return { ok: payload.ok, message: payload.message, forwarded: payload.forwarded === true };
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : 'Unable to submit your report.' };
+    return { ok: false, message: error instanceof Error ? error.message : 'Unable to submit your report.', forwarded: false };
   }
 }
 

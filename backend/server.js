@@ -7,6 +7,7 @@ if (process.env.NODE_ENV !== 'test' && process.env.NODE_ENV !== 'production') {
   dotenv.config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.env') });
 }
 import { mkdirSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import cors from 'cors';
 import express from 'express';
 import bcrypt from 'bcryptjs';
@@ -37,11 +38,13 @@ import {
   suggestionSchema,
   notificationReadSchema,
   webPushSubscriptionRequestSchema,
+  webPushSnoozeRequestSchema,
   webPushUnsubscribeSchema,
   verifyOtpSchema,
 } from './schemas.js';
 import { achievementSeeds, rewardSeeds } from './db/seed-data.js';
-import { getConfiguredVapidPublicKey, isAllowedWebPushEndpoint } from './services/web-push-reminders.js';
+import { getConfiguredVapidPublicKey, getWebPushSnoozeSettings, hashWebPushSnoozeToken, isAllowedWebPushEndpoint } from './services/web-push-reminders.js';
+import { forwardSupportIssue } from './services/support-email.js';
 
 const { generateGeminiText, gemini } = await import('./services/gemini.js');
 
@@ -226,6 +229,10 @@ database.exec(`
   CREATE TABLE IF NOT EXISTS web_push_subscriptions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, endpoint TEXT NOT NULL UNIQUE, subscription_json TEXT NOT NULL, time_zone TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
   CREATE INDEX IF NOT EXISTS web_push_subscriptions_user_idx ON web_push_subscriptions(user_id);
   CREATE TABLE IF NOT EXISTS web_push_deliveries (subscription_id TEXT NOT NULL REFERENCES web_push_subscriptions(id) ON DELETE CASCADE, habit_id TEXT NOT NULL, reminder_date TEXT NOT NULL, reminder_time TEXT NOT NULL, attempted_at INTEGER NOT NULL DEFAULT 0, sent_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (subscription_id, habit_id, reminder_date, reminder_time));
+  CREATE TABLE IF NOT EXISTS web_push_snooze_tokens (token_hash TEXT PRIMARY KEY, subscription_id TEXT NOT NULL REFERENCES web_push_subscriptions(id) ON DELETE CASCADE, habit_id TEXT NOT NULL, snooze_count INTEGER NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+  CREATE INDEX IF NOT EXISTS web_push_snooze_tokens_expiry_idx ON web_push_snooze_tokens(expires_at);
+  CREATE TABLE IF NOT EXISTS web_push_snooze_queue (id TEXT PRIMARY KEY, subscription_id TEXT NOT NULL REFERENCES web_push_subscriptions(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, habit_id TEXT NOT NULL, snooze_count INTEGER NOT NULL, scheduled_at INTEGER NOT NULL, attempted_at INTEGER NOT NULL DEFAULT 0, sent_at INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+  CREATE INDEX IF NOT EXISTS web_push_snooze_queue_due_idx ON web_push_snooze_queue(scheduled_at, sent_at, attempted_at);
   CREATE TABLE IF NOT EXISTS rewards (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, token_cost INTEGER NOT NULL CHECK (token_cost >= 0), description TEXT NOT NULL DEFAULT '');
   CREATE TABLE IF NOT EXISTS reward_redemptions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, reward_id TEXT NOT NULL REFERENCES rewards(id), token_cost INTEGER NOT NULL, redeemed_at INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS habit_completions (
@@ -244,6 +251,7 @@ database.exec(`
     description TEXT NOT NULL,
     attachment_name TEXT,
     attachment_uri TEXT,
+    attachment_data BLOB,
     status TEXT NOT NULL DEFAULT 'open',
     created_at INTEGER NOT NULL
   );
@@ -254,6 +262,10 @@ database.exec(`
     created_at INTEGER NOT NULL
   );
 `);
+const issueReportColumns = database.prepare('PRAGMA table_info(issue_reports)').all();
+if (!issueReportColumns.some((column) => column.name === 'attachment_data')) {
+  database.exec('ALTER TABLE issue_reports ADD COLUMN attachment_data BLOB');
+}
 for (const reward of [['plant-buddy', 'Plant Buddy', 200, 'Profile decoration'], ['kindness-boost', 'Kindness Boost', 250, 'Send encouragement to a friend'], ['premium-theme', 'Premium Theme', 320, 'Unlock the premium app theme'], ['habit-swap', 'Habit Swap Token', 380, 'Swap one habit, keep your streak history'], ['mystery-box', 'Mystery Box', 420, 'Open for a random reward'], ['xp-booster', 'XP Booster', 500, '+20% points for 3 days'], ['grace-day', 'Grace Day', 620, 'Skip logging for a day, streak stays safe'], ['custom-title', 'Custom Title', 750, 'Set your own title under your name']]) {
   database.prepare('INSERT OR IGNORE INTO rewards (id, name, token_cost, description) VALUES (?, ?, ?, ?)').run(...reward);
 }
@@ -1236,18 +1248,41 @@ app.post('/api/support/reports', uploadIssueAttachment, async (request, response
     return;
   }
 
+  const reportId = crypto.randomUUID();
+  const attachmentData = request.file ? await readFile(request.file.path) : null;
   try {
     database.prepare(`
-      INSERT INTO issue_reports (id, user_id, topic, timing, description, attachment_name, attachment_uri, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(crypto.randomUUID(), session.userId, input.topic, input.timing, input.description, request.file?.originalname || null, request.file ? `uploads/${request.file.filename}` : null, Date.now());
+      INSERT INTO issue_reports (id, user_id, topic, timing, description, attachment_name, attachment_uri, attachment_data, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(reportId, session.userId, input.topic, input.timing, input.description, request.file?.originalname || null, null, attachmentData, Date.now());
   } catch (error) {
     removeUploadedFile(request.file);
     response.status(500).json({ ok: false, message: 'Your report could not be saved.' });
     return;
   }
 
-  response.status(201).json({ ok: true, message: 'Your report was submitted successfully.' });
+  let forwarded = false;
+  try {
+    forwarded = await forwardSupportIssue({
+      id: reportId,
+      topic: input.topic,
+      timing: input.timing,
+      description: input.description,
+      reporterEmail: session.email,
+      attachmentName: request.file?.originalname,
+      attachmentPath: request.file?.path,
+    });
+  } catch (error) {
+    console.error('Support report email forwarding failed.');
+  }
+  response.status(201).json({
+    ok: true,
+    forwarded,
+    message: forwarded
+      ? 'Your report was saved and sent to the support mailbox.'
+      : 'Your report was saved, but email forwarding is not configured or is unavailable.',
+  });
+  removeUploadedFile(request.file);
 });
 
 app.post('/api/support/suggestions', (request, response) => {
@@ -1308,6 +1343,48 @@ app.delete('/api/web-push/subscriptions', (request, response) => {
   const input = parseRequest(webPushUnsubscribeSchema, request, response);
   if (!input) return;
   database.prepare('DELETE FROM web_push_subscriptions WHERE user_id=? AND endpoint=?').run(session.userId, input.endpoint);
+  response.json({ ok: true });
+});
+
+app.post('/api/web-push/snooze', (request, response) => {
+  const input = parseRequest(webPushSnoozeRequestSchema, request, response);
+  if (!input) return;
+  const tokenHash = hashWebPushSnoozeToken(input.token);
+  if (!tokenHash) return response.status(410).json({ ok: false, message: 'This snooze action has expired.' });
+
+  const now = Date.now();
+  const enqueued = database.transaction(() => {
+    const token = database.prepare(`
+      SELECT snooze_token.subscription_id AS subscriptionId,
+             snooze_token.habit_id AS habitId,
+             snooze_token.snooze_count AS snoozeCount,
+             subscription.user_id AS userId,
+             (SELECT state_json FROM user_app_state WHERE user_id=subscription.user_id ORDER BY updated_at DESC LIMIT 1) AS stateJson
+      FROM web_push_snooze_tokens AS snooze_token
+      JOIN web_push_subscriptions AS subscription ON subscription.id=snooze_token.subscription_id
+      WHERE snooze_token.token_hash=? AND snooze_token.consumed_at=0 AND snooze_token.expires_at>?
+    `).get(tokenHash, now);
+    if (!token) return false;
+
+    let settings;
+    try {
+      settings = getWebPushSnoozeSettings(token.stateJson, token.habitId, token.snoozeCount);
+    } catch {
+      return false;
+    }
+    if (!settings) return false;
+
+    const consumed = database.prepare('UPDATE web_push_snooze_tokens SET consumed_at=? WHERE token_hash=? AND consumed_at=0 AND expires_at>?')
+      .run(now, tokenHash, now);
+    if (!consumed.changes) return false;
+    database.prepare(`
+      INSERT INTO web_push_snooze_queue(id,subscription_id,user_id,habit_id,snooze_count,scheduled_at,created_at)
+      VALUES(?,?,?,?,?,?,?)
+    `).run(crypto.randomUUID(), token.subscriptionId, token.userId, token.habitId, settings.nextSnoozeCount, now + settings.intervalMinutes * 60_000, now);
+    return true;
+  })();
+
+  if (!enqueued) return response.status(410).json({ ok: false, message: 'This snooze action is no longer available.' });
   response.json({ ok: true });
 });
 

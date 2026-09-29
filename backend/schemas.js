@@ -40,3 +40,4 @@ export const webPushSubscriptionRequestSchema = z.object({
 	timeZone: z.string().trim().min(1).max(80),
 }).strict();
 export const webPushUnsubscribeSchema = z.object({ endpoint: z.string().url().max(2048).refine((value) => value.startsWith('https://')) }).strict();
+export const webPushSnoozeRequestSchema = z.object({ token: z.string().min(32).max(128) }).strict();

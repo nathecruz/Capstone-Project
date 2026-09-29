@@ -183,6 +183,31 @@ CREATE TABLE IF NOT EXISTS web_push_deliveries (
   PRIMARY KEY (subscription_id, habit_id, reminder_date, reminder_time)
 );
 
+CREATE TABLE IF NOT EXISTS web_push_snooze_tokens (
+  token_hash TEXT PRIMARY KEY,
+  subscription_id TEXT NOT NULL REFERENCES web_push_subscriptions(id) ON DELETE CASCADE,
+  habit_id TEXT NOT NULL,
+  snooze_count INTEGER NOT NULL,
+  expires_at BIGINT NOT NULL,
+  consumed_at BIGINT NOT NULL DEFAULT 0,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS web_push_snooze_tokens_expiry_idx ON web_push_snooze_tokens(expires_at);
+
+CREATE TABLE IF NOT EXISTS web_push_snooze_queue (
+  id TEXT PRIMARY KEY,
+  subscription_id TEXT NOT NULL REFERENCES web_push_subscriptions(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  habit_id TEXT NOT NULL,
+  snooze_count INTEGER NOT NULL,
+  scheduled_at BIGINT NOT NULL,
+  attempted_at BIGINT NOT NULL DEFAULT 0,
+  sent_at BIGINT NOT NULL DEFAULT 0,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS web_push_snooze_queue_due_idx
+  ON web_push_snooze_queue(scheduled_at, sent_at, attempted_at);
+
 CREATE TABLE IF NOT EXISTS rewards (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
@@ -216,9 +241,11 @@ CREATE TABLE IF NOT EXISTS issue_reports (
   description TEXT NOT NULL,
   attachment_name TEXT,
   attachment_uri TEXT,
+  attachment_data BYTEA,
   status TEXT NOT NULL DEFAULT 'open',
   created_at BIGINT NOT NULL
 );
+ALTER TABLE issue_reports ADD COLUMN IF NOT EXISTS attachment_data BYTEA;
 CREATE INDEX IF NOT EXISTS issue_reports_user_created_idx ON issue_reports(user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS feature_suggestions (

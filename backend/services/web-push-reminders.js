@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 const reminderDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export function getConfiguredVapidPublicKey(environment = process.env) {
@@ -117,4 +119,43 @@ export function getDueHabitReminders(habit, timeZone, now = new Date()) {
     }
   }
   return [...due.values()];
+}
+
+export function getSnoozeLimit(frequency) {
+  if (frequency === 'Once') return 1;
+  const count = Number.parseInt(frequency, 10);
+  return Number.isFinite(count) ? Math.max(1, Math.min(5, count)) : 1;
+}
+
+export function hashWebPushSnoozeToken(token) {
+  if (typeof token !== 'string' || token.length < 32 || token.length > 128) return null;
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+export function getWebPushSnoozeUrl(environment = process.env) {
+  const configuredUrl = environment.WEB_PUSH_API_URL?.trim() || environment.RENDER_EXTERNAL_URL?.trim();
+  if (!configuredUrl) return null;
+  try {
+    const url = new URL(configuredUrl);
+    const localHost = ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && localHost)) return null;
+    return new URL('/api/web-push/snooze', url).toString();
+  } catch {
+    return null;
+  }
+}
+
+export function getWebPushSnoozeSettings(state, habitId, snoozeCount) {
+  const savedState = typeof state === 'string' ? JSON.parse(state) : state;
+  if (!savedState || savedState.preferences?.notificationsEnabled === false) return null;
+  const habit = Array.isArray(savedState.habits) ? savedState.habits.find((item) => item.id === habitId) : null;
+  if (!habit?.reminderEnabled) return null;
+  const snoozeLimit = getSnoozeLimit(savedState.snoozeFrequency || 'Once');
+  const count = Number(snoozeCount);
+  if (!Number.isInteger(count) || count < 0 || count >= snoozeLimit) return null;
+  const configuredInterval = Number(savedState.ringInterval);
+  const intervalMinutes = Number.isFinite(configuredInterval)
+    ? Math.max(1, Math.min(1440, Math.trunc(configuredInterval)))
+    : 30;
+  return { habit, intervalMinutes, nextSnoozeCount: count + 1, snoozeLimit };
 }

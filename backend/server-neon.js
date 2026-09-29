@@ -17,7 +17,8 @@ import { closeDatabase, query, withTransaction } from './db/client.js';
 import { seedCatalog } from './db/seed-data.js';
 import { mergeAppState, normalizeAppState } from './services/app-state-sync.js';
 import { hasValidFileSignature, removeUploadedFile, uploadIssueAttachment } from './services/file-upload.js';
-import { getConfiguredVapidPublicKey, isAllowedWebPushEndpoint } from './services/web-push-reminders.js';
+import { forwardSupportIssue } from './services/support-email.js';
+import { getConfiguredVapidPublicKey, getWebPushSnoozeSettings, hashWebPushSnoozeToken, isAllowedWebPushEndpoint } from './services/web-push-reminders.js';
 import {
   assistantSchema,
   emailSchema as email,
@@ -37,6 +38,7 @@ import {
   suggestionSchema,
   notificationReadSchema,
   webPushSubscriptionRequestSchema,
+  webPushSnoozeRequestSchema,
   webPushUnsubscribeSchema,
 } from './schemas.js';
 
@@ -519,7 +521,54 @@ app.post('/api/auth/reset-password', resetVerificationLimiter, async (request, r
   response.json({ ok: true, message: 'Your password has been reset successfully.' });
 });
 app.post('/api/auth/change-password', async (request, response) => { const session = await requireAuth(request, response); if (!session) return; const input = parse(z.object({ currentPassword: z.string().min(1).max(128), newPassword: password }).strict(), request, response); if (!input) return; const user = await findUser(session.email); if (!user || !bcrypt.compareSync(input.currentPassword, user.passwordHash)) return response.status(401).json({ ok: false, message: 'The current password is incorrect.' }); const error = passwordStrength(input.newPassword, user); if (error) return response.status(400).json({ ok: false, message: error }); await query('UPDATE users SET password_hash=$1 WHERE id=$2', [bcrypt.hashSync(input.newPassword, 12), user.id]); await query('DELETE FROM sessions WHERE user_id=$1', [user.id]); response.json({ ok: true, message: 'Your password has been updated. Please sign in again.' }); });
-app.post('/api/support/reports', uploadIssueAttachment, async (request, response) => { const session = await requireAuth(request, response); if (!session) { removeUploadedFile(request.file); return; } if (!(await hasValidFileSignature(request.file))) { removeUploadedFile(request.file); return response.status(400).json({ ok: false, message: 'The attachment content does not match its file type.' }); } const input = parse(issueSchema, request, response); if (!input) { removeUploadedFile(request.file); return; } try { await query('INSERT INTO issue_reports(id,user_id,topic,timing,description,attachment_name,attachment_uri,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [crypto.randomUUID(), session.userId, input.topic, input.timing, input.description, request.file?.originalname || null, request.file ? `uploads/${request.file.filename}` : null, Date.now()]); response.status(201).json({ ok: true, message: 'Your report was submitted successfully.' }); } catch { removeUploadedFile(request.file); response.status(500).json({ ok: false, message: 'Your report could not be saved.' }); } });
+app.post('/api/support/reports', uploadIssueAttachment, async (request, response) => {
+  const session = await requireAuth(request, response);
+  if (!session) {
+    removeUploadedFile(request.file);
+    return;
+  }
+  if (!(await hasValidFileSignature(request.file))) {
+    removeUploadedFile(request.file);
+    return response.status(400).json({ ok: false, message: 'The attachment content does not match its file type.' });
+  }
+  const input = parse(issueSchema, request, response);
+  if (!input) {
+    removeUploadedFile(request.file);
+    return;
+  }
+
+  const reportId = crypto.randomUUID();
+  const attachmentData = request.file ? await readFile(request.file.path) : null;
+  try {
+    await query('INSERT INTO issue_reports(id,user_id,topic,timing,description,attachment_name,attachment_uri,attachment_data,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [reportId, session.userId, input.topic, input.timing, input.description, request.file?.originalname || null, null, attachmentData, Date.now()]);
+  } catch {
+    removeUploadedFile(request.file);
+    return response.status(500).json({ ok: false, message: 'Your report could not be saved.' });
+  }
+
+  let forwarded = false;
+  try {
+    forwarded = await forwardSupportIssue({
+      id: reportId,
+      topic: input.topic,
+      timing: input.timing,
+      description: input.description,
+      reporterEmail: session.email,
+      attachmentName: request.file?.originalname,
+      attachmentPath: request.file?.path,
+    });
+  } catch (error) {
+    console.error('Support report email forwarding failed.');
+  }
+  response.status(201).json({
+    ok: true,
+    forwarded,
+    message: forwarded
+      ? 'Your report was saved and sent to the support mailbox.'
+      : 'Your report was saved, but email forwarding is not configured or is unavailable.',
+  });
+  removeUploadedFile(request.file);
+});
 app.post('/api/support/suggestions', async (request, response) => { const session = await requireAuth(request, response); if (!session) return; const input = parse(suggestionSchema, request, response); if (!input) return; await query('INSERT INTO feature_suggestions(id,user_id,suggestion,created_at) VALUES($1,$2,$3,$4)', [crypto.randomUUID(), session.userId, input.suggestion, Date.now()]); response.status(201).json({ ok: true, message: 'Your suggestion was submitted successfully.' }); });
 app.get('/api/notifications', async (request, response) => { const session = await requireAuth(request, response); if (!session) return; const result = await query('SELECT id,type,title,body AS message,read_at AS "readAt",created_at AS "createdAt" FROM notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100', [session.userId]); response.json({ ok: true, notifications: result.rows }); });
 app.patch('/api/notifications/:id', async (request, response) => { const session = await requireAuth(request, response); if (!session) return; const input = parse(notificationReadSchema, request, response); if (!input) return; const result = await query('UPDATE notifications SET read_at=$1 WHERE id=$2 AND user_id=$3', [input.read ? Date.now() : null, request.params.id, session.userId]); if (!result.rowCount) return response.status(404).json({ ok: false, message: 'Notification not found.' }); response.json({ ok: true }); });
@@ -548,6 +597,40 @@ app.delete('/api/web-push/subscriptions', async (request, response) => {
   const session = await requireAuth(request, response); if (!session) return;
   const input = parse(webPushUnsubscribeSchema, request, response); if (!input) return;
   await query('DELETE FROM web_push_subscriptions WHERE user_id=$1 AND endpoint=$2', [session.userId, input.endpoint]);
+  response.json({ ok: true });
+});
+app.post('/api/web-push/snooze', async (request, response) => {
+  const input = parse(webPushSnoozeRequestSchema, request, response); if (!input) return;
+  const tokenHash = hashWebPushSnoozeToken(input.token);
+  if (!tokenHash) return response.status(410).json({ ok: false, message: 'This snooze action has expired.' });
+  const now = Date.now();
+  const enqueued = await withTransaction(async (db) => {
+    const token = (await db.query(`
+      SELECT snooze_token.subscription_id AS "subscriptionId",
+             snooze_token.habit_id AS "habitId",
+             snooze_token.snooze_count AS "snoozeCount",
+             subscription.user_id AS "userId",
+             current_state.state_json AS "stateJson"
+      FROM web_push_snooze_tokens AS snooze_token
+      JOIN web_push_subscriptions AS subscription ON subscription.id=snooze_token.subscription_id
+      JOIN LATERAL (
+        SELECT state_json FROM user_app_state WHERE user_id=subscription.user_id ORDER BY updated_at DESC LIMIT 1
+      ) AS current_state ON TRUE
+      WHERE snooze_token.token_hash=$1 AND snooze_token.consumed_at=0 AND snooze_token.expires_at>$2
+      FOR UPDATE OF snooze_token
+    `, [tokenHash, now])).rows[0];
+    if (!token) return false;
+    const settings = getWebPushSnoozeSettings(token.stateJson, token.habitId, Number(token.snoozeCount));
+    if (!settings) return false;
+    const consumed = await db.query('UPDATE web_push_snooze_tokens SET consumed_at=$1 WHERE token_hash=$2 AND consumed_at=0 AND expires_at>$1', [now, tokenHash]);
+    if (!consumed.rowCount) return false;
+    await db.query(`
+      INSERT INTO web_push_snooze_queue(id,subscription_id,user_id,habit_id,snooze_count,scheduled_at,created_at)
+      VALUES($1,$2,$3,$4,$5,$6,$7)
+    `, [crypto.randomUUID(), token.subscriptionId, token.userId, token.habitId, settings.nextSnoozeCount, now + settings.intervalMinutes * 60_000, now]);
+    return true;
+  });
+  if (!enqueued) return response.status(410).json({ ok: false, message: 'This snooze action is no longer available.' });
   response.json({ ok: true });
 });
 app.post('/api/rewards/redeem', async (request, response) => { const session = await requireAuth(request, response); if (!session) return; const input = parse(rewardRedemptionSchema, request, response); if (!input) return; const reward = (await query('SELECT id,name,token_cost AS "tokenCost" FROM rewards WHERE id=$1', [input.rewardId])).rows[0]; if (!reward || reward.name !== input.rewardName || Number(reward.tokenCost) !== input.tokenCost) return response.status(400).json({ ok: false, message: 'This reward is not available.' }); const balance = Number((await query('SELECT COALESCE(SUM(amount),0) AS balance FROM token_transactions WHERE user_id=$1', [session.userId])).rows[0].balance); const permanent = ['plant-buddy', 'premium-theme', 'custom-title'].includes(reward.id); if (permanent && (await query('SELECT 1 FROM reward_redemptions WHERE user_id=$1 AND reward_id=$2 LIMIT 1', [session.userId, reward.id])).rowCount) return response.status(409).json({ ok: false, message: 'This reward has already been redeemed.' }); if (balance < input.tokenCost) return response.status(409).json({ ok: false, message: 'You do not have enough tokens.' }); await withTransaction(async (db) => { const now = Date.now(); await db.query('INSERT INTO reward_redemptions(id,user_id,reward_id,token_cost,redeemed_at) VALUES($1,$2,$3,$4,$5)', [crypto.randomUUID(), session.userId, reward.id, input.tokenCost, now]); await db.query('INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,$3,$4,$5,$6)', [crypto.randomUUID(), session.userId, -input.tokenCost, `Redeemed ${reward.name}`, new Date(now).toISOString(), now]); }); response.json({ ok: true, tokens: balance - input.tokenCost }); });

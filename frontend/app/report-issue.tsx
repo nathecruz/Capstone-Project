@@ -86,7 +86,12 @@ export default function ReportIssueScreen() {
       showAlert('Report could not be submitted', result.message || 'Please try again when the account service is available.');
       return;
     }
-    showAlert('Report submitted', 'Thanks for helping us improve the app.', [{ text: 'Done', onPress: () => router.back() }], 'success');
+    showAlert(
+      result.forwarded ? 'Report sent to support' : 'Report saved',
+      result.forwarded ? 'Thanks for helping us improve the app.' : 'Your report is saved, but email forwarding is not configured or is currently unavailable.',
+      [{ text: 'Done', onPress: () => router.back() }],
+      'success',
+    );
   };
 
   return (

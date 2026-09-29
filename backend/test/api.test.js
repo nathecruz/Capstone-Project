@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -10,6 +10,7 @@ import bcrypt from 'bcryptjs';
 import Database from 'better-sqlite3';
 import { goalPlanSchema } from '../schemas.js';
 import { normalizeAppState } from '../services/app-state-sync.js';
+import { getSupportEmailConfig } from '../services/support-email.js';
 
 const port = 18900 + Math.floor(Math.random() * 500);
 const mlPort = port + 1000;
@@ -105,6 +106,24 @@ test('goal plan schema strips uncalibrated numeric score fields', () => {
   assert.deepEqual(parsed.data, plan);
 });
 
+test('support email uses the configured inbox or falls back to the SMTP sender', () => {
+  const explicitInbox = getSupportEmailConfig({
+    SMTP_USER: 'mailer@habitai.app',
+    SMTP_PASSWORD: 'smtp-secret-value',
+    SUPPORT_EMAIL: 'support@habitai.app',
+  });
+  assert.equal(explicitInbox.configured, true);
+  assert.equal(explicitInbox.recipient, 'support@habitai.app');
+
+  const senderFallback = getSupportEmailConfig({
+    SMTP_USER: 'mailer@habitai.app',
+    SMTP_PASSWORD: 'smtp-secret-value',
+  });
+  assert.equal(senderFallback.configured, true);
+  assert.equal(senderFallback.recipient, 'mailer@habitai.app');
+  assert.equal(getSupportEmailConfig({ SMTP_USER: 'mailer@habitai.app' }).configured, false);
+});
+
 test('auth, login activity, leaderboard sync, periods, and account deletion work together', async (t) => {
   await waitForServer();
   await mockMlServiceReady;
@@ -171,6 +190,48 @@ test('auth, login activity, leaderboard sync, periods, and account deletion work
     body: JSON.stringify({ subscription: pushSubscription, timeZone: 'America/Los_Angeles' }),
   });
   assert.equal(savedPushSubscription.response.status, 200, JSON.stringify(savedPushSubscription.body));
+
+  const snoozeState = {
+    avatarImage: null,
+    profile: { fullName: 'Test User', email: 'test@example.com' },
+    preferences: { notificationsEnabled: true },
+    habits: [{ id: 'habit-snooze', label: 'Stretch', reminderEnabled: true }],
+    points: 0,
+    tokens: 0,
+    tokenHistory: [],
+    darkModeOverride: null,
+    ringInterval: 15,
+    snoozeFrequency: '2 times',
+    goals: [],
+  };
+  const savedSnoozeState = await request('/api/app-state', {
+    method: 'PUT',
+    headers: authHeaders,
+    body: JSON.stringify(snoozeState),
+  });
+  assert.equal(savedSnoozeState.response.status, 200, JSON.stringify(savedSnoozeState.body));
+  const snoozeToken = crypto.randomBytes(32).toString('base64url');
+  const snoozeDatabase = new Database(path.join(databaseDirectory, 'test.sqlite'));
+  const snoozeSubscriptionId = snoozeDatabase.prepare('SELECT id FROM web_push_subscriptions WHERE endpoint=?').get(pushSubscription.endpoint).id;
+  snoozeDatabase.prepare(`
+    INSERT INTO web_push_snooze_tokens(token_hash,subscription_id,habit_id,snooze_count,expires_at,created_at)
+    VALUES(?,?,?,?,?,?)
+  `).run(crypto.createHash('sha256').update(snoozeToken).digest('hex'), snoozeSubscriptionId, 'habit-snooze', 0, Date.now() + 60000, Date.now());
+  snoozeDatabase.close();
+
+  const acceptedSnooze = await request('/api/web-push/snooze', {
+    method: 'POST',
+    body: JSON.stringify({ token: snoozeToken }),
+  });
+  assert.equal(acceptedSnooze.response.status, 200, JSON.stringify(acceptedSnooze.body));
+  const replayedSnooze = await request('/api/web-push/snooze', {
+    method: 'POST',
+    body: JSON.stringify({ token: snoozeToken }),
+  });
+  assert.equal(replayedSnooze.response.status, 410);
+  const queuedSnoozes = new Database(path.join(databaseDirectory, 'test.sqlite'))
+    .prepare('SELECT COUNT(*) AS count FROM web_push_snooze_queue').get().count;
+  assert.equal(queuedSnoozes, 1);
 
   const invalidPushSubscription = await request('/api/web-push/subscriptions', {
     method: 'POST',
@@ -415,6 +476,7 @@ test('auth, login activity, leaderboard sync, periods, and account deletion work
   });
   assert.equal(report.response.status, 201, JSON.stringify(report.body));
   assert.equal(report.body.ok, true);
+  assert.equal(report.body.forwarded, false);
 
   const invalidAttachment = new FormData();
   invalidAttachment.append('topic', 'Other');
@@ -428,6 +490,8 @@ test('auth, login activity, leaderboard sync, periods, and account deletion work
   });
   assert.equal(invalidAttachmentResponse.status, 400);
 
+  const uploadDirectory = path.resolve(import.meta.dirname, '..', 'data', 'uploads');
+  const uploadsBeforeReport = readdirSync(uploadDirectory).sort();
   const validAttachment = new FormData();
   validAttachment.append('topic', 'Other');
   validAttachment.append('timing', 'Today');
@@ -440,13 +504,12 @@ test('auth, login activity, leaderboard sync, periods, and account deletion work
   });
   assert.equal(validAttachmentResponse.status, 201, await validAttachmentResponse.text());
   const uploadedDatabase = new Database(path.join(databaseDirectory, 'test.sqlite'));
-  const uploadedReport = uploadedDatabase.prepare('SELECT attachment_uri AS attachmentUri FROM issue_reports WHERE description = ?')
+  const uploadedReport = uploadedDatabase.prepare('SELECT attachment_uri AS attachmentUri, attachment_data AS attachmentData FROM issue_reports WHERE description = ?')
     .get('Valid attachment should be stored.');
   uploadedDatabase.close();
-  assert.match(uploadedReport.attachmentUri, /^uploads\/[0-9a-f-]+\.png$/);
-  const uploadedFilePath = path.resolve(import.meta.dirname, '..', 'data', uploadedReport.attachmentUri);
-  assert.equal(existsSync(uploadedFilePath), true);
-  rmSync(uploadedFilePath, { force: true });
+  assert.equal(uploadedReport.attachmentUri, null);
+  assert.deepEqual(uploadedReport.attachmentData, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  assert.deepEqual(readdirSync(uploadDirectory).sort(), uploadsBeforeReport);
 
   const deviceOneState = { ...appState, preferences: { language: 'Tagalog' } };
   const deviceOneSave = await request('/api/app-state', {
@@ -476,7 +539,7 @@ test('auth, login activity, leaderboard sync, periods, and account deletion work
       (SELECT COUNT(*) FROM goals WHERE user_id = (SELECT id FROM users WHERE email = ?)) AS goals`)
     .get('updated@example.com', 'updated@example.com');
   stateDatabase.close();
-  assert.equal(appStateRows.count, 4);
+  assert.equal(appStateRows.count, 5);
   assert.equal(normalizedCounts.habits, 1);
   assert.equal(normalizedCounts.goals, 1);
 

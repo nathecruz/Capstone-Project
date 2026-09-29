@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { webPushSubscriptionRequestSchema } from '../schemas.js';
-import { getConfiguredVapidPublicKey, getDueHabitReminders, getHabitReminderDays, getHabitReminderTimes, isAllowedWebPushEndpoint, parseReminderTime } from '../services/web-push-reminders.js';
+import { getConfiguredVapidPublicKey, getDueHabitReminders, getHabitReminderDays, getHabitReminderTimes, getSnoozeLimit, getWebPushSnoozeSettings, getWebPushSnoozeUrl, hashWebPushSnoozeToken, isAllowedWebPushEndpoint, parseReminderTime } from '../services/web-push-reminders.js';
 
 test('parses 12-hour and legacy reminder times', () => {
   assert.deepEqual(parseReminderTime('08:30 PM'), { hour: 20, minute: 30 });
@@ -78,4 +78,28 @@ test('validates a web push subscription payload', () => {
 test('does not advertise Web Push until the full VAPID configuration is present', () => {
   assert.equal(getConfiguredVapidPublicKey({ WEB_PUSH_VAPID_PUBLIC_KEY: 'public', WEB_PUSH_VAPID_PRIVATE_KEY: 'private' }), null);
   assert.equal(getConfiguredVapidPublicKey({ WEB_PUSH_VAPID_PUBLIC_KEY: 'public', WEB_PUSH_VAPID_PRIVATE_KEY: 'private', WEB_PUSH_VAPID_SUBJECT: 'mailto:owner@example.org' }), 'public');
+});
+
+test('creates safe snooze URLs and hashes one-time tokens', () => {
+  assert.equal(getWebPushSnoozeUrl({ WEB_PUSH_API_URL: 'https://api.example.org/' }), 'https://api.example.org/api/web-push/snooze');
+  assert.equal(getWebPushSnoozeUrl({ WEB_PUSH_API_URL: 'http://attacker.example' }), null);
+  assert.equal(getWebPushSnoozeUrl({ WEB_PUSH_API_URL: 'http://localhost:8787' }), 'http://localhost:8787/api/web-push/snooze');
+  assert.match(hashWebPushSnoozeToken('a'.repeat(32)), /^[a-f0-9]{64}$/);
+  assert.equal(hashWebPushSnoozeToken('short'), null);
+});
+
+test('enforces Web Push snooze permission, interval, and count limits', () => {
+  const state = {
+    preferences: { notificationsEnabled: true },
+    ringInterval: 15,
+    snoozeFrequency: '2 times',
+    habits: [{ id: 'habit-1', reminderEnabled: true }],
+  };
+  assert.equal(getSnoozeLimit('2 times'), 2);
+  assert.deepEqual(getWebPushSnoozeSettings(state, 'habit-1', 0), {
+    habit: { id: 'habit-1', reminderEnabled: true }, intervalMinutes: 15, nextSnoozeCount: 1, snoozeLimit: 2,
+  });
+  assert.equal(getWebPushSnoozeSettings(state, 'habit-1', 2), null);
+  assert.equal(getWebPushSnoozeSettings({ ...state, preferences: { notificationsEnabled: false } }, 'habit-1', 0), null);
+  assert.equal(getWebPushSnoozeSettings(state, 'missing-habit', 0), null);
 });

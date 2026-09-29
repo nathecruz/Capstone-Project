@@ -86,6 +86,11 @@ services:
           type: web
           name: habitai-backend
           envVarKey: WEB_PUSH_VAPID_SUBJECT
+      - key: WEB_PUSH_API_URL
+        fromService:
+          type: web
+          name: habitai-backend
+          envVarKey: RENDER_EXTERNAL_URL
 
   - type: web
     name: habitai-ml
