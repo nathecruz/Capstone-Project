@@ -27,7 +27,7 @@ function displayDate(value: string) {
 
 export default function HomeScreen() {
   const showAlert = useAppDialog();
-  const { isDarkMode, avatarImage, habits, profile, addHabit: createHabit, refreshAppState } = useAppColorScheme();
+  const { isDarkMode, avatarImage, habits, profile, addHabit: createHabit } = useAppColorScheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const compact = width < 370;
@@ -47,7 +47,6 @@ export default function HomeScreen() {
   const [quickTimeHour, setQuickTimeHour] = React.useState('09');
   const [quickTimeMinute, setQuickTimeMinute] = React.useState('00');
   const [quickTimePeriod, setQuickTimePeriod] = React.useState<'AM' | 'PM'>('AM');
-  const [isRefreshing, setIsRefreshing] = React.useState(false);
   const { completed: completedHabits, completionPercent } = getHabitProgressSummary(habits);
   const activeHabits = filterHabitsByStatus(habits, 'active');
   const progressSegments = Array.from({ length: 36 }, (_, index) => {
@@ -64,19 +63,6 @@ export default function HomeScreen() {
     { label: 'Monthly', icon: 'calendar-number-outline' },
     { label: 'Custom', icon: 'options-outline' },
   ];
-
-  const refreshNow = async () => {
-    if (isRefreshing) return;
-    setIsRefreshing(true);
-    try {
-      const synced = await refreshAppState();
-      if (!synced) {
-        showAlert('Sync unavailable', 'Could not reach your account database. Your changes remain on this device and will retry when the connection returns.');
-      }
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
 
   const submitQuickHabit = () => {
     if (!quickHabitName.trim()) {
@@ -146,16 +132,6 @@ export default function HomeScreen() {
                 accessibilityRole="button"
               >
                 {avatarImage ? <Image source={{ uri: avatarImage }} style={styles.avatarImage} /> : <Text style={styles.avatarEmoji}>👩🏻</Text>}
-              </Pressable>
-              <Pressable
-                style={styles.alertBubble}
-                onPress={() => void refreshNow()}
-                accessibilityLabel="Refresh app data"
-                accessibilityRole="button"
-                accessibilityState={{ busy: isRefreshing }}
-                disabled={isRefreshing}
-              >
-                <Ionicons name={isRefreshing ? 'sync' : 'refresh-outline'} size={18} color="#1d1d1d" />
               </Pressable>
               <Pressable
                 style={styles.alertBubble}

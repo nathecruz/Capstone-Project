@@ -48,8 +48,8 @@ function getChartSegments(rates: number[]) {
     const nextRate = rates[index + 1] ?? rate;
     const x = 8 + (index * 80) / Math.max(1, rates.length - 1);
     const nextX = 8 + ((index + 1) * 80) / Math.max(1, rates.length - 1);
-    const y = 82 - (rate / 100) * 62;
-    const nextY = 82 - (nextRate / 100) * 62;
+    const y = 100 - rate;
+    const nextY = 100 - nextRate;
     const dx = nextX - x;
     const dy = nextY - y;
     return { left: `${x}%` as DimensionValue, top: `${y}%` as DimensionValue, width: `${Math.sqrt((dx * 0.9) ** 2 + dy ** 2)}%` as DimensionValue, rotate: `${Math.atan2(dy, dx) * (180 / Math.PI)}deg` };
@@ -163,7 +163,7 @@ export default function InsightsScreen() {
   const dailyRates = completionHistory.map((entry) => habits.length ? Math.round((entry.count / habits.length) * 100) : 0);
   const trendPoints: { left: DimensionValue; top: DimensionValue }[] = dailyRates.map((rate, index) => ({
     left: `${8 + (index * 80) / Math.max(1, dailyRates.length - 1)}%`,
-    top: `${82 - (rate / 100) * 62}%`,
+    top: `${100 - rate}%`,
   }));
   const trendSegments = getChartSegments(dailyRates);
   const trendChange = dailyRates.length > 1 ? dailyRates[dailyRates.length - 1] - dailyRates[0] : 0;
@@ -423,9 +423,10 @@ export default function InsightsScreen() {
                       <Text style={styles.axisText}>75%</Text>
                       <Text style={styles.axisText}>50%</Text>
                       <Text style={styles.axisText}>25%</Text>
+                      <Text style={styles.axisText}>0%</Text>
                     </View>
                     <View style={styles.chartPlot}>
-                      {[0, 1, 2, 3].map((line) => <View key={line} style={[styles.chartGuide, isDarkMode && styles.darkChartGuide]} />)}
+                      {[0, 1, 2, 3, 4].map((line) => <View key={line} style={[styles.chartGuide, isDarkMode && styles.darkChartGuide]} />)}
                       {trendSegments.map((segment, index) => (
                         <View key={`segment-${index}`} style={[styles.chartSegment, segment]} />
                       ))}

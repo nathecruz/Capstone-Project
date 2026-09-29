@@ -204,7 +204,7 @@ export default function AddScreen() {
       <View style={styles.reminderHeader}>
         <View style={styles.reminderTitleWrap}>
           <View style={styles.reminderIcon}><Ionicons name="notifications-outline" size={24} color="#5B42D8" /></View>
-          <View>
+          <View style={styles.reminderTitleCopy}>
             <Text style={styles.reminderTitle}>Custom Reminders</Text>
             <Text style={styles.reminderDescription}>{Platform.OS === 'web' ? 'Allow notifications to receive reminders. On iPhone, open HabitMind from your Home Screen.' : 'Get reminders at the times you choose to stay consistent.'}</Text>
           </View>
@@ -241,6 +241,7 @@ const styles = StyleSheet.create({
   reminderSection: { backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#E7E1F2', marginTop: 16, padding: 14 },
   reminderHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F0EEF4' },
   reminderTitleWrap: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  reminderTitleCopy: { flex: 1, minWidth: 0 },
   reminderIcon: { width: 46, height: 46, borderRadius: 15, backgroundColor: '#F0EAFF', alignItems: 'center', justifyContent: 'center', marginRight: 11 },
   reminderTitle: { fontSize: 15, fontWeight: '800', color: '#302B3B' }, reminderDescription: { fontSize: 10, color: '#827C8C', marginTop: 4 },
   customFrequencyCard: { backgroundColor: '#F8F6FF', borderRadius: 13, padding: 12, marginTop: 10 }, customFrequencyTitle: { fontSize: 11, color: '#393440', fontWeight: '800' }, customFrequencyInput: { height: 42, backgroundColor: '#FFFFFF', borderRadius: 10, borderWidth: 1, borderColor: '#E4DDF4', paddingHorizontal: 11, marginTop: 9, fontSize: 12, color: '#302B3B' }, customFrequencyHint: { fontSize: 10, color: '#827C8C', fontWeight: '600', marginTop: 7 },
