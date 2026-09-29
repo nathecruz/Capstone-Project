@@ -311,6 +311,19 @@ function getLocalDateKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+function applyRemoteCompletionDates(habit: Habit, completionDates: string[]) {
+  const today = getLocalDateKey();
+  const done = completionDates.includes(today);
+  const goal = Math.max(1, Number(habit.goal) || 1);
+  return normalizeHabitFields({
+    ...habit,
+    completionDates,
+    done,
+    progress: done ? 100 : 0,
+    total: `${done ? goal : 0}/${goal}`,
+  }) as Habit;
+}
+
 export function isHabitMissedToday(habit: Pick<Habit, 'completionDates' | 'startDate' | 'reminderEnabled' | 'reminderTime'>, now = new Date()) {
   const today = getLocalDateKey(now);
   if (habit.completionDates.includes(today) || (habit.startDate && habit.startDate > today) || !habit.reminderEnabled) return false;
@@ -583,7 +596,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       for (const completion of remoteCompletions ?? []) {
         completionsByHabit.set(completion.habitId, [...(completionsByHabit.get(completion.habitId) ?? []), completion.date]);
       }
-      setHabits((remoteCompletions === null ? savedHabits : savedHabits.map((habit) => ({ ...habit, completionDates: completionsByHabit.get(habit.id) ?? [] })))
+      setHabits((remoteCompletions === null
+        ? savedHabits
+        : savedHabits.map((habit) => applyRemoteCompletionDates(habit, completionsByHabit.get(habit.id) ?? [])))
         .map((habit) => normalizeHabitFields({ ...habit, startDate: habit.startDate || getLocalDateKey() })) as Habit[]);
       setPoints(typeof savedState.points === 'number' ? savedState.points : 0);
       setTokens(typeof savedState.tokens === 'number' ? savedState.tokens : 0);
@@ -683,7 +698,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         setPreferences(nextState.preferences as Preferences);
         setHabits((remoteCompletions === null
           ? savedHabits
-          : savedHabits.map((habit) => ({ ...habit, completionDates: completionsByHabit.get(habit.id) ?? [] })))
+          : savedHabits.map((habit) => applyRemoteCompletionDates(habit, completionsByHabit.get(habit.id) ?? [])))
           .map((habit) => normalizeHabitFields(habit)) as Habit[]);
         setPoints(nextState.points);
         setTokens(nextState.tokens);

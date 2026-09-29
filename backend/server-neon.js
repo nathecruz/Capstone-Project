@@ -403,11 +403,35 @@ app.put('/api/habit-completions', async (request, response) => {
   const session = await requireAuth(request, response); if (!session) return;
   const input = parse(habitCompletionSchema, request, response); if (!input) return;
   if (!isValidCompletionDate(input.date)) return response.status(400).json({ ok: false, message: 'Completion date must be a valid date up to today.' });
-  const savedStateResult = await query('SELECT state_json AS "stateJson" FROM user_app_state WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 1', [session.userId]);
-  const habits = savedStateResult.rows[0]?.stateJson?.habits || [];
-  if (!habits.some((habit) => habit.id === input.habitId)) return response.status(404).json({ ok: false, message: 'Habit not found.' });
-  if (input.completed) await query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [session.userId, input.habitId, input.date, Date.now()]);
-  else await query('DELETE FROM habit_completions WHERE user_id=$1 AND habit_id=$2 AND completed_date=$3', [session.userId, input.habitId, input.date]);
+  const updated = await withTransaction(async (connection) => {
+    await connection.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
+    const savedStateResult = await connection.query('SELECT state_json AS "stateJson", updated_at AS "updatedAt" FROM user_app_state WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 1 FOR UPDATE', [session.userId]);
+    const savedState = savedStateResult.rows[0];
+    const state = savedState?.stateJson;
+    const habit = state?.habits?.find((entry) => entry.id === input.habitId);
+    if (!habit) return false;
+
+    if (input.completed) {
+      await connection.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [session.userId, input.habitId, input.date, Date.now()]);
+    } else {
+      await connection.query('DELETE FROM habit_completions WHERE user_id=$1 AND habit_id=$2 AND completed_date=$3', [session.userId, input.habitId, input.date]);
+    }
+
+    const completionDates = new Set(Array.isArray(habit.completionDates) ? habit.completionDates.filter((date) => typeof date === 'string') : []);
+    if (input.completed) completionDates.add(input.date);
+    else completionDates.delete(input.date);
+    habit.completionDates = Array.from(completionDates).sort();
+    const today = new Date().toISOString().slice(0, 10);
+    habit.done = habit.completionDates.includes(today);
+    const goal = Math.max(1, Number(habit.goal) || 1);
+    habit.progress = habit.done ? 100 : 0;
+    habit.total = `${habit.done ? goal : 0}/${goal}`;
+    const updatedAt = Math.max(Date.now(), Number(savedState.updatedAt) + 1);
+    await saveUserAppState(session.userId, state, updatedAt, connection);
+    await syncNormalizedState(session.userId, state, updatedAt, connection);
+    return true;
+  });
+  if (!updated) return response.status(404).json({ ok: false, message: 'Habit not found.' });
   response.json({ ok: true, completions: await getServerCompletions(session.userId), points: await serverCompletionPoints(session.userId) });
 });
 app.post('/api/auth/logout', async (request, response) => { const token = authToken(request); if (token) await query('DELETE FROM sessions WHERE token_hash=$1', [hashToken(token)]); response.json({ ok: true, message: 'Logged out successfully.' }); });
