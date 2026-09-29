@@ -206,7 +206,7 @@ export default function AddScreen() {
           <View style={styles.reminderIcon}><Ionicons name="notifications-outline" size={24} color="#5B42D8" /></View>
           <View>
             <Text style={styles.reminderTitle}>Custom Reminders</Text>
-            <Text style={styles.reminderDescription}>{Platform.OS === 'web' ? 'Allow notifications; on iPhone, open HabitMind from your Home Screen.' : 'Get reminded to stay consistent with your habit.'}</Text>
+            <Text style={styles.reminderDescription}>{Platform.OS === 'web' ? 'Allow notifications to receive reminders. On iPhone, open HabitMind from your Home Screen.' : 'Get reminders at the times you choose to stay consistent.'}</Text>
           </View>
         </View>
         <Pressable style={[styles.toggle, reminder && styles.toggleOn]} onPress={() => void toggleReminder()} accessibilityRole="switch" accessibilityState={{ checked: reminder }} accessibilityLabel="Toggle custom reminders">

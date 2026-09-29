@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 
-export const geminiModel = process.env.GEMINI_MODEL?.trim() || 'gemini-3.8-flash';
+export const geminiModel = process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
 
 const createGeminiClient = () => {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
