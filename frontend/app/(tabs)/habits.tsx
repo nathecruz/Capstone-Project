@@ -14,7 +14,7 @@ export default function HabitsScreen() {
   const showAlert = useAppDialog();
   const { isDarkMode, habits: habitList, toggleHabit, deleteHabit, reorderHabits } = useAppColorScheme();
   const [selectedTab, setSelectedTab] = useState('All');
-  const [filterMode, setFilterMode] = useState<'all' | 'active' | 'done'>('all');
+  const [filterMode, setFilterMode] = useState<'all' | 'active' | 'done'>('active');
   const [sortMode, setSortMode] = useState<'progress' | 'streak' | 'name'>('progress');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [showSortMenu, setShowSortMenu] = useState(false);

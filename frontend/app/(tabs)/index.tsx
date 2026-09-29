@@ -6,6 +6,7 @@ import { Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextIn
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { filterHabitsByStatus } from '@/utils/habit-data';
 
 const popularHabits = ['Drink Water', 'Exercise / Workout', 'Read a Book', 'Sleep Early', 'Meditate', 'Eat Healthy'];
 const quickRepeatOptions = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -26,7 +27,7 @@ function displayDate(value: string) {
 
 export default function HomeScreen() {
   const showAlert = useAppDialog();
-  const { isDarkMode, avatarImage, habits, profile, addHabit: createHabit } = useAppColorScheme();
+  const { isDarkMode, avatarImage, habits, profile, addHabit: createHabit, refreshAppState } = useAppColorScheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const compact = width < 370;
@@ -46,7 +47,9 @@ export default function HomeScreen() {
   const [quickTimeHour, setQuickTimeHour] = React.useState('09');
   const [quickTimeMinute, setQuickTimeMinute] = React.useState('00');
   const [quickTimePeriod, setQuickTimePeriod] = React.useState<'AM' | 'PM'>('AM');
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
   const { completed: completedHabits, completionPercent } = getHabitProgressSummary(habits);
+  const activeHabits = filterHabitsByStatus(habits, 'active');
   const progressSegments = Array.from({ length: 36 }, (_, index) => {
     const angle = (index / 36) * Math.PI * 2;
     return {
@@ -61,6 +64,16 @@ export default function HomeScreen() {
     { label: 'Monthly', icon: 'calendar-number-outline' },
     { label: 'Custom', icon: 'options-outline' },
   ];
+
+  const refreshNow = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      await refreshAppState();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const submitQuickHabit = () => {
     if (!quickHabitName.trim()) {
@@ -133,6 +146,16 @@ export default function HomeScreen() {
               </Pressable>
               <Pressable
                 style={styles.alertBubble}
+                onPress={() => void refreshNow()}
+                accessibilityLabel="Refresh app data"
+                accessibilityRole="button"
+                accessibilityState={{ busy: isRefreshing }}
+                disabled={isRefreshing}
+              >
+                <Ionicons name={isRefreshing ? 'sync' : 'refresh-outline'} size={18} color="#1d1d1d" />
+              </Pressable>
+              <Pressable
+                style={styles.alertBubble}
                 onPress={() => router.push('/notifications')}
                 hitSlop={8}
               >
@@ -167,7 +190,7 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.habitList}>
-              {habits.length === 0 ? <Text style={styles.emptyHabitText}>No habits yet. Add your first habit below.</Text> : habits.map((habit) => (
+              {activeHabits.length === 0 ? <Text style={styles.emptyHabitText}>{habits.length === 0 ? 'No habits yet. Add your first habit below.' : 'All habits completed today.'}</Text> : activeHabits.map((habit) => (
                 <View key={habit.id} style={styles.habitRow}>
                   <View style={styles.habitMeta}>
                     <View style={styles.habitIconWrap}>
@@ -175,9 +198,7 @@ export default function HomeScreen() {
                     </View>
                     <Text style={styles.habitLabel}>{habit.label}</Text>
                   </View>
-                  <View style={styles.checkWrap}>
-                    {habit.done ? <Ionicons name="checkmark" size={15} color="#ffffff" /> : null}
-                  </View>
+                  <View style={styles.checkWrap} />
                 </View>
               ))}
             </View>

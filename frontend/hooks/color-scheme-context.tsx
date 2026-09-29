@@ -451,6 +451,7 @@ type ColorSchemeContextValue = {
   addTokens: (amount: number, label?: string) => void;
   getAppStateSnapshot: () => PersistedAppState;
   syncAppState: () => Promise<{ state: PersistedAppState; ok: boolean; merged: boolean }>;
+  refreshAppState: () => Promise<void>;
   clearLocalData: () => void;
 };
 
@@ -473,6 +474,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   const [activeUserEmail, setActiveUserEmail] = useState('');
   const [stateHydrated, setStateHydrated] = useState(false);
   const syncBaseRef = useRef<AppStateSyncBase | null>(null);
+  const refreshAppStateRef = useRef<(() => Promise<void>) | null>(null);
   const sentBrowserRemindersRef = useRef(new Set<string>());
   const handledSnoozeActionsRef = useRef(new Set<string>());
   const colorScheme: ColorScheme = darkModeOverride === null
@@ -510,6 +512,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     let cancelled = false;
+    let sessionLoadVersion = 0;
 
     const resetState = () => {
       syncBaseRef.current = null;
@@ -528,9 +531,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       setStateHydrated(true);
     };
 
-    const loadStateForSession = async (session: SessionUser | null) => {
+    const loadStateForSession = async (session: SessionUser | null, version: number) => {
       if (!session) {
-        if (!cancelled) resetState();
+        if (!cancelled && version === sessionLoadVersion) resetState();
         return;
       }
 
@@ -542,8 +545,10 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       } catch {
         savedState = {};
       }
+      if (cancelled || version !== sessionLoadVersion) return;
 
       const remoteState = await getRemoteAppState();
+      if (cancelled || version !== sessionLoadVersion) return;
       if (remoteState?.state) {
         const remoteSavedState = remoteState.state as Partial<PersistedAppState>;
         savedState = {
@@ -558,8 +563,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       }
 
       const remoteCompletions = await getRemoteHabitCompletions();
-
-      if (cancelled) return;
+      if (cancelled || version !== sessionLoadVersion) return;
       setActiveUserEmail(email);
       setAvatarImage(savedState.avatarImage ?? null);
       setProfile({
@@ -590,12 +594,20 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       setStateHydrated(true);
     };
 
+    const refreshSessionState = async () => {
+      const version = ++sessionLoadVersion;
+      const session = await getCurrentSession();
+      if (cancelled || version !== sessionLoadVersion) return;
+      await loadStateForSession(session, version);
+    };
+
     const unsubscribe = subscribeToAuthChanges(() => {
-      void getCurrentSession().then(loadStateForSession);
+      void refreshSessionState();
     });
-    void getCurrentSession().then(loadStateForSession);
+    void refreshSessionState();
     return () => {
       cancelled = true;
+      sessionLoadVersion += 1;
       unsubscribe();
     };
   }, []);
@@ -643,7 +655,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
 
     let cancelled = false;
     let refreshInFlight = false;
-    let appIsActive = AppState.currentState === 'active';
+    let appIsActive = Platform.OS === 'web' || AppState.currentState === 'active';
 
     const refreshRemoteState = async () => {
       if (cancelled || !appIsActive || refreshInFlight) return;
@@ -686,6 +698,15 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       }
     };
 
+    refreshAppStateRef.current = refreshRemoteState;
+    const handleVisibilityChange = () => {
+      appIsActive = !document.hidden;
+      if (appIsActive) void refreshRemoteState();
+    };
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+
     const refreshTimer = setInterval(() => void refreshRemoteState(), 1000);
     const appStateSubscription = AppState.addEventListener('change', (nextState) => {
       appIsActive = nextState === 'active';
@@ -697,6 +718,10 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       cancelled = true;
       clearInterval(refreshTimer);
       appStateSubscription.remove();
+      if (Platform.OS === 'web' && typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
+      if (refreshAppStateRef.current === refreshRemoteState) refreshAppStateRef.current = null;
     };
   }, [activeUserEmail, stateHydrated]);
 
@@ -1073,6 +1098,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       addTokens,
       getAppStateSnapshot,
       syncAppState,
+      refreshAppState: () => refreshAppStateRef.current?.() ?? Promise.resolve(),
       clearLocalData,
     }),
     [avatarImage, colorScheme, goals, habits, points, preferences, profile, ringInterval, snoozeFrequency, tokenHistory, tokens],
