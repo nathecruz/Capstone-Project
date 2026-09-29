@@ -57,6 +57,22 @@ export function getHabitReminderDays(habit) {
   return configuredDays.filter((day) => reminderDays.includes(day));
 }
 
+function isScheduledReminderDay(habit, local, days) {
+  if (habit.frequency === 'Weekly' || habit.frequency === 'Custom') {
+    if (days.length) return days.includes(local.day);
+    if (habit.frequency === 'Weekly' && /^\d{4}-\d{2}-\d{2}$/.test(habit.startDate || '')) {
+      const weekday = new Date(`${habit.startDate}T00:00:00Z`).getUTCDay();
+      return local.day === reminderDays[weekday];
+    }
+    return false;
+  }
+  if (habit.frequency === 'Monthly') {
+    const scheduledDay = Number(String(habit.startDate || '').slice(8, 10)) || 1;
+    return local.dayOfMonth === scheduledDay;
+  }
+  return true;
+}
+
 function getLocalParts(date, timeZone) {
   try {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -73,6 +89,7 @@ function getLocalParts(date, timeZone) {
     return {
       date: `${values.year}-${values.month}-${values.day}`,
       day: values.weekday,
+      dayOfMonth: Number(values.day),
       hour: Number(values.hour),
       minute: Number(values.minute),
     };
@@ -89,7 +106,7 @@ export function getDueHabitReminders(habit, timeZone, now = new Date()) {
   for (let minutesAgo = 0; minutesAgo <= 5; minutesAgo += 1) {
     const candidate = new Date(now.getTime() - minutesAgo * 60_000);
     const local = getLocalParts(candidate, timeZone);
-    if (!local || (habit.frequency === 'Custom' && !days.includes(local.day))) continue;
+    if (!local || !isScheduledReminderDay(habit, local, days)) continue;
     if (habit.startDate && habit.startDate > local.date) continue;
     if (Array.isArray(habit.completionDates) && habit.completionDates.includes(local.date)) continue;
     for (const time of times) {

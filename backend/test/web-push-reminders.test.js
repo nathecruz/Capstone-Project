@@ -26,6 +26,26 @@ test('checks multiple custom reminder times against the subscription timezone an
   assert.deepEqual(getHabitReminderDays({ frequency: 'Custom', meta: habit.meta }), ['Mon', 'Wed']);
 });
 
+test('checks weekly and monthly reminders on their configured cadence', () => {
+  const weekly = {
+    label: 'Run', reminderEnabled: true, frequency: 'Weekly', startDate: '2026-09-28',
+    reminderTime: '08:30 AM', reminderDays: ['Mon', 'Wed'], completionDates: [],
+  };
+  assert.deepEqual(getDueHabitReminders(weekly, 'UTC', new Date('2026-09-30T08:30:00.000Z')), [
+    { date: '2026-09-30', time: '08:30' },
+  ]);
+  assert.deepEqual(getDueHabitReminders(weekly, 'UTC', new Date('2026-10-01T08:30:00.000Z')), []);
+
+  const monthly = {
+    label: 'Pay bills', reminderEnabled: true, frequency: 'Monthly', startDate: '2026-09-14',
+    reminderTime: '08:30 AM', completionDates: [],
+  };
+  assert.deepEqual(getDueHabitReminders(monthly, 'UTC', new Date('2026-10-14T08:30:00.000Z')), [
+    { date: '2026-10-14', time: '08:30' },
+  ]);
+  assert.deepEqual(getDueHabitReminders(monthly, 'UTC', new Date('2026-10-15T08:30:00.000Z')), []);
+});
+
 test('skips completed, future-start, disabled, and invalid-timezone reminders', () => {
   const habit = { label: 'Read', reminderEnabled: true, frequency: 'Daily', reminderTime: '08:30 AM', completionDates: [] };
   const now = new Date('2026-09-28T08:30:00.000Z');

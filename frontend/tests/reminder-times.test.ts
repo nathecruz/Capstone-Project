@@ -1,4 +1,4 @@
-import { getHabitReminderDays, getHabitReminderTimes, isHabitReminderDay } from '@/hooks/color-scheme-context';
+import { getHabitReminderDays, getHabitReminderSchedule, getHabitReminderTimes, getSnoozeLimit, isHabitReminderDay } from '@/hooks/color-scheme-context';
 
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
 
@@ -22,5 +22,29 @@ describe('custom reminder days', () => {
     expect(isHabitReminderDay(habit, new Date(2026, 8, 28))).toBe(true);
     expect(isHabitReminderDay(habit, new Date(2026, 8, 29))).toBe(false);
     expect(getHabitReminderDays({ frequency: 'Custom', meta: habit.meta })).toEqual(['Mon', 'Wed']);
+  });
+});
+
+describe('habit reminder schedules', () => {
+  it('uses selected weekdays for weekly schedules', () => {
+    const weekly = { frequency: 'Weekly', startDate: '2026-09-28', meta: 'Weekly • 07:00 AM', reminderDays: ['Mon', 'Wed'] };
+    expect(getHabitReminderSchedule(weekly)).toEqual({ type: 'weekly', days: ['Mon', 'Wed'] });
+    expect(isHabitReminderDay(weekly, new Date(2026, 8, 30))).toBe(true);
+    expect(isHabitReminderDay(weekly, new Date(2026, 9, 1))).toBe(false);
+    expect(getHabitReminderSchedule({ ...weekly, reminderDays: [] })).toEqual({ type: 'weekly', days: ['Mon'] });
+  });
+
+  it('uses the start-date day for monthly schedules and every day for daily schedules', () => {
+    const monthly = { frequency: 'Monthly', startDate: '2026-09-14', meta: 'Monthly • 07:00 AM', reminderDays: [] };
+    expect(getHabitReminderSchedule(monthly)).toEqual({ type: 'monthly', day: 14 });
+    expect(isHabitReminderDay(monthly, new Date(2026, 9, 14))).toBe(true);
+    expect(isHabitReminderDay(monthly, new Date(2026, 9, 15))).toBe(false);
+    expect(isHabitReminderDay({ ...monthly, frequency: 'Daily' }, new Date(2026, 9, 15))).toBe(true);
+  });
+});
+
+describe('snooze limits', () => {
+  it.each([['Once', 1], ['2 times', 2], ['3 times', 3], ['5 times', 5], ['invalid', 1]])('%s allows %i snoozes', (frequency, limit) => {
+    expect(getSnoozeLimit(frequency)).toBe(limit);
   });
 });

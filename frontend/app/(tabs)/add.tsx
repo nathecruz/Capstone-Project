@@ -84,7 +84,7 @@ export default function AddScreen() {
 
   const addHabit = () => {
     if (!name.trim()) { showMessage('Habit name required', 'Give your new habit a name first.'); return; }
-    if (frequency === 'Custom' && !repeatDays.length) { showMessage('Choose repeat days', 'Select at least one day for a custom schedule.'); return; }
+    if ((frequency === 'Custom' || frequency === 'Weekly') && !repeatDays.length) { showMessage('Choose repeat days', 'Select at least one day for this schedule.'); return; }
     const selectedCategory = categories.find((item) => item.label === category);
     createHabit({
       startDate,
@@ -98,7 +98,8 @@ export default function AddScreen() {
       reminderEnabled: reminder && reminderTimes.length > 0,
       reminderTime: reminderTimes[0] || '07:00 AM',
       reminderTimes: reminderTimes,
-      reminderDays: frequency === 'Custom' ? repeatDays : [],
+      reminderDays: frequency === 'Custom' || frequency === 'Weekly' ? repeatDays : [],
+      reminderSoundEnabled,
       smartReminderEnabled: smartReminder,
     });
     setAddedHabitSummary({
@@ -107,8 +108,7 @@ export default function AddScreen() {
       reminder: reminder ? `${reminderTimes.length} reminder${reminderTimes.length === 1 ? '' : 's'}` : 'Reminders off',
     });
     resetForm();
-    router.replace('/(tabs)/habits');
-    setHabitAddedVisible(false);
+    setHabitAddedVisible(true);
   };
 
   const addReminderTime = () => {

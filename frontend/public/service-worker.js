@@ -23,6 +23,7 @@ self.addEventListener('push', (event) => {
       body: payload.body || 'A small step today keeps your streak moving.',
       tag: payload.tag,
       data: payload.data,
+      silent: payload.soundEnabled === false,
     });
   })());
 });

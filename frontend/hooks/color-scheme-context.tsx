@@ -51,8 +51,32 @@ export function getHabitReminderDays(habit: Pick<Habit, 'frequency' | 'meta' | '
   return configuredDays.filter((day): day is (typeof reminderDayLabels)[number] => reminderDayLabels.includes(day as (typeof reminderDayLabels)[number]));
 }
 
-export function isHabitReminderDay(habit: Pick<Habit, 'frequency' | 'meta' | 'reminderDays'>, date: Date) {
-  return habit.frequency !== 'Custom' || getHabitReminderDays(habit).includes(reminderDayLabels[date.getDay()]);
+export function getHabitReminderSchedule(habit: Pick<Habit, 'frequency' | 'meta' | 'reminderDays' | 'startDate'>) {
+  if (habit.frequency === 'Monthly') {
+    const day = Number(habit.startDate.slice(8, 10));
+    return { type: 'monthly' as const, day: day >= 1 && day <= 31 ? day : 1 };
+  }
+  if (habit.frequency === 'Weekly' || habit.frequency === 'Custom') {
+    const days = getHabitReminderDays(habit);
+    if (!days.length && habit.frequency === 'Weekly' && /^\d{4}-\d{2}-\d{2}$/.test(habit.startDate)) {
+      return { type: 'weekly' as const, days: [reminderDayLabels[new Date(`${habit.startDate}T00:00:00`).getDay()]] };
+    }
+    return { type: 'weekly' as const, days };
+  }
+  return { type: 'daily' as const };
+}
+
+export function isHabitReminderDay(habit: Pick<Habit, 'frequency' | 'meta' | 'reminderDays' | 'startDate'>, date: Date) {
+  const schedule = getHabitReminderSchedule(habit);
+  if (schedule.type === 'weekly') return schedule.days.includes(reminderDayLabels[date.getDay()]);
+  if (schedule.type === 'monthly') return date.getDate() === schedule.day;
+  return true;
+}
+
+export function getSnoozeLimit(frequency: string) {
+  if (frequency === 'Once') return 1;
+  const count = Number.parseInt(frequency, 10);
+  return Number.isFinite(count) ? Math.max(1, Math.min(5, count)) : 1;
 }
 
 export async function getNotificationsModule() {
@@ -180,6 +204,7 @@ export type Habit = {
   reminderTime: string;
   reminderTimes?: string[];
   reminderDays?: string[];
+  reminderSoundEnabled?: boolean;
   smartReminderEnabled?: boolean;
 };
 
@@ -438,6 +463,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   const [profile, setProfile] = useState<Profile>(initialProfile);
   const [preferences, setPreferences] = useState<Preferences>(initialPreferences);
   const [habits, setHabits] = useState<Habit[]>([]);
+  const [reminderScheduleRevision, setReminderScheduleRevision] = useState(0);
   const [points, setPoints] = useState(0);
   const [tokens, setTokens] = useState(0);
   const [tokenHistory, setTokenHistory] = useState<TokenTransaction[]>([]);
@@ -448,6 +474,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   const [stateHydrated, setStateHydrated] = useState(false);
   const syncBaseRef = useRef<AppStateSyncBase | null>(null);
   const sentBrowserRemindersRef = useRef(new Set<string>());
+  const handledSnoozeActionsRef = useRef(new Set<string>());
   const colorScheme: ColorScheme = darkModeOverride === null
     ? systemScheme === 'dark'
       ? 'dark'
@@ -455,6 +482,25 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     : darkModeOverride
       ? 'dark'
       : 'light';
+
+  useEffect(() => {
+    const refreshAtMidnight = () => {
+      const now = new Date();
+      const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      return setTimeout(() => setReminderScheduleRevision((revision) => revision + 1), nextMidnight.getTime() - now.getTime() + 100);
+    };
+    let midnightTimer = refreshAtMidnight();
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      setReminderScheduleRevision((revision) => revision + 1);
+      clearTimeout(midnightTimer);
+      midnightTimer = refreshAtMidnight();
+    });
+    return () => {
+      clearTimeout(midnightTimer);
+      appStateSubscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof Appearance?.setColorScheme === 'function') {
@@ -686,6 +732,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
               void registration.showNotification(`${habit.label} reminder`, {
                 body: 'A small step today keeps your streak moving.',
                 tag: key,
+                silent: habit.reminderSoundEnabled === false,
               }).catch(() => undefined);
             }
           }
@@ -697,6 +744,11 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       }
       const Notifications = await getNotificationsModule();
       if (!Notifications) return;
+      await Notifications.setNotificationCategoryAsync('habit-reminder-snooze', [{
+        identifier: 'SNOOZE',
+        buttonTitle: 'Snooze',
+        options: { opensAppToForeground: false },
+      }]);
       await Notifications.cancelAllScheduledNotificationsAsync();
       if (!preferences.notificationsEnabled) return;
       const reminders = habits
@@ -704,8 +756,11 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         .filter((entry): entry is { habit: Habit; times: { hour: number; minute: number }[] } => entry.habit.reminderEnabled && entry.times.length > 0 && (!entry.habit.startDate || entry.habit.startDate <= getLocalDateKey()));
       if (!reminders.length) return;
       if (Platform.OS === 'android') {
-        await Notifications.setNotificationChannelAsync('habit-reminders', {
+        await Notifications.setNotificationChannelAsync('habit-reminders-sound-v2', {
           name: 'Habit reminders', importance: Notifications.AndroidImportance.HIGH, sound: 'reminder_sound.mp3',
+        });
+        await Notifications.setNotificationChannelAsync('habit-reminders-silent-v2', {
+          name: 'Silent habit reminders', importance: Notifications.AndroidImportance.HIGH, sound: null,
         });
       }
       const permission = await Notifications.getPermissionsAsync();
@@ -715,17 +770,32 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       }
       const smartReminders = reminders.filter(({ habit }) => habit.smartReminderEnabled);
       for (const { habit, times } of reminders.filter(({ habit }) => !habit.smartReminderEnabled)) {
+        const soundEnabled = habit.reminderSoundEnabled !== false;
+        const channel = Platform.OS === 'android'
+          ? { channelId: soundEnabled ? 'habit-reminders-sound-v2' : 'habit-reminders-silent-v2' }
+          : {};
         for (const time of times) {
           if (cancelled) return;
-          const content = { title: `${habit.label} reminder`, body: 'A small step today keeps your streak moving.', sound: 'reminder_sound.mp3', data: { habitId: habit.id } };
-          const channel = Platform.OS === 'android' ? { channelId: 'habit-reminders' } : {};
-          if (habit.frequency === 'Custom') {
-            for (const day of getHabitReminderDays(habit)) {
+          const schedule = getHabitReminderSchedule(habit);
+          const content = {
+            title: `${habit.label} reminder`,
+            body: 'A small step today keeps your streak moving.',
+            sound: soundEnabled ? 'reminder_sound.mp3' : false,
+            data: { habitId: habit.id, snoozeCount: 0 },
+            categoryIdentifier: 'habit-reminder-snooze',
+          };
+          if (schedule.type === 'weekly') {
+            for (const day of schedule.days) {
               await Notifications.scheduleNotificationAsync({
                 content,
                 trigger: { type: Notifications.SchedulableTriggerInputTypes.WEEKLY, weekday: reminderDayNumbers[day], hour: time.hour, minute: time.minute, ...channel },
               });
             }
+          } else if (schedule.type === 'monthly') {
+            await Notifications.scheduleNotificationAsync({
+              content,
+              trigger: { type: Notifications.SchedulableTriggerInputTypes.CALENDAR, day: schedule.day, hour: time.hour, minute: time.minute, repeats: true, ...channel },
+            });
           } else {
             await Notifications.scheduleNotificationAsync({
               content,
@@ -743,10 +813,11 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
           content: {
             title: 'Smart Reminder',
             body: `${habit.label} may have been missed. Complete it now to keep your routine moving.`,
-            sound: 'reminder_sound.mp3',
-            data: { habitId: habit.id, type: 'missed-habit' },
+            sound: soundEnabled ? 'reminder_sound.mp3' : false,
+            data: { habitId: habit.id, type: 'missed-habit', snoozeCount: 0 },
+            categoryIdentifier: 'habit-reminder-snooze',
           },
-          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: missedAt, ...(Platform.OS === 'android' ? { channelId: 'habit-reminders' } : {}) },
+          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: missedAt, ...channel },
         });
       }
 
@@ -761,14 +832,19 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
           ? { dropoutRisk: prediction.dropout_risk, completionProbability: prediction.completion_probability }
           : undefined;
         const { target, riskLevel } = computeSmartReminderTime(habit, new Date(), modelRisk);
+        const soundEnabled = habit.reminderSoundEnabled !== false;
+        const channel = Platform.OS === 'android'
+          ? { channelId: soundEnabled ? 'habit-reminders-sound-v2' : 'habit-reminders-silent-v2' }
+          : {};
         await Notifications.scheduleNotificationAsync({
           content: {
             title: `Smart reminder: ${habit.label}`,
             body: prediction?.recommended_action || getSmartReminderMessage(habit, riskLevel),
-            sound: 'reminder_sound.mp3',
-            data: { habitId: habit.id, type: 'smart-reminder', riskLevel },
+            sound: soundEnabled ? 'reminder_sound.mp3' : false,
+            data: { habitId: habit.id, type: 'smart-reminder', riskLevel, snoozeCount: 0 },
+            categoryIdentifier: 'habit-reminder-snooze',
           },
-          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: target, ...(Platform.OS === 'android' ? { channelId: 'habit-reminders' } : {}) },
+          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: target, ...channel },
         });
       }
     };
@@ -777,7 +853,67 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       cancelled = true;
       if (browserReminderTimer) clearInterval(browserReminderTimer);
     };
-  }, [habits, preferences.notificationsEnabled]);
+  }, [habits, preferences.notificationsEnabled, reminderScheduleRevision]);
+
+  useEffect(() => {
+    let active = true;
+    let responseSubscription: { remove: () => void } | undefined;
+
+    const handleResponse = async (Notifications: NotificationsModule, response: import('expo-notifications').NotificationResponse) => {
+      if (response.actionIdentifier !== 'SNOOZE') return;
+      const actionKey = `${response.notification.request.identifier}:SNOOZE`;
+      if (handledSnoozeActionsRef.current.has(actionKey)) return;
+      handledSnoozeActionsRef.current.add(actionKey);
+
+      const data = response.notification.request.content.data ?? {};
+      const snoozeCount = Number(data.snoozeCount) || 0;
+      const snoozeLimit = getSnoozeLimit(snoozeFrequency);
+      if (snoozeCount >= snoozeLimit) return;
+      const habitId = typeof data.habitId === 'string' ? data.habitId : '';
+      const habit = habits.find((item) => item.id === habitId);
+      const soundEnabled = habit?.reminderSoundEnabled !== false;
+      const channel = Platform.OS === 'android'
+        ? { channelId: soundEnabled ? 'habit-reminders-sound-v2' : 'habit-reminders-silent-v2' }
+        : {};
+      const notificationContent = response.notification.request.content;
+      const nextSnoozeCount = snoozeCount + 1;
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: notificationContent.title || 'Habit reminder',
+          body: notificationContent.body || 'A small step today keeps your streak moving.',
+          sound: soundEnabled ? 'reminder_sound.mp3' : false,
+          data: { ...data, snoozeCount: nextSnoozeCount },
+          ...(nextSnoozeCount < snoozeLimit ? { categoryIdentifier: 'habit-reminder-snooze' } : {}),
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: new Date(Date.now() + ringInterval * 60_000),
+          ...channel,
+        },
+      });
+    };
+
+    const register = async () => {
+      const Notifications = await getNotificationsModule();
+      if (!Notifications || !active) return;
+      await Notifications.setNotificationCategoryAsync('habit-reminder-snooze', [{
+        identifier: 'SNOOZE',
+        buttonTitle: 'Snooze',
+        options: { opensAppToForeground: false },
+      }]);
+      responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
+        void handleResponse(Notifications, response).catch(() => undefined);
+      });
+      const lastResponse = await Notifications.getLastNotificationResponseAsync();
+      if (active && lastResponse) await handleResponse(Notifications, lastResponse).catch(() => undefined);
+    };
+
+    void register();
+    return () => {
+      active = false;
+      responseSubscription?.remove();
+    };
+  }, [habits, ringInterval, snoozeFrequency]);
 
   const addHabit = (habit: Omit<Habit, 'id' | 'goal' | 'progress' | 'total' | 'streak' | 'done' | 'completionDates'> & { goal: number }) => {
     const goal = Math.max(1, habit.goal || 1);
@@ -800,6 +936,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       reminderTime: habit.reminderTime,
       reminderTimes: habit.reminderTimes ?? [habit.reminderTime],
       reminderDays: habit.reminderDays ?? [],
+      reminderSoundEnabled: habit.reminderSoundEnabled ?? true,
       smartReminderEnabled: habit.smartReminderEnabled ?? false,
     }]);
   };

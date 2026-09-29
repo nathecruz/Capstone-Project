@@ -67,6 +67,7 @@ async function dispatchDueReminders() {
             title,
             body,
             tag: `${habit.id}-${due.date}-${due.time}`,
+            soundEnabled: habit.reminderSoundEnabled !== false,
             data: { habitId: habit.id, type: 'habit-reminder' },
           }), { TTL: 86400 });
           const sentAt = Date.now();
