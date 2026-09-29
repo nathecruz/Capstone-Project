@@ -518,6 +518,31 @@ function calculateServerPoints(userId) {
 function getServerCompletions(userId) {
   return database.prepare('SELECT habit_id AS habitId, completed_date AS date FROM habit_completions WHERE user_id = ? ORDER BY completed_date DESC').all(userId);
 }
+function getCanonicalHabits(userId) {
+  const rows = database.prepare('SELECT id, label, meta, category, icon, color, goal, progress, total, streak, done, reminder_enabled AS reminderEnabled, reminder_time AS reminderTime, sort_order AS sortOrder, updated_at AS updatedAt FROM habits WHERE user_id = ? ORDER BY sort_order ASC, id ASC').all(userId);
+  const completions = getServerCompletions(userId);
+  const completionsByHabit = new Map();
+  for (const completion of completions) {
+    const dates = completionsByHabit.get(completion.habitId) || [];
+    dates.push(completion.date);
+    completionsByHabit.set(completion.habitId, dates);
+  }
+  return rows.map((habit) => {
+    const id = String(habit.id).replace(`${userId}:habit:`, '');
+    const completionDates = completionsByHabit.get(id) || [];
+    const done = completionDates.includes(new Date().toISOString().slice(0, 10));
+    const goal = Math.max(1, Number(habit.goal) || 1);
+    return { ...habit, id, goal, completionDates, done, progress: done ? 100 : 0, total: `${done ? goal : 0}/${goal}` };
+  });
+}
+function reconcileHabitState(savedHabits, canonicalHabits) {
+  if (!Array.isArray(savedHabits) || savedHabits.length === 0) return canonicalHabits;
+  const canonicalById = new Map(canonicalHabits.map((habit) => [habit.id, habit]));
+  return savedHabits.map((habit) => {
+    const canonical = canonicalById.get(habit.id);
+    return canonical ? { ...habit, completionDates: canonical.completionDates, done: canonical.done, progress: canonical.progress, total: canonical.total } : habit;
+  });
+}
 
 function applyHabitCompletionToState(userId, habitId, completionDate, completed) {
   const currentState = database.prepare('SELECT state_json AS stateJson, updated_at AS updatedAt FROM user_app_state WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1').get(userId);
@@ -979,12 +1004,10 @@ app.get('/api/app-state', (request, response) => {
 
   const savedState = database.prepare('SELECT state_json AS stateJson, updated_at AS updatedAt FROM user_app_state WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1')
     .get(session.userId);
-  if (!savedState) {
-    response.json({ ok: true, state: null, updatedAt: null });
-    return;
-  }
-
-  response.json({ ok: true, state: JSON.parse(savedState.stateJson), updatedAt: savedState.updatedAt });
+  const canonicalHabits = getCanonicalHabits(session.userId);
+  const parsedState = savedState ? JSON.parse(savedState.stateJson) : null;
+  const state = parsedState ? { ...parsedState, habits: reconcileHabitState(parsedState.habits, canonicalHabits) } : canonicalHabits.length ? { habits: canonicalHabits } : null;
+  response.json({ ok: true, state, updatedAt: savedState?.updatedAt ?? null });
 });
 
 app.put('/api/app-state', (request, response) => {

@@ -151,6 +151,33 @@ async function getServerCompletions(userId) {
   const result = await query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1 ORDER BY completed_date DESC', [userId]);
   return result.rows;
 }
+async function getCanonicalHabits(userId) {
+  const [habitResult, completionResult] = await Promise.all([
+    query('SELECT id, label, meta, category, icon, color, goal, progress, total, streak, done, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime", sort_order AS "sortOrder", updated_at AS "updatedAt" FROM habits WHERE user_id=$1 ORDER BY sort_order ASC, id ASC', [userId]),
+    query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1 ORDER BY completed_date ASC', [userId]),
+  ]);
+  const completionsByHabit = new Map();
+  for (const completion of completionResult.rows) {
+    const dates = completionsByHabit.get(completion.habitId) || [];
+    dates.push(completion.date);
+    completionsByHabit.set(completion.habitId, dates);
+  }
+  return habitResult.rows.map((habit) => {
+    const id = String(habit.id).replace(`${userId}:habit:`, '');
+    const completionDates = completionsByHabit.get(id) || [];
+    const done = completionDates.includes(new Date().toISOString().slice(0, 10));
+    const goal = Math.max(1, Number(habit.goal) || 1);
+    return { ...habit, id, goal, completionDates, done, progress: done ? 100 : 0, total: `${done ? goal : 0}/${goal}` };
+  });
+}
+function reconcileHabitState(savedHabits, canonicalHabits) {
+  if (!Array.isArray(savedHabits) || savedHabits.length === 0) return canonicalHabits;
+  const canonicalById = new Map(canonicalHabits.map((habit) => [habit.id, habit]));
+  return savedHabits.map((habit) => {
+    const canonical = canonicalById.get(habit.id);
+    return canonical ? { ...habit, completionDates: canonical.completionDates, done: canonical.done, progress: canonical.progress, total: canonical.total } : habit;
+  });
+}
 function isValidCompletionDate(date) {
   const parsed = new Date(`${date}T00:00:00.000Z`);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date && date <= new Date().toISOString().slice(0, 10);
@@ -300,7 +327,16 @@ app.get('/api/auth/me', async (request, response) => { const session = await req
 app.get('/api/auth/login-activity', async (request, response) => { const session = await requireAuth(request, response); if (!session) return; const result = await query('SELECT device, created_at AS "createdAt", login_date_time AS "loginDateTime" FROM login_activity WHERE user_id = $1 ORDER BY login_date_time DESC LIMIT 10', [session.userId]); response.json({ ok: true, activities: result.rows }); });
 app.put('/api/auth/profile', async (request, response) => { const session = await requireAuth(request, response); if (!session) return; const input = parse(profileSchema, request, response); if (!input) return; const emailAddress = normalizeEmail(input.email); const duplicate = await query('SELECT id FROM users WHERE (email = $1 OR lower(username) = lower($2)) AND id <> $3', [emailAddress, input.username, session.userId]); if (duplicate.rows[0]) return response.status(409).json({ ok: false, message: 'This email or username is already in use.' }); await query('UPDATE users SET full_name=$1,username=$2,email=$3,date_of_birth=$4,gender=$5,about=$6 WHERE id=$7', [input.fullName, input.username, emailAddress, input.dateOfBirth, input.gender, input.about, session.userId]); const user = await findUser(emailAddress); response.json({ ok: true, message: 'Profile updated successfully.', user: userFromRow(user) }); });
 
-app.get('/api/app-state', async (request, response) => { const session = await requireAuth(request, response); if (!session) return; const result = await query('SELECT state_json AS "stateJson", updated_at AS "updatedAt" FROM user_app_state WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 1', [session.userId]); const row = result.rows[0]; response.json({ ok: true, state: row?.stateJson || null, updatedAt: row ? Number(row.updatedAt) : null }); });
+app.get('/api/app-state', async (request, response) => {
+  const session = await requireAuth(request, response); if (!session) return;
+  const [result, canonicalHabits] = await Promise.all([
+    query('SELECT state_json AS "stateJson", updated_at AS "updatedAt" FROM user_app_state WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 1', [session.userId]),
+    getCanonicalHabits(session.userId),
+  ]);
+  const row = result.rows[0];
+  const state = row?.stateJson ? { ...row.stateJson, habits: reconcileHabitState(row.stateJson.habits, canonicalHabits) } : canonicalHabits.length ? { habits: canonicalHabits } : null;
+  response.json({ ok: true, state, updatedAt: row ? Number(row.updatedAt) : null });
+});
 async function syncNormalizedState(userId, state, updatedAt, connection = null) {
   const runInTransaction = connection ? (callback) => callback(connection) : withTransaction;
   await runInTransaction(async (connection) => {
