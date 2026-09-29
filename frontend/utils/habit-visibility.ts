@@ -3,6 +3,7 @@ export type HabitVisibilityCandidate = {
   startDate?: string;
   reminderEnabled?: boolean;
   reminderTime?: string;
+  reminderTimes?: string[];
 };
 
 export function getLocalDateKey(date = new Date()) {
@@ -37,8 +38,21 @@ export function parseReminderTime(reminderTime?: string) {
 export function isHabitMissedToday(habit: HabitVisibilityCandidate, now = new Date()) {
   const today = getLocalDateKey(now);
   if (habit.completionDates.includes(today) || (habit.startDate && habit.startDate > today) || !habit.reminderEnabled) return false;
-  const time = parseReminderTime(habit.reminderTime);
-  return Boolean(time && (now.getHours() > time.hour || (now.getHours() === time.hour && now.getMinutes() >= time.minute)));
+  const reminderTimes = habit.reminderTimes?.length ? habit.reminderTimes : [habit.reminderTime];
+  let hasValidReminderTime = false;
+  for (const reminderTime of reminderTimes) {
+    const time = parseReminderTime(reminderTime);
+    if (!time) continue;
+    hasValidReminderTime = true;
+    if (now.getHours() < time.hour || (now.getHours() === time.hour && now.getMinutes() < time.minute)) return false;
+  }
+  return hasValidReminderTime;
+}
+
+export function canCompleteHabitForDate(habit: HabitVisibilityCandidate, date: Date | string, now = new Date()) {
+  const dateKey = typeof date === 'string' ? date : getLocalDateKey(date);
+  if (dateKey !== getLocalDateKey(now)) return true;
+  return !isHabitMissedToday(habit, now);
 }
 
 export function getVisibleHabitsForDate<T extends HabitVisibilityCandidate>(habits: T[], selectedDate: Date | string, now = new Date()): T[] {

@@ -7,6 +7,7 @@ import { translate, type SupportedLanguage } from '@/constants/i18n';
 import { getCurrentSession, subscribeToAuthChanges, type SessionUser } from '@/authentication/session';
 import { getApiBaseUrl, getAuthenticatedHeaders, getRemoteAppState, getRemoteHabitCompletions, getWebPushVapidPublicKey, saveRemoteAppState, saveRemoteHabitCompletion, saveWebPushSubscription, type AppStateSyncBase, type AppStateSyncPayload } from '@/authentication/authService';
 import { normalizeHabitFields } from '@/utils/habit-data';
+import { canCompleteHabitForDate } from '@/utils/habit-visibility';
 
 type ColorScheme = 'light' | 'dark';
 let nextHabitId = 0;
@@ -325,11 +326,18 @@ function applyRemoteCompletionDates(habit: Habit, completionDates: string[]) {
   }) as Habit;
 }
 
-export function isHabitMissedToday(habit: Pick<Habit, 'completionDates' | 'startDate' | 'reminderEnabled' | 'reminderTime'>, now = new Date()) {
+export function isHabitMissedToday(habit: Pick<Habit, 'completionDates' | 'startDate' | 'reminderEnabled' | 'reminderTime' | 'reminderTimes'>, now = new Date()) {
   const today = getLocalDateKey(now);
   if (habit.completionDates.includes(today) || (habit.startDate && habit.startDate > today) || !habit.reminderEnabled) return false;
-  const time = parseReminderTime(habit.reminderTime);
-  return Boolean(time && (now.getHours() > time.hour || (now.getHours() === time.hour && now.getMinutes() >= time.minute)));
+  const reminderTimes = habit.reminderTimes?.length ? habit.reminderTimes : [habit.reminderTime];
+  let hasValidReminderTime = false;
+  for (const reminderTime of reminderTimes) {
+    const time = parseReminderTime(reminderTime);
+    if (!time) continue;
+    hasValidReminderTime = true;
+    if (now.getHours() < time.hour || (now.getHours() === time.hour && now.getMinutes() < time.minute)) return false;
+  }
+  return hasValidReminderTime;
 }
 
 function getSmartReminderMessage(habit: Habit, riskLevel: 'low' | 'medium' | 'high') {
@@ -1002,6 +1010,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     const isToday = dateKey === getLocalDateKey();
     const completionTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
     const currentHabit = habits.find((habit) => habit.id === id);
+    if (isToday && currentHabit && !canCompleteHabitForDate(currentHabit, date)) return;
     const completedOnDate = currentHabit?.completionDates.includes(dateKey) ?? false;
     setHabits((current) => current.map((habit) => {
       if (habit.id !== id) return habit;

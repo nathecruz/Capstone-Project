@@ -160,8 +160,10 @@ export default function HabitsScreen() {
               <View style={styles.progressPercentRow}>
                 <Text style={[styles.progressPercent, isDarkMode && styles.darkMutedText]}>{item.progress}%</Text>
                 <Pressable
-                  style={[styles.checkButton, item.done ? styles.checkButtonDone : styles.checkButtonEmpty]}
+                  style={[styles.checkButton, item.done ? styles.checkButtonDone : styles.checkButtonEmpty, isHabitMissedToday(item, currentTime) && { opacity: 0.45 }]}
                   onPress={() => toggleHabit(item.id)}
+                  disabled={isHabitMissedToday(item, currentTime)}
+                  accessibilityState={{ checked: item.done, disabled: isHabitMissedToday(item, currentTime) }}
                 >
                   {item.done ? <Ionicons name="checkmark" size={18} color="#FFFFFF" /> : null}
                 </Pressable>
