@@ -1,6 +1,7 @@
 import {
   getApiBaseUrl,
   getSession,
+  saveRemoteHabitCompletion,
   signIn,
   signUp,
   updatePasswordWithOtp,
@@ -12,6 +13,7 @@ import {
   saveSessionToken,
 } from '@/authentication/session';
 import { isAuthenticated } from '@/authorization';
+import { Platform } from 'react-native';
 
 const fetchMock = jest.fn();
 const unsetEnv = (key: string) => {
@@ -79,6 +81,25 @@ describe('auth service offline behavior', () => {
 
     await expect(isAuthenticated()).resolves.toBe(false);
     expect(logoutUser).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends the device time zone with habit completions', async () => {
+    jest.mocked(getSessionToken).mockResolvedValue('session-token');
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ok: true, completions: [] }),
+    });
+
+    await saveRemoteHabitCompletion({ habitId: 'habit-1', date: '2026-09-30', completed: true });
+
+    const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(requestInit.body))).toMatchObject({
+      habitId: 'habit-1',
+      date: '2026-09-30',
+      completed: true,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    });
   });
 
   it('returns an actionable message when sign-in is attempted offline', async () => {
@@ -191,7 +212,9 @@ describe('auth service offline behavior', () => {
     const previousAiApiUrl = process.env.EXPO_PUBLIC_AI_API_URL;
     const previousAuthUrl = process.env.EXPO_PUBLIC_AUTH_URL;
     const previousLocation = window.location;
+    const previousPlatform = Platform.OS;
 
+    Platform.OS = 'web';
     process.env.NODE_ENV = 'production';
     unsetEnv('EXPO_PUBLIC_API_URL');
     unsetEnv('EXPO_PUBLIC_AI_API_URL');
@@ -209,6 +232,7 @@ describe('auth service offline behavior', () => {
         configurable: true,
         value: previousLocation,
       });
+      Platform.OS = previousPlatform;
       if (previousNodeEnv === undefined) unsetEnv('NODE_ENV'); else process.env.NODE_ENV = previousNodeEnv;
       if (previousApiUrl === undefined) unsetEnv('EXPO_PUBLIC_API_URL'); else process.env.EXPO_PUBLIC_API_URL = previousApiUrl;
       if (previousAiApiUrl === undefined) unsetEnv('EXPO_PUBLIC_AI_API_URL'); else process.env.EXPO_PUBLIC_AI_API_URL = previousAiApiUrl;
@@ -221,7 +245,9 @@ describe('auth service offline behavior', () => {
     const previousApiUrl = process.env.EXPO_PUBLIC_API_URL;
     const previousAiApiUrl = process.env.EXPO_PUBLIC_AI_API_URL;
     const previousLocation = window.location;
+    const previousPlatform = Platform.OS;
 
+    Platform.OS = 'web';
     process.env.NODE_ENV = 'production';
     process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8787';
     unsetEnv('EXPO_PUBLIC_AI_API_URL');
@@ -237,6 +263,7 @@ describe('auth service offline behavior', () => {
         configurable: true,
         value: previousLocation,
       });
+      Platform.OS = previousPlatform;
       if (previousNodeEnv === undefined) unsetEnv('NODE_ENV'); else process.env.NODE_ENV = previousNodeEnv;
       if (previousApiUrl === undefined) unsetEnv('EXPO_PUBLIC_API_URL'); else process.env.EXPO_PUBLIC_API_URL = previousApiUrl;
       if (previousAiApiUrl === undefined) unsetEnv('EXPO_PUBLIC_AI_API_URL'); else process.env.EXPO_PUBLIC_AI_API_URL = previousAiApiUrl;

@@ -15,6 +15,7 @@ import Database from 'better-sqlite3';
 import { rateLimit } from 'express-rate-limit';
 import nodemailer from 'nodemailer';
 import { mergeAppState, normalizeAppState } from './services/app-state-sync.js';
+import { getDateKeyInTimeZone, isValidCompletionDate } from './services/completion-date.js';
 import { hasValidFileSignature, removeUploadedFile, uploadIssueAttachment } from './services/file-upload.js';
 import {
   accountDeletionSchema,
@@ -540,11 +541,14 @@ function reconcileHabitState(savedHabits, canonicalHabits) {
   const canonicalById = new Map(canonicalHabits.map((habit) => [habit.id, habit]));
   return savedHabits.map((habit) => {
     const canonical = canonicalById.get(habit.id);
-    return canonical ? { ...habit, completionDates: canonical.completionDates, done: canonical.done, progress: canonical.progress, total: canonical.total } : habit;
+    if (!canonical) return habit;
+    const done = canonical.completionDates.includes(getDateKeyInTimeZone(new Date(), habit.completionTimeZone));
+    const goal = Math.max(1, Number(habit.goal) || 1);
+    return { ...habit, completionDates: canonical.completionDates, done, progress: done ? 100 : 0, total: `${done ? goal : 0}/${goal}` };
   });
 }
 
-function applyHabitCompletionToState(userId, habitId, completionDate, completed) {
+function applyHabitCompletionToState(userId, habitId, completionDate, completed, timeZone) {
   const currentState = database.prepare('SELECT state_json AS stateJson, updated_at AS updatedAt FROM user_app_state WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1').get(userId);
   if (!currentState) {
     return false;
@@ -559,13 +563,14 @@ function applyHabitCompletionToState(userId, habitId, completionDate, completed)
   if (!habit) {
     return false;
   }
+  habit.completionTimeZone = timeZone || habit.completionTimeZone || 'UTC';
 
   const dates = new Set(Array.isArray(habit.completionDates) ? habit.completionDates.filter((value) => typeof value === 'string') : []);
   if (completed) dates.add(completionDate);
   else dates.delete(completionDate);
 
   habit.completionDates = Array.from(dates).sort();
-  habit.done = habit.completionDates.includes(new Date().toISOString().slice(0, 10));
+  habit.done = habit.completionDates.includes(getDateKeyInTimeZone(new Date(), timeZone));
 
   const goal = Math.max(1, Number(habit.goal) || 1);
   habit.progress = habit.done ? 100 : 0;
@@ -576,11 +581,6 @@ function applyHabitCompletionToState(userId, habitId, completionDate, completed)
     .run(crypto.randomUUID(), userId, JSON.stringify(state), updatedAt);
   syncNormalizedState(userId, state, updatedAt);
   return true;
-}
-
-function isValidCompletionDate(date) {
-  const parsed = new Date(`${date}T00:00:00.000Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date && date <= new Date().toISOString().slice(0, 10);
 }
 
 function createEmailTransport() {
@@ -1045,7 +1045,7 @@ app.put('/api/habit-completions', (request, response) => {
   if (!session) return;
   const input = parseRequest(habitCompletionSchema, request, response);
   if (!input) return;
-  if (!isValidCompletionDate(input.date)) return response.status(400).json({ ok: false, message: 'Completion date must be a valid date up to today.' });
+  if (!isValidCompletionDate(input.date, input.timeZone)) return response.status(400).json({ ok: false, message: 'Completion date must be a valid date up to today.' });
   const savedState = database.prepare('SELECT state_json AS stateJson FROM user_app_state WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1').get(session.userId);
   const habits = savedState ? JSON.parse(savedState.stateJson).habits : [];
   if (!habits.some((habit) => habit.id === input.habitId)) return response.status(404).json({ ok: false, message: 'Habit not found.' });
@@ -1058,7 +1058,7 @@ app.put('/api/habit-completions', (request, response) => {
       .run(session.userId, input.habitId, input.date);
   }
 
-  applyHabitCompletionToState(session.userId, input.habitId, input.date, input.completed);
+  applyHabitCompletionToState(session.userId, input.habitId, input.date, input.completed, input.timeZone);
 
   response.json({ ok: true, completions: getServerCompletions(session.userId), points: calculateServerPoints(session.userId) });
 });

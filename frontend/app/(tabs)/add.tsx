@@ -51,6 +51,7 @@ export default function AddScreen() {
   const [customFrequency, setCustomFrequency] = useState('Weekdays only');
   const [goal, setGoal] = useState('');
   const [reminder, setReminder] = useState(Platform.OS !== 'web');
+  const [reminderPermissionPending, setReminderPermissionPending] = useState(false);
   const [reminderTimes, setReminderTimes] = useState(['07:00 AM']);
   const [repeatDays, setRepeatDays] = useState(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
   const [reminderSoundEnabled, setReminderSoundEnabled] = useState(true);
@@ -85,11 +86,24 @@ export default function AddScreen() {
   };
 
   const toggleReminder = async () => {
-    if (!reminder && Platform.OS === 'web' && !(await requestNotificationAccess())) {
-      showAlert('Browser notifications unavailable', 'Use HTTPS and allow notifications. On iPhone, add HabitMind to your Home Screen first.');
-      return;
+    if (reminderPermissionPending) return;
+    const nextReminder = !reminder;
+    if (nextReminder && Platform.OS === 'web') {
+      setReminderPermissionPending(true);
+      let hasAccess = false;
+      try {
+        hasAccess = await requestNotificationAccess();
+      } catch {
+        hasAccess = false;
+      } finally {
+        setReminderPermissionPending(false);
+      }
+      if (!hasAccess) {
+        showAlert('Browser notifications unavailable', 'Use HTTPS and allow notifications. On iPhone, add HabitMind to your Home Screen first.');
+        return;
+      }
     }
-    setReminder(!reminder);
+    setReminder(nextReminder);
   };
 
   const addHabit = () => {
@@ -201,7 +215,7 @@ export default function AddScreen() {
     <View style={styles.startDateRow}><View style={styles.startDateCopy}><Ionicons name="calendar-outline" size={21} color="#5B42D8" /><View><Text style={styles.startDateTitle}>Start date</Text><Text style={styles.startDateHint}>Begin tracking this habit on {displayDate(startDate)}.</Text></View></View><Pressable style={styles.startDateButton} onPress={() => setStartDatePickerVisible(true)}><Text style={styles.startDateButtonText}>{displayDate(startDate)}</Text><Ionicons name="chevron-down" size={15} color="#5B42D8" /></Pressable></View>
     {startDatePickerVisible && <DateTimePicker value={new Date(`${startDate}T00:00:00`)} mode="date" minimumDate={new Date()} onChange={(_event, date) => { setStartDatePickerVisible(false); if (date) setStartDate(formatDate(date)); }} />}
     <View style={styles.reminderSection}>
-      <View style={styles.reminderHeader}>
+      <Pressable style={[styles.reminderHeader, reminderPermissionPending && styles.reminderHeaderPending]} onPress={() => void toggleReminder()} disabled={reminderPermissionPending} accessibilityRole="switch" accessibilityState={{ checked: reminder, disabled: reminderPermissionPending }} accessibilityLabel="Toggle custom reminders">
         <View style={styles.reminderTitleWrap}>
           <View style={styles.reminderIcon}><Ionicons name="notifications-outline" size={24} color="#5B42D8" /></View>
           <View style={styles.reminderTitleCopy}>
@@ -209,10 +223,10 @@ export default function AddScreen() {
             <Text style={styles.reminderDescription}>{Platform.OS === 'web' ? 'Allow notifications to receive reminders. On iPhone, open HabitMind from your Home Screen.' : 'Get reminders at the times you choose to stay consistent.'}</Text>
           </View>
         </View>
-        <Pressable style={[styles.toggle, reminder && styles.toggleOn]} onPress={() => void toggleReminder()} accessibilityRole="switch" accessibilityState={{ checked: reminder }} accessibilityLabel="Toggle custom reminders">
+        <View style={[styles.toggle, reminder && styles.toggleOn]}>
           <View style={[styles.knob, reminder && styles.knobOn]} />
-        </Pressable>
-      </View>
+        </View>
+      </Pressable>
       {reminder && <>
         <View style={styles.reminderSubheader}><View><Text style={styles.reminderSubheaderText}>Reminder Times</Text><Text style={styles.reminderHint}>{reminderTimes.length}/2 times added</Text></View><Pressable style={[styles.addTimeButton, reminderTimes.length >= 2 && styles.addTimeButtonDisabled]} onPress={() => { if (reminderTimes.length >= 2) { showAlert('Reminder limit reached', 'You can add up to 2 reminder times only.'); return; } setEditingReminderTime(null); setTimeModalVisible(true); }} accessibilityRole="button" accessibilityLabel="Add reminder time"><Ionicons name="add" size={15} color="#FFFFFF" /><Text style={styles.addTimeButtonText}>Add Time</Text></Pressable></View>
         <View style={styles.reminderTimesList}>{reminderTimes.length ? reminderTimes.map((time) => <View key={time} style={styles.reminderTimeRow}><View style={styles.reminderTimeIcon}><Ionicons name="time-outline" size={20} color="#6742D8" /></View><View style={styles.reminderTimeCopy}><Text style={styles.reminderTimeText}>{time}</Text><Text style={styles.reminderTimeHint}>{time.includes('AM') ? 'Morning reminder' : 'Evening reminder'}</Text></View><Pressable style={styles.editTimeButton} onPress={() => editReminderTime(time)} accessibilityLabel={`Edit reminder at ${time}`}><Ionicons name="create-outline" size={16} color="#5B42D8" /><Text style={styles.editTimeText}>Edit</Text></Pressable><Pressable style={styles.removeTimeButton} onPress={() => setReminderTimes((times) => times.filter((item) => item !== time))} accessibilityLabel={`Remove reminder at ${time}`}><Ionicons name="trash-outline" size={17} color="#D45A68" /></Pressable></View>) : <Text style={styles.emptyReminderText}>No reminder time added yet.</Text>}</View>
@@ -240,6 +254,7 @@ const styles = StyleSheet.create({
   startDateRow: { minHeight: 70, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#E4DDF4', padding: 12, marginTop: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }, startDateCopy: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9 }, startDateTitle: { fontSize: 12, fontWeight: '800', color: '#393440' }, startDateHint: { fontSize: 9, color: '#827C8C', marginTop: 3 }, startDateButton: { minHeight: 34, borderRadius: 9, backgroundColor: '#F0EAFF', paddingHorizontal: 9, flexDirection: 'row', alignItems: 'center', gap: 4 }, startDateButtonText: { fontSize: 9, color: '#5B42D8', fontWeight: '800' },
   reminderSection: { backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#E7E1F2', marginTop: 16, padding: 14 },
   reminderHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F0EEF4' },
+  reminderHeaderPending: { opacity: 0.65 },
   reminderTitleWrap: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   reminderTitleCopy: { flex: 1, minWidth: 0 },
   reminderIcon: { width: 46, height: 46, borderRadius: 15, backgroundColor: '#F0EAFF', alignItems: 'center', justifyContent: 'center', marginRight: 11 },

@@ -203,6 +203,7 @@ export type Habit = {
   reminderEnabled: boolean;
   reminderTime: string;
   reminderTimes?: string[];
+  completionTimeZone?: string;
   reminderDays?: string[];
   reminderSoundEnabled?: boolean;
   smartReminderEnabled?: boolean;
@@ -999,6 +1000,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   const toggleHabitForDate = (id: string, date: Date) => {
     const dateKey = getLocalDateKey(date);
     const isToday = dateKey === getLocalDateKey();
+    const completionTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
     const currentHabit = habits.find((habit) => habit.id === id);
     const completedOnDate = currentHabit?.completionDates.includes(dateKey) ?? false;
     setHabits((current) => current.map((habit) => {
@@ -1022,7 +1024,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         label: completedOnDate ? `Undid ${habit.label}` : `Completed ${habit.label}`,
         date: new Date().toISOString(),
       }, ...current]);
-      return { ...habit, done, completionDates, streak, progress: isToday ? (done ? 100 : 0) : habit.progress, total: isToday ? `${done ? goal : 0}/${goal}` : habit.total };
+      return { ...habit, done, completionDates, streak, completionTimeZone, progress: isToday ? (done ? 100 : 0) : habit.progress, total: isToday ? `${done ? goal : 0}/${goal}` : habit.total };
     }));
     void saveRemoteHabitCompletion({ habitId: id, date: dateKey, completed: !completedOnDate }).then((result) => {
       if (typeof result?.points === 'number') setPoints(result.points);

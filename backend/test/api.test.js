@@ -10,7 +10,17 @@ import bcrypt from 'bcryptjs';
 import Database from 'better-sqlite3';
 import { goalPlanSchema } from '../schemas.js';
 import { normalizeAppState } from '../services/app-state-sync.js';
+import { isValidCompletionDate } from '../services/completion-date.js';
 import { getSupportEmailConfig } from '../services/support-email.js';
+
+test('habit completion dates use the client time zone', () => {
+  const now = new Date('2026-09-30T12:00:00.000Z');
+
+  assert.equal(isValidCompletionDate('2026-10-01', 'Pacific/Kiritimati', now), true);
+  assert.equal(isValidCompletionDate('2026-10-01', 'UTC', now), false);
+  assert.equal(isValidCompletionDate('2026-10-02', 'Pacific/Kiritimati', now), false);
+  assert.equal(isValidCompletionDate('2026-10-01', 'Invalid/TimeZone', now), false);
+});
 
 const port = 18900 + Math.floor(Math.random() * 500);
 const mlPort = port + 1000;
@@ -403,7 +413,7 @@ test('auth, login activity, leaderboard sync, periods, and account deletion work
   const completion = await request('/api/habit-completions', {
     method: 'PUT',
     headers: authHeaders,
-    body: JSON.stringify({ habitId: 'habit-1', date: completionDate, completed: true }),
+    body: JSON.stringify({ habitId: 'habit-1', date: completionDate, completed: true, timeZone: 'UTC' }),
   });
   assert.equal(completion.response.status, 200, JSON.stringify(completion.body));
   assert.equal(completion.body.points, 20);
@@ -425,6 +435,7 @@ test('auth, login activity, leaderboard sync, periods, and account deletion work
     ...appState,
     habits: [{
       ...appState.habits[0],
+      completionTimeZone: 'UTC',
       completionDates: [completionDate],
       done: true,
       progress: 100,

@@ -1,7 +1,7 @@
 import { Stack, router, useSegments } from 'expo-router';
 import Head from 'expo-router/head';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, LogBox, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, LogBox, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -117,9 +117,14 @@ function RootNavigator() {
           accessibilityLabel="Checking your session"
           accessibilityRole="progressbar"
           pointerEvents="none"
-          style={[StyleSheet.absoluteFill, { backgroundColor: colorScheme === 'dark' ? '#111018' : '#F3F2F8' }]}
+          style={[StyleSheet.absoluteFill, styles.loadingPage, { backgroundColor: '#f4f7ff' }]}
         >
-          <ActivityIndicator color="#5B42D8" style={styles.sessionLoader} />
+          <View style={styles.loadingMark}>
+            <Text style={styles.loadingMarkText}>H</Text>
+          </View>
+          <Text style={styles.loadingBrand}>HabitAI</Text>
+          <ActivityIndicator size="small" color="#5B42D8" style={styles.loadingIndicator} />
+          <Text style={styles.loadingText}>Preparing your habits...</Text>
         </View>
       )}
       <StatusBar
@@ -130,7 +135,42 @@ function RootNavigator() {
 }
 
 const styles = StyleSheet.create({
-  sessionLoader: {
+  loadingPage: {
     flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingMark: {
+    width: 64,
+    height: 64,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#5B42D8',
+    shadowColor: '#5B42D8',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.22,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  loadingMarkText: {
+    color: '#FFFFFF',
+    fontSize: 32,
+    fontWeight: '900',
+  },
+  loadingBrand: {
+    marginTop: 16,
+    color: '#24212D',
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  loadingIndicator: {
+    marginTop: 28,
+  },
+  loadingText: {
+    marginTop: 10,
+    color: '#777282',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

@@ -49,6 +49,7 @@ jest.mock('react-native', () => {
       OS: 'ios',
       select: (options: Record<string, any>) => options.ios ?? options.default ?? options.android ?? options.native ?? undefined,
     },
+    useWindowDimensions: () => ({ width: 390, height: 844, scale: 1, fontScale: 1 }),
     StyleSheet: {
       create: (styles: Record<string, any>) => styles,
       flatten: (style: any) => Array.isArray(style)

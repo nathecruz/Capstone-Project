@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import LoginScreen from '@/app/login';
 
 jest.mock('expo-router', () => ({
@@ -41,13 +41,17 @@ describe('LoginScreen', () => {
     }
   });
 
-  it('allows a valid account to sign in in production', async () => {
-    const { signIn } = jest.requireMock('@/authentication');
+  it('allows a valid account to sign in', async () => {
+    const { getSession, signIn } = jest.requireMock('@/authentication');
     const { router } = jest.requireMock('expo-router');
+    getSession.mockResolvedValue(null);
     signIn.mockResolvedValue({ ok: true, message: 'Login successful.' });
-    process.env.NODE_ENV = 'production';
 
-    const { getByPlaceholderText, getByText, queryByText } = render(<LoginScreen />);
+    const screen = render(<LoginScreen />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const { getByPlaceholderText, getByText, queryByText } = screen;
     await waitFor(() => {
       expect(getByPlaceholderText('Email Address')).toBeTruthy();
     });

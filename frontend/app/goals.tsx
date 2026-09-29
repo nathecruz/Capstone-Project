@@ -106,7 +106,6 @@ export default function GoalsScreen() {
   const { isDarkMode, getAppStateSnapshot, syncAppState } = useAppColorScheme();
   const { width } = useWindowDimensions();
   const compact = width < 380;
-  const compactPadding = compact ? 12 : 20;
   const [activeTab, setActiveTab] = useState<GoalTab>('Planner');
   const [goalInput, setGoalInput] = useState('');
   const [generatedGoal, setGeneratedGoal] = useState<GoalInsight | null>(null);
@@ -532,9 +531,9 @@ export default function GoalsScreen() {
 
                     </View>
 
-                    <Pressable style={[styles.primaryButton, styles.saveGoalButton]} onPress={saveGoal}>
-                      <Ionicons name="bookmark-outline" size={17} color="#FFFFFF" />
-                      <Text style={styles.primaryButtonText}>Save goal</Text>
+                    <Pressable style={[styles.primaryButton, styles.saveGoalButton]} onPress={() => void saveGoal()} disabled={isSavingGoal}>
+                      {isSavingGoal ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="bookmark-outline" size={17} color="#FFFFFF" />}
+                      <Text style={styles.primaryButtonText}>{isSavingGoal ? 'Saving...' : 'Save goal'}</Text>
                     </Pressable>
                   </View>
                 ) : null}

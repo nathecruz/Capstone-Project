@@ -473,7 +473,7 @@ export async function saveRemoteHabitCompletion(completion: HabitCompletion & { 
     return await apiRequest<{ ok: boolean; completions?: HabitCompletion[]; points?: number }>('/api/habit-completions', {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}` },
-      body: JSON.stringify(completion),
+      body: JSON.stringify({ ...completion, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }),
     });
   } catch {
     return null;
