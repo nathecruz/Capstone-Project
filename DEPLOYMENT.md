@@ -33,7 +33,7 @@ The root `render.yaml` deploys all three services as one Blueprint:
 1. Create or connect a Neon project and have its `DATABASE_URL`, `AUTH_URL`, `JWKS_URL`, and public Neon Auth base URL ready. The JWKS URL must end in `/.well-known/jwks.json`. The frontend auth URL is the Neon Auth base URL used by the client, not the backend API URL.
 2. Push the repository to GitHub.
 3. In Render, select **New** -> **Blueprint** and connect this repository.
-4. Provide the prompted values, including backend Neon credentials, `ALLOWED_ORIGINS`, Gemini API key, SMTP settings, and the frontend `EXPO_PUBLIC_AUTH_URL`. For `ALLOWED_ORIGINS`, enter the frontend's Render origin (for example, `https://habitai-frontend.onrender.com`). If Render assigns a different URL, update it in the backend after the first sync.
+4. Provide the prompted values, including backend Neon credentials, `ALLOWED_ORIGINS`, Gemini API key, SMTP settings, and the frontend `EXPO_PUBLIC_AUTH_URL`. `SUPPORT_EMAIL` is optional; if omitted, issue reports go to the configured SMTP sender. For `ALLOWED_ORIGINS`, enter the frontend's Render origin (for example, `https://habitai-frontend.onrender.com`). If Render assigns a different URL, update it in the backend after the first sync.
 5. Deploy the Blueprint. Keep `ML_MODEL_RELEASE_APPROVED=false` until real approved training outcomes and an independent holdout report have been verified.
 6. `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_AI_API_URL` are injected from the backend URL. `EXPO_PUBLIC_AUTH_URL` must point to the Neon Auth client endpoint. It is compiled into the public web bundle, so it must be a public URL, never a secret. Render only prompts for `sync: false` values when a Blueprint is first created; add or update this value in the service's Environment settings after that.
 
@@ -41,17 +41,19 @@ The root `render.yaml` deploys all three services as one Blueprint:
 
 Web Push lets scheduled reminders arrive when the browser/PWA is backgrounded or closed. The Render Cron service runs once per minute and has a minimum charge of $1/month, plus usage.
 
-1. Generate a VAPID key pair locally from the `backend` directory:
+1. From the repository root, configure local VAPID keys and import usable SMTP settings from the root `.env` into the ignored backend environment file:
 
 	```powershell
-	npm run push:generate-vapid-keys
+	node backend/scripts/generate-vapid-keys.js --configure-local
 	```
 
-2. In Render, open `habitai-backend` -> **Environment** and set `WEB_PUSH_VAPID_PUBLIC_KEY` and `WEB_PUSH_VAPID_PRIVATE_KEY` to the generated values. Keep the private key secret and do not commit it. Set `WEB_PUSH_VAPID_SUBJECT` to a contact email in `mailto:` form.
+2. From `backend/.env`, copy `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY`, and `WEB_PUSH_VAPID_SUBJECT` into the `habitai-backend` service's Render **Environment**. Never commit or share the private key. `WEB_PUSH_API_URL` is linked to the backend service URL in the Blueprint.
 3. Confirm the `habitai-web-push` Cron Job is created and its database/VAPID variables reference the backend service. Render does not prompt for new `sync: false` secrets when syncing an existing Blueprint, so add the keys in the dashboard.
 4. Deploy the frontend over HTTPS. On iPhone, open the site in Safari, add HabitMind to the Home Screen, open that installed web app, then enable Custom Reminders and allow notifications. On Android, use Chrome and allow notifications.
 
-The dispatcher checks saved habit schedules, custom weekdays, and each device timezone. Delivery is normally within a minute; after a delayed or interrupted Cron run, it retries reminders up to five minutes late. Mobile operating systems may apply their own notification delivery policies.
+The dispatcher checks saved habit schedules, custom weekdays, and each device timezone. Web Push reminders include a one-use Snooze action; the cron delivers snoozed reminders using the saved interval and count. Delivery is normally within a minute; after a delayed or interrupted Cron run, it retries reminders up to five minutes late. Mobile operating systems may apply their own notification delivery policies.
+
+Issue report attachments are stored as database binary data (SQLite BLOB locally, Neon BYTEA in production) and can be forwarded to `SUPPORT_EMAIL` through the configured SMTP account. Malware scanning is not yet integrated.
 
 For Vercel frontend-only hosting, set the project root to `frontend` and add these build-time environment variables in Project Settings:
 
