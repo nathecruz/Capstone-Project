@@ -36,7 +36,7 @@ const REWARDS: Reward[] = [
 // Keep this format stable — ownership is read back out of token history.
 const redeemLabel = (reward: Reward) => `Redeemed ${reward.title}`;
 
-type Leader = { rank: number; name: string; points: number; avatar: string };
+type Leader = { rank: number; name: string; points: number; avatar: string; isYou?: boolean };
 type Spotlight = Leader & { tone: 'gold' | 'silver' | 'bronze' };
 type LeaderboardPeriod = 'This Week' | 'This Month' | 'All Time';
 type LeaderboardSort = 'points-desc' | 'points-asc' | 'rank';
@@ -58,7 +58,7 @@ export default function LeaderboardsScreen() {
   const [leaderboardStatus, setLeaderboardStatus] = useState<'idle' | 'loading' | 'connected' | 'unavailable'>('idle');
   const [refreshKey, setRefreshKey] = useState(0);
   const [leaderboard, setLeaderboard] = useState<LeaderboardResponse>({ date: '', leaders: [] });
-  const { tokens, addTokens, points, profile, tokenHistory } = useAppColorScheme();
+  const { tokens, applyWallet, points, profile, tokenHistory } = useAppColorScheme();
   const insets = useSafeAreaInsets();
   const compact = useWindowDimensions().width < 375;
 
@@ -130,7 +130,8 @@ export default function LeaderboardsScreen() {
     return `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
   };
   const liveDate = getDateLabel(period);
-  const userStanding = allLeaders.find((entry) => entry.name === profile.fullName) ?? { rank: 0, name: '', points: 0, avatar: '' };
+  // The server marks the signed-in student's row (other students only see initials).
+  const userStanding = allLeaders.find((entry) => entry.isYou) ?? allLeaders.find((entry) => entry.name === profile.fullName) ?? { rank: 0, name: '', points: 0, avatar: '' };
   const effectiveLeaderboardStatus = !profile.fullName.trim() ? 'unavailable' : leaderboardStatus;
   const hasLeaderboard = effectiveLeaderboardStatus === 'connected';
   const hasUserPosition = hasLeaderboard && points > 0 && Boolean(userStanding);
@@ -188,7 +189,8 @@ export default function LeaderboardsScreen() {
     setRedeeming(true);
     const result = await redeemReward(reward);
     if (result.ok) {
-      addTokens(-reward.cost, redeemLabel(reward));
+      // The server deducted the tokens; show its balance and history.
+      if ('tokens' in result) applyWallet(result as { tokens?: number; tokenHistory?: object[]; points?: number });
       setToast(`${reward.title} redeemed.`);
     } else {
       setToast(result.message || 'Redeem failed. Your tokens were not spent.');

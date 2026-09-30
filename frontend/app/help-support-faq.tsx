@@ -10,9 +10,9 @@ const faqList = [
     title: 'Getting Started',
     icon: 'rocket-outline',
     items: [
-      { question: 'How do I create my first habit?', answer: 'Open the Add tab, enter a name, choose a target, and save your habit.' },
-      { question: 'Can I customize reminder times?', answer: 'Open Settings & Preferences and choose Reminder Time.' },
-      { question: 'What happens when I miss a day?', answer: 'Your completed history stays intact, but the active streak stops until you complete the habit again.' },
+      { question: 'How do I create my first habit?', answer: 'Open the Add tab, enter a name, pick a category and how often (daily, weekly, monthly or custom days), set a target, then save your habit.' },
+      { question: 'Can I customize reminder times?', answer: 'Yes. When you add a habit, turn on Reminders and choose up to two times. How long and how often a reminder snoozes is set in Snooze Settings.' },
+      { question: 'What happens when I miss a day?', answer: 'Your check-in history is kept, but the streak goes back to zero after a scheduled day is missed. Days a habit is not scheduled (for example Tuesday for a Mon/Wed/Fri habit) never break it.' },
     ],
   },
   {
@@ -21,7 +21,7 @@ const faqList = [
     items: [
       { question: 'How do I mark a habit as complete?', answer: 'Tap the check control on the Habits tab. Tap it again to undo today\'s completion.' },
       { question: 'Can I edit an existing habit?', answer: 'Open the habit from the Habits tab to update its reminder and target.' },
-      { question: 'How do streaks work?', answer: 'A streak increases when you complete a habit for the current day.' },
+      { question: 'How do streaks work?', answer: 'A streak counts the scheduled days in a row you completed the habit. Today counts once you check in, and an unfinished today does not break it yet.' },
     ],
   },
   {
@@ -29,7 +29,7 @@ const faqList = [
     icon: 'person-outline',
     items: [
       { question: 'How do I update my profile information?', answer: 'Open Profile, choose Personal Information, then tap Edit Profile.' },
-      { question: 'Can I change my email address?', answer: 'Yes. Edit Personal Information and save the new email address.' },
+      { question: 'Can I change my email address?', answer: 'Yes. Edit Personal Information and save the new address. We email a 6-digit code to confirm it.' },
       { question: 'How do I manage notifications?', answer: 'Open Notifications from your Profile settings and adjust your reminders.' },
     ],
   },
@@ -37,18 +37,18 @@ const faqList = [
     title: 'Goals & Rewards',
     icon: 'trophy-outline',
     items: [
-      { question: 'How do I earn points and badges?', answer: 'Complete habits consistently to earn points and unlock achievements.' },
+      { question: 'How do I earn points and badges?', answer: 'Every check-in gives 20 points and 5 tokens; undoing it takes them back. Achievements unlock as you build habits and streaks. Spend tokens on rewards in Leaderboards.' },
       { question: 'Can I set multiple goals?', answer: 'Yes. Use Set New Goal as often as needed.' },
-      { question: 'How are levels calculated?', answer: 'Levels are based on your total points and completed habits.' },
+      { question: 'How are levels calculated?', answer: 'Every 100 points is one level.' },
     ],
   },
   {
     title: 'Privacy & Data',
     icon: 'shield-checkmark-outline',
     items: [
-      { question: 'Are my habits stored securely?', answer: 'Your habits, progress, points, tokens, and preferences are stored on this device and synced to your account when you are signed in.' },
-      { question: 'Can I export my data?', answer: 'Use Export My Data in Settings & Preferences to view your current profile summary.' },
-      { question: 'How do I delete my account data?', answer: 'Use Clear Local Data in Settings & Preferences to reset the app on this device.' },
+      { question: 'Are my habits stored securely?', answer: 'Yes. Your data is saved to your HabitAI account over encrypted connections and synced to your devices. Read the Privacy Notice in Settings & Preferences for details.' },
+      { question: 'Can I export my data?', answer: 'Yes. In Settings & Preferences tap Download my data to get a copy of everything HabitAI stores about you.' },
+      { question: 'How do I delete my account data?', answer: 'In Settings & Preferences tap Delete Account. This permanently removes your account and all of its data and cannot be undone.' },
     ],
   },
 ];

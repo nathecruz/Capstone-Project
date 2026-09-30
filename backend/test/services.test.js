@@ -13,7 +13,7 @@ test('recognises template values copied from .env.example', () => {
   for (const value of ['', 'your-gemini-api-key', 'replace-with-a-long-random-secret', 'postgresql://user:password@ep-example.us-east-2.aws.neon.tech/habitai', 'your-email@gmail.com', 'xxxx']) {
     assert.equal(isTemplateValue(value), true, value);
   }
-  for (const value of ['AIzaSyA-real-looking-key-1234567890abcd', 'adrielle@gmail.com', 'postgresql://neondb_owner:secret@ep-plain-flower.aws.neon.tech/db', 'gemini-2.5-flash']) {
+  for (const value of ['AIzaSyA-real-looking-key-1234567890abcd', 'student.sender@gmail.com', 'postgresql://neondb_owner:secret@ep-plain-flower.aws.neon.tech/db', 'gemini-2.5-flash']) {
     assert.equal(isTemplateValue(value), false, value);
   }
 });
@@ -122,4 +122,53 @@ test('model goal plans are normalised into the stored shape', () => {
   assert.deepEqual(plan.actionDueDates, ['Oct 1', 'Oct 3', 'Oct 7', 'Oct 14']);
   assert.equal(plan.nextCheckIn, 'Oct 7, 2026');
   assert.equal(normalizeGoalPlan({ actionPlan: ['one'] }, { timeline: '90 days' }), null);
+});
+
+test('streaks follow the habit schedule and reset after a missed scheduled day', async () => {
+  const { computeStreak } = await import('../services/streaks.js');
+  const today = '2026-09-30'; // Wednesday
+  const daily = { frequency: 'Daily', startDate: '2026-09-01' };
+  assert.equal(computeStreak(daily, ['2026-09-28', '2026-09-29', '2026-09-30'], today), 3);
+  assert.equal(computeStreak(daily, ['2026-09-28', '2026-09-29'], today), 2, 'an unfinished today does not break the streak');
+  assert.equal(computeStreak(daily, ['2026-09-26', '2026-09-28'], today), 0, 'a missed yesterday resets it');
+  assert.equal(computeStreak(daily, ['2026-09-26', '2026-09-28', '2026-09-29', '2026-09-30'], today), 3, 'the old bug counted every check-in');
+
+  const monWedFri = { frequency: 'Custom', startDate: '2026-09-01', reminderDays: ['Mon', 'Wed', 'Fri'] };
+  assert.equal(computeStreak(monWedFri, ['2026-09-25', '2026-09-28', '2026-09-30'], today), 3, 'Tue and weekends are not scheduled');
+  assert.equal(computeStreak(monWedFri, ['2026-09-25', '2026-09-30'], today), 1, 'missing Monday breaks it');
+
+  const weekly = { frequency: 'Weekly', startDate: '2026-09-02' }; // Wednesdays
+  assert.equal(computeStreak(weekly, ['2026-09-16', '2026-09-23', '2026-09-30'], today), 3);
+  const monthly = { frequency: 'Monthly', startDate: '2026-07-30' };
+  assert.equal(computeStreak(monthly, ['2026-07-30', '2026-08-30', '2026-09-30'], today), 3);
+  assert.equal(computeStreak(daily, [], today), 0);
+});
+
+test('leaderboards show first name and last initial only', async () => {
+  const { leaderboardName } = await import('../lib/display.js');
+  assert.equal(leaderboardName('Juan Dela Cruz'), 'Juan C.');
+  assert.equal(leaderboardName('Maria'), 'Maria');
+  assert.equal(leaderboardName(''), 'Student');
+});
+
+test('ML training rows use past features and the observed next-week outcome, with no identifiers', async () => {
+  const { buildTrainingRows, toCsv, TRAINING_COLUMNS } = await import('../services/ml-training-rows.js');
+  const habit = { id: 'h1', label: 'Secret habit name', category: 'Health', frequency: 'Daily' };
+  const dates = ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-07', '2026-09-10'];
+  const rows = buildTrainingRows(habit, dates, { today: '2026-09-30' });
+  assert.equal(rows[0].last_7_days, '1,1,1,0,0,0,1', 'window ends on the reference day (Sep 7)');
+  assert.equal(rows[0].completion_rate, Number((4 / 7).toFixed(4)));
+  assert.equal(rows[0].missed_days, 3);
+  assert.equal(rows[0].streak, 1);
+  assert.equal(rows[0].priority, 'low');
+  assert.equal(rows[0].goal_type, 'health');
+  assert.equal(rows[0].completed_next_7_days, 1, 'Sep 10 falls in the next week');
+  assert.equal(rows[1].completed_next_7_days, 0, 'nothing after Sep 14');
+  assert.ok(rows.every((row) => row.completed_next_7_days === 0 || row.completed_next_7_days === 1));
+  assert.equal(rows.at(-1).last_7_days.split(',').length, 7);
+  assert.equal(buildTrainingRows(habit, dates, { today: '2026-09-10' }).length, 0, 'an outcome week that is not over yet is skipped');
+
+  const csv = toCsv(rows);
+  assert.equal(csv.split('\n')[0], TRAINING_COLUMNS.join(','));
+  assert.ok(!csv.includes('Secret') && !csv.includes('h1'));
 });

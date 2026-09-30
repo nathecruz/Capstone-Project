@@ -142,12 +142,39 @@ function isNetworkError(error: unknown) {
   return error instanceof TypeError || (error instanceof Error && error.name === 'AbortError');
 }
 
-const DEFAULT_TIMEOUT_MS = 20000;
+// Long enough for a sleeping free-tier server to start (the banner explains the wait).
+const DEFAULT_TIMEOUT_MS = 60000;
+// Free hosting puts the API to sleep; the first request after that can take ~30-60 s.
+const SLOW_REQUEST_MS = 4000;
+export type ServerStatus = 'ok' | 'waking';
+const serverStatusListeners = new Set<(status: ServerStatus) => void>();
+let slowRequests = 0;
+
+/** Notifies when requests are unusually slow (server waking up) and when they recover. */
+export function subscribeToServerStatus(listener: (status: ServerStatus) => void) {
+  serverStatusListeners.add(listener);
+  return () => {
+    serverStatusListeners.delete(listener);
+  };
+}
+
+function setSlowRequests(delta: number) {
+  const before = slowRequests;
+  slowRequests = Math.max(0, slowRequests + delta);
+  if ((before === 0) !== (slowRequests === 0)) {
+    serverStatusListeners.forEach((listener) => listener(slowRequests > 0 ? 'waking' : 'ok'));
+  }
+}
 
 export async function apiRequest<T>(path: string, options: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
   const { timeoutMs = DEFAULT_TIMEOUT_MS, ...init } = options;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let markedSlow = false;
+  const slowTimer = setTimeout(() => {
+    markedSlow = true;
+    setSlowRequests(1);
+  }, SLOW_REQUEST_MS);
   let response: Response;
   try {
     response = await fetch(`${getApiBaseUrl()}${path}`, {
@@ -160,6 +187,8 @@ export async function apiRequest<T>(path: string, options: RequestInit & { timeo
     });
   } finally {
     clearTimeout(timer);
+    clearTimeout(slowTimer);
+    if (markedSlow) setSlowRequests(-1);
   }
 
   const rawBody = await response.text();
@@ -188,7 +217,7 @@ export async function apiRequest<T>(path: string, options: RequestInit & { timeo
   return payload as T;
 }
 
-export async function signUp(user: { fullName: string; username: string; email: string; password: string; dateOfBirth: string; gender: string; region: string }) {
+export async function signUp(user: { fullName: string; username: string; email: string; password: string; dateOfBirth: string; gender: string; region: string; privacyConsent: boolean }) {
   const email = user.email.trim();
   if (!isValidEmailFormat(email)) {
     return { ok: false, message: 'Please enter a valid email address.' };
@@ -205,6 +234,7 @@ export async function signUp(user: { fullName: string; username: string; email: 
         dateOfBirth: user.dateOfBirth.trim(),
         gender: user.gender.trim(),
         region: user.region.trim(),
+        privacyConsent: user.privacyConsent,
       }),
     });
 
@@ -313,7 +343,59 @@ export async function getSession() {
       return null;
     }
 
-    return null;
+    // Offline or server asleep: keep the saved session instead of signing the student out.
+    return session;
+  }
+}
+
+async function refreshStoredUser(user: SessionUser | undefined) {
+  const token = await getSessionToken();
+  if (token && user && isValidSessionUser(user)) await saveSessionToken(token, user);
+}
+
+export async function verifyEmailCode(otp: string) {
+  try {
+    const payload = await apiRequest<{ ok: boolean; message?: string; user?: SessionUser }>('/api/auth/email/verify', {
+      method: 'POST',
+      headers: await getAuthenticatedHeaders(),
+      body: JSON.stringify({ otp: otp.trim() }),
+    });
+    await refreshStoredUser(payload.user);
+    return { ok: true, message: payload.message || 'Email confirmed.' };
+  } catch (error) {
+    if (isNetworkError(error)) return { ok: false, message: 'Unable to reach the account service. Connect to the internet and try again.' };
+    const payload = error instanceof ApiRequestError ? error.payload : {};
+    return { ok: false, message: error instanceof Error ? error.message : 'Unable to verify the code.', attemptsLeft: typeof payload.attemptsLeft === 'number' ? payload.attemptsLeft : undefined };
+  }
+}
+
+export async function resendEmailVerification() {
+  try {
+    const payload = await apiRequest<{ ok: boolean; message?: string; retryAfterSeconds?: number; alreadyVerified?: boolean }>('/api/auth/email/resend', {
+      method: 'POST',
+      headers: await getAuthenticatedHeaders(),
+      body: JSON.stringify({}),
+    });
+    return { ok: true, message: payload.message || 'A new code was sent.', retryAfterSeconds: payload.retryAfterSeconds ?? 60, alreadyVerified: Boolean(payload.alreadyVerified) };
+  } catch (error) {
+    if (isNetworkError(error)) return { ok: false, message: 'Unable to reach the account service. Connect to the internet and try again.' };
+    const payload = error instanceof ApiRequestError ? error.payload : {};
+    return { ok: false, message: error instanceof Error ? error.message : 'Unable to send a new code.', retryAfterSeconds: typeof payload.retryAfterSeconds === 'number' ? payload.retryAfterSeconds : undefined };
+  }
+}
+
+/** Records that the student accepted the Privacy Notice (accounts created before it existed). */
+export async function acceptPrivacyNotice() {
+  try {
+    const payload = await apiRequest<{ ok: boolean; user?: SessionUser }>('/api/auth/consent', {
+      method: 'POST',
+      headers: await getAuthenticatedHeaders(),
+      body: JSON.stringify({ accepted: true }),
+    });
+    await refreshStoredUser(payload.user);
+    return { ok: true, message: 'Thank you.' };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : 'Unable to save your choice.' };
   }
 }
 
@@ -321,7 +403,7 @@ export async function redeemReward(reward: { id: string; title: string; cost: nu
   const token = await getSessionToken();
   if (!token) return { ok: false, message: 'You are not signed in.', forwarded: false };
   try {
-    return await apiRequest<{ ok: boolean; tokens?: number; message?: string }>('/api/rewards/redeem', {
+    return await apiRequest<{ ok: boolean; tokens?: number; tokenHistory?: object[]; points?: number; message?: string }>('/api/rewards/redeem', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({ rewardId: reward.id, rewardName: reward.title, tokenCost: reward.cost }),
@@ -502,7 +584,7 @@ export async function saveRemoteHabitCompletion(completion: HabitCompletion & { 
   const token = await getSessionToken();
   if (!token) return null;
   try {
-    return await apiRequest<{ ok: boolean; completions?: HabitCompletion[]; points?: number }>('/api/habit-completions', {
+    return await apiRequest<{ ok: boolean; completions?: HabitCompletion[]; points?: number; tokens?: number; tokenHistory?: object[]; habit?: { id: string; streak: number; done: boolean } | null }>('/api/habit-completions', {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({ ...completion, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }),
@@ -704,5 +786,28 @@ export async function deleteAccount(currentPassword: string) {
     return { ok: payload.ok, message: payload.message || 'Your account has been deleted.' };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : 'Unable to delete your account.' };
+  }
+}
+
+/** Downloads everything HabitAI stores about the student (web) or opens the share sheet (mobile). */
+export async function exportMyData() {
+  try {
+    const data = await apiRequest<object>('/api/auth/export', { headers: await getAuthenticatedHeaders() });
+    const json = JSON.stringify(data, null, 2);
+    const fileName = `habitai-my-data-${new Date().toISOString().slice(0, 10)}.json`;
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return { ok: true, message: `Saved ${fileName}.` };
+    }
+    const { Share } = await import('react-native');
+    await Share.share({ title: fileName, message: json });
+    return { ok: true, message: 'Your data is ready to save or share.' };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : 'Unable to export your data.' };
   }
 }

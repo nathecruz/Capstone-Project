@@ -27,5 +27,6 @@ export const loginLimiter = limiter({ limit: 10, keyGenerator: emailKey, message
 export const registerLimiter = limiter({ limit: 20, keyGenerator: (request) => `ip:${ipKeyGenerator(request.ip)}`, message: 'Too many sign-up attempts from this network. Please try again later.' });
 export const resetRequestLimiter = limiter({ limit: 5, keyGenerator: emailKey, message: 'Too many password reset requests. Please try again later.' });
 export const resetVerificationLimiter = limiter({ limit: 15, keyGenerator: emailKey, message: 'Too many verification attempts. Please try again later.' });
+export const resendVerificationLimiter = limiter({ limit: 20, message: 'Too many verification requests. Please try again later.' });
 export const aiLimiter = limiter({ limit: 30, message: 'You have reached the AI request limit. Please try again in a few minutes.' });
 export const predictionLimiter = limiter({ limit: 120, message: 'Too many prediction requests. Please try again shortly.' });

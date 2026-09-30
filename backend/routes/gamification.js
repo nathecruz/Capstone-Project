@@ -1,9 +1,11 @@
 import crypto from 'node:crypto';
 import { query, withTransaction } from '../db/client.js';
+import { leaderboardName } from '../lib/display.js';
 import { getPeriodStart, parse } from '../lib/http.js';
 import { leaderboardSchema, rewardRedemptionSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
-import { serverCompletionPoints } from '../services/app-state-store.js';
+import { refreshSnapshot, serverCompletionPoints } from '../services/app-state-store.js';
+import { getWallet, POINTS_PER_CHECK_IN, spendTokens } from '../services/wallet.js';
 
 // Rewards that can only be redeemed once per account.
 const PERMANENT_REWARDS = new Set(['plant-buddy', 'premium-theme', 'custom-title']);
@@ -19,36 +21,51 @@ export default function registerGamificationRoutes(app) {
 
     const result = await withTransaction(async (db) => {
       await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
-      const balance = Number((await db.query('SELECT COALESCE(SUM(amount),0) AS balance FROM token_transactions WHERE user_id=$1', [session.userId])).rows[0].balance);
       if (PERMANENT_REWARDS.has(reward.id) && (await db.query('SELECT 1 FROM reward_redemptions WHERE user_id=$1 AND reward_id=$2 LIMIT 1', [session.userId, reward.id])).rowCount) {
         return { status: 409, body: { ok: false, message: 'This reward has already been redeemed.' } };
       }
-      if (balance < input.tokenCost) return { status: 409, body: { ok: false, message: 'You do not have enough tokens.' } };
       const now = Date.now();
-      await db.query('INSERT INTO reward_redemptions(id,user_id,reward_id,token_cost,redeemed_at) VALUES($1,$2,$3,$4,$5)', [crypto.randomUUID(), session.userId, reward.id, input.tokenCost, now]);
-      await db.query('INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,$3,$4,$5,$6)', [crypto.randomUUID(), session.userId, -input.tokenCost, `Redeemed ${reward.name}`, new Date(now).toISOString(), now]);
-      return { status: 200, body: { ok: true, tokens: balance - input.tokenCost } };
+      const spent = await spendTokens(db, session.userId, Number(reward.tokenCost), `Redeemed ${reward.name}`, now);
+      if (!spent.ok) return { status: 409, body: { ok: false, message: 'You do not have enough tokens.' } };
+      await db.query('INSERT INTO reward_redemptions(id,user_id,reward_id,token_cost,redeemed_at) VALUES($1,$2,$3,$4,$5)', [crypto.randomUUID(), session.userId, reward.id, reward.tokenCost, now]);
+      const refreshed = await refreshSnapshot(session.userId, db);
+      const wallet = await getWallet(db, session.userId);
+      return { status: 200, body: { ok: true, tokens: wallet.tokens, tokenHistory: wallet.tokenHistory, points: wallet.points, updatedAt: refreshed?.updatedAt ?? null } };
     });
     response.status(result.status).json(result.body);
   });
 
   // Points come from recorded check-ins (20 each); students only, staff accounts are excluded.
+  // Students who turned off "Show me on leaderboards" are hidden from everyone but themselves.
   app.get('/api/leaderboard', async (request, response) => {
-    if (!(await requireAuth(request, response))) return;
+    const session = await requireAuth(request, response);
+    if (!session) return;
     const period = String(request.query.period || 'This Week');
     if (!['This Week', 'This Month', 'All Time'].includes(period)) return response.status(400).json({ ok: false, message: 'Unsupported leaderboard period.' });
     const start = period === 'All Time' ? null : getPeriodStart(period);
     const result = await query(
-      `SELECT u.full_name AS name, (COUNT(c.completed_date)::integer * 20) AS points, COALESCE(l.avatar, LEFT(u.full_name, 1)) AS avatar
+      `SELECT u.id, u.full_name AS "fullName", (COUNT(c.completed_date)::integer * $3) AS points, COALESCE(l.avatar, LEFT(u.full_name, 1)) AS avatar
          FROM users u
          LEFT JOIN habit_completions c ON c.user_id=u.id AND ($1::date IS NULL OR c.completed_date >= $1::date)
          LEFT JOIN leaderboard_users l ON l.user_id=u.id
+         LEFT JOIN user_preferences p ON p.user_id=u.id
         WHERE u.role = 'user' AND u.status = 'active'
+          AND (u.id = $2 OR (p.preferences_json->'showOnLeaderboard') IS DISTINCT FROM 'false'::jsonb)
         GROUP BY u.id,u.full_name,l.avatar
         ORDER BY points DESC,u.full_name ASC`,
-      [start],
+      [start, session.userId, POINTS_PER_CHECK_IN],
     );
-    response.json({ period, date: period === 'All Time' ? 'Since joining' : period, leaders: result.rows.map((user, index) => ({ ...user, rank: index + 1 })) });
+    response.json({
+      period,
+      date: period === 'All Time' ? 'Since joining' : period,
+      leaders: result.rows.map((row, index) => ({
+        rank: index + 1,
+        name: row.id === session.userId ? `${leaderboardName(row.fullName)} (You)` : leaderboardName(row.fullName),
+        points: row.points,
+        avatar: row.avatar,
+        isYou: row.id === session.userId,
+      })),
+    });
   });
 
   app.post('/api/leaderboard/sync', async (request, response) => {

@@ -3,7 +3,19 @@ import { readFile } from 'node:fs/promises';
 import { query, withTransaction } from './client.js';
 import { seedCatalog } from './seed-data.js';
 import { backfillActivityFromSnapshots } from '../services/activity.js';
-import { pruneAllSnapshots } from '../services/app-state-store.js';
+
+/** Runs a data migration exactly once per database, recorded in app_migrations. */
+async function runOnce(name, migration) {
+  const claimed = await query('INSERT INTO app_migrations(name, applied_at) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING name', [name, Date.now()]);
+  if (!claimed.rowCount) return false;
+  try {
+    await migration();
+    return true;
+  } catch (error) {
+    await query('DELETE FROM app_migrations WHERE name = $1', [name]);
+    throw error;
+  }
+}
 
 export async function ensureNeonSchema({ log = () => {} } = {}) {
   const schema = await readFile(new URL('./schema.sql', import.meta.url), 'utf8');
@@ -14,6 +26,8 @@ export async function ensureNeonSchema({ log = () => {} } = {}) {
   // Managed from the HabitAI Admin Panel: role (user/faculty/admin) and account status (active/deactivated).
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'");
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'");
+  await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at BIGINT');
+  await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_consent_at BIGINT');
 
   const appStateId = await query(`
     SELECT 1 FROM information_schema.columns
@@ -42,11 +56,11 @@ export async function ensureNeonSchema({ log = () => {} } = {}) {
   await query('ALTER TABLE login_activity ALTER COLUMN login_date_time SET DEFAULT CURRENT_TIMESTAMP');
   await query('ALTER TABLE login_activity ALTER COLUMN login_date_time SET NOT NULL');
   await query("DELETE FROM notifications WHERE type='habit-reminder' AND body LIKE 'Reminder set for %'");
-  await query('DELETE FROM sessions WHERE expires_at <= $1', [Date.now()]);
   await withTransaction(seedCatalog);
 
-  // Keep day-level engagement history before trimming old snapshots.
+  // Accounts created before email verification existed are treated as verified (once only).
+  await runOnce('email-verification-backfill', () => query('UPDATE users SET email_verified_at = created_at WHERE email_verified_at IS NULL'));
+
+  // Keep day-level engagement history before services/maintenance.js trims old snapshots.
   await backfillActivityFromSnapshots();
-  const pruned = await pruneAllSnapshots();
-  if (pruned) log(`[db] pruned ${pruned} old app-state snapshots`);
 }

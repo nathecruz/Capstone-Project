@@ -246,7 +246,23 @@ CREATE TABLE IF NOT EXISTS issue_reports (
   created_at BIGINT NOT NULL
 );
 ALTER TABLE issue_reports ADD COLUMN IF NOT EXISTS attachment_data BYTEA;
+ALTER TABLE issue_reports ADD COLUMN IF NOT EXISTS updated_at BIGINT;
 CREATE INDEX IF NOT EXISTS issue_reports_user_created_idx ON issue_reports(user_id, created_at DESC);
+
+-- One-time data migrations that must never run twice.
+CREATE TABLE IF NOT EXISTS app_migrations (
+  name TEXT PRIMARY KEY,
+  applied_at BIGINT NOT NULL
+);
+
+-- Email verification codes sent after sign-up or an email change.
+CREATE TABLE IF NOT EXISTS email_verification_codes (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  code_hash TEXT NOT NULL,
+  expires_at BIGINT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  created_at BIGINT NOT NULL
+);
 
 -- One row per student per day they used the app (Asia/Manila calendar days).
 -- Engagement analytics read this instead of keeping every app-state snapshot.

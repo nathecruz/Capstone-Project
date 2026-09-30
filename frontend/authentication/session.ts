@@ -31,6 +31,10 @@ export type SessionUser = {
   dateOfBirth?: string;
   gender?: string;
   about?: string;
+  /** false until the sign-up email is confirmed (undefined for sessions saved by older app versions). */
+  emailVerified?: boolean;
+  /** null when the account has not accepted the Privacy Notice yet. */
+  privacyConsentAt?: number | null;
 };
 
 export type SessionRecord = {
@@ -105,6 +109,8 @@ export async function getCurrentSession(): Promise<SessionUser | null> {
       dateOfBirth: parsed.dateOfBirth ? String(parsed.dateOfBirth) : '',
       gender: parsed.gender ? String(parsed.gender) : '',
       about: parsed.about ? String(parsed.about) : '',
+      emailVerified: typeof parsed.emailVerified === 'boolean' ? parsed.emailVerified : undefined,
+      privacyConsentAt: typeof parsed.privacyConsentAt === 'number' || parsed.privacyConsentAt === null ? parsed.privacyConsentAt : undefined,
     };
   } catch {
     return null;

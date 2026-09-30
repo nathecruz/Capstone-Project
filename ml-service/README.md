@@ -10,6 +10,21 @@ streak,completion_rate,missed_days,last_7_days,average_session_minutes,priority,
 
 `last_7_days` must contain seven comma-separated `0`/`1` values. `completed_next_7_days` is the actual outcome label: `1` if the habit was completed at least once in the following seven days, otherwise `0`.
 
+To build these files from real HabitAI check-ins, run the backend exporter (reads Neon,
+writes to the git-ignored `ml-service/data/private/`, and splits users between the
+training and holdout files so the holdout stays independent):
+
+```powershell
+npm --prefix backend run ml:export
+```
+
+It only uses active student accounts, keeps model features and the observed outcome
+(no names, emails, habit labels or ids), and refuses to export until at least 10 users
+have a week of history. `average_session_minutes` is exported as a constant because the
+app does not measure it; predictions omit it and fall back to the training mean.
+Until a model trained this way passes the thresholds below, the app labels every
+forecast as an experimental estimate.
+
 Run the evaluation from `ml-service` after installing the requirements:
 
 ```powershell

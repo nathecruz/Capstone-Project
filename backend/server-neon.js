@@ -12,14 +12,17 @@ import { closeDatabase } from './db/client.js';
 import { ensureNeonSchema } from './db/neon-schema.js';
 import { createApp } from './http/app.js';
 import { verifyMailer } from './services/mailer.js';
+import { scheduleMaintenance } from './services/maintenance.js';
 
 assertProductionConfig();
 await ensureNeonSchema({ log: console.log });
 void verifyMailer();
+const maintenance = scheduleMaintenance();
 
 const server = createApp().listen(config.port, '0.0.0.0', () => console.log(`Neon Insights API listening on http://0.0.0.0:${config.port}`));
 
 async function shutdown() {
+  clearInterval(maintenance);
   server.close();
   await closeDatabase();
 }

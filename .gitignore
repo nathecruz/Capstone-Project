@@ -31,3 +31,6 @@ venv/
 *.sqlite-wal
 backend/data/backups/
 backend/data/uploads/
+
+# Exported real outcome data for ML training (anonymized, but never committed)
+ml-service/data/private/

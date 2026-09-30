@@ -1,13 +1,16 @@
+// End-to-end API test against a real PostgreSQL database.
+//
+// Set TEST_DATABASE_URL (a Neon branch or any Postgres). The test creates a private,
+// randomly named schema, runs the real server against it and drops it afterwards, so
+// no existing table is touched. Without TEST_DATABASE_URL the test is skipped.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
+import path from 'node:path';
 import test from 'node:test';
 import bcrypt from 'bcryptjs';
-import Database from 'better-sqlite3';
+import pg from 'pg';
 import { goalPlanSchema } from '../schemas.js';
 import { normalizeAppState } from '../services/app-state-sync.js';
 import { isValidCompletionDate } from '../services/completion-date.js';
@@ -15,85 +18,11 @@ import { getSupportEmailConfig } from '../services/support-email.js';
 
 test('habit completion dates use the client time zone', () => {
   const now = new Date('2026-09-30T12:00:00.000Z');
-
   assert.equal(isValidCompletionDate('2026-10-01', 'Pacific/Kiritimati', now), true);
   assert.equal(isValidCompletionDate('2026-10-01', 'UTC', now), false);
   assert.equal(isValidCompletionDate('2026-10-02', 'Pacific/Kiritimati', now), false);
   assert.equal(isValidCompletionDate('2026-10-01', 'Invalid/TimeZone', now), false);
 });
-
-const port = 18900 + Math.floor(Math.random() * 500);
-const mlPort = port + 1000;
-const databaseDirectory = mkdtempSync(path.join(tmpdir(), 'habitai-api-test-'));
-const server = spawn(process.execPath, ['server.js'], {
-  cwd: path.resolve(import.meta.dirname, '..'),
-  env: {
-    ...process.env,
-    NODE_ENV: 'test',
-    DATABASE_URL: '',
-    PORT: String(port),
-    DATABASE_PATH: path.join(databaseDirectory, 'test.sqlite'),
-    GEMINI_API_KEY: 'replace-with-test-key',
-    ML_SERVICE_API_KEY: 'dev-only-local-key',
-    ML_SERVICE_URL: `http://127.0.0.1:${mlPort}`,
-    WEB_PUSH_VAPID_PUBLIC_KEY: 'test-vapid-public-key',
-    WEB_PUSH_VAPID_PRIVATE_KEY: 'test-vapid-private-key',
-    WEB_PUSH_VAPID_SUBJECT: 'mailto:test@example.com',
-  },
-  stdio: 'ignore',
-});
-const serverExit = new Promise((resolve) => server.once('exit', resolve));
-
-const baseUrl = `http://127.0.0.1:${port}`;
-let mlServiceReady = false;
-const mockMlService = createServer((request, response) => {
-  if (request.url === '/api/predict/habit' && request.method === 'POST') {
-    if (!mlServiceReady) {
-      response.writeHead(503, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify({ error: 'Model unavailable.' }));
-      return;
-    }
-    response.writeHead(200, { 'Content-Type': 'application/json' });
-    response.end(JSON.stringify({
-      habit_name: 'Workout', completion_probability: 0.8, dropout_risk: 0.2, confidence: 0.9,
-      recommended_action: 'Keep the routine stable.', suggested_reminder_time: '08:00', summary: 'Model forecast.',
-      models_used: ['Test model'], prediction_source: 'model', is_fallback: false,
-    }));
-    return;
-  }
-  response.writeHead(404);
-  response.end();
-});
-const mockMlServiceReady = new Promise((resolve) => mockMlService.listen(mlPort, '127.0.0.1', resolve));
-
-async function waitForServer() {
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`${baseUrl}/health`);
-      if (response.ok) return;
-    } catch {
-      // The server may still be starting.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error('Test server did not start in time.');
-}
-
-async function request(pathname, options = {}) {
-  const response = await fetch(`${baseUrl}${pathname}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
-  });
-  const responseText = await response.text();
-  let body;
-  try {
-    body = JSON.parse(responseText);
-  } catch {
-    throw new Error(`Expected JSON from ${pathname}, received HTTP ${response.status}: ${responseText.slice(0, 120)}`);
-  }
-  return { response, body };
-}
 
 test('goal plan schema strips uncalibrated numeric score fields', () => {
   const plan = {
@@ -111,466 +40,369 @@ test('goal plan schema strips uncalibrated numeric score fields', () => {
     status: 'Fresh plan',
   };
   const parsed = goalPlanSchema.safeParse({ ...plan, score: 91, confidence: 88 });
-
   assert.equal(parsed.success, true);
   assert.deepEqual(parsed.data, plan);
 });
 
 test('support email uses the configured inbox or falls back to the SMTP sender', () => {
-  const explicitInbox = getSupportEmailConfig({
-    SMTP_USER: 'mailer@habitai.app',
-    SMTP_PASSWORD: 'smtp-secret-value',
-    SUPPORT_EMAIL: 'support@habitai.app',
-  });
+  const explicitInbox = getSupportEmailConfig({ SMTP_USER: 'mailer@habitai.app', SMTP_PASSWORD: 'smtp-secret-value', SUPPORT_EMAIL: 'support@habitai.app' });
   assert.equal(explicitInbox.configured, true);
   assert.equal(explicitInbox.recipient, 'support@habitai.app');
-
-  const senderFallback = getSupportEmailConfig({
-    SMTP_USER: 'mailer@habitai.app',
-    SMTP_PASSWORD: 'smtp-secret-value',
-  });
-  assert.equal(senderFallback.configured, true);
+  const senderFallback = getSupportEmailConfig({ SMTP_USER: 'mailer@habitai.app', SMTP_PASSWORD: 'smtp-secret-value' });
   assert.equal(senderFallback.recipient, 'mailer@habitai.app');
   assert.equal(getSupportEmailConfig({ SMTP_USER: 'mailer@habitai.app' }).configured, false);
 });
 
-test('auth, login activity, leaderboard sync, periods, and account deletion work together', async (t) => {
-  await waitForServer();
-  await mockMlServiceReady;
-  const liveness = await request('/healthz');
-  assert.equal(liveness.response.status, 200);
-  assert.equal(liveness.body.ok, true);
+const testDatabaseUrl = process.env.TEST_DATABASE_URL?.trim();
+
+/** Same database, private schema. Neon's pooler drops startup options, so use the direct host. */
+function urlForSchema(raw, schema) {
+  const url = new URL(raw);
+  url.hostname = url.hostname.replace('-pooler.', '.');
+  if (schema) url.searchParams.set('options', `-c search_path=${schema}`);
+  return url.toString();
+}
+
+function poolFor(url) {
+  const parsed = new URL(url);
+  const isLocal = ['localhost', '127.0.0.1'].includes(parsed.hostname);
+  parsed.searchParams.delete('sslmode');
+  parsed.searchParams.delete('channel_binding');
+  return new pg.Pool({ connectionString: parsed.toString(), ssl: isLocal ? false : { rejectUnauthorized: true }, max: 2 });
+}
+
+test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'set TEST_DATABASE_URL to run the PostgreSQL integration test' }, async (t) => {
+  const schema = `habitai_test_${crypto.randomBytes(4).toString('hex')}`;
+  const admin = poolFor(urlForSchema(testDatabaseUrl));
+  await admin.query(`CREATE SCHEMA ${schema}`);
+  const db = poolFor(urlForSchema(testDatabaseUrl, schema));
+
+  const port = 18900 + Math.floor(Math.random() * 500);
+  const mlPort = port + 1000;
+  const deadSmtpPort = port + 2000;
+  let mlServiceReady = false;
+  const mockMlService = createServer((request, response) => {
+    if (request.url === '/api/predict/habit' && request.method === 'POST') {
+      response.writeHead(mlServiceReady ? 200 : 503, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify(mlServiceReady ? { habit_name: 'Workout', prediction_source: 'model', is_fallback: false } : { error: 'Model unavailable.' }));
+      return;
+    }
+    response.writeHead(404);
+    response.end();
+  });
+  await new Promise((resolve) => mockMlService.listen(mlPort, '127.0.0.1', resolve));
+
+  const server = spawn(process.execPath, ['server.js'], {
+    cwd: path.resolve(import.meta.dirname, '..'),
+    env: {
+      ...process.env,
+      NODE_ENV: 'test',
+      DATABASE_URL: urlForSchema(testDatabaseUrl, schema),
+      PORT: String(port),
+      GEMINI_API_KEY: '',
+      GEMINI_API_KEY_COACH: '',
+      GEMINI_API_KEY_GOALS: '',
+      GEMINI_API_KEY_ASSISTANT: '',
+      ML_SERVICE_API_KEY: 'dev-only-local-key',
+      ML_SERVICE_URL: `http://127.0.0.1:${mlPort}`,
+      WEB_PUSH_VAPID_PUBLIC_KEY: 'test-vapid-public-key',
+      WEB_PUSH_VAPID_PRIVATE_KEY: 'test-vapid-private-key',
+      WEB_PUSH_VAPID_SUBJECT: 'mailto:test@example.com',
+      // "Configured" SMTP that refuses connections: exercises verification and failure paths without sending mail.
+      SMTP_HOST: '127.0.0.1',
+      SMTP_PORT: String(deadSmtpPort),
+      SMTP_SECURE: 'false',
+      SMTP_USER: 'mailer@habitai.test',
+      SMTP_PASSWORD: 'not-a-real-password',
+    },
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  let serverErrors = '';
+  server.stderr.on('data', (chunk) => { serverErrors += chunk; });
+  const serverExit = new Promise((resolve) => server.once('exit', resolve));
+
   t.after(async () => {
     server.kill();
     await serverExit;
     await new Promise((resolve) => mockMlService.close(resolve));
+    await db.end();
+    await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await admin.end();
+  });
+
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const deadline = Date.now() + 90_000;
+  for (;;) {
     try {
-      rmSync(databaseDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-    } catch (error) {
-      if (error?.code !== 'EPERM') throw error;
+      if ((await fetch(`${baseUrl}/healthz`)).ok) break;
+    } catch {
+      // still starting
     }
-  });
-
-  const registration = await request('/api/auth/register', {
-    method: 'POST',
-    headers: { Origin: 'http://localhost:8081' },
-    body: JSON.stringify({ fullName: 'Test User', username: 'test_user', email: 'test@example.com', password: 'Violet!Orbit7!Cedar2!Mint', dateOfBirth: 'May 14, 1998', gender: 'Prefer not to say' }),
-  });
-  assert.equal(registration.response.status, 201, JSON.stringify(registration.body));
-  assert.equal(registration.response.headers.get('access-control-allow-origin'), 'http://localhost:8081');
-  assert.equal(registration.body.ok, true);
-  assert.equal(registration.body.user.dateOfBirth, 'May 14, 1998');
-  assert.equal(registration.body.user.gender, 'Prefer not to say');
-  assert.equal(registration.body.user.about, '');
-
-  const duplicateUsernameRegistration = await request('/api/auth/register', {
-    method: 'POST',
-    body: JSON.stringify({ fullName: 'Another User', username: 'TEST_USER', email: 'another@example.com', password: 'Amber!River8!Stone3!Leaf', dateOfBirth: 'January 1, 1990', gender: 'Prefer not to say' }),
-  });
-  assert.equal(duplicateUsernameRegistration.response.status, 409);
-  assert.equal(duplicateUsernameRegistration.body.message, 'This username is already in use.');
-
-  const login = await request('/api/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ email: 'test@example.com', password: 'Violet!Orbit7!Cedar2!Mint', device: 'Test Phone (Android 15)' }),
-  });
-  assert.equal(login.response.status, 200);
-  const token = login.body.token;
-  assert.ok(token);
-  const authHeaders = { Authorization: `Bearer ${token}` };
-
-  const pushPublicKey = await request('/api/web-push/public-key');
-  assert.equal(pushPublicKey.response.status, 200);
-  assert.equal(pushPublicKey.body.publicKey, 'test-vapid-public-key');
-
-  const pushSubscription = {
-    endpoint: 'https://fcm.googleapis.com/fcm/send/test-endpoint',
-    expirationTime: null,
-    keys: { p256dh: 'test-p256dh-key', auth: 'test-auth-key' },
-  };
-  const anonymousPushSubscription = await request('/api/web-push/subscriptions', {
-    method: 'POST',
-    body: JSON.stringify({ subscription: pushSubscription, timeZone: 'UTC' }),
-  });
-  assert.equal(anonymousPushSubscription.response.status, 401);
-
-  const savedPushSubscription = await request('/api/web-push/subscriptions', {
-    method: 'POST',
-    headers: authHeaders,
-    body: JSON.stringify({ subscription: pushSubscription, timeZone: 'America/Los_Angeles' }),
-  });
-  assert.equal(savedPushSubscription.response.status, 200, JSON.stringify(savedPushSubscription.body));
-
-  const snoozeState = {
-    avatarImage: null,
-    profile: { fullName: 'Test User', email: 'test@example.com' },
-    preferences: { notificationsEnabled: true },
-    habits: [{ id: 'habit-snooze', label: 'Stretch', reminderEnabled: true }],
-    points: 0,
-    tokens: 0,
-    tokenHistory: [],
-    darkModeOverride: null,
-    ringInterval: 15,
-    snoozeFrequency: '2 times',
-    goals: [],
-  };
-  const savedSnoozeState = await request('/api/app-state', {
-    method: 'PUT',
-    headers: authHeaders,
-    body: JSON.stringify(snoozeState),
-  });
-  assert.equal(savedSnoozeState.response.status, 200, JSON.stringify(savedSnoozeState.body));
-  const snoozeToken = crypto.randomBytes(32).toString('base64url');
-  const snoozeDatabase = new Database(path.join(databaseDirectory, 'test.sqlite'));
-  const snoozeSubscriptionId = snoozeDatabase.prepare('SELECT id FROM web_push_subscriptions WHERE endpoint=?').get(pushSubscription.endpoint).id;
-  snoozeDatabase.prepare(`
-    INSERT INTO web_push_snooze_tokens(token_hash,subscription_id,habit_id,snooze_count,expires_at,created_at)
-    VALUES(?,?,?,?,?,?)
-  `).run(crypto.createHash('sha256').update(snoozeToken).digest('hex'), snoozeSubscriptionId, 'habit-snooze', 0, Date.now() + 60000, Date.now());
-  snoozeDatabase.close();
-
-  const acceptedSnooze = await request('/api/web-push/snooze', {
-    method: 'POST',
-    body: JSON.stringify({ token: snoozeToken }),
-  });
-  assert.equal(acceptedSnooze.response.status, 200, JSON.stringify(acceptedSnooze.body));
-  const replayedSnooze = await request('/api/web-push/snooze', {
-    method: 'POST',
-    body: JSON.stringify({ token: snoozeToken }),
-  });
-  assert.equal(replayedSnooze.response.status, 410);
-  const queuedSnoozes = new Database(path.join(databaseDirectory, 'test.sqlite'))
-    .prepare('SELECT COUNT(*) AS count FROM web_push_snooze_queue').get().count;
-  assert.equal(queuedSnoozes, 1);
-
-  const invalidPushSubscription = await request('/api/web-push/subscriptions', {
-    method: 'POST',
-    headers: authHeaders,
-    body: JSON.stringify({ subscription: { ...pushSubscription, endpoint: 'https://attacker.example/push' }, timeZone: 'UTC' }),
-  });
-  assert.equal(invalidPushSubscription.response.status, 400);
-
-  const removePushSubscription = await request('/api/web-push/subscriptions', {
-    method: 'DELETE',
-    headers: authHeaders,
-    body: JSON.stringify({ endpoint: pushSubscription.endpoint }),
-  });
-  assert.equal(removePushSubscription.response.status, 200);
-
-  const currentUser = await request('/api/auth/me', { headers: authHeaders });
-  assert.equal(currentUser.response.status, 200);
-  assert.equal(currentUser.body.user.dateOfBirth, 'May 14, 1998');
-  assert.equal(currentUser.body.user.gender, 'Prefer not to say');
-  assert.equal(currentUser.body.user.about, '');
-
-  const queryTokenUser = await request(`/api/auth/me?token=${encodeURIComponent(token)}`);
-  assert.equal(queryTokenUser.response.status, 401);
-  const bodyTokenUser = await request('/api/leaderboard/sync', {
-    method: 'POST',
-    body: JSON.stringify({ token, name: 'Test User', points: 0 }),
-  });
-  assert.equal(bodyTokenUser.response.status, 401);
-  const anonymousLeaderboard = await request('/api/leaderboard');
-  assert.equal(anonymousLeaderboard.response.status, 401);
-
-  const expiredToken = crypto.randomBytes(32).toString('hex');
-  const testDatabase = new Database(path.join(databaseDirectory, 'test.sqlite'));
-  testDatabase.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
-    .run(crypto.createHash('sha256').update(expiredToken).digest('hex'), login.body.user.id, 0);
-  testDatabase.close();
-  const expiredSession = await request('/api/auth/me', { headers: { Authorization: `Bearer ${expiredToken}` } });
-  assert.equal(expiredSession.response.status, 401, JSON.stringify(expiredSession.body));
-
-  const malformedState = await request('/api/app-state', {
-    method: 'PUT',
-    headers: authHeaders,
-    body: JSON.stringify({ unexpected: true }),
-  });
-  assert.equal(malformedState.response.status, 400);
-
-  const predictionFailure = await request('/api/habit/predict', {
-    method: 'POST',
-    headers: authHeaders,
-    body: JSON.stringify({ habit_name: 'Workout' }),
-  });
-  assert.equal(predictionFailure.response.status, 503);
-
-  mlServiceReady = true;
-  const predictionSuccess = await request('/api/habit/predict', {
-    method: 'POST',
-    headers: authHeaders,
-    body: JSON.stringify({ habit_name: 'Workout' }),
-  });
-  assert.equal(predictionSuccess.response.status, 200);
-  assert.equal(predictionSuccess.body.prediction_source, 'model');
-  assert.equal(predictionSuccess.body.is_fallback, false);
-
-  const assistantUnavailable = await request('/api/insights/assistant', {
-    method: 'POST',
-    headers: authHeaders,
-    body: JSON.stringify({ question: 'What should I focus on?' }),
-  });
-  assert.equal(assistantUnavailable.response.status, 503);
-
-  const forgotPasswordWithoutEmailConfig = await request('/api/auth/forgot-password', {
-    method: 'POST',
-    body: JSON.stringify({ email: 'test@example.com' }),
-  });
-  assert.equal(forgotPasswordWithoutEmailConfig.response.status, 503, JSON.stringify(forgotPasswordWithoutEmailConfig.body));
-  assert.equal(forgotPasswordWithoutEmailConfig.body.ok, false);
-  assert.equal(Object.hasOwn(forgotPasswordWithoutEmailConfig.body, 'otp'), false);
-  assert.match(forgotPasswordWithoutEmailConfig.body.message, /SMTP|email.*config|Gmail/i);
-
-  const resetDatabase = new Database(path.join(databaseDirectory, 'test.sqlite'));
-  resetDatabase.prepare(`
-    INSERT INTO password_reset_requests (email, otp_hash, expires_at, attempts, verified_at, created_at)
-    VALUES (?, ?, ?, 0, ?, ?)
-  `).run('test@example.com', bcrypt.hashSync('123456', 4), Date.now() + 300000, Date.now(), Date.now());
-  resetDatabase.close();
-
-  for (let attempt = 1; attempt <= 5; attempt += 1) {
-    const resetAttempt = await request('/api/auth/reset-password', {
-      method: 'POST',
-      body: JSON.stringify({ email: 'test@example.com', otp: '654321', newPassword: 'Amber!River8!Stone3!Leaf' }),
-    });
-    assert.equal(resetAttempt.response.status, attempt === 5 ? 429 : 401);
+    if (Date.now() > deadline) throw new Error(`Server did not start:\n${serverErrors}`);
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  const lockedReset = await request('/api/auth/reset-password', {
-    method: 'POST',
-    body: JSON.stringify({ email: 'test@example.com', otp: '123456', newPassword: 'Amber!River8!Stone3!Leaf' }),
+
+  async function request(pathname, options = {}) {
+    const response = await fetch(`${baseUrl}${pathname}`, { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) } });
+    const text = await response.text();
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      throw new Error(`Expected JSON from ${pathname}, received HTTP ${response.status}: ${text.slice(0, 120)}`);
+    }
+    return { response, body };
+  }
+  const setCode = async (table, key, code) => {
+    const hash = bcrypt.hashSync(code, 4);
+    if (table === 'email') {
+      await db.query(`INSERT INTO email_verification_codes(user_id, code_hash, expires_at, attempts, created_at) VALUES ($1, $2, $3, 0, 0)
+        ON CONFLICT (user_id) DO UPDATE SET code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0`, [key, hash, Date.now() + 600000]);
+    } else {
+      await db.query(`INSERT INTO password_reset_requests(email, otp_hash, expires_at, attempts, verified_at, created_at) VALUES ($1, $2, $3, 0, NULL, 0)
+        ON CONFLICT (email) DO UPDATE SET otp_hash = excluded.otp_hash, expires_at = excluded.expires_at, attempts = 0, verified_at = NULL`, [key, hash, Date.now() + 600000]);
+    }
+  };
+
+  const password = 'Violet!Orbit7!Cedar2!Mint';
+  const registration = { fullName: 'Test User', username: 'test_user', email: 'test@example.com', password, dateOfBirth: 'May 14, 1998', gender: 'Prefer not to say' };
+  let token;
+  let userId;
+  let authHeaders;
+
+  await t.test('registration requires privacy consent and email verification', async () => {
+    const noConsent = await request('/api/auth/register', { method: 'POST', body: JSON.stringify(registration) });
+    assert.equal(noConsent.response.status, 400);
+    assert.match(noConsent.body.message, /Privacy Notice/);
+
+    const created = await request('/api/auth/register', { method: 'POST', headers: { Origin: 'http://localhost:8081' }, body: JSON.stringify({ ...registration, privacyConsent: true }) });
+    assert.equal(created.response.status, 201, JSON.stringify(created.body));
+    assert.equal(created.response.headers.get('access-control-allow-origin'), 'http://localhost:8081');
+    assert.equal(created.body.user.emailVerified, false);
+    assert.ok(created.body.user.privacyConsentAt);
+    token = created.body.token;
+    userId = created.body.user.id;
+    authHeaders = { Authorization: `Bearer ${token}` };
+
+    const duplicate = await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, email: 'another@example.com', username: 'TEST_USER', privacyConsent: true }) });
+    assert.equal(duplicate.response.status, 409);
+    assert.equal(duplicate.body.message, 'This username is already in use.');
+
+    const blocked = await request('/api/app-state', { headers: authHeaders });
+    assert.equal(blocked.response.status, 403);
+    assert.equal(blocked.body.code, 'EMAIL_NOT_VERIFIED');
+    assert.equal((await request('/api/auth/me', { headers: authHeaders })).response.status, 200);
+
+    await setCode('email', userId, '424242');
+    const wrong = await request('/api/auth/email/verify', { method: 'POST', headers: authHeaders, body: JSON.stringify({ otp: '111111' }) });
+    assert.equal(wrong.response.status, 401);
+    assert.equal(wrong.body.attemptsLeft, 4);
+    const right = await request('/api/auth/email/verify', { method: 'POST', headers: authHeaders, body: JSON.stringify({ otp: '424242' }) });
+    assert.equal(right.response.status, 200, JSON.stringify(right.body));
+    assert.equal(right.body.user.emailVerified, true);
   });
-  assert.equal(lockedReset.response.status, 429);
 
-  const profileUpdate = await request('/api/auth/profile', {
-    method: 'PUT',
-    headers: authHeaders,
-    body: JSON.stringify({ fullName: 'Updated User', username: 'updated_user', email: 'updated@example.com', dateOfBirth: 'June 1, 1997', gender: 'Female', about: 'Updated profile.' }),
+  await t.test('sessions, tokens in URLs/bodies and expired sessions are rejected', async () => {
+    const login = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'test@example.com', password, device: 'Test Phone (Android 15)' }) });
+    assert.equal(login.response.status, 200);
+    token = login.body.token;
+    authHeaders = { Authorization: `Bearer ${token}` };
+    assert.equal((await request(`/api/auth/me?token=${encodeURIComponent(token)}`)).response.status, 401);
+    assert.equal((await request('/api/leaderboard/sync', { method: 'POST', body: JSON.stringify({ token }) })).response.status, 401);
+    assert.equal((await request('/api/leaderboard')).response.status, 401);
+    const expiredToken = crypto.randomBytes(32).toString('hex');
+    await db.query('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, 0)', [crypto.createHash('sha256').update(expiredToken).digest('hex'), userId]);
+    assert.equal((await request('/api/auth/me', { headers: { Authorization: `Bearer ${expiredToken}` } })).response.status, 401);
+    assert.equal((await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ unexpected: true }) })).response.status, 400);
   });
-  assert.equal(profileUpdate.response.status, 200, JSON.stringify(profileUpdate.body));
-  assert.equal(profileUpdate.body.user.email, 'updated@example.com');
-  assert.equal(profileUpdate.body.user.username, 'updated_user');
 
-  const updatedUser = await request('/api/auth/me', { headers: authHeaders });
-  assert.equal(updatedUser.body.user.fullName, 'Updated User');
-  assert.equal(updatedUser.body.user.email, 'updated@example.com');
-
-  const activity = await request('/api/auth/login-activity', { headers: authHeaders });
-  assert.equal(activity.response.status, 200);
-  const latestActivity = activity.body.activities.find((entry) => entry.device === 'Test Phone (Android 15)');
-  assert.ok(latestActivity, JSON.stringify(activity.body.activities));
-  assert.equal(typeof latestActivity.createdAt, 'number');
-  assert.ok(latestActivity.loginDateTime);
-  assert.equal(Object.hasOwn(latestActivity, 'ipAddress'), false);
-  const loginActivityColumns = new Database(path.join(databaseDirectory, 'test.sqlite'))
-    .prepare('PRAGMA table_info(login_activity)').all();
-  assert.equal(loginActivityColumns.some((column) => column.name === 'ip_address'), false);
-  assert.equal(loginActivityColumns.some((column) => column.name === 'login_date_time'), true);
-
-  const sync = await request('/api/leaderboard/sync', {
-    method: 'POST',
-    headers: authHeaders,
-    body: JSON.stringify({ avatar: 'T' }),
+  await t.test('web push subscriptions and one-time snooze tokens', async () => {
+    const pushSubscription = { endpoint: 'https://fcm.googleapis.com/fcm/send/test-endpoint', expirationTime: null, keys: { p256dh: 'test-p256dh-key', auth: 'test-auth-key' } };
+    assert.equal((await request('/api/web-push/public-key')).body.publicKey, 'test-vapid-public-key');
+    assert.equal((await request('/api/web-push/subscriptions', { method: 'POST', body: JSON.stringify({ subscription: pushSubscription, timeZone: 'UTC' }) })).response.status, 401);
+    assert.equal((await request('/api/web-push/subscriptions', { method: 'POST', headers: authHeaders, body: JSON.stringify({ subscription: pushSubscription, timeZone: 'America/Los_Angeles' }) })).response.status, 200);
+    const snoozeState = { avatarImage: null, profile: { fullName: 'Test User' }, preferences: { notificationsEnabled: true }, habits: [{ id: 'habit-snooze', label: 'Stretch', reminderEnabled: true }], points: 0, tokens: 0, tokenHistory: [], darkModeOverride: null, ringInterval: 15, snoozeFrequency: '2 times', goals: [] };
+    assert.equal((await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify(snoozeState) })).response.status, 200);
+    const snoozeToken = crypto.randomBytes(32).toString('base64url');
+    const subscriptionId = (await db.query('SELECT id FROM web_push_subscriptions WHERE endpoint=$1', [pushSubscription.endpoint])).rows[0].id;
+    await db.query('INSERT INTO web_push_snooze_tokens(token_hash,subscription_id,habit_id,snooze_count,expires_at,created_at) VALUES($1,$2,$3,0,$4,$5)', [crypto.createHash('sha256').update(snoozeToken).digest('hex'), subscriptionId, 'habit-snooze', Date.now() + 60000, Date.now()]);
+    assert.equal((await request('/api/web-push/snooze', { method: 'POST', body: JSON.stringify({ token: snoozeToken }) })).response.status, 200);
+    assert.equal((await request('/api/web-push/snooze', { method: 'POST', body: JSON.stringify({ token: snoozeToken }) })).response.status, 410);
+    assert.equal((await db.query('SELECT COUNT(*)::int AS count FROM web_push_snooze_queue')).rows[0].count, 1);
+    assert.equal((await request('/api/web-push/subscriptions', { method: 'POST', headers: authHeaders, body: JSON.stringify({ subscription: { ...pushSubscription, endpoint: 'https://attacker.example/push' }, timeZone: 'UTC' }) })).response.status, 400);
+    assert.equal((await request('/api/web-push/subscriptions', { method: 'DELETE', headers: authHeaders, body: JSON.stringify({ endpoint: pushSubscription.endpoint }) })).response.status, 200);
   });
-  assert.equal(sync.response.status, 200);
 
-  const secondSync = await request('/api/leaderboard/sync', {
-    method: 'POST',
-    headers: authHeaders,
-    body: JSON.stringify({ avatar: 'T' }),
+  await t.test('ML proxy, AI without keys, and password reset protections', async () => {
+    assert.equal((await request('/api/habit/predict', { method: 'POST', headers: authHeaders, body: JSON.stringify({ habit_name: 'Workout' }) })).response.status, 503);
+    mlServiceReady = true;
+    const prediction = await request('/api/habit/predict', { method: 'POST', headers: authHeaders, body: JSON.stringify({ habit_name: 'Workout' }) });
+    assert.equal(prediction.response.status, 200);
+    assert.equal(prediction.body.prediction_source, 'model');
+    assert.equal((await request('/api/insights/assistant', { method: 'POST', headers: authHeaders, body: JSON.stringify({ question: 'What should I focus on?', mode: 'support' }) })).response.status, 503);
+
+    const unknown = await request('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email: 'nobody@example.com' }) });
+    assert.equal(unknown.response.status, 200);
+    assert.match(unknown.body.message, /If an account exists/);
+    const cooldown = await request('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email: 'nobody@example.com' }) });
+    assert.equal(cooldown.response.status, 429);
+    assert.ok(cooldown.body.retryAfterSeconds > 0);
+    const smtpDown = await request('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email: 'test@example.com' }) });
+    assert.equal(smtpDown.response.status, 503);
+    assert.doesNotMatch(smtpDown.body.message, /SMTP|Gmail|password/i, 'no configuration details reach the client');
+
+    await setCode('reset', 'test@example.com', '123456');
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      const wrong = await request('/api/auth/verify-otp', { method: 'POST', body: JSON.stringify({ email: 'test@example.com', otp: '654321' }) });
+      assert.equal(wrong.response.status, attempt === 5 ? 429 : 401);
+    }
+    assert.equal((await request('/api/auth/verify-otp', { method: 'POST', body: JSON.stringify({ email: 'test@example.com', otp: '123456' }) })).response.status, 404, 'locked codes are discarded');
   });
-  assert.equal(secondSync.response.status, 200);
 
-  const completionDate = new Date().toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
   const appState = {
     avatarImage: null,
-    profile: { fullName: 'Test User', email: 'test@example.com' },
+    profile: { fullName: 'Test User' },
     preferences: { language: 'English' },
-    habits: [{ id: 'habit-1', completionDates: [] }],
+    habits: [{ id: 'habit-1', label: 'Read', frequency: 'Daily', startDate: '2026-01-01', completionDates: [] }],
     points: 42,
-    tokens: 5,
-    tokenHistory: [],
+    tokens: 999,
+    tokenHistory: [{ id: 'fake', amount: 999, label: 'Free tokens', date: today }],
     darkModeOverride: null,
     ringInterval: 30,
     snoozeFrequency: 'Once',
     goals: [{ id: 'goal-1', title: 'Read more', progress: 25 }],
   };
-  const stateSave = await request('/api/app-state', {
-    method: 'PUT',
-    headers: authHeaders,
-    body: JSON.stringify(appState),
+  let stateUpdatedAt;
+
+  await t.test('points and tokens are owned by the server', async () => {
+    const saved = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify(appState) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    assert.equal(saved.body.state.points, 0, 'client points are ignored');
+    assert.equal(saved.body.state.tokens, 0, 'client tokens are ignored');
+    assert.equal(saved.body.state.tokenHistory.length, 0);
+    stateUpdatedAt = saved.body.updatedAt;
+
+    const coach = await request('/api/insights/assistant', { method: 'POST', headers: authHeaders, body: JSON.stringify({ question: 'Help', mode: 'coach' }) });
+    assert.equal(coach.response.status, 503, 'AI unavailable without a key; no tokens are spent');
+
+    const redeem = await request('/api/rewards/redeem', { method: 'POST', headers: authHeaders, body: JSON.stringify({ rewardId: 'plant-buddy', rewardName: 'Plant Buddy', tokenCost: 200 }) });
+    assert.equal(redeem.response.status, 409);
   });
-  assert.equal(stateSave.response.status, 200, JSON.stringify(stateSave.body));
 
-  const duplicateHabitState = normalizeAppState({
-    ...appState,
-    habits: [
-      { ...appState.habits[0], id: 'habit-1', completionDates: [completionDate] },
-      { ...appState.habits[0], id: 'habit-1', completionDates: [completionDate] },
-    ],
+  await t.test('check-ins award tokens, compute streaks and survive stale devices', async () => {
+    const done = await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'habit-1', date: today, completed: true, timeZone: 'UTC' }) });
+    assert.equal(done.response.status, 200, JSON.stringify(done.body));
+    assert.equal(done.body.points, 20);
+    assert.equal(done.body.tokens, 5);
+    assert.equal(done.body.tokenHistory[0].label, 'Completed Read');
+    assert.equal(done.body.habit.streak, 1);
+
+    const repeat = await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'habit-1', date: today, completed: true, timeZone: 'UTC' }) });
+    assert.equal(repeat.body.tokens, 5, 'the same check-in is only rewarded once');
+
+    const stale = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...appState, preferences: { language: 'Filipino' } }) });
+    assert.equal(stale.response.status, 200);
+    assert.deepEqual(stale.body.state.habits[0].completionDates, [today], 'a device without the check-in cannot erase it');
+
+    const undo = await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'habit-1', date: today, completed: false, timeZone: 'UTC' }) });
+    assert.equal(undo.body.tokens, 0);
+    assert.equal(undo.body.points, 0);
+    assert.equal(undo.body.habit.streak, 0);
+
+    const offline = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], completionDates: [today] }] }) });
+    assert.deepEqual(offline.body.state.habits[0].completionDates, [today], 'offline check-ins from a synced state are kept');
+    assert.equal(offline.body.state.tokens, 5);
+    stateUpdatedAt = offline.body.updatedAt;
+
+    const unchanged = await request(`/api/app-state?since=${stateUpdatedAt}`, { headers: authHeaders });
+    assert.equal(unchanged.body.unchanged, true);
+    assert.equal(normalizeAppState({ habits: [{ id: 'a' }, { id: 'a' }] }).habits.length, 1);
   });
-  assert.equal(duplicateHabitState.habits.length, 1);
 
-  const completion = await request('/api/habit-completions', {
-    method: 'PUT',
-    headers: authHeaders,
-    body: JSON.stringify({ habitId: 'habit-1', date: completionDate, completed: true, timeZone: 'UTC' }),
+  await t.test('achievement notifications keep their read state', async () => {
+    const notes = await request('/api/notifications', { headers: authHeaders });
+    const firstHabit = notes.body.notifications.find((note) => note.title === 'First Habit');
+    assert.ok(firstHabit, JSON.stringify(notes.body));
+    await request(`/api/notifications/${encodeURIComponent(firstHabit.id)}`, { method: 'PATCH', headers: authHeaders, body: JSON.stringify({ read: true }) });
+    const latest = await request('/api/app-state', { headers: authHeaders });
+    await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...appState, ringInterval: 45, baseUpdatedAt: latest.body.updatedAt, baseState: latest.body.state }) });
+    const after = await request('/api/notifications', { headers: authHeaders });
+    assert.ok(after.body.notifications.find((note) => note.id === firstHabit.id).readAt);
   });
-  assert.equal(completion.response.status, 200, JSON.stringify(completion.body));
-  assert.equal(completion.body.points, 20);
-  assert.deepEqual(completion.body.completions, [{ habitId: 'habit-1', date: completionDate }]);
 
-  const persistedState = await request('/api/app-state', { headers: authHeaders });
-  assert.equal(persistedState.response.status, 200);
-  assert.equal(Array.isArray(persistedState.body.state.habits), true);
-  assert.deepEqual(persistedState.body.state.habits[0].completionDates, [completionDate]);
+  await t.test('leaderboards hide full names and respect opt-out', async () => {
+    const second = await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, fullName: 'Second Student', username: 'second_user', email: 'second@example.com', password: 'Silver!Meadow8!Cloud3!Pine', privacyConsent: true }) });
+    await db.query('UPDATE users SET email_verified_at = 1 WHERE email = $1', ['second@example.com']);
+    const secondHeaders = { Authorization: `Bearer ${second.body.token}` };
+    await request('/api/app-state', { method: 'PUT', headers: secondHeaders, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], label: 'Second user habit' }] }) });
+    const crossUser = await request('/api/habit-completions', { method: 'PUT', headers: secondHeaders, body: JSON.stringify({ habitId: 'habit-1', date: today, completed: true }) });
+    assert.equal(crossUser.body.points, 20, 'habit ids are scoped per user');
 
-  const verifiedLeaderboardSync = await request('/api/leaderboard/sync', {
-    method: 'POST',
-    headers: authHeaders,
-    body: JSON.stringify({ avatar: 'T' }),
+    const board = await request('/api/leaderboard?period=All%20Time', { headers: authHeaders });
+    const names = board.body.leaders.map((leader) => leader.name);
+    assert.ok(names.includes('Test U. (You)'), names.join(', '));
+    assert.ok(names.includes('Second S.'), names.join(', '));
+    assert.ok(!names.some((name) => name.includes('Student') && name.includes('Second Student')));
+
+    await request('/api/app-state', { method: 'PUT', headers: secondHeaders, body: JSON.stringify({ ...appState, preferences: { showOnLeaderboard: false }, habits: [{ ...appState.habits[0], label: 'Second user habit' }] }) });
+    const hidden = await request('/api/leaderboard?period=All%20Time', { headers: authHeaders });
+    assert.ok(!hidden.body.leaders.some((leader) => leader.name.startsWith('Second')), 'opted-out students are hidden from others');
+    const self = await request('/api/leaderboard?period=All%20Time', { headers: secondHeaders });
+    assert.ok(self.body.leaders.some((leader) => leader.isYou), 'but still see themselves');
   });
-  assert.equal(verifiedLeaderboardSync.response.status, 200);
 
-  const expectedPersistedState = {
-    ...appState,
-    habits: [{
-      ...appState.habits[0],
-      completionTimeZone: 'UTC',
-      completionDates: [completionDate],
-      done: true,
-      progress: 100,
-      total: '1/1',
-    }],
-  };
-  const stateLoad = await request('/api/app-state', { headers: authHeaders });
-  assert.equal(stateLoad.response.status, 200);
-  assert.deepEqual(stateLoad.body.state, expectedPersistedState);
+  await t.test('issue reports store attachments in the database and validate content', async () => {
+    const report = await request('/api/support/reports', { method: 'POST', headers: authHeaders, body: JSON.stringify({ topic: 'Other', timing: 'Today', description: 'The report flow works.' }) });
+    assert.equal(report.response.status, 201, JSON.stringify(report.body));
+    const invalid = new FormData();
+    invalid.append('topic', 'Other');
+    invalid.append('timing', 'Today');
+    invalid.append('description', 'Invalid attachment should be rejected.');
+    invalid.append('attachment', new Blob(['not a PNG']), 'evidence.png');
+    assert.equal((await fetch(`${baseUrl}/api/support/reports`, { method: 'POST', headers: authHeaders, body: invalid })).status, 400);
+    const valid = new FormData();
+    valid.append('topic', 'Other');
+    valid.append('timing', 'Today');
+    valid.append('description', 'Valid attachment should be stored.');
+    valid.append('attachment', new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], { type: 'image/png' }), 'evidence.png');
+    assert.equal((await fetch(`${baseUrl}/api/support/reports`, { method: 'POST', headers: authHeaders, body: valid })).status, 201);
+    const stored = (await db.query('SELECT attachment_data AS data FROM issue_reports WHERE description = $1', ['Valid attachment should be stored.'])).rows[0];
+    assert.deepEqual(stored.data, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
 
-  const secondRegistration = await request('/api/auth/register', {
-    method: 'POST',
-    body: JSON.stringify({ fullName: 'Second User', username: 'second_user', email: 'second@example.com', password: 'Silver!Meadow8!Cloud3!Pine', dateOfBirth: 'May 14, 1998', gender: 'Prefer not to say' }),
+    const { pruneIssueAttachments } = await import('../services/retention.js');
+    assert.equal(await pruneIssueAttachments(db), 0, 'an open report keeps its attachment');
+    const longAgo = Date.now() - 31 * 24 * 60 * 60 * 1000;
+    await db.query("UPDATE issue_reports SET status = 'resolved', updated_at = $1 WHERE description = $2", [longAgo, 'Valid attachment should be stored.']);
+    assert.equal(await pruneIssueAttachments(db), 1, 'a report resolved over 30 days ago loses its attachment');
+    const pruned = (await db.query('SELECT attachment_name AS name, attachment_data AS data FROM issue_reports WHERE description = $1', ['Valid attachment should be stored.'])).rows[0];
+    assert.equal(pruned.data, null);
+    assert.ok(pruned.name, 'the file name is kept');
   });
-  assert.equal(secondRegistration.response.status, 201, JSON.stringify(secondRegistration.body));
-  const secondAuthHeaders = { Authorization: `Bearer ${secondRegistration.body.token}` };
-  const secondUserAppState = {
-    ...appState,
-    profile: { fullName: 'Second User', email: 'second@example.com' },
-    habits: [{ ...appState.habits[0], label: 'Second user habit' }],
-    goals: [{ ...appState.goals[0], title: 'Second user goal' }],
-  };
-  const secondUserStateSave = await request('/api/app-state', {
-    method: 'PUT',
-    headers: secondAuthHeaders,
-    body: JSON.stringify(secondUserAppState),
-  });
-  assert.equal(secondUserStateSave.response.status, 200, JSON.stringify(secondUserStateSave.body));
 
-  const crossUserCompletion = await request('/api/habit-completions', {
-    method: 'PUT',
-    headers: secondAuthHeaders,
-    body: JSON.stringify({ habitId: 'habit-1', date: completionDate, completed: true }),
-  });
-  assert.equal(crossUserCompletion.response.status, 200, JSON.stringify(crossUserCompletion.body));
-  assert.equal(crossUserCompletion.body.points, 20);
-  const firstUserStateAfterCrossAccess = await request('/api/app-state', { headers: authHeaders });
-  assert.deepEqual(firstUserStateAfterCrossAccess.body.state, expectedPersistedState);
-  const scopedHabitRows = new Database(path.join(databaseDirectory, 'test.sqlite'))
-    .prepare('SELECT user_id AS userId, label FROM habits WHERE id LIKE ? ORDER BY user_id')
-    .all('%:habit:habit-1');
-  assert.equal(scopedHabitRows.length, 2);
-  assert.deepEqual(new Set(scopedHabitRows.map((row) => row.label)), new Set(['habit-1', 'Second user habit']));
+  await t.test('profile, login activity, multi-device merge and account deletion', async () => {
+    const profile = await request('/api/auth/profile', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ fullName: 'Updated User', username: 'updated_user', email: 'updated@example.com', dateOfBirth: 'June 1, 1997', gender: 'Female', about: 'Updated profile.' }) });
+    assert.equal(profile.response.status, 200, JSON.stringify(profile.body));
+    assert.equal(profile.body.user.emailVerified, false, 'a new email must be confirmed again');
+    await db.query('UPDATE users SET email_verified_at = 1 WHERE id = $1', [userId]);
 
-  const report = await request('/api/support/reports', {
-    method: 'POST',
-    headers: authHeaders,
-    body: JSON.stringify({ topic: 'Other', timing: 'Today', description: 'The report flow works.' }),
-  });
-  assert.equal(report.response.status, 201, JSON.stringify(report.body));
-  assert.equal(report.body.ok, true);
-  assert.equal(report.body.forwarded, false);
+    const activity = await request('/api/auth/login-activity', { headers: authHeaders });
+    const entry = activity.body.activities.find((item) => item.device === 'Test Phone (Android 15)');
+    assert.ok(entry?.loginDateTime);
+    const columns = (await db.query(`SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'login_activity'`, [schema])).rows.map((row) => row.column_name);
+    assert.ok(!columns.includes('ip_address'));
 
-  const invalidAttachment = new FormData();
-  invalidAttachment.append('topic', 'Other');
-  invalidAttachment.append('timing', 'Today');
-  invalidAttachment.append('description', 'Invalid attachment should be rejected.');
-  invalidAttachment.append('attachment', new Blob(['not a PNG']), 'evidence.png');
-  const invalidAttachmentResponse = await fetch(`${baseUrl}/api/support/reports`, {
-    method: 'POST',
-    headers: authHeaders,
-    body: invalidAttachment,
-  });
-  assert.equal(invalidAttachmentResponse.status, 400);
+    const base = await request('/api/app-state', { headers: authHeaders });
+    const deviceOne = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...base.body.state, preferences: { language: 'Tagalog' }, baseUpdatedAt: base.body.updatedAt, baseState: base.body.state }) });
+    assert.equal(deviceOne.response.status, 200);
+    const deviceTwo = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...base.body.state, ringInterval: 20, baseUpdatedAt: base.body.updatedAt, baseState: base.body.state }) });
+    assert.equal(deviceTwo.body.merged, true);
+    assert.equal(deviceTwo.body.state.preferences.language, 'Tagalog');
+    assert.equal(deviceTwo.body.state.ringInterval, 20);
+    const snapshots = (await db.query('SELECT COUNT(*)::int AS count FROM user_app_state WHERE user_id = $1', [userId])).rows[0].count;
+    assert.ok(snapshots <= 20, `snapshots are pruned (${snapshots})`);
 
-  const uploadDirectory = path.resolve(import.meta.dirname, '..', 'data', 'uploads');
-  const uploadsBeforeReport = readdirSync(uploadDirectory).sort();
-  const validAttachment = new FormData();
-  validAttachment.append('topic', 'Other');
-  validAttachment.append('timing', 'Today');
-  validAttachment.append('description', 'Valid attachment should be stored.');
-  validAttachment.append('attachment', new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], { type: 'image/png' }), 'evidence.png');
-  const validAttachmentResponse = await fetch(`${baseUrl}/api/support/reports`, {
-    method: 'POST',
-    headers: authHeaders,
-    body: validAttachment,
+    assert.equal((await request('/api/auth/account', { method: 'DELETE', headers: authHeaders, body: JSON.stringify({ currentPassword: password }) })).response.status, 200);
+    assert.equal((await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'updated@example.com', password }) })).response.status, 401);
   });
-  assert.equal(validAttachmentResponse.status, 201, await validAttachmentResponse.text());
-  const uploadedDatabase = new Database(path.join(databaseDirectory, 'test.sqlite'));
-  const uploadedReport = uploadedDatabase.prepare('SELECT attachment_uri AS attachmentUri, attachment_data AS attachmentData FROM issue_reports WHERE description = ?')
-    .get('Valid attachment should be stored.');
-  uploadedDatabase.close();
-  assert.equal(uploadedReport.attachmentUri, null);
-  assert.deepEqual(uploadedReport.attachmentData, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-  assert.deepEqual(readdirSync(uploadDirectory).sort(), uploadsBeforeReport);
-
-  const deviceOneState = { ...appState, preferences: { language: 'Tagalog' } };
-  const deviceOneSave = await request('/api/app-state', {
-    method: 'PUT',
-    headers: authHeaders,
-    body: JSON.stringify({ ...deviceOneState, baseUpdatedAt: stateSave.body.updatedAt, baseState: appState }),
-  });
-  assert.equal(deviceOneSave.response.status, 200);
-
-  const deviceTwoState = { ...appState, points: 62 };
-  const deviceTwoSave = await request('/api/app-state', {
-    method: 'PUT',
-    headers: authHeaders,
-    body: JSON.stringify({ ...deviceTwoState, baseUpdatedAt: stateSave.body.updatedAt, baseState: appState }),
-  });
-  assert.equal(deviceTwoSave.response.status, 200);
-  assert.equal(deviceTwoSave.body.merged, true);
-  assert.equal(deviceTwoSave.body.state.preferences.language, 'Tagalog');
-  assert.equal(deviceTwoSave.body.state.points, 62);
-  const stateDatabase = new Database(path.join(databaseDirectory, 'test.sqlite'));
-  const appStateRows = stateDatabase
-    .prepare('SELECT COUNT(*) AS count FROM user_app_state WHERE user_id = (SELECT id FROM users WHERE email = ?)')
-    .get('updated@example.com');
-  const normalizedCounts = stateDatabase
-    .prepare(`SELECT
-      (SELECT COUNT(*) FROM habits WHERE user_id = (SELECT id FROM users WHERE email = ?)) AS habits,
-      (SELECT COUNT(*) FROM goals WHERE user_id = (SELECT id FROM users WHERE email = ?)) AS goals`)
-    .get('updated@example.com', 'updated@example.com');
-  stateDatabase.close();
-  assert.equal(appStateRows.count, 5);
-  assert.equal(normalizedCounts.habits, 1);
-  assert.equal(normalizedCounts.goals, 1);
-
-  for (const period of ['This Week', 'This Month', 'All Time']) {
-    const leaderboard = await request(`/api/leaderboard?period=${encodeURIComponent(period)}`, { headers: authHeaders });
-    assert.equal(leaderboard.response.status, 200);
-    const updatedUserEntry = leaderboard.body.leaders.find((entry) => entry.name === 'Updated User');
-    assert.equal(updatedUserEntry?.points, 20);
-  }
-
-  const deletion = await request('/api/auth/account', {
-    method: 'DELETE',
-    headers: authHeaders,
-    body: JSON.stringify({ currentPassword: 'Violet!Orbit7!Cedar2!Mint' }),
-  });
-  assert.equal(deletion.response.status, 200);
-
-  const deletedLogin = await request('/api/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ email: 'updated@example.com', password: 'Violet!Orbit7!Cedar2!Mint' }),
-  });
-  assert.equal(deletedLogin.response.status, 401);
 });

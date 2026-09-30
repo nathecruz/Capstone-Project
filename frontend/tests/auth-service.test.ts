@@ -54,13 +54,13 @@ describe('auth service offline behavior', () => {
     }
   });
 
-  it('clears the session when the backend is unreachable', async () => {
+  it('keeps the cached session while the backend is unreachable (offline or waking up)', async () => {
     const cachedUser = { id: 'user-1', fullName: 'Test User', email: 'test@example.com' };
     jest.mocked(getCurrentSession).mockResolvedValue(cachedUser);
     jest.mocked(getSessionToken).mockResolvedValue('session-token');
     fetchMock.mockRejectedValue(new TypeError('Network request failed'));
 
-    await expect(getSession()).resolves.toBeNull();
+    await expect(getSession()).resolves.toEqual(cachedUser);
     expect(logoutUser).not.toHaveBeenCalled();
   });
 
@@ -157,6 +157,7 @@ describe('auth service offline behavior', () => {
       dateOfBirth: 'April 2, 2005',
       gender: 'Prefer not to say',
       region: 'Philippines',
+      privacyConsent: true,
     })).resolves.toEqual({
       ok: false,
       message: 'Registration is temporarily disabled.',

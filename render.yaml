@@ -42,24 +42,30 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
+      # Sender for OTP, verification and password emails. Use a project mailbox or a
+      # transactional provider (Brevo, Resend, Mailgun...), not a personal Gmail:
+      # Gmail caps sending at ~500 emails/day and signups now send a verification code.
+      # Set these in the Render dashboard; existing values are kept on Blueprint sync.
       - key: SMTP_HOST
-        value: smtp.gmail.com
+        sync: false
       - key: SMTP_PORT
-        value: "465"
+        sync: false
       - key: SMTP_SECURE
-        value: "true"
+        sync: false
       - key: SMTP_USER
-        value: adrielleestacio00@gmail.com
+        sync: false
       - key: SMTP_PASSWORD
         sync: false
       - key: SMTP_FROM
-        value: adrielleestacio00@gmail.com
+        sync: false
+      - key: REQUIRE_EMAIL_VERIFICATION
+        value: "true"
       - key: WEB_PUSH_VAPID_PUBLIC_KEY
         sync: false
       - key: WEB_PUSH_VAPID_PRIVATE_KEY
         sync: false
       - key: WEB_PUSH_VAPID_SUBJECT
-        value: mailto:adrielleestacio00@gmail.com
+        sync: false
 
   - type: cron
     name: habitai-web-push

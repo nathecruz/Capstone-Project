@@ -11,8 +11,8 @@ share one Neon PostgreSQL database:
 | ML service (`ml-service/`) | Python, FastAPI, scikit-learn, XGBoost | Render (Docker) | Habit completion / drop-out predictions |
 | Admin Panel (`../Admin Dashboard/`) | React + Vite, Express, `pg` | Separate web service | User, category and notification management; anonymized analytics |
 
-External services: **Neon** (PostgreSQL), **Google Gemini** (AI text), **Gmail SMTP**
-(verification codes and notices), **browser push services** (FCM, Apple, Mozilla).
+External services: **Neon** (PostgreSQL), **Google Gemini** (AI text), **SMTP** (a project
+mailbox or transactional provider for verification codes and notices), **browser push services** (FCM, Apple, Mozilla).
 
 ## 1. System context
 
@@ -26,7 +26,7 @@ flowchart LR
   admin --> db
   api -- prompts with DB context --> gemini[Google Gemini]
   api -- X-ML-Service-Key --> ml[ML service<br/>FastAPI]
-  api -- SMTP --> mail[Gmail SMTP]
+  api -- SMTP --> mail[SMTP provider]
   cron[Reminder dispatcher<br/>Render cron, every minute] --> db
   cron -- VAPID Web Push --> push[Browser push services]
   push --> app
@@ -46,11 +46,11 @@ Design rules that the data flows below rely on:
 
 ```mermaid
 flowchart TB
-  entry[server.js<br/>entry point] -->|DATABASE_URL set| neon[server-neon.js<br/>bootstrap]
-  entry -->|no DATABASE_URL| sqlite[Legacy SQLite server<br/>offline dev + API tests]
+  entry[server.js<br/>checks DATABASE_URL] --> neon[server-neon.js<br/>bootstrap]
   neon --> config[config/<br/>env loading + validation]
   neon --> schema[db/neon-schema.js<br/>idempotent migrations]
   neon --> app[http/app.js<br/>CORS, JSON, rate limits, errors]
+  neon --> maint[services/maintenance.js<br/>daily cleanup]
   app --> routes
 
   subgraph routes[routes/]
@@ -65,6 +65,8 @@ flowchart TB
     mailer[mailer.js + email-templates.js] --- gem[gemini.js<br/>client, timeout, retry]
     prompts[ai-prompts.js<br/>system prompts, schemas] --- ctx[ai-context.js<br/>context from DB]
     activity[activity.js] --- pw[passwords.js]
+    wallet[wallet.js<br/>token ledger] --- streaks[streaks.js<br/>schedule-aware streaks]
+    verify[email-verification.js] --- retention[retention.js]
   end
 
   services --> client[db/client.js<br/>pg pool]
@@ -83,7 +85,8 @@ flowchart TB
 
 | Area | Endpoints |
 | --- | --- |
-| Accounts | `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`, `PUT /api/auth/profile`, `POST /api/auth/change-password`, `POST /api/auth/logout`, `DELETE /api/auth/account`, `GET /api/auth/login-activity` |
+| Accounts | `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`, `PUT /api/auth/profile`, `POST /api/auth/change-password`, `POST /api/auth/logout`, `DELETE /api/auth/account`, `GET /api/auth/login-activity`, `GET /api/auth/export` |
+| Verification & consent | `POST /api/auth/email/verify`, `POST /api/auth/email/resend`, `POST /api/auth/consent` |
 | Password reset | `POST /api/auth/forgot-password`, `POST /api/auth/verify-otp`, `POST /api/auth/reset-password` |
 | Sync | `GET /api/app-state[?since=]`, `PUT /api/app-state`, `GET/PUT /api/habit-completions` |
 | Habits | `GET /api/habit-categories`, `POST /api/habit/predict` |
@@ -123,7 +126,13 @@ erDiagram
   API keeps the latest 20 per student. `user_activity_days` keeps one row per active day
   for engagement analytics.
 - `habit_completions` is the authoritative record of check-ins: points, leaderboards,
-  streak displays, AI context and analytics all derive from it.
+  streaks, AI context and analytics all derive from it. A synced state can add offline
+  check-ins but never delete them; only `PUT /api/habit-completions` can undo one.
+- `token_transactions` is the wallet ledger. The balance is its sum: +5 per check-in (id
+  unique per habit and day, so it cannot be earned twice), −5 when a check-in is undone,
+  −10 per AI Coach answer, and the reward cost on redemption.
+- `users.email_verified_at` and `users.privacy_consent_at` gate the app for new accounts;
+  `email_verification_codes` holds hashed 6-digit codes (15 minutes, 5 attempts).
 
 ## 4. Data flows
 
@@ -173,8 +182,8 @@ sequenceDiagram
     API-->>A: 200 {state, updatedAt, merged}
   end
   A->>API: PUT /api/habit-completions {habitId, date, completed, timeZone}
-  API->>DB: insert/delete habit_completions; update snapshot
-  API-->>A: 200 {completions, points}
+  API->>DB: insert/delete habit_completions, award/revoke 5 tokens, recompute streak
+  API-->>A: 200 {completions, points, tokens, tokenHistory, habit.streak}
   loop every 15 s while open, and on returning to the app
     A->>API: GET /api/app-state?since=updatedAt
     API-->>A: {unchanged: true} or the newer state + completions
@@ -188,15 +197,41 @@ Key properties:
   common base version instead of overwriting each other.
 - **Cheap polling:** an unchanged poll is a single indexed `max(updated_at)` query.
 - **No echo writes:** identical saves are detected on both the client and the server.
+- **Server-owned progress:** points, tokens, streaks and check-ins in a synced state are
+  ignored; the server overlays its own values, so a stale device cannot erase check-ins
+  and a modified client cannot award itself tokens.
 
-### 4.3 Password reset with a one-time code (OTP)
+### 4.3 Sign-up, email verification and privacy consent
 
 ```mermaid
 sequenceDiagram
   participant A as Student app
   participant API as App API
   participant DB as Neon
-  participant M as Gmail SMTP
+  participant M as SMTP
+  A->>API: POST /api/auth/register {..., privacyConsent: true}
+  API->>DB: insert user (privacy_consent_at = now, email_verified_at = null)
+  API->>M: 6-digit verification code (hashed in email_verification_codes)
+  API-->>A: 201 {token, user.emailVerified: false}
+  A->>A: route guard opens /verify-email
+  A->>API: POST /api/auth/email/verify {otp}
+  API->>DB: check expiry and attempts, set email_verified_at
+  API-->>A: 200 {user.emailVerified: true}
+```
+
+Until the email is confirmed, every API except `/me`, profile, verification, consent and
+account deletion answers `403 EMAIL_NOT_VERIFIED`. Accounts that existed before this change
+are marked verified once, and accounts without `privacy_consent_at` are asked to accept the
+Privacy Notice on their next launch. Verification is skipped when SMTP is not configured.
+
+### 4.4 Password reset with a one-time code (OTP)
+
+```mermaid
+sequenceDiagram
+  participant A as Student app
+  participant API as App API
+  participant DB as Neon
+  participant M as SMTP
   A->>API: POST /api/auth/forgot-password {email}
   API->>DB: resend cooldown check (60 s)
   API->>DB: upsert password_reset_requests (bcrypt(code), expires in 10 min)
@@ -219,7 +254,7 @@ rate limited per IP + email. Unknown and deactivated emails get the same respons
 cooldown as real ones, but no email. SMTP failures are logged on the server and the user
 sees a generic "try again later" message.
 
-### 4.4 AI features (Coach, Insights assistant, Help assistant, Goal planner)
+### 4.5 AI features (Coach, Insights assistant, Help assistant, Goal planner)
 
 ```mermaid
 sequenceDiagram
@@ -235,7 +270,8 @@ sequenceDiagram
   G-->>API: text
   API->>API: strip markdown, trim length
   API-->>A: {answer}
-  A->>A: Coach deducts 10 tokens only after a successful answer
+  API->>DB: Coach only: charge 10 tokens in the ledger after a successful answer
+  API-->>A: {answer, tokens, tokenHistory}
 ```
 
 - The **context is built from the database**, not from numbers the app reports, so answers
@@ -250,7 +286,7 @@ sequenceDiagram
 - Calls time out, retry once on transient errors (429/5xx), and are disabled cleanly when
   no real API key is configured (`/health` reports which AI profiles are available).
 
-### 4.5 Reminders
+### 4.6 Reminders
 
 ```mermaid
 sequenceDiagram
@@ -275,7 +311,7 @@ sequenceDiagram
 
 Native Android/iOS builds also schedule local notifications on the device.
 
-### 4.6 Admin Panel
+### 4.7 Admin Panel
 
 The Admin Panel reads and writes the same database with its own staff sessions:
 role and status changes take effect in the app immediately (deactivated accounts lose their
@@ -295,6 +331,8 @@ template is used by the reminder cron. Its analytics are aggregated and k-anonym
 | AI | server-side context, system instructions, fenced user input, output cleaning |
 | Secrets | server-side only; `EXPO_PUBLIC_*` checked for leaked keys by `npm run check:env` |
 | Errors | JSON error handler, no stack traces or SMTP/config details returned to clients |
+| Privacy (RA 10173) | consent recorded at sign-up, Privacy Notice screen, data export, account deletion, leaderboard shows first name + last initial with opt-out, Admin analytics k-anonymized |
+| Storage | daily cleanup of old issue attachments, expired codes/sessions and old snapshots |
 
 ## 6. Running locally
 

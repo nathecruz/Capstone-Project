@@ -63,6 +63,33 @@ export function passwordResetCodeEmail({ name, code, minutes }) {
   };
 }
 
+export function emailVerificationCodeEmail({ name, code, minutes }) {
+  const greeting = `Hello ${firstName(name)},`;
+  return {
+    subject: `${code} is your HabitAI email verification code`,
+    text: [
+      greeting,
+      '',
+      `Welcome to HabitAI! Your email verification code is: ${code}`,
+      `It expires in ${minutes} minutes.`,
+      '',
+      'If you did not create a HabitAI account, you can ignore this email.',
+    ].join('\n'),
+    html: layout({
+      preheader: `Confirm your email to start using HabitAI. The code expires in ${minutes} minutes.`,
+      heading: 'Confirm your email',
+      body: `
+        <p style="margin:0 0 12px;font-size:15px;line-height:1.6;">${escapeHtml(greeting)}</p>
+        <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">Welcome to HabitAI! Enter this code in the app to confirm your email address:</p>
+        <p style="margin:0 0 16px;text-align:center;">
+          <span style="display:inline-block;padding:14px 24px;border-radius:12px;background:#f1eefc;color:${BRAND};font-size:32px;font-weight:700;letter-spacing:8px;font-family:Consolas,Menlo,monospace;">${escapeHtml(code)}</span>
+        </p>
+        <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#4d4960;">It expires in <strong>${escapeHtml(minutes)} minutes</strong>.</p>
+        <p style="margin:0;font-size:13px;line-height:1.6;color:#77738a;">If you did not create a HabitAI account, you can ignore this email.</p>`,
+    }),
+  };
+}
+
 export function passwordChangedEmail({ name, when = new Date(), timeZone = 'Asia/Manila' }) {
   const formatted = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone }).format(when);
   const greeting = `Hello ${firstName(name)},`;

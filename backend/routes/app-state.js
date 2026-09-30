@@ -1,21 +1,21 @@
-import { withTransaction } from '../db/client.js';
+import { query, withTransaction } from '../db/client.js';
 import { parse } from '../lib/http.js';
 import { habitCompletionSchema, stateSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
+import { recordActivity } from '../services/activity.js';
 import { mergeAppState, normalizeAppState } from '../services/app-state-sync.js';
 import {
+  buildServerState,
   getCanonicalHabits,
   getLatestAppState,
   getLatestUpdatedAt,
   getServerCompletions,
-  reconcileHabitState,
-  sameState,
+  sameClientState,
   saveUserAppState,
-  serverCompletionPoints,
   syncNormalizedState,
 } from '../services/app-state-store.js';
-import { recordActivity } from '../services/activity.js';
-import { getDateKeyInTimeZone, isValidCompletionDate } from '../services/completion-date.js';
+import { isValidCompletionDate } from '../services/completion-date.js';
+import { applyWallet, awardCheckIn, getWallet, revokeCheckIn } from '../services/wallet.js';
 
 export default function registerAppStateRoutes(app) {
   // `?since=<updatedAt>` lets clients poll cheaply: when nothing is newer the
@@ -30,14 +30,14 @@ export default function registerAppStateRoutes(app) {
       if (latest !== null && latest <= since) return response.json({ ok: true, unchanged: true, updatedAt: latest });
     }
 
-    const [saved, canonicalHabits, completions] = await Promise.all([
-      getLatestAppState(session.userId),
-      getCanonicalHabits(session.userId),
-      getServerCompletions(session.userId),
-    ]);
-    const state = saved?.state
-      ? { ...saved.state, habits: reconcileHabitState(saved.state.habits, canonicalHabits) }
-      : canonicalHabits.length ? { habits: canonicalHabits } : null;
+    const [saved, completions] = await Promise.all([getLatestAppState(session.userId), getServerCompletions(session.userId)]);
+    let state = null;
+    if (saved?.state) {
+      state = await buildServerState(session.userId, saved.state);
+    } else {
+      const canonicalHabits = await getCanonicalHabits(session.userId);
+      if (canonicalHabits.length) state = applyWallet({ habits: canonicalHabits }, await getWallet({ query }, session.userId));
+    }
     response.json({ ok: true, state, updatedAt: saved?.updatedAt ?? null, completions });
   });
 
@@ -57,14 +57,15 @@ export default function registerAppStateRoutes(app) {
       const merged = Boolean(existing && baseState && Number(baseUpdatedAt) !== existingUpdatedAt);
       const state = merged ? mergeAppState(baseState, currentState, incomingState) : normalizeAppState(incomingState);
 
-      // Echoed or repeated saves change nothing: skip the write and the table resync.
-      if (existing && sameState(state, currentState)) return { state: currentState, updatedAt: existingUpdatedAt, merged, unchanged: true };
+      // Nothing the app owns changed (points, tokens and streaks are the server's): skip the write.
+      if (existing && sameClientState(state, currentState)) return { state: currentState, updatedAt: existingUpdatedAt, merged, unchanged: true };
 
       const updatedAt = Math.max(clientUpdatedAt || 0, Date.now());
       const savedUpdatedAt = Math.max(updatedAt, existingUpdatedAt || 0) + (existingUpdatedAt === updatedAt ? 1 : 0);
-      await saveUserAppState(session.userId, state, savedUpdatedAt, connection);
       await syncNormalizedState(session.userId, state, savedUpdatedAt, connection);
-      return { state, updatedAt: savedUpdatedAt, merged, unchanged: false };
+      const serverState = await buildServerState(session.userId, state, connection);
+      await saveUserAppState(session.userId, serverState, savedUpdatedAt, connection);
+      return { state: serverState, updatedAt: savedUpdatedAt, merged, unchanged: false };
     });
     response.json({ ok: true, ...result });
   });
@@ -75,6 +76,7 @@ export default function registerAppStateRoutes(app) {
     response.json({ ok: true, completions: await getServerCompletions(session.userId) });
   });
 
+  // The authoritative way to check in or undo: updates check-ins, tokens, streak and the snapshot together.
   app.put('/api/habit-completions', async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
@@ -82,35 +84,50 @@ export default function registerAppStateRoutes(app) {
     if (!input) return;
     if (!isValidCompletionDate(input.date, input.timeZone)) return response.status(400).json({ ok: false, message: 'Completion date must be a valid date up to today.' });
 
-    const updated = await withTransaction(async (connection) => {
+    const result = await withTransaction(async (connection) => {
       await connection.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
       const saved = await getLatestAppState(session.userId, connection);
-      const state = saved?.state;
-      const habit = state?.habits?.find((entry) => entry.id === input.habitId);
-      if (!habit) return false;
-      habit.completionTimeZone = input.timeZone || habit.completionTimeZone || 'UTC';
+      const habit = saved?.state?.habits?.find((entry) => entry.id === input.habitId);
+      if (!habit) return null;
+      const now = Date.now();
 
       if (input.completed) {
-        await connection.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [session.userId, input.habitId, input.date, Date.now()]);
+        const inserted = await connection.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING habit_id', [session.userId, input.habitId, input.date, now]);
+        if (inserted.rowCount) await awardCheckIn(connection, session.userId, input.habitId, input.date, habit.label, now);
       } else {
-        await connection.query('DELETE FROM habit_completions WHERE user_id=$1 AND habit_id=$2 AND completed_date=$3', [session.userId, input.habitId, input.date]);
+        const removed = await connection.query('DELETE FROM habit_completions WHERE user_id=$1 AND habit_id=$2 AND completed_date=$3', [session.userId, input.habitId, input.date]);
+        if (removed.rowCount) await revokeCheckIn(connection, session.userId, input.habitId, input.date, habit.label, now);
       }
 
-      const completionDates = new Set(Array.isArray(habit.completionDates) ? habit.completionDates.filter((date) => typeof date === 'string') : []);
-      if (input.completed) completionDates.add(input.date);
-      else completionDates.delete(input.date);
-      habit.completionDates = Array.from(completionDates).sort();
-      const today = getDateKeyInTimeZone(new Date(), input.timeZone);
-      habit.done = habit.completionDates.includes(today);
-      const goal = Math.max(1, Number(habit.goal) || 1);
-      habit.progress = habit.done ? 100 : 0;
-      habit.total = `${habit.done ? goal : 0}/${goal}`;
-      const updatedAt = Math.max(Date.now(), Number(saved.updatedAt) + 1);
-      await saveUserAppState(session.userId, state, updatedAt, connection);
+      // Reflect the change in the snapshot too, so the sync below cannot re-add an undone check-in.
+      const state = {
+        ...saved.state,
+        habits: saved.state.habits.map((entry) => {
+          if (entry.id !== input.habitId) return entry;
+          const dates = new Set(Array.isArray(entry.completionDates) ? entry.completionDates : []);
+          if (input.completed) dates.add(input.date);
+          else dates.delete(input.date);
+          return { ...entry, completionDates: [...dates].sort(), completionTimeZone: input.timeZone || entry.completionTimeZone || 'UTC' };
+        }),
+      };
+      const updatedAt = Math.max(now, Number(saved.updatedAt) + 1);
       await syncNormalizedState(session.userId, state, updatedAt, connection);
-      return true;
+      const serverState = await buildServerState(session.userId, state, connection);
+      await saveUserAppState(session.userId, serverState, updatedAt, connection);
+      return { serverState, updatedAt };
     });
-    if (!updated) return response.status(404).json({ ok: false, message: 'Habit not found.' });
-    response.json({ ok: true, completions: await getServerCompletions(session.userId), points: await serverCompletionPoints(session.userId) });
+    if (!result) return response.status(404).json({ ok: false, message: 'Habit not found.' });
+
+    const { serverState, updatedAt } = result;
+    const habit = serverState.habits.find((entry) => entry.id === input.habitId);
+    response.json({
+      ok: true,
+      updatedAt,
+      completions: await getServerCompletions(session.userId),
+      points: serverState.points,
+      tokens: serverState.tokens,
+      tokenHistory: serverState.tokenHistory,
+      habit: habit ? { id: habit.id, streak: habit.streak, done: habit.done, completionDates: habit.completionDates } : null,
+    });
   });
 }

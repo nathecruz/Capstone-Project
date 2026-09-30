@@ -15,6 +15,8 @@ const assistantSuggestions = [
   { label: 'How do I earn more points?', icon: 'star-outline' },
 ];
 
+const supportEmail = process.env.EXPO_PUBLIC_SUPPORT_EMAIL?.trim() || '';
+
 export default function HelpSupportScreen() {
   const { isDarkMode } = useAppColorScheme();
   const { width } = useWindowDimensions();
@@ -22,7 +24,8 @@ export default function HelpSupportScreen() {
   const showAlert = useAppDialog();
   const helpItems = [
     { title: 'FAQ', subtitle: 'Find answers to common questions', icon: 'help-circle-outline', action: () => router.push('/help-support-faq') },
-    { title: 'Contact Support', subtitle: 'Get in touch with our team', icon: 'chatbubble-ellipses-outline', action: () => void openExternalLink('mailto:support@aihabittracker.app') },
+    // Uses the real support inbox when configured; otherwise the in-app report form (which reaches the Admin Panel).
+    { title: 'Contact Support', subtitle: 'Get in touch with our team', icon: 'chatbubble-ellipses-outline', action: () => (supportEmail ? void openExternalLink(`mailto:${supportEmail}`) : router.push('/report-issue')) },
     { title: 'Report an Issue', subtitle: 'Help us improve the app', icon: 'warning-outline', action: () => router.push('/report-issue') },
     { title: 'Suggest a Feature', subtitle: 'We would love to hear your idea.', icon: 'sparkles-outline', action: () => setSuggestionOpen(true) },
   ];
@@ -62,7 +65,7 @@ export default function HelpSupportScreen() {
 
           <View style={styles.helpBanner}>
             <View style={styles.bannerCopy}>
-              <Text style={styles.bannerEyebrow}>AI HABIT TRACKER SUPPORT</Text>
+              <Text style={styles.bannerEyebrow}>HABITAI SUPPORT</Text>
               <Text style={styles.bannerTitle}>We&apos;re here to help!</Text>
               <Text style={styles.bannerText}>Find answers and get support whenever you need.</Text>
               <View style={styles.availability}>
@@ -140,7 +143,7 @@ export default function HelpSupportScreen() {
             {assistantOpen && (
               <View style={styles.assistantPanel}>
                 <Text style={styles.assistantGreeting}>Hi there!</Text>
-                <Text style={styles.assistantMessage}>I&apos;m your AI Assistant. Ask me anything about{`\n`}AI Habit Tracker and I&apos;ll do my best to help!</Text>
+                <Text style={styles.assistantMessage}>I&apos;m your AI Assistant. Ask me anything about{`\n`}HabitAI and I&apos;ll do my best to help!</Text>
                 <View style={styles.suggestionList}>
                   {assistantSuggestions.map((suggestion) => (
                     <Pressable key={suggestion.label} style={styles.suggestionChip} onPress={() => setAssistantQuestion(suggestion.label)}>
@@ -174,7 +177,7 @@ export default function HelpSupportScreen() {
           <View style={styles.aboutCard}>
             <View style={styles.aboutAccent} />
             <View style={styles.aboutCopy}>
-              <Text style={styles.aboutTitle}>About AI Habit Tracker</Text>
+              <Text style={styles.aboutTitle}>About HabitAI</Text>
               <Text style={styles.aboutText}>Version 1.0.0</Text>
               <Text style={styles.aboutText}>Built with love to help you build better habits every day.</Text>
             </View>

@@ -14,7 +14,7 @@ self.addEventListener('notificationclick', (event) => {
         if (!response.ok) throw new Error('Snooze request rejected.');
       } catch {
         await self.registration.showNotification('Snooze unavailable', {
-          body: 'Open HabitMind and check your connection before trying again.',
+          body: 'Open HabitAI and check your connection before trying again.',
           tag: 'snooze-unavailable',
         });
       }

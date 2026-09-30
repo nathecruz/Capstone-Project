@@ -10,7 +10,7 @@ if (!isGeminiConfigured()) {
 }
 
 try {
-  const result = await generateGeminiText('Reply with exactly: HabitMind AI smoke test passed.', { maxOutputTokens: 24 });
+  const result = await generateGeminiText('Reply with exactly: HabitAI smoke test passed.', { maxOutputTokens: 24 });
   if (!result) throw new Error('The model returned an empty response.');
   console.log(`Gemini smoke test passed using ${getGeminiModel()}.`);
 } catch (error) {

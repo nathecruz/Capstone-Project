@@ -20,7 +20,7 @@ const settings = [
 
 export default function ProfileScreen() {
   const showAlert = useAppDialog();
-  const { isDarkMode, avatarImage, setAvatarImage, habits, goals, profile, points, tokens, addTokens, t } = useAppColorScheme();
+  const { isDarkMode, avatarImage, setAvatarImage, habits, goals, profile, points, tokens, applyWallet, t } = useAppColorScheme();
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
   const { averageProgress, maxStreak, completed } = getHabitProgressSummary(habits);
@@ -49,14 +49,14 @@ export default function ProfileScreen() {
     setCoachLoading(true);
     setCoachError('');
     try {
-      // Tokens are only spent when the coach actually answers.
+      // The server charges 10 tokens only when the coach actually answers.
       const result = await askAi('coach', question);
       if (result.ok) {
-        addTokens(-10, 'AI Coach');
+        applyWallet(result);
         setCoachReply(result.answer);
         setCoachQuestion('');
       } else {
-        setCoachError(`${result.message} Your tokens were not spent.`);
+        setCoachError(result.status === 402 ? result.message : `${result.message} Your tokens were not spent.`);
       }
     } finally {
       setCoachLoading(false);

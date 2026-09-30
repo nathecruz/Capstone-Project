@@ -1,4 +1,4 @@
-import { query } from '../db/client.js';
+import { query, withTransaction } from '../db/client.js';
 import { aiLimiter } from '../http/rate-limits.js';
 import { parse } from '../lib/http.js';
 import { assistantSchema, goalGenerationSchema, goalPlanSchema } from '../schemas.js';
@@ -13,7 +13,9 @@ import {
   normalizeGoalPlan,
   systemPromptFor,
 } from '../services/ai-prompts.js';
+import { refreshSnapshot } from '../services/app-state-store.js';
 import { generateGeminiText, isGeminiConfigured } from '../services/gemini.js';
+import { COACH_TOKEN_COST, getWallet, spendTokens, tokenBalance } from '../services/wallet.js';
 
 const DEFAULT_TIME_ZONE = 'Asia/Manila';
 
@@ -46,9 +48,14 @@ export default function registerAiRoutes(app) {
     const mode = input.mode;
     if (!isGeminiConfigured(mode)) return response.status(503).json({ ok: false, error: 'Gemini AI service is not configured on the server.' });
 
+    // The coach costs tokens: check the balance first, charge only after a real answer.
+    if (mode === 'coach' && (await tokenBalance({ query }, session.userId)) < COACH_TOKEN_COST) {
+      return response.status(402).json({ ok: false, error: `You need ${COACH_TOKEN_COST} tokens to ask the AI Coach. Complete habits to earn more.` });
+    }
+
     try {
       const context = mode === 'support'
-        ? { app: 'HabitAI', studentFirstName: String(session.fullName || '').split(/\s+/)[0] }
+        ? { app: 'HabitAI' } // no personal data is needed to explain the app
         : await loadAiContext(session.userId, input.timeZone || DEFAULT_TIME_ZONE);
       const text = await generateGeminiText(buildUserPrompt({ question: input.question, context }), {
         system: systemPromptFor(mode),
@@ -58,7 +65,15 @@ export default function registerAiRoutes(app) {
       });
       const answer = cleanAnswer(text);
       if (!answer) return response.status(502).json({ ok: false, error: 'The AI service returned an empty response.' });
-      response.json({ ok: true, answer, mode });
+      if (mode !== 'coach') return response.json({ ok: true, answer, mode });
+
+      const wallet = await withTransaction(async (db) => {
+        await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
+        await spendTokens(db, session.userId, COACH_TOKEN_COST, 'AI Coach');
+        await refreshSnapshot(session.userId, db);
+        return getWallet(db, session.userId);
+      });
+      response.json({ ok: true, answer, mode, tokens: wallet.tokens, tokenHistory: wallet.tokenHistory });
     } catch (error) {
       logAiError(mode, error);
       response.status(502).json({ ok: false, error: 'The AI service is temporarily unavailable.' });

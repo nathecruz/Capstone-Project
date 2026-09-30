@@ -5,9 +5,9 @@ import { ApiRequestError, apiRequest, getAuthenticatedHeaders } from '@/authenti
 export type AiMode = 'assistant' | 'coach' | 'support';
 
 export type AiFailure = { ok: false; status: number; message: string };
-export type AiAnswer = { ok: true; answer: string } | AiFailure;
+export type AiAnswer = { ok: true; answer: string; tokens?: number; tokenHistory?: object[] } | AiFailure;
 
-const AI_TIMEOUT_MS = 35000;
+const AI_TIMEOUT_MS = 70000;
 
 function deviceTimeZone() {
   try {
@@ -21,7 +21,7 @@ function toFailure(error: unknown): AiFailure {
   if (error instanceof ApiRequestError) {
     if (error.status === 401) return { ok: false, status: 401, message: 'Please sign in again to use AI features.' };
     if (error.status === 503) return { ok: false, status: 503, message: 'AI features are not available right now.' };
-    if (error.status === 429) return { ok: false, status: 429, message: error.message };
+    if (error.status === 429 || error.status === 402) return { ok: false, status: error.status, message: error.message };
     return { ok: false, status: error.status, message: 'The AI service is temporarily unavailable. Please try again.' };
   }
   return { ok: false, status: 0, message: 'Could not reach the AI service. Check your connection and try again.' };
@@ -29,13 +29,13 @@ function toFailure(error: unknown): AiFailure {
 
 export async function askAi(mode: AiMode, question: string): Promise<AiAnswer> {
   try {
-    const result = await apiRequest<{ answer?: string }>('/api/insights/assistant', {
+    const result = await apiRequest<{ answer?: string; tokens?: number; tokenHistory?: object[] }>('/api/insights/assistant', {
       method: 'POST',
       headers: await getAuthenticatedHeaders(),
       body: JSON.stringify({ mode, question: question.trim().slice(0, 500) || undefined, timeZone: deviceTimeZone() }),
       timeoutMs: AI_TIMEOUT_MS,
     });
-    return result.answer ? { ok: true, answer: result.answer } : { ok: false, status: 502, message: 'The AI returned an empty answer. Please try again.' };
+    return result.answer ? { ok: true, answer: result.answer, tokens: result.tokens, tokenHistory: result.tokenHistory } : { ok: false, status: 502, message: 'The AI returned an empty answer. Please try again.' };
   } catch (error) {
     return toFailure(error);
   }

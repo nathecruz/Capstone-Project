@@ -96,8 +96,8 @@ if (!hasEnvFile && !isProduction && Object.keys(process.env).length === 0) {
 
 if (isProduction && !hasProductionDatabaseUrl(values.DATABASE_URL)) {
   deployIssues.push('DATABASE_URL must be a real PostgreSQL URL with TLS enabled in production.');
-} else if (!isProduction && !values.DATABASE_URL && !values.DATABASE_PATH) {
-  deployIssues.push('Set DATABASE_URL or DATABASE_PATH in the backend environment.');
+} else if (!isProduction && (!values.DATABASE_URL || /user:password|ep-example/i.test(values.DATABASE_URL))) {
+  deployIssues.push('Set DATABASE_URL to a PostgreSQL (Neon) URL in the backend environment.');
 }
 if (process.argv.includes('--production') && nodeEnv !== 'production') {
   deployIssues.push('NODE_ENV must be explicitly set to production for a production deployment.');

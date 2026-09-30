@@ -57,6 +57,7 @@ export default function RegisterScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [privacyConsent, setPrivacyConsent] = useState(false);
   const [dialog, setDialog] = useState<{ title: string; message: string; variant: AppDialogVariant } | null>(null);
   const passwordStrength = getPasswordStrengthStatus(password, {
     fullName,
@@ -108,6 +109,11 @@ export default function RegisterScreen() {
       return;
     }
 
+    if (!privacyConsent) {
+      showDialog('Privacy Notice', 'Please read and agree to the Privacy Notice to create your account.');
+      return;
+    }
+
     if (password !== confirmPassword) {
       showDialog('Password mismatch', 'Please make sure both passwords match.');
       return;
@@ -129,14 +135,15 @@ export default function RegisterScreen() {
     setIsSubmitting(true);
 
     try {
-      const result = await signUp({ fullName, username, email, password, dateOfBirth, gender, region });
+      const result = await signUp({ fullName, username, email, password, dateOfBirth, gender, region, privacyConsent });
 
       if (!result.ok) {
         showDialog('Registration failed', result.message || 'Unable to create account.');
         return;
       }
 
-      showDialog('Success', 'Your account has been created.', 'success');
+      // The app now opens the email confirmation screen (if the server requires it).
+      showDialog('Account created', result.message || 'Your account has been created.', 'success');
     } finally {
       setIsSubmitting(false);
     }
@@ -317,6 +324,23 @@ export default function RegisterScreen() {
             >
               <Ionicons name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'} size={21} color="#657089" />
             </Pressable>
+          </View>
+
+          <View style={styles.consentRow}>
+            <Pressable
+              onPress={() => setPrivacyConsent((current) => !current)}
+              style={[styles.consentBox, privacyConsent && styles.consentBoxChecked]}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: privacyConsent }}
+              accessibilityLabel="I agree to the Privacy Notice"
+            >
+              {privacyConsent && <Ionicons name="checkmark" size={15} color="#FFFFFF" />}
+            </Pressable>
+            <Text style={styles.consentText}>
+              I have read and agree to the{' '}
+              <Link href="/privacy-notice" style={styles.linkText}>Privacy Notice</Link>
+              {' '}and allow HabitAI to process my data as described there (Data Privacy Act of 2012).
+            </Text>
           </View>
 
           <Pressable
@@ -644,5 +668,31 @@ const styles = StyleSheet.create({
   linkText: {
     color: '#5a42d8',
     fontWeight: '800',
+  },
+  consentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginTop: 16,
+  },
+  consentBox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#9AA3B8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  consentBoxChecked: {
+    backgroundColor: '#5a42d8',
+    borderColor: '#5a42d8',
+  },
+  consentText: {
+    flex: 1,
+    color: '#586074',
+    fontSize: 12.5,
+    lineHeight: 18,
   },
 });

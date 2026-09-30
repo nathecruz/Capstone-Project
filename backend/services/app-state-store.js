@@ -1,24 +1,41 @@
 // Neon data layer for the synced app state.
 //
-// Data flow: the app sends its whole state (PUT /api/app-state). The latest
-// `user_app_state` row is the source of truth for the app; `syncNormalizedState`
-// mirrors it into relational tables (habits, goals, tokens, achievements) that the
-// leaderboard, reminders, AI context and the Admin Panel read. Habit check-ins are
-// authoritative in `habit_completions` (PUT /api/habit-completions).
+// Data flow: the app sends its whole state (PUT /api/app-state). The server keeps
+// ownership of everything that can be earned or faked:
+//   - check-ins live in habit_completions (PUT /api/habit-completions); a synced state
+//     can add offline check-ins but can never delete them,
+//   - streaks are recomputed from check-ins and each habit's schedule,
+//   - points and tokens come from the server ledger (services/wallet.js).
+// The latest `user_app_state` snapshot, with those server values applied, is what the
+// app reads; relational tables (habits, goals, achievements) mirror it for the
+// leaderboard, reminders, AI context and the Admin Panel.
 import crypto from 'node:crypto';
 import { config } from '../config/index.js';
 import { query, withTransaction } from '../db/client.js';
+import { sameState } from './app-state-sync.js';
 import { getDateKeyInTimeZone } from './completion-date.js';
+import { computeStreak } from './streaks.js';
+import { applyWallet, awardCheckIn, getWallet, POINTS_PER_CHECK_IN } from './wallet.js';
 
 export { sameState, stableStringify } from './app-state-sync.js';
 
-export async function serverCompletionPoints(userId) {
-  const result = await query('SELECT COUNT(*)::integer * 20 AS points FROM habit_completions WHERE user_id=$1', [userId]);
-  return result.rows[0]?.points || 0;
+const DEFAULT_TIME_ZONE = 'Asia/Manila';
+
+function todayFor(timeZone) {
+  try {
+    return getDateKeyInTimeZone(new Date(), timeZone || DEFAULT_TIME_ZONE);
+  } catch {
+    return getDateKeyInTimeZone(new Date(), DEFAULT_TIME_ZONE);
+  }
 }
 
-export async function getServerCompletions(userId) {
-  const result = await query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1 ORDER BY completed_date DESC', [userId]);
+export async function serverCompletionPoints(userId, runner = { query }) {
+  const result = await runner.query('SELECT COUNT(*)::integer AS checkins FROM habit_completions WHERE user_id=$1', [userId]);
+  return (result.rows[0]?.checkins || 0) * POINTS_PER_CHECK_IN;
+}
+
+export async function getServerCompletions(userId, runner = { query }) {
+  const result = await runner.query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1 ORDER BY completed_date DESC', [userId]);
   return result.rows;
 }
 
@@ -33,39 +50,71 @@ export async function getLatestAppState(userId, runner = { query }) {
   return row ? { state: row.stateJson, updatedAt: Number(row.updatedAt) } : null;
 }
 
+function completionsByHabit(completions) {
+  const map = new Map();
+  for (const completion of completions) {
+    if (!map.has(completion.habitId)) map.set(completion.habitId, []);
+    map.get(completion.habitId).push(completion.date);
+  }
+  for (const dates of map.values()) dates.sort();
+  return map;
+}
+
+/** Applies the server's check-ins and the derived fields (done, progress, streak) to one habit. */
+export function withServerProgress(habit, completionDates) {
+  const today = todayFor(habit.completionTimeZone);
+  const done = completionDates.includes(today);
+  const goal = Math.max(1, Number(habit.goal) || 1);
+  return {
+    ...habit,
+    completionDates,
+    done,
+    progress: done ? 100 : 0,
+    total: `${done ? goal : 0}/${goal}`,
+    streak: computeStreak(habit, completionDates, today),
+  };
+}
+
 /** Habits rebuilt from the relational tables, used when no synced state exists yet. */
 export async function getCanonicalHabits(userId) {
-  const [habitResult, completionResult] = await Promise.all([
+  const [habitResult, completions] = await Promise.all([
     query('SELECT id, label, meta, category, icon, color, goal, progress, total, streak, done, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime", sort_order AS "sortOrder", updated_at AS "updatedAt" FROM habits WHERE user_id=$1 ORDER BY sort_order ASC, id ASC', [userId]),
-    query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1 ORDER BY completed_date ASC', [userId]),
+    getServerCompletions(userId),
   ]);
-  const completionsByHabit = new Map();
-  for (const completion of completionResult.rows) {
-    const dates = completionsByHabit.get(completion.habitId) || [];
-    dates.push(completion.date);
-    completionsByHabit.set(completion.habitId, dates);
-  }
+  const byHabit = completionsByHabit(completions);
   return habitResult.rows.map((habit) => {
     const id = String(habit.id).replace(`${userId}:habit:`, '');
-    const completionDates = completionsByHabit.get(id) || [];
-    const done = completionDates.includes(new Date().toISOString().slice(0, 10));
-    const goal = Math.max(1, Number(habit.goal) || 1);
-    return { ...habit, id, goal, completionDates, done, progress: done ? 100 : 0, total: `${done ? goal : 0}/${goal}` };
+    const frequency = String(habit.meta || '').split('•')[0].trim();
+    return withServerProgress({ ...habit, id, frequency: ['Weekly', 'Monthly'].includes(frequency) ? frequency : 'Daily' }, byHabit.get(id) || []);
   });
 }
 
-/** Overlays the authoritative check-ins onto the habits of a saved state. */
-export function reconcileHabitState(savedHabits, canonicalHabits) {
-  if (!Array.isArray(savedHabits) || savedHabits.length === 0) return canonicalHabits;
-  const canonicalById = new Map(canonicalHabits.map((habit) => [habit.id, habit]));
-  return savedHabits.map((habit) => {
-    const canonical = canonicalById.get(habit.id);
-    if (!canonical) return habit;
-    const done = canonical.completionDates.includes(getDateKeyInTimeZone(new Date(), habit.completionTimeZone));
-    const goal = Math.max(1, Number(habit.goal) || 1);
-    return { ...habit, completionDates: canonical.completionDates, done, progress: done ? 100 : 0, total: `${done ? goal : 0}/${goal}` };
-  });
+/** The state as the app should see it: server check-ins, streaks, points and tokens applied. */
+export async function buildServerState(userId, state, runner = { query }) {
+  const [completions, wallet] = await Promise.all([getServerCompletions(userId, runner), getWallet(runner, userId)]);
+  const byHabit = completionsByHabit(completions);
+  const habits = (Array.isArray(state?.habits) ? state.habits : []).map((habit) => withServerProgress(habit, byHabit.get(String(habit.id)) || []));
+  return applyWallet({ ...state, habits }, wallet);
 }
+
+const SERVER_OWNED_FIELDS = ['points', 'tokens', 'tokenHistory'];
+const SERVER_OWNED_HABIT_FIELDS = ['done', 'progress', 'total', 'streak'];
+
+/** The part of a state the app is allowed to change, for detecting no-op saves. */
+export function clientOwnedPart(state) {
+  if (!state || typeof state !== 'object') return state;
+  const copy = { ...state };
+  for (const key of SERVER_OWNED_FIELDS) delete copy[key];
+  copy.habits = (Array.isArray(state.habits) ? state.habits : []).map((habit) => {
+    const habitCopy = { ...habit };
+    for (const key of SERVER_OWNED_HABIT_FIELDS) delete habitCopy[key];
+    habitCopy.completionDates = [...new Set(Array.isArray(habit.completionDates) ? habit.completionDates : [])].sort();
+    return habitCopy;
+  });
+  return copy;
+}
+
+export const sameClientState = (left, right) => sameState(clientOwnedPart(left), clientOwnedPart(right));
 
 /**
  * Appends a state snapshot and prunes older ones. Only the newest snapshot is read;
@@ -78,6 +127,19 @@ export async function saveUserAppState(userId, state, updatedAt, connection) {
        SELECT id FROM user_app_state WHERE user_id=$1 ORDER BY updated_at DESC LIMIT $2)`,
     [userId, config.appState.snapshotsToKeep],
   );
+}
+
+/**
+ * Saves a fresh snapshot after a server-side change (reward redeemed, coach answered),
+ * so the app's `?since=` poll picks up the new balance on every device.
+ */
+export async function refreshSnapshot(userId, connection) {
+  const latest = await getLatestAppState(userId, connection);
+  if (!latest) return null;
+  const state = await buildServerState(userId, latest.state, connection);
+  const updatedAt = Math.max(Date.now(), latest.updatedAt + 1);
+  await saveUserAppState(userId, state, updatedAt, connection);
+  return { state, updatedAt };
 }
 
 /** One-off cleanup for databases that accumulated snapshots before pruning existed. */
@@ -102,6 +164,14 @@ export function earnedAchievements(habits) {
   return [...earned];
 }
 
+/** Valid, not-in-the-future check-in dates from a synced habit (offline check-ins). */
+function syncedCompletionDates(habit) {
+  const latestAllowed = todayFor('Pacific/Kiritimati'); // the earliest "today" on Earth
+  return [...new Set((Array.isArray(habit.completionDates) ? habit.completionDates : [])
+    .map(String)
+    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date) && date <= latestAllowed))];
+}
+
 /** Mirrors the synced state into the relational tables inside the caller's transaction. */
 export async function syncNormalizedState(userId, state, updatedAt, connection) {
   const rawHabits = Array.isArray(state.habits) ? state.habits : [];
@@ -113,30 +183,34 @@ export async function syncNormalizedState(userId, state, updatedAt, connection) 
     return true;
   });
 
-  await connection.query('DELETE FROM habits WHERE user_id=$1', [userId]);
-  const habitIds = habits.map((habit) => String(habit.id).trim()).filter(Boolean);
+  // Check-ins of deleted habits go with them; check-ins of existing habits are never
+  // removed by a sync, only added (offline check-ins), so a stale device cannot erase them.
+  const habitIds = habits.map((habit) => String(habit.id).trim());
   if (habitIds.length === 0) await connection.query('DELETE FROM habit_completions WHERE user_id=$1', [userId]);
   else await connection.query('DELETE FROM habit_completions WHERE user_id=$1 AND NOT (habit_id = ANY($2::text[]))', [userId, habitIds]);
-  for (const [sortOrder, habit] of habits.entries()) {
+  for (const habit of habits) {
+    const habitId = String(habit.id).trim();
+    for (const date of syncedCompletionDates(habit)) {
+      const inserted = await connection.query(
+        'INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING habit_id',
+        [userId, habitId, date, updatedAt],
+      );
+      if (inserted.rowCount) await awardCheckIn(connection, userId, habitId, date, habit.label, updatedAt);
+    }
+  }
+
+  const byHabit = completionsByHabit(await getServerCompletions(userId, connection));
+  const serverHabits = habits.map((habit) => withServerProgress(habit, byHabit.get(String(habit.id)) || []));
+
+  await connection.query('DELETE FROM habits WHERE user_id=$1', [userId]);
+  for (const [sortOrder, habit] of serverHabits.entries()) {
     const goal = Math.max(1, Number(habit.goal) || 1);
-    const habitId = String(habit.id || '').trim();
-    if (!habitId) continue;
+    const habitId = String(habit.id).trim();
     await connection.query(
       `INSERT INTO habits(id,user_id,label,meta,category,icon,color,goal,progress,total,streak,done,reminder_enabled,reminder_time,sort_order,updated_at)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-       ON CONFLICT (id) DO UPDATE SET
-         label = EXCLUDED.label, meta = EXCLUDED.meta, category = EXCLUDED.category, icon = EXCLUDED.icon,
-         color = EXCLUDED.color, goal = EXCLUDED.goal, progress = EXCLUDED.progress, total = EXCLUDED.total,
-         streak = EXCLUDED.streak, done = EXCLUDED.done, reminder_enabled = EXCLUDED.reminder_enabled,
-         reminder_time = EXCLUDED.reminder_time, sort_order = EXCLUDED.sort_order, updated_at = EXCLUDED.updated_at`,
-      [`${userId}:habit:${habitId}`, userId, habit.label || habit.name || habitId, habit.meta || '', habit.category || '', habit.icon || 'ellipse-outline', habit.color || '', goal, Number(habit.progress) || 0, habit.total || `0/${goal}`, Number(habit.streak) || 0, Boolean(habit.done), Boolean(habit.reminderEnabled), habit.reminderTime || '', sortOrder, updatedAt],
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+      [`${userId}:habit:${habitId}`, userId, habit.label || habit.name || habitId, habit.meta || '', habit.category || '', habit.icon || 'ellipse-outline', habit.color || '', goal, habit.progress, habit.total, habit.streak, habit.done, Boolean(habit.reminderEnabled), habit.reminderTime || '', sortOrder, updatedAt],
     );
-    await connection.query('DELETE FROM habit_completions WHERE user_id=$1 AND habit_id=$2', [userId, habitId]);
-    for (const completionDate of Array.isArray(habit.completionDates) ? habit.completionDates : []) {
-      if (/^\d{4}-\d{2}-\d{2}$/.test(String(completionDate))) {
-        await connection.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [userId, habitId, completionDate, updatedAt]);
-      }
-    }
   }
 
   await connection.query('DELETE FROM goals WHERE user_id=$1', [userId]);
@@ -151,14 +225,9 @@ export async function syncNormalizedState(userId, state, updatedAt, connection) 
   const preferences = state.preferences || {};
   await connection.query('INSERT INTO user_preferences(user_id,preferences_json,ring_interval,snooze_frequency,updated_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(user_id) DO UPDATE SET preferences_json=excluded.preferences_json,ring_interval=excluded.ring_interval,snooze_frequency=excluded.snooze_frequency,updated_at=excluded.updated_at', [userId, preferences, Number(state.ringInterval) || 30, state.snoozeFrequency || 'Once', updatedAt]);
 
-  await connection.query('DELETE FROM token_transactions WHERE user_id=$1', [userId]);
-  for (const transaction of state.tokenHistory || []) {
-    await connection.query('INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING', [`${userId}:token:${transaction.id || crypto.randomUUID()}`, userId, Number(transaction.amount) || 0, transaction.label || '', transaction.date || '', updatedAt]);
-  }
-
   // Achievements are upserted, so earned dates and the read state of their
   // notifications survive later syncs (they used to be recreated every time).
-  const earned = earnedAchievements(habits);
+  const earned = earnedAchievements(serverHabits);
   await connection.query('DELETE FROM user_achievements WHERE user_id=$1 AND NOT (achievement_id = ANY($2::text[]))', [userId, earned]);
   await connection.query(
     `DELETE FROM notifications WHERE user_id=$1 AND type='achievement'

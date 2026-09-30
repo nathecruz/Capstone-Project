@@ -114,7 +114,7 @@ export default function AddScreen() {
         setReminderPermissionPending(false);
       }
       if (!hasAccess) {
-        showAlert('Browser notifications unavailable', 'Use HTTPS and allow notifications. On iPhone, add HabitMind to your Home Screen first.');
+        showAlert('Browser notifications unavailable', 'Use HTTPS and allow notifications. On iPhone, add HabitAI to your Home Screen first.');
         return;
       }
     }
@@ -235,7 +235,7 @@ export default function AddScreen() {
           <View style={styles.reminderIcon}><Ionicons name="notifications-outline" size={24} color="#5B42D8" /></View>
           <View style={styles.reminderTitleCopy}>
             <Text style={styles.reminderTitle}>Custom Reminders</Text>
-            <Text style={styles.reminderDescription}>{Platform.OS === 'web' ? 'Allow notifications to receive reminders. On iPhone, open HabitMind from your Home Screen.' : 'Get reminders at the times you choose to stay consistent.'}</Text>
+            <Text style={styles.reminderDescription}>{Platform.OS === 'web' ? 'Allow notifications to receive reminders. On iPhone, open HabitAI from your Home Screen.' : 'Get reminders at the times you choose to stay consistent.'}</Text>
           </View>
         </View>
         <View style={[styles.toggle, reminder && styles.toggleOn]}>

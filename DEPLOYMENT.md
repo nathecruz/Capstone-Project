@@ -49,11 +49,19 @@ Web Push lets scheduled reminders arrive when the browser/PWA is backgrounded or
 
 2. From `backend/.env`, copy `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY`, and `WEB_PUSH_VAPID_SUBJECT` into the `habitai-backend` service's Render **Environment**. Never commit or share the private key. `WEB_PUSH_API_URL` is linked to the backend service URL in the Blueprint.
 3. Confirm the `habitai-web-push` Cron Job is created and its database/VAPID variables reference the backend service. Render does not prompt for new `sync: false` secrets when syncing an existing Blueprint, so add the keys in the dashboard.
-4. Deploy the frontend over HTTPS. On iPhone, open the site in Safari, add HabitMind to the Home Screen, open that installed web app, then enable Custom Reminders and allow notifications. On Android, use Chrome and allow notifications.
+4. Deploy the frontend over HTTPS. On iPhone, open the site in Safari, add HabitAI to the Home Screen, open that installed web app, then enable Custom Reminders and allow notifications. On Android, use Chrome and allow notifications.
 
 The dispatcher checks saved habit schedules, custom weekdays, and each device timezone. Web Push reminders include a one-use Snooze action; the cron delivers snoozed reminders using the saved interval and count. Delivery is normally within a minute; after a delayed or interrupted Cron run, it retries reminders up to five minutes late. Mobile operating systems may apply their own notification delivery policies.
 
-Issue report attachments are stored as database binary data (SQLite BLOB locally, Neon BYTEA in production) and can be forwarded to `SUPPORT_EMAIL` through the configured SMTP account. Malware scanning is not yet integrated.
+Issue report attachments are stored in Neon (`BYTEA`) and can be forwarded to `SUPPORT_EMAIL` through the configured SMTP account. The backend clears attachment bytes 30 days after a report is resolved or closed, and after 180 days at most, so the free 0.5 GB database does not fill up. Malware scanning is not yet integrated; for higher volumes, move attachments to object storage (Cloudflare R2, S3, Supabase Storage) and keep only the object key in the database.
+
+### Email sender
+
+Sign-ups now send a verification code, so use a dedicated sender instead of a personal Gmail (Gmail allows about 500 messages a day and ties delivery to one person's account). Any SMTP provider works: for example Brevo (`smtp-relay.brevo.com`, port 587), Resend (`smtp.resend.com`, port 465) or a PSAU project mailbox. Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` and `SMTP_FROM` in the Render dashboard; `render.yaml` no longer contains any personal address, and values already set on the service are kept when the Blueprint syncs. Set `WEB_PUSH_VAPID_SUBJECT` to a `mailto:` address of the project team. `REQUIRE_EMAIL_VERIFICATION=false` turns verification off if the sender is unavailable.
+
+### Free-tier cold starts
+
+The Render free web service sleeps after 15 minutes without traffic and takes up to a minute to wake. The app waits up to 60 seconds for API calls and shows a "Connecting to HabitAI…" banner after 4 seconds, and a signed-in student keeps using the cached session meanwhile. To remove the delay, upgrade the backend to a paid instance or ping `/healthz` every 10 minutes from an uptime monitor.
 
 For Vercel frontend-only hosting, either set the project root to `frontend` (recommended) or leave it at the repository root. The frontend config supports the first option; the root `vercel.json` supports the second. Add these build-time environment variables in Project Settings:
 

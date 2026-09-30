@@ -9,7 +9,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ColorSchemeProvider, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { AppDialogProvider } from '@/components/ui/app-dialog';
-import { getSession, subscribeToAuthChanges } from '@/authentication';
+import { getSession, subscribeToAuthChanges, type SessionUser } from '@/authentication';
+import { ServerStatusBanner } from '@/components/server-status-banner';
 
 LogBox.ignoreLogs([
   "InteractionManager has been deprecated and will be removed in a future release. Please refactor long tasks into smaller ones, and  use 'requestIdleCallback' instead.",
@@ -36,7 +37,9 @@ export default function RootLayout() {
 function RootNavigator() {
   const { colorScheme } = useAppColorScheme();
   const segments = useSegments();
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  // undefined while checking; null when signed out.
+  const [sessionUser, setSessionUser] = useState<SessionUser | null | undefined>(undefined);
+  const isAuthenticated = sessionUser === undefined ? null : Boolean(sessionUser);
   const sessionCheckVersion = useRef(0);
 
   useEffect(() => {
@@ -45,11 +48,11 @@ function RootNavigator() {
       const checkVersion = ++sessionCheckVersion.current;
       const session = await getSession();
       if (isMounted && checkVersion === sessionCheckVersion.current) {
-        setIsAuthenticated(Boolean(session));
+        setSessionUser(session ?? null);
       }
     };
     const unsubscribe = subscribeToAuthChanges(() => {
-      setIsAuthenticated(null);
+      setSessionUser(undefined);
       void refreshSession();
     });
 
@@ -63,29 +66,39 @@ function RootNavigator() {
   }, []);
 
   useEffect(() => {
-    if (isAuthenticated === null) return;
+    if (sessionUser === undefined) return;
 
-    const currentSegment = segments[0];
-    const isPublicRoute = currentSegment === 'login' || currentSegment === 'register' || currentSegment === 'logout';
+    const currentSegment = segments[0] as string | undefined;
+    const isPublicRoute = currentSegment === 'login' || currentSegment === 'register' || currentSegment === 'logout' || currentSegment === 'privacy-notice';
 
-    if (!isAuthenticated && !isPublicRoute) {
-      router.replace('/login');
-    } else if (isAuthenticated && (currentSegment === 'login' || currentSegment === 'register')) {
+    if (!sessionUser) {
+      if (!isPublicRoute) router.replace('/login');
+      return;
+    }
+    if (currentSegment === 'logout') return;
+    // New accounts confirm their email first; older accounts accept the Privacy Notice once.
+    if (sessionUser.emailVerified === false) {
+      if (currentSegment !== 'verify-email') router.replace('/verify-email');
+    } else if (sessionUser.privacyConsentAt === null) {
+      if (currentSegment !== 'privacy-notice') router.replace('/privacy-notice?accept=1');
+    } else if (currentSegment === 'login' || currentSegment === 'register' || currentSegment === 'verify-email') {
       router.replace('/(tabs)');
     }
-  }, [isAuthenticated, segments]);
+  }, [sessionUser, segments]);
 
   return (
     <>
       <Head>
         <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-title" content="HabitMind" />
+        <meta name="apple-mobile-web-app-title" content="HabitAI" />
         <meta name="mobile-web-app-capable" content="yes" />
       </Head>
       <Stack>
         <Stack.Screen name="login" options={{ headerShown: false }} />
         <Stack.Screen name="register" options={{ headerShown: false }} />
         <Stack.Screen name="logout" options={{ headerShown: false }} />
+        <Stack.Screen name="verify-email" options={{ headerShown: false }} />
+        <Stack.Screen name="privacy-notice" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="progress" options={{ headerShown: false }} />
         <Stack.Screen name="personal-information" options={{ headerShown: false }} />
@@ -126,6 +139,7 @@ function RootNavigator() {
           <Text style={styles.loadingText}>Preparing your habits...</Text>
         </View>
       )}
+      <ServerStatusBanner />
       <StatusBar
         style={colorScheme === 'dark' ? 'light' : 'dark'}
       />
