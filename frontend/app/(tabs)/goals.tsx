@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
-import { getApiBaseUrl, getAuthenticatedHeaders } from '@/authentication';
+import { generateGoalPlan } from '@/utils/ai-client';
 import { useAppColorScheme, type Goal } from '@/hooks/color-scheme-context';
 
 type GoalTab = 'Planner' | 'My Goals';
@@ -138,46 +138,30 @@ export default function GoalsScreen() {
     }
 
     const input = goalInput.trim();
-    const apiUrl = getApiBaseUrl();
     setIsGenerating(true);
-
-    if (!apiUrl) {
-      showAlert('AI planner unavailable', 'Connect the backend before generating a goal plan.');
-      setIsGenerating(false);
-      return;
-    }
-
     try {
-        const authHeaders = await getAuthenticatedHeaders();
-        const response = await fetch(`${apiUrl}/api/goals/generate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeaders },
-          body: JSON.stringify({ goal: input, focusTarget, timeline: timelineOption }),
-        });
-
-        if (!response.ok) throw new Error('Goal generation request failed.');
-        const payload = await response.json();
-        const plan = payload.plan as Partial<GoalInsight>;
-        const nextGoal: GoalInsight = {
-          ...buildGoalInsight(input, timelineOption, focusTarget),
-          ...plan,
-          id: `${Date.now()}`,
-          title: input.length > 50 ? `${input.slice(0, 47)}...` : input,
-          focusTarget,
-          timeline: timelineOption,
-          completedSteps: [false, false, false, false],
-          actionDueDates: plan.actionDueDates ?? buildGoalInsight(input, timelineOption, focusTarget).actionDueDates,
-          progress: 0,
-          status: 'Fresh plan',
-        } as GoalInsight;
-        setGeneratedGoal(nextGoal);
-        setActiveTab('Planner');
-        setIsGenerating(false);
+      const result = await generateGoalPlan<Partial<GoalInsight>>({ goal: input, focusTarget, timeline: timelineOption });
+      if (!result.ok) {
+        showAlert('AI planner unavailable', `${result.message} Nothing was saved.`);
         return;
-    } catch {
-      showAlert('AI planner unavailable', 'The backend could not generate this plan. Nothing was saved.');
+      }
+      const plan = result.plan;
+      const nextGoal: GoalInsight = {
+        ...buildGoalInsight(input, timelineOption, focusTarget),
+        ...plan,
+        id: `${Date.now()}`,
+        title: input.length > 50 ? `${input.slice(0, 47)}...` : input,
+        focusTarget,
+        timeline: timelineOption,
+        completedSteps: [false, false, false, false],
+        actionDueDates: plan.actionDueDates ?? buildGoalInsight(input, timelineOption, focusTarget).actionDueDates,
+        progress: 0,
+        status: 'Fresh plan',
+      } as GoalInsight;
+      setGeneratedGoal(nextGoal);
+      setActiveTab('Planner');
+    } finally {
       setIsGenerating(false);
-      return;
     }
   };
 

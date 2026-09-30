@@ -5,7 +5,7 @@ import React, { useState } from 'react';
 import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
-import { getAuthenticatedHeaders } from '@/authentication';
+import { askAi } from '@/utils/ai-client';
 import type { TranslationKey } from '@/constants/i18n';
 import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
 
@@ -49,45 +49,15 @@ export default function ProfileScreen() {
     setCoachLoading(true);
     setCoachError('');
     try {
-      const apiUrl = (process.env.EXPO_PUBLIC_API_URL || process.env.EXPO_PUBLIC_AI_API_URL)?.replace(/\/$/, '');
-      const summary = {
-        completionPercent: Math.round(habits.length ? habits.reduce((sum, habit) => sum + habit.progress, 0) / habits.length : 0),
-        averageProgress: Math.round(habits.length ? habits.reduce((sum, habit) => sum + habit.progress, 0) / habits.length : 0),
-        completed: habits.filter((habit) => habit.done).length,
-        missedHabits: Math.max(0, habits.length - habits.filter((habit) => habit.done).length),
-        maxStreak: Math.max(0, ...habits.map((habit) => habit.streak), 0),
-        habits: habits.map((habit) => ({ label: habit.label, progress: habit.progress, streak: habit.streak, done: habit.done })),
-      };
-
-      if (!apiUrl) throw new Error('AI service unavailable');
-      {
-        const authHeaders = await getAuthenticatedHeaders();
-        const response = await fetch(`${apiUrl}/api/insights/assistant`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeaders },
-          body: JSON.stringify({
-            question,
-            summary,
-            mode: 'coach',
-          }),
-        });
-
-        if (response.ok) {
-          const result = (await response.json()) as { answer?: string };
-          if (result.answer) {
-            addTokens(-10, 'AI Coach');
-            setCoachReply(result.answer);
-            setCoachQuestion('');
-            setCoachLoading(false);
-            return;
-          }
-        }
-
-        throw new Error('AI service unavailable');
+      // Tokens are only spent when the coach actually answers.
+      const result = await askAi('coach', question);
+      if (result.ok) {
+        addTokens(-10, 'AI Coach');
+        setCoachReply(result.answer);
+        setCoachQuestion('');
+      } else {
+        setCoachError(`${result.message} Your tokens were not spent.`);
       }
-
-    } catch {
-      setCoachError('The secure AI service is unavailable right now. Your tokens were not spent.');
     } finally {
       setCoachLoading(false);
     }

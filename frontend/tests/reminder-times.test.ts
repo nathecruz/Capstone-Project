@@ -17,7 +17,7 @@ describe('getHabitReminderTimes', () => {
 
 describe('custom reminder days', () => {
   it('uses configured weekdays and supports legacy metadata', () => {
-    const habit = { frequency: 'Custom', meta: 'Every week • 07:00 AM • Mon, Wed', reminderDays: ['Mon', 'Wed'] };
+    const habit = { frequency: 'Custom', startDate: '2026-09-01', meta: 'Every week • 07:00 AM • Mon, Wed', reminderDays: ['Mon', 'Wed'] };
     expect(getHabitReminderDays(habit)).toEqual(['Mon', 'Wed']);
     expect(isHabitReminderDay(habit, new Date(2026, 8, 28))).toBe(true);
     expect(isHabitReminderDay(habit, new Date(2026, 8, 29))).toBe(false);

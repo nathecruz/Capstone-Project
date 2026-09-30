@@ -12,6 +12,17 @@ import { canCompleteHabitForDate } from '@/utils/habit-visibility';
 type ColorScheme = 'light' | 'dark';
 let nextHabitId = 0;
 const APP_STATE_KEY_PREFIX = 'habitai_app_state:';
+const REMOTE_REFRESH_INTERVAL_MS = 15000;
+
+/** JSON with sorted keys, so two copies of the same state compare equal regardless of key order. */
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().filter((key) => record[key] !== undefined).map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
 type NotificationsModule = typeof import('expo-notifications');
 let notificationsModule: NotificationsModule | null = null;
 
@@ -653,6 +664,8 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       goals,
     };
     void AsyncStorage.setItem(`${APP_STATE_KEY_PREFIX}${activeUserEmail}`, JSON.stringify(state));
+    // State just received from the server (or unchanged) does not need to be sent back.
+    if (syncBaseRef.current && stableStringify(syncBaseRef.current.state) === stableStringify(state)) return;
     const syncTimer = setTimeout(() => {
       void saveRemoteAppState(state as AppStateSyncPayload, syncBaseRef.current).then((result) => {
         if (!result?.state || !result.updatedAt) return;
@@ -686,13 +699,14 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       if (cancelled || !appIsActive || refreshInFlight) return;
       refreshInFlight = true;
       try {
-        const [remoteState, remoteCompletions] = await Promise.all([
-          getRemoteAppState(),
-          getRemoteHabitCompletions(),
-        ]);
-        if (cancelled || !remoteState?.state || !remoteState.updatedAt) return;
+        // Cheap poll: the server only returns the full state when another device saved something newer.
+        const knownUpdatedAt = syncBaseRef.current?.updatedAt ?? 0;
+        const remoteState = await getRemoteAppState(knownUpdatedAt || null);
+        if (cancelled || !remoteState || remoteState.unchanged || !remoteState.state || !remoteState.updatedAt) return;
         const localUpdatedAt = syncBaseRef.current?.updatedAt ?? 0;
         if (remoteState.updatedAt <= localUpdatedAt) return;
+        const remoteCompletions = remoteState.completions ?? await getRemoteHabitCompletions();
+        if (cancelled) return;
 
         const nextState = remoteState.state;
         const savedHabits: Habit[] = Array.isArray(nextState.habits) ? nextState.habits as Habit[] : [];
@@ -743,7 +757,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       window.addEventListener('online', handleOnline);
     }
 
-    const refreshTimer = setInterval(() => void refreshRemoteState(), 1000);
+    // Other devices' changes arrive within this interval; returning to the app refreshes immediately.
+    // (It used to poll every second, which exhausted the API rate limit within minutes.)
+    const refreshTimer = setInterval(() => void refreshRemoteState(), REMOTE_REFRESH_INTERVAL_MS);
     const appStateSubscription = AppState.addEventListener('change', (nextState) => {
       appIsActive = nextState === 'active';
       if (appIsActive) void syncThenRefresh();
@@ -1106,8 +1122,8 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   const syncAppState = useCallback(async (state = getAppStateSnapshot()) => {
     const result = await saveRemoteAppState(state as AppStateSyncPayload, syncBaseRef.current);
     const savedState = result?.state as PersistedAppState | undefined;
-    if (savedState && result.updatedAt) syncBaseRef.current = { updatedAt: result.updatedAt, state: result.state! };
-    if (savedState && result.merged) {
+    if (savedState && result?.updatedAt && result.state) syncBaseRef.current = { updatedAt: result.updatedAt, state: result.state };
+    if (savedState && result?.merged) {
       setAvatarImage(savedState.avatarImage ?? null);
       setProfile(savedState.profile as Profile);
       setPreferences(savedState.preferences as Preferences);

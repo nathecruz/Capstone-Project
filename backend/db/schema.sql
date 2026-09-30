@@ -248,6 +248,15 @@ CREATE TABLE IF NOT EXISTS issue_reports (
 ALTER TABLE issue_reports ADD COLUMN IF NOT EXISTS attachment_data BYTEA;
 CREATE INDEX IF NOT EXISTS issue_reports_user_created_idx ON issue_reports(user_id, created_at DESC);
 
+-- One row per student per day they used the app (Asia/Manila calendar days).
+-- Engagement analytics read this instead of keeping every app-state snapshot.
+CREATE TABLE IF NOT EXISTS user_activity_days (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  activity_date DATE NOT NULL,
+  PRIMARY KEY (user_id, activity_date)
+);
+CREATE INDEX IF NOT EXISTS user_activity_days_date_idx ON user_activity_days(activity_date);
+
 CREATE TABLE IF NOT EXISTS feature_suggestions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

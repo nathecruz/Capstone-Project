@@ -21,19 +21,13 @@ const unsetEnv = (key: string) => {
 };
 
 jest.mock('@/authentication/session', () => ({
-  completePasswordReset: jest.fn(),
   getCurrentSession: jest.fn(),
   getRememberedEmail: jest.fn(),
   getSessionToken: jest.fn(),
-  loginWithStoredAccount: jest.fn(),
   logoutUser: jest.fn(),
-  readSavedAccounts: jest.fn(),
-  requestPasswordReset: jest.fn(),
-  saveNewAccount: jest.fn(),
   saveSessionToken: jest.fn(),
   setRememberedEmail: jest.fn(),
   subscribeToAuthChanges: jest.fn(),
-  verifyResetCode: jest.fn(),
 }));
 
 describe('auth service offline behavior', () => {

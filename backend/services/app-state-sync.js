@@ -1,3 +1,14 @@
+/** JSON with sorted keys, so JSONB (which reorders keys) compares equal to the same JS object. */
+export function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().filter((key) => value[key] !== undefined).map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+export const sameState = (left, right) => stableStringify(left) === stableStringify(right);
+
 function valuesEqual(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }

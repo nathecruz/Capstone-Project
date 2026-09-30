@@ -29,9 +29,29 @@ and the existing integration tests use the SQLite fallback.
 
 ## Architecture
 
-- The `frontend` app handles UI, auth flows, habits, and local state.
-- The `backend` service handles app logic, persistence, and API flows when it is introduced.
+See **[ARCHITECTURE.md](ARCHITECTURE.md)** for the system diagram, API modules, data model
+and the data flows for sign-in, sync, password reset (OTP), AI features, reminders and the
+Admin Panel.
+
+- The `frontend` app handles UI, local-first state and sync; all API calls go through
+  `frontend/authentication/authService.ts`, and AI calls through `frontend/utils/ai-client.ts`.
+- The `backend` API is split into `config/`, `db/`, `http/`, `routes/` and `services/`
+  (entry point `server-neon.js`). The SQLite server in `server.js` is only an offline fallback
+  used by the API test suite.
 - The `ml-service` handles prediction and recommendation logic for habit forecasting.
+
+Backend checks:
+
+```bash
+npm --prefix backend run lint        # syntax-checks every backend module
+npm --prefix backend run test:unit   # services, prompts, email templates, reminders
+npm --prefix backend test            # unit tests + SQLite API integration test
+```
+
+Configuration: the backend reads `backend/.env` and then the root `.env`; a value that is
+still a template placeholder (for example `your-gemini-api-key`) is ignored in favour of a
+real one from the other file. Neon Auth (`AUTH_URL`, `JWKS_URL`, `EXPO_PUBLIC_AUTH_URL`) is
+optional: sign-in uses the backend's own accounts and hashed session tokens.
 
 ## ML service setup
 
@@ -126,8 +146,8 @@ The ML service is intentionally separated from the frontend to keep the app arch
 - Leaderboards are authenticated community data. The server derives member identity from the session and points from recorded habit completions; client-supplied names and points are rejected.
 - Habit and smart reminders use local device notifications and require a native iOS/Android build plus notification permission; the web build does not deliver scheduled device reminders. Smart reminders are scheduled after a habit is saved, using recent activity and prediction guidance when available.
 - Issue reports accept real multipart uploads for JPG, PNG, WEBP, and MP4 files up to 10MB. Files are stored under `backend/data/uploads` with server-generated names and magic-byte validation; they are not yet connected to cloud storage, malware scanning, or an external ticketing/email workflow.
-- Password reset emails use configurable SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, and optional `SMTP_FROM`). Gmail is supported through `smtp.gmail.com` with a Gmail App Password; other SMTP providers can be used with their own credentials.
-- AI Coach and the AI Assistant use Google Gemini through `GEMINI_API_KEY` and `GEMINI_MODEL` (default `gemini-2.5-flash`, or a valid deployed override). The Insights Assistant clearly labels its local guidance fallback; the Coach does not charge tokens when Gemini is unavailable. AI Goals requires Gemini and does not fabricate a generated plan when the service is unavailable. Goal plans no longer present uncalibrated numeric potential/confidence scores.
+- Password reset emails use configurable SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, and optional `SMTP_FROM`). Gmail is supported through `smtp.gmail.com` with a Gmail App Password; other SMTP providers can be used with their own credentials. Codes are 6 digits, valid for 10 minutes, limited to 5 attempts, and sent as branded HTML emails; a security notice is emailed after every password change. The backend verifies the SMTP login at start-up and logs the result.
+- AI Coach and the AI Assistant use Google Gemini through `GEMINI_API_KEY` and `GEMINI_MODEL` (default `gemini-2.5-flash`, or a valid deployed override). Prompts live in `backend/services/ai-prompts.js`; the server grounds every answer in the student's habits and check-ins from the database (`backend/services/ai-context.js`), and the Help & Support assistant answers from a built-in app guide. The Insights Assistant clearly labels its local guidance fallback; the Coach does not charge tokens when Gemini is unavailable. AI Goals requires Gemini and does not fabricate a generated plan when the service is unavailable. Goal plans no longer present uncalibrated numeric potential/confidence scores.
 - AI screens use the live backend when `EXPO_PUBLIC_API_URL` or `EXPO_PUBLIC_AI_API_URL` is configured; otherwise they explicitly fall back to local guidance.
 - ML predictions remain a prototype until the service is retrained and evaluated with approved anonymized real outcomes. Bootstrap model scores are not production evidence. HabitAI does not collect session duration; the prediction service imputes that optional feature from the trained model's training-set mean instead of sending a fabricated per-user duration.
 - Retraining requires `ML_TRAINING_DATASET` to point to an approved anonymized outcomes CSV; the service no longer creates synthetic bootstrap training rows during retraining.

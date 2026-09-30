@@ -133,13 +133,15 @@ const publicApiUrl = values.EXPO_PUBLIC_API_URL || values.EXPO_PUBLIC_AI_API_URL
 if (isProduction && (!publicApiUrl || !isHttpsUrl(publicApiUrl))) {
   deployIssues.push('EXPO_PUBLIC_API_URL must be a deployed HTTPS backend URL in production.');
 }
+// Sign-in uses the backend's own accounts and session tokens, so Neon Auth settings are
+// optional. When they are provided they still have to be valid HTTPS URLs.
 const publicAuthUrl = values.EXPO_PUBLIC_AUTH_URL || values.AUTH_URL;
-if (isProduction && (!publicAuthUrl || !isHttpsUrl(publicAuthUrl))) {
-  deployIssues.push('EXPO_PUBLIC_AUTH_URL or AUTH_URL must be a deployed HTTPS Neon Auth URL in production.');
+if (isProduction && publicAuthUrl && !isPlaceholderValue(publicAuthUrl) && !isHttpsUrl(publicAuthUrl)) {
+  deployIssues.push('EXPO_PUBLIC_AUTH_URL/AUTH_URL, when set, must be an HTTPS URL in production.');
 }
 const jwksUrl = values.JWKS_URL || values.AUTH_JWKS_URL || values.NEON_JWKS_URL;
-if (isProduction && (!jwksUrl || !isHttpsUrl(jwksUrl) || !String(jwksUrl).includes('/.well-known/jwks.json'))) {
-  deployIssues.push('JWKS_URL/AUTH_JWKS_URL must point to the Neon Auth JWKS endpoint in production.');
+if (isProduction && jwksUrl && !isPlaceholderValue(jwksUrl) && (!isHttpsUrl(jwksUrl) || !String(jwksUrl).includes('/.well-known/jwks.json'))) {
+  deployIssues.push('JWKS_URL/AUTH_JWKS_URL, when set, must point to an HTTPS /.well-known/jwks.json endpoint.');
 }
 const publicSecretVariables = Object.keys(values).filter((name) => (
   /^EXPO_PUBLIC_.*(?:API_KEY|SECRET|PASSWORD|TOKEN)/i.test(name) && Boolean(values[name])

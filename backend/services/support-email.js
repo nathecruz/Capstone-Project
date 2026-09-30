@@ -1,47 +1,31 @@
-import nodemailer from 'nodemailer';
 import path from 'node:path';
-
-function isPlaceholder(value) {
-  const normalized = String(value ?? '').trim().toLowerCase();
-  return !normalized || normalized.includes('your-') || normalized.includes('replace-with') || normalized.includes('example.com');
-}
+import { getEmailConfig, sendEmail } from './mailer.js';
 
 export function getSupportEmailConfig(environment = process.env) {
-  const user = environment.SMTP_USER?.trim() || environment.GMAIL_USER?.trim() || '';
-  const password = environment.SMTP_PASSWORD?.trim() || environment.GMAIL_APP_PASSWORD?.trim() || '';
-  const recipient = environment.SUPPORT_EMAIL?.trim() || user;
-  const host = environment.SMTP_HOST?.trim() || '';
-  const port = Number(environment.SMTP_PORT || 587);
+  const mail = getEmailConfig(environment);
+  const recipient = environment.SUPPORT_EMAIL?.trim() || mail.user;
   const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient);
   return {
-    user,
-    password,
+    user: mail.user,
+    password: mail.password,
     recipient,
-    host,
-    port,
-    configured: Boolean(!isPlaceholder(user) && !isPlaceholder(password) && validEmail),
+    host: mail.host,
+    port: mail.port,
+    configured: mail.configured && validEmail,
   };
 }
 
+/** Emails an issue report to the support inbox. Returns false when email is not configured. */
 export async function forwardSupportIssue(report, environment = process.env) {
   const config = getSupportEmailConfig(environment);
   if (!config.configured) return false;
 
-  const transport = config.host
-    ? nodemailer.createTransport({
-      host: config.host,
-      port: config.port,
-      secure: String(environment.SMTP_SECURE).toLowerCase() === 'true' || config.port === 465,
-      auth: { user: config.user, pass: config.password },
-    })
-    : nodemailer.createTransport({ service: 'gmail', auth: { user: config.user, pass: config.password } });
-  const sender = environment.SMTP_FROM?.trim() || config.user;
-  const attachment = report.attachmentPath
+  const attachments = report.attachmentPath
     ? [{ filename: path.basename(report.attachmentName || report.attachmentPath), path: report.attachmentPath }]
     : [];
 
-  await transport.sendMail({
-    from: `HabitAI Support <${sender}>`,
+  await sendEmail({
+    fromName: 'HabitAI Support',
     to: config.recipient,
     ...(report.reporterEmail ? { replyTo: report.reporterEmail } : {}),
     subject: `[HabitAI issue ${report.id}] ${report.topic}`,
@@ -53,7 +37,7 @@ export async function forwardSupportIssue(report, environment = process.env) {
       '',
       report.description,
     ].join('\n'),
-    attachments: attachment,
-  });
+    attachments,
+  }, environment);
   return true;
 }

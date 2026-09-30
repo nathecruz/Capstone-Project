@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import webpush from 'web-push';
 import { closeDatabase, query } from '../db/client.js';
-import { getDueHabitReminders, getSnoozeLimit, getWebPushSnoozeSettings, getWebPushSnoozeUrl, hashWebPushSnoozeToken } from '../services/web-push-reminders.js';
+import { getDueHabitReminders, getReminderText, getSnoozeLimit, getWebPushSnoozeSettings, getWebPushSnoozeUrl, hashWebPushSnoozeToken } from '../services/web-push-reminders.js';
 
 const publicKey = process.env.WEB_PUSH_VAPID_PUBLIC_KEY?.trim();
 const privateKey = process.env.WEB_PUSH_VAPID_PRIVATE_KEY?.trim();
@@ -13,6 +13,18 @@ if (!publicKey || !privateKey || !subject) {
 
 webpush.setVapidDetails(subject, publicKey, privateKey);
 const snoozeUrl = getWebPushSnoozeUrl();
+
+// The Admin Panel manages the reminder wording; without its table or when disabled, the built-in text is used.
+async function loadReminderTemplate() {
+  try {
+    const result = await query("SELECT title, body FROM notification_templates WHERE id='habit-reminder' AND is_active");
+    return result.rows[0] ?? null;
+  } catch (error) {
+    if (error?.code === '42P01') return null;
+    throw error;
+  }
+}
+let reminderTemplate = null;
 
 function makeNotificationId(userId, habitId, date, time) {
   const value = `${userId}\0${habitId}\0${date}\0${time}`;
@@ -52,7 +64,8 @@ async function dispatchDueSnoozes() {
   let failed = 0;
 
   for (const row of claimed.rows) {
-    const subscription = (await query('SELECT subscription_json AS "subscriptionJson" FROM web_push_subscriptions WHERE id=$1', [row.subscriptionId])).rows[0];
+    const subscription = (await query(`SELECT s.subscription_json AS "subscriptionJson" FROM web_push_subscriptions s
+      JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND u.status <> 'deactivated'`, [row.subscriptionId])).rows[0];
     const appState = (await query('SELECT state_json AS "stateJson" FROM user_app_state WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 1', [row.userId])).rows[0]?.stateJson;
     if (!subscription || !appState) {
       await query('UPDATE web_push_snooze_queue SET sent_at=$2,attempted_at=0 WHERE id=$1', [row.id, now]);
@@ -68,8 +81,7 @@ async function dispatchDueSnoozes() {
     try {
       const action = await makeSnoozeAction(row.subscriptionId, row.habitId, Number(row.snoozeCount), state);
       await webpush.sendNotification(subscription.subscriptionJson, JSON.stringify({
-        title: `${String(habit.label || 'Habit').slice(0, 120)} reminder`,
-        body: 'A small step today keeps your streak moving.',
+        ...getReminderText(habit, reminderTemplate),
         tag: `snooze-${row.id}`,
         soundEnabled: habit.reminderSoundEnabled !== false,
         actions: action ? [{ action: action.action, title: action.title }] : [],
@@ -97,6 +109,7 @@ async function dispatchDueReminders() {
            subscription.time_zone AS "timeZone",
            current_state.state_json AS "stateJson"
     FROM web_push_subscriptions AS subscription
+    JOIN users AS account ON account.id = subscription.user_id AND account.status <> 'deactivated'
     JOIN LATERAL (
       SELECT state_json
       FROM user_app_state
@@ -130,8 +143,7 @@ async function dispatchDueReminders() {
         `, [row.subscriptionId, String(habit.id), due.date, due.time, Date.now()]);
         if (!claim.rowCount) continue;
 
-        const title = `${String(habit.label || 'Habit').slice(0, 120)} reminder`;
-        const body = 'A small step today keeps your streak moving.';
+        const { title, body } = getReminderText(habit, reminderTemplate);
         const notificationId = makeNotificationId(row.userId, String(habit.id), due.date, due.time);
         try {
           const action = await makeSnoozeAction(row.subscriptionId, String(habit.id), 0, state);
@@ -172,6 +184,7 @@ async function dispatchDueReminders() {
 }
 
 try {
+  reminderTemplate = await loadReminderTemplate();
   await dispatchDueReminders();
 } catch (error) {
   console.error('Web Push dispatch failed.', error);

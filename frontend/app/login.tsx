@@ -41,6 +41,8 @@ export default function LoginScreen() {
   const [otpSent, setOtpSent] = useState(false);
   const [otpVerified, setOtpVerified] = useState(false);
   const [resendCountdown, setResendCountdown] = useState(0);
+  const [codeLifetimeMinutes, setCodeLifetimeMinutes] = useState(10);
+  const [resetBusy, setResetBusy] = useState<'send' | 'verify' | 'save' | null>(null);
   const [dialog, setDialog] = useState<{ title: string; message: string; variant: AppDialogVariant } | null>(null);
   const resetPasswordStrength = getPasswordStrengthStatus(newResetPassword, {
     email: resetEmail,
@@ -176,77 +178,80 @@ export default function LoginScreen() {
     resetModalState();
   };
 
-  const handleResetRequest = async () => {
+  const sendResetCode = async (isResend: boolean) => {
     const targetEmail = resetEmail.trim();
+    if (resetBusy || (isResend && resendCountdown > 0)) return;
 
     if (!targetEmail) {
       showDialog('Email required', 'Please enter the email address associated with your account.');
       return;
     }
 
-    const result = await resetPassword(targetEmail);
+    setResetBusy('send');
+    try {
+      const result = await resetPassword(targetEmail);
+      if (!result.ok) {
+        // The server enforces a resend cooldown; show it on the button instead of letting the user retry blindly.
+        if ('retryAfterSeconds' in result && result.retryAfterSeconds) setResendCountdown(result.retryAfterSeconds);
+        showDialog(isResend ? 'Resend failed' : 'Reset failed', result.message || 'Unable to process your password reset request.');
+        return;
+      }
 
-    if (!result.ok) {
-      showDialog('Reset failed', result.message || 'Unable to process your password reset request.');
-      return;
+      setEmail(targetEmail);
+      setResetOtp('');
+      setNewResetPassword('');
+      setConfirmResetPassword('');
+      setOtpSent(true);
+      setOtpVerified(false);
+      setResendCountdown('retryAfterSeconds' in result && result.retryAfterSeconds ? result.retryAfterSeconds : 60);
+      setCodeLifetimeMinutes(Math.round(('expiresInSeconds' in result && result.expiresInSeconds ? result.expiresInSeconds : 600) / 60));
+      showDialog(isResend ? 'New code sent' : 'Check your email', result.message || 'A verification code was sent to your email.', 'success');
+    } finally {
+      setResetBusy(null);
     }
-
-    setEmail(targetEmail);
-    setResetOtp('');
-    setNewResetPassword('');
-    setConfirmResetPassword('');
-    setOtpSent(true);
-    setOtpVerified(false);
-    setResendCountdown(60);
-    showDialog('OTP sent', result.message || 'A verification code was sent to your email.', 'success');
   };
 
-  const handleResendOtp = async () => {
-    if (resendCountdown > 0) {
-      return;
-    }
+  const handleResetRequest = () => sendResetCode(false);
+  const handleResendOtp = () => sendResetCode(true);
 
+  const handleVerifyOtp = async (code = resetOtp) => {
     const targetEmail = resetEmail.trim();
+    if (resetBusy) return;
 
-    if (!targetEmail) {
-      showDialog('Email required', 'Please enter the email address associated with your account.');
+    if (!targetEmail || code.trim().length !== 6) {
+      showDialog('Missing code', 'Please enter the 6-digit code sent to your email.');
       return;
     }
 
-    const result = await resetPassword(targetEmail);
-    if (!result.ok) {
-      showDialog('Resend failed', result.message || 'Unable to resend the OTP.');
-      return;
-    }
+    setResetBusy('verify');
+    try {
+      const otpCheck = await verifyPasswordReset(targetEmail, code);
+      if (!otpCheck.ok) {
+        setResetOtp('');
+        if ('mustRequestNewCode' in otpCheck && otpCheck.mustRequestNewCode) {
+          setOtpSent(false);
+          setResendCountdown(0);
+        }
+        showDialog('Invalid code', otpCheck.message || 'The verification code is invalid.');
+        return;
+      }
 
-    setResetOtp('');
-    setNewResetPassword('');
-    setConfirmResetPassword('');
-    setOtpVerified(false);
-    setResendCountdown(60);
-    showDialog('New OTP sent', result.message || 'A new verification code was sent to your email.', 'success');
+      setOtpVerified(true);
+    } finally {
+      setResetBusy(null);
+    }
   };
 
-  const handleVerifyOtp = async () => {
-    const targetEmail = resetEmail.trim();
-
-    if (!targetEmail || !resetOtp.trim()) {
-      showDialog('Missing OTP', 'Please enter the verification code sent to your email.');
-      return;
-    }
-
-    const otpCheck = await verifyPasswordReset(targetEmail, resetOtp);
-    if (!otpCheck.ok) {
-      showDialog('Invalid OTP', otpCheck.message || 'The verification code is invalid.');
-      return;
-    }
-
-    setOtpVerified(true);
-    showDialog('OTP verified', 'Now create your new password.', 'success');
+  const handleOtpChange = (value: string) => {
+    const code = value.replace(/\D/g, '').slice(0, 6);
+    setResetOtp(code);
+    // Verify as soon as the sixth digit is typed or pasted.
+    if (code.length === 6 && resetOtp.length !== 6) void handleVerifyOtp(code);
   };
 
   const handleSetNewPassword = async () => {
     const targetEmail = resetEmail.trim();
+    if (resetBusy) return;
 
     if (!newResetPassword.trim() || !confirmResetPassword.trim()) {
       showDialog('New password required', 'Please enter your new password and confirm it.');
@@ -258,7 +263,13 @@ export default function LoginScreen() {
       return;
     }
 
-    const result = await updatePasswordWithOtp(targetEmail, resetOtp, newResetPassword);
+    setResetBusy('save');
+    let result: Awaited<ReturnType<typeof updatePasswordWithOtp>>;
+    try {
+      result = await updatePasswordWithOtp(targetEmail, resetOtp, newResetPassword);
+    } finally {
+      setResetBusy(null);
+    }
     if (!result.ok) {
       showDialog('Reset failed', result.message || 'Unable to update your password.');
       return;
@@ -365,14 +376,15 @@ export default function LoginScreen() {
                   <Pressable style={styles.secondaryButton} onPress={cancelResetFlow}>
                     <Text style={styles.secondaryButtonText}>Cancel</Text>
                   </Pressable>
-                  <Pressable style={styles.primaryButton} onPress={handleResetRequest}>
-                    <Text style={styles.primaryButtonText}>Send OTP</Text>
+                  <Pressable style={[styles.primaryButton, resetBusy !== null && styles.buttonDisabled]} onPress={handleResetRequest} disabled={resetBusy !== null}>
+                    {resetBusy === 'send' && <ActivityIndicator size="small" color="#FFFFFF" />}
+                    <Text style={styles.primaryButtonText}>{resetBusy === 'send' ? 'Sending...' : 'Send code'}</Text>
                   </Pressable>
                 </View>
               </>
             ) : !otpVerified ? (
               <>
-                <Text style={styles.resetSubtitle}>We sent a 6-digit OTP to {resetEmail}. Use it to verify and set a new password.</Text>
+                <Text style={styles.resetSubtitle}>Enter the 6-digit code sent to {resetEmail}. It expires in {codeLifetimeMinutes} minutes. If you do not see it, check your Spam folder.</Text>
                 <View style={styles.otpInputWrap}>
                   <View style={styles.otpBoxes} pointerEvents="none">
                     {Array.from({ length: 6 }, (_, index) => (
@@ -383,9 +395,12 @@ export default function LoginScreen() {
                   </View>
                   <TextInput
                     value={resetOtp}
-                    onChangeText={(value) => setResetOtp(value.replace(/\D/g, '').slice(0, 6))}
+                    onChangeText={handleOtpChange}
                     keyboardType="number-pad"
+                    textContentType="oneTimeCode"
+                    autoComplete="one-time-code"
                     maxLength={6}
+                    editable={resetBusy === null}
                     autoFocus
                     style={styles.otpTextInput}
                     accessibilityLabel="Verification code"
@@ -394,9 +409,9 @@ export default function LoginScreen() {
 
                 <View style={styles.resendRow}>
                   <Text style={styles.helpText}>Didn’t receive the code?</Text>
-                  <Pressable onPress={handleResendOtp} disabled={resendCountdown > 0} accessibilityRole="button" accessibilityState={{ disabled: resendCountdown > 0 }}>
-                    <Text style={[styles.resendLink, resendCountdown > 0 && styles.resendLinkDisabled]}>
-                      {resendCountdown > 0 ? `Resend OTP (${resendCountdown}s)` : 'Resend OTP'}
+                  <Pressable onPress={handleResendOtp} disabled={resendCountdown > 0 || resetBusy !== null} accessibilityRole="button" accessibilityState={{ disabled: resendCountdown > 0 || resetBusy !== null }}>
+                    <Text style={[styles.resendLink, (resendCountdown > 0 || resetBusy !== null) && styles.resendLinkDisabled]}>
+                      {resetBusy === 'send' ? 'Sending...' : resendCountdown > 0 ? `Resend code (${resendCountdown}s)` : 'Resend code'}
                     </Text>
                   </Pressable>
                 </View>
@@ -405,14 +420,15 @@ export default function LoginScreen() {
                   <Pressable style={styles.secondaryButton} onPress={cancelResetFlow}>
                     <Text style={styles.secondaryButtonText}>Back</Text>
                   </Pressable>
-                  <Pressable style={styles.primaryButton} onPress={handleVerifyOtp}>
-                    <Text style={styles.primaryButtonText}>Verify OTP</Text>
+                  <Pressable style={[styles.primaryButton, resetBusy !== null && styles.buttonDisabled]} onPress={() => void handleVerifyOtp()} disabled={resetBusy !== null}>
+                    {resetBusy === 'verify' && <ActivityIndicator size="small" color="#FFFFFF" />}
+                    <Text style={styles.primaryButtonText}>{resetBusy === 'verify' ? 'Verifying...' : 'Verify code'}</Text>
                   </Pressable>
                 </View>
               </>
             ) : (
               <>
-                <Text style={styles.resetSubtitle}>OTP verified. Create a new password for {resetEmail}.</Text>
+                <Text style={styles.resetSubtitle}>Code verified. Create a new password for {resetEmail}. You will be signed out of your other devices.</Text>
                 <Text style={styles.label}>New password</Text>
                 <TextInput
                   value={newResetPassword}
@@ -440,11 +456,12 @@ export default function LoginScreen() {
                   style={styles.resetInput}
                 />
                 <View style={styles.resetActions}>
-                  <Pressable style={styles.secondaryButton} onPress={() => setOtpVerified(false)}>
-                    <Text style={styles.secondaryButtonText}>Back to OTP</Text>
+                  <Pressable style={styles.secondaryButton} onPress={cancelResetFlow} disabled={resetBusy !== null}>
+                    <Text style={styles.secondaryButtonText}>Cancel</Text>
                   </Pressable>
-                  <Pressable style={styles.primaryButton} onPress={handleSetNewPassword}>
-                    <Text style={styles.primaryButtonText}>Set new password</Text>
+                  <Pressable style={[styles.primaryButton, resetBusy !== null && styles.buttonDisabled]} onPress={handleSetNewPassword} disabled={resetBusy !== null}>
+                    {resetBusy === 'save' && <ActivityIndicator size="small" color="#FFFFFF" />}
+                    <Text style={styles.primaryButtonText}>{resetBusy === 'save' ? 'Saving...' : 'Set new password'}</Text>
                   </Pressable>
                 </View>
               </>
@@ -798,8 +815,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
   primaryButton: {
     flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
     backgroundColor: '#5a42d8',
     borderRadius: 14,
     paddingVertical: 14,

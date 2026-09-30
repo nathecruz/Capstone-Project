@@ -30,7 +30,7 @@ The root `render.yaml` deploys all three services as one Blueprint:
 - `habitai-backend`: Express API. Its ML service URL and API key are linked automatically.
 - `habitai-frontend`: Expo web export hosted as a Static Site. Its API URLs are linked automatically to the backend; its Neon Auth URL is provided separately.
 
-1. Create or connect a Neon project and have its `DATABASE_URL`, `AUTH_URL`, `JWKS_URL`, and public Neon Auth base URL ready. The JWKS URL must end in `/.well-known/jwks.json`. The frontend auth URL is the Neon Auth base URL used by the client, not the backend API URL.
+1. Create or connect a Neon project and have its `DATABASE_URL` ready. Neon Auth (`AUTH_URL`, `JWKS_URL`, `EXPO_PUBLIC_AUTH_URL`) is optional: HabitAI signs users in with its own accounts and hashed session tokens. If you set them, the JWKS URL must end in `/.well-known/jwks.json`.
 2. Push the repository to GitHub.
 3. In Render, select **New** -> **Blueprint** and connect this repository.
 4. Provide the prompted values, including backend Neon credentials, `ALLOWED_ORIGINS`, Gemini API keys, SMTP settings, and the frontend `EXPO_PUBLIC_AUTH_URL`. Use `GEMINI_API_KEY_GOALS`, `GEMINI_API_KEY_COACH`, and `GEMINI_API_KEY_ASSISTANT` for the goal planner, habit coach, and support/progress assistant; the generic `GEMINI_API_KEY` remains a fallback. `SUPPORT_EMAIL` is optional; if omitted, issue reports go to the configured SMTP sender. For `ALLOWED_ORIGINS`, enter the frontend's Render origin (for example, `https://habitai-frontend.onrender.com`). If Render assigns a different URL, update it in the backend after the first sync.
@@ -67,7 +67,8 @@ With `frontend` as the project root, Vercel runs `npm ci` and `npm run export:we
 - The backend checks that `ML_SERVICE_URL` is not localhost in production.
 - The ML service returns HTTP 503 until `ML_MODEL_RELEASE_APPROVED=true` and a valid evaluated model is present. The included synthetic demo data is not production training data.
 - Render uses `/healthz` to verify that each service is running; `/health` reports dependency/model readiness and may return HTTP 503 until the ML release is approved.
-- The backend requires `AUTH_URL` and `JWKS_URL` when using the production Neon database.
+- The backend no longer requires `AUTH_URL` and `JWKS_URL`; in production it requires `DATABASE_URL`, `ML_SERVICE_URL`, a real `ML_SERVICE_API_KEY` and `ALLOWED_ORIGINS`, and reports all missing values at once.
+- Redeploy both the backend and the frontend together: the app now polls `GET /api/app-state?since=` and sends `mode: "support"` for the Help assistant.
 - Full production readiness validation requires at least one of `GEMINI_API_KEY`, `GEMINI_API_KEY_GOALS`, `GEMINI_API_KEY_COACH`, or `GEMINI_API_KEY_ASSISTANT`, plus an SMTP username/password pair; without them, AI or password-reset email features are unavailable and the production readiness check fails.
 - The app validates that `ML_SERVICE_API_KEY` is a real secret and not a placeholder.
 - The backend also expects `ALLOWED_ORIGINS` to be defined in production.

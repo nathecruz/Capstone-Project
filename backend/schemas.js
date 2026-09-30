@@ -22,8 +22,17 @@ export const habitPredictionSchema = z.object({ habit_name: z.string().trim().mi
 export const leaderboardSchema = z.object({ avatar: z.string().trim().max(2).optional() }).strict();
 export const leaderboardSyncSchema = leaderboardSchema;
 export const habitCompletionSchema = z.object({ habitId: z.string().trim().min(1).max(120), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), completed: z.boolean(), timeZone: z.string().trim().min(1).max(80).optional() }).strict();
-export const assistantSchema = z.object({ question: z.string().trim().max(500).optional(), summary: z.record(z.string(), z.unknown()).optional(), mode: z.enum(['assistant', 'coach']).default('assistant') }).strict();
-export const goalGenerationSchema = z.object({ goal: z.string().trim().min(1).max(500), focusTarget: z.string().trim().max(30).optional(), timeline: z.string().trim().max(30).optional() }).strict();
+const timeZoneSchema = z.string().trim().min(1).max(80).refine((value) => {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}, 'Unknown time zone.');
+// `summary` is accepted for older app builds; the server now builds AI context from the database.
+export const assistantSchema = z.object({ question: z.string().trim().max(500).optional(), summary: z.record(z.string(), z.unknown()).optional(), mode: z.enum(['assistant', 'coach', 'support']).default('assistant'), timeZone: timeZoneSchema.optional() }).strict();
+export const goalGenerationSchema = z.object({ goal: z.string().trim().min(1).max(500), focusTarget: z.string().trim().max(30).optional(), timeline: z.string().trim().max(30).optional(), timeZone: timeZoneSchema.optional() }).strict();
 export const goalPlanSchema = z.object({ category: z.enum(['Career', 'Health', 'Finance', 'Education', 'Relationships', 'Personal Growth']), summary: z.string().min(1).max(1000), intensity: z.enum(['High focus', 'Balanced', 'Quick win']), focusAreas: z.array(z.string().trim().min(1).max(120)).length(3), actionPlan: z.array(z.string().trim().min(1).max(70)).length(4), actionDueDates: z.array(z.string().trim().min(1).max(40)).length(4), nextMilestone: z.string().min(1).max(500), risk: z.string().min(1).max(500), riskAction: z.string().min(1).max(500), timeline: z.enum(['7-14 days', '30-60 days', '90 days']), nextCheckIn: z.string().trim().min(1).max(40), status: z.literal('Fresh plan') });
 export const issueSchema = z.object({ topic: z.string().trim().min(1).max(100), timing: z.string().trim().min(1).max(50), description: z.string().trim().min(1).max(500) }).strict();
 export const issueReportSchema = issueSchema;

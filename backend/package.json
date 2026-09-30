@@ -4,14 +4,15 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "lint": "node --check server.js && node --check server-neon.js && node --check services/app-state-sync.js && node --check services/file-upload.js && node --check services/gemini.js",
+    "lint": "node scripts/lint.js",
     "dev": "node --watch server.js",
     "db:migrate:neon": "node scripts/migrate-neon.js",
     "push:dispatch": "node scripts/send-web-push-reminders.js",
     "push:generate-vapid-keys": "node scripts/generate-vapid-keys.js",
     "smoke:gemini": "node scripts/smoke-gemini.js",
     "backup": "node scripts/backup-db.js",
-    "test": "node --test test/api.test.js"
+    "test": "node --test test/services.test.js test/web-push-reminders.test.js test/api.test.js",
+    "test:unit": "node --test test/services.test.js test/web-push-reminders.test.js"
   },
   "dependencies": {
     "@google/genai": "^2.24.0",

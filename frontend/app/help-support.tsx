@@ -3,7 +3,8 @@ import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getApiBaseUrl, getAuthenticatedHeaders, submitFeatureSuggestion } from '@/authentication';
+import { submitFeatureSuggestion } from '@/authentication';
+import { askAi } from '@/utils/ai-client';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { openExternalLink } from '@/utils/platform';
@@ -40,21 +41,9 @@ export default function HelpSupportScreen() {
         : question.includes('add') || question.includes('habit')
           ? 'Open the Add tab, enter a habit name, choose a target, and save it.'
           : 'Try the FAQ for common answers, or contact support for account-specific help.';
-    let answer = localAnswer;
-    try {
-      const response = await fetch(`${getApiBaseUrl()}/api/insights/assistant`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await getAuthenticatedHeaders()) },
-        body: JSON.stringify({ question: assistantQuestion.trim(), mode: 'assistant', summary: { context: 'Help and Support for AI Habit Tracker' } }),
-      });
-      if (response.ok) {
-        const result = await response.json() as { answer?: string };
-        if (result.answer) answer = result.answer;
-      }
-    } catch {
-      // Keep local support guidance when the live AI service is unavailable.
-    }
-    showAlert('AI Assistant', answer);
+    // The support mode answers from the app guide on the server; the local answer covers offline use.
+    const result = await askAi('support', assistantQuestion);
+    showAlert('AI Assistant', result.ok ? result.answer : localAnswer);
     setAssistantQuestion('');
   };
   const filteredItems = helpItems.filter((item) => `${item.title} ${item.subtitle}`.toLowerCase().includes(search.toLowerCase()));

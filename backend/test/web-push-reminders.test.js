@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { webPushSubscriptionRequestSchema } from '../schemas.js';
-import { getConfiguredVapidPublicKey, getDueHabitReminders, getHabitReminderDays, getHabitReminderTimes, getSnoozeLimit, getWebPushSnoozeSettings, getWebPushSnoozeUrl, hashWebPushSnoozeToken, isAllowedWebPushEndpoint, parseReminderTime } from '../services/web-push-reminders.js';
+import { getConfiguredVapidPublicKey, getDueHabitReminders, getHabitReminderDays, getReminderText, getHabitReminderTimes, getSnoozeLimit, getWebPushSnoozeSettings, getWebPushSnoozeUrl, hashWebPushSnoozeToken, isAllowedWebPushEndpoint, parseReminderTime } from '../services/web-push-reminders.js';
 
 test('parses 12-hour and legacy reminder times', () => {
   assert.deepEqual(parseReminderTime('08:30 PM'), { hour: 20, minute: 30 });
@@ -102,4 +102,12 @@ test('enforces Web Push snooze permission, interval, and count limits', () => {
   assert.equal(getWebPushSnoozeSettings(state, 'habit-1', 2), null);
   assert.equal(getWebPushSnoozeSettings({ ...state, preferences: { notificationsEnabled: false } }, 'habit-1', 0), null);
   assert.equal(getWebPushSnoozeSettings(state, 'missing-habit', 0), null);
+});
+test('uses the Admin Panel reminder template when one is active', () => {
+  assert.deepEqual(getReminderText({ label: 'Drink Water' }), { title: 'Drink Water reminder', body: 'A small step today keeps your streak moving.' });
+  assert.deepEqual(
+    getReminderText({ label: 'Read' }, { title: 'Time for {{ habit }}', body: '{{habit}} keeps your {{app_name}} streak going.' }),
+    { title: 'Time for Read', body: 'Read keeps your HabitAI streak going.' },
+  );
+  assert.equal(getReminderText({}, { title: '', body: '' }).title, 'Habit reminder');
 });

@@ -121,6 +121,19 @@ export function getDueHabitReminders(habit, timeZone, now = new Date()) {
   return [...due.values()];
 }
 
+/**
+ * Reminder title/body. `template` is the Admin Panel's "habit-reminder" notification
+ * template ({ title, body } with a {{habit}} placeholder) or null for the built-in text.
+ */
+export function getReminderText(habit, template = null) {
+  const name = String(habit?.label || 'Habit').slice(0, 120);
+  if (!template?.title || !template?.body) {
+    return { title: `${name} reminder`, body: 'A small step today keeps your streak moving.' };
+  }
+  const fill = (text) => String(text).replace(/\{\{\s*habit\s*\}\}/gi, name).replace(/\{\{\s*app_name\s*\}\}/gi, 'HabitAI');
+  return { title: fill(template.title).slice(0, 160), body: fill(template.body).slice(0, 600) };
+}
+
 export function getSnoozeLimit(frequency) {
   if (frequency === 'Once') return 1;
   const count = Number.parseInt(frequency, 10);

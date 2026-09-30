@@ -1,35 +1,25 @@
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
+// The app's single API client: every backend request goes through apiRequest below.
+// session.ts only stores the session token and profile on the device.
 import {
-  completePasswordReset,
   getCurrentSession,
   getRememberedEmail,
   getSessionToken,
-  loginWithStoredAccount,
   logoutUser,
-  readSavedAccounts,
-  requestPasswordReset,
-  saveNewAccount,
   saveSessionToken,
   setRememberedEmail,
   subscribeToAuthChanges,
   type SessionUser,
-  verifyResetCode,
 } from './session';
 
 export {
-  completePasswordReset,
   getCurrentSession,
   getRememberedEmail,
-  loginWithStoredAccount,
   logoutUser,
-  readSavedAccounts,
-  requestPasswordReset,
-  saveNewAccount,
   setRememberedEmail,
   subscribeToAuthChanges,
-  verifyResetCode,
 };
 
 export type { SessionUser };
@@ -136,28 +126,41 @@ function isValidSessionUser(value: unknown): value is SessionUser {
     && isValidEmailFormat(user.email);
 }
 
-class ApiRequestError extends Error {
+export class ApiRequestError extends Error {
   status: number;
+  payload: Record<string, unknown>;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, payload: Record<string, unknown> = {}) {
     super(message);
     this.name = 'ApiRequestError';
     this.status = status;
+    this.payload = payload;
   }
 }
 
 function isNetworkError(error: unknown) {
-  return error instanceof TypeError;
+  return error instanceof TypeError || (error instanceof Error && error.name === 'AbortError');
 }
 
-async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers ?? {}),
-    },
-  });
+const DEFAULT_TIMEOUT_MS = 20000;
+
+export async function apiRequest<T>(path: string, options: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, ...init } = options;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(`${getApiBaseUrl()}${path}`, {
+      ...init,
+      signal: init.signal ?? controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init.headers ?? {}),
+      },
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 
   const rawBody = await response.text();
   let payload: unknown = {};
@@ -171,12 +174,15 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T
   }
 
   if (!response.ok) {
-    const message = typeof payload === 'object' && payload !== null && 'message' in payload && typeof payload.message === 'string'
-      ? payload.message
-      : typeof payload === 'string' && payload.trim()
-        ? payload.trim()
-        : 'Request failed.';
-    throw new ApiRequestError(message, response.status);
+    const body = typeof payload === 'object' && payload !== null ? payload as Record<string, unknown> : {};
+    const message = typeof body.message === 'string'
+      ? body.message
+      : typeof body.error === 'string'
+        ? body.error
+        : typeof payload === 'string' && payload.trim()
+          ? payload.trim()
+          : 'Request failed.';
+    throw new ApiRequestError(message, response.status, body);
   }
 
   return payload as T;
@@ -325,6 +331,18 @@ export async function redeemReward(reward: { id: string; title: string; cost: nu
   }
 }
 
+export type HabitCategory = { label: string; icon: string; color: string };
+
+/** Active habit categories managed from the HabitAI Admin Panel, or null when the backend is unreachable. */
+export async function getHabitCategories() {
+  try {
+    const payload = await apiRequest<{ ok: boolean; categories?: HabitCategory[] }>('/api/habit-categories');
+    return (payload.categories ?? []).filter((item) => item && typeof item.label === 'string' && item.label.trim());
+  } catch {
+    return null;
+  }
+}
+
 export async function getPersistedNotifications() {
   const token = await getSessionToken();
   if (!token) return null;
@@ -401,12 +419,26 @@ export async function saveWebPushSubscription(
   }
 }
 
-export async function getRemoteAppState() {
+export type RemoteAppState = {
+  ok: boolean;
+  /** True when nothing changed since `since`; state and completions are then omitted. */
+  unchanged?: boolean;
+  state?: AppStateSyncPayload | null;
+  updatedAt?: number | null;
+  completions?: HabitCompletion[];
+};
+
+/**
+ * Fetches the synced state. Pass the last known `updatedAt` as `since` to poll cheaply:
+ * the server answers `{ unchanged: true }` unless another device saved something newer.
+ */
+export async function getRemoteAppState(since?: number | null) {
   const token = await getSessionToken();
   if (!token) return null;
 
   try {
-    return await apiRequest<{ ok: boolean; state?: AppStateSyncPayload | null; updatedAt?: number | null }>('/api/app-state', {
+    const query = since ? `?since=${encodeURIComponent(String(since))}` : '';
+    return await apiRequest<RemoteAppState>(`/api/app-state${query}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
   } catch {
@@ -438,7 +470,7 @@ export async function saveRemoteAppState(state: AppStateSyncPayload, base: AppSt
   if (!token) return null;
 
   try {
-    return await apiRequest<{ ok: boolean; state?: AppStateSyncPayload; updatedAt?: number; merged?: boolean }>('/api/app-state', {
+    return await apiRequest<{ ok: boolean; state?: AppStateSyncPayload; updatedAt?: number; merged?: boolean; unchanged?: boolean }>('/api/app-state', {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({
@@ -546,7 +578,7 @@ export async function resetPassword(email: string) {
   }
 
   try {
-    const payload = await apiRequest<{ ok: boolean; message?: string; email?: string }>('/api/auth/forgot-password', {
+    const payload = await apiRequest<{ ok: boolean; message?: string; email?: string; expiresInSeconds?: number; retryAfterSeconds?: number }>('/api/auth/forgot-password', {
       method: 'POST',
       body: JSON.stringify({ email: normalizedEmail }),
     });
@@ -555,11 +587,18 @@ export async function resetPassword(email: string) {
       ok: payload.ok,
       message: payload.message || 'A verification code was sent to your email.',
       email: payload.email || normalizedEmail,
+      expiresInSeconds: payload.expiresInSeconds ?? 600,
+      retryAfterSeconds: payload.retryAfterSeconds ?? 60,
     };
   } catch (error) {
+    if (isNetworkError(error)) {
+      return { ok: false, message: 'Unable to reach the account service. Connect to the internet and try again.' };
+    }
+    const retryAfterSeconds = error instanceof ApiRequestError && typeof error.payload.retryAfterSeconds === 'number' ? error.payload.retryAfterSeconds : undefined;
     return {
       ok: false,
       message: error instanceof Error ? error.message : 'Unable to connect to the account service.',
+      retryAfterSeconds,
     };
   }
 }
@@ -587,9 +626,13 @@ export async function verifyPasswordReset(email: string, otp: string) {
       return { ok: false, message: 'Password reset requires a connection to the account service.' };
     }
 
+    const payload = error instanceof ApiRequestError ? error.payload : {};
     return {
       ok: false,
       message: error instanceof Error ? error.message : 'Unable to verify the reset code.',
+      attemptsLeft: typeof payload.attemptsLeft === 'number' ? payload.attemptsLeft : undefined,
+      // 404/410/429: the code is gone, so the user has to request a new one.
+      mustRequestNewCode: error instanceof ApiRequestError && [404, 410, 429].includes(error.status),
     };
   }
 }

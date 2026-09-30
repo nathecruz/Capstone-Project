@@ -1,11 +1,11 @@
-import dotenv from 'dotenv';
+// Entry point. With DATABASE_URL set it runs the modular Neon API (server-neon.js);
+// without it, the legacy single-file SQLite server below is used for offline
+// development and the API test suite.
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { loadEnvironment } from './config/env.js';
 
-if (process.env.NODE_ENV !== 'test' && process.env.NODE_ENV !== 'production') {
-  dotenv.config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.env') });
-}
+loadEnvironment();
 import { mkdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import cors from 'cors';
@@ -46,6 +46,8 @@ import {
 import { achievementSeeds, rewardSeeds } from './db/seed-data.js';
 import { getConfiguredVapidPublicKey, getWebPushSnoozeSettings, hashWebPushSnoozeToken, isAllowedWebPushEndpoint } from './services/web-push-reminders.js';
 import { forwardSupportIssue } from './services/support-email.js';
+import { passwordResetCodeEmail } from './services/email-templates.js';
+import { GOAL_PLANNER_SYSTEM, buildUserPrompt, cleanAnswer, goalPlanJsonSchema, goalPlannerPrompt, normalizeGoalPlan, systemPromptFor } from './services/ai-prompts.js';
 
 const { generateGeminiText, isGeminiConfigured } = await import('./services/gemini.js');
 
@@ -624,23 +626,10 @@ async function sendResetOtpEmail(email, otp, fullName) {
   }
 
   const senderEmail = process.env.SMTP_FROM?.trim() || process.env.SMTP_USER?.trim() || process.env.GMAIL_USER?.trim() || 'habitai@localhost';
-  const displayName = 'HabitAI';
-
   await transport.sendMail({
-    from: `${displayName} <${senderEmail}>`,
+    from: `HabitAI <${senderEmail}>`,
     to: email,
-    subject: 'Your HabitAI password reset code',
-    text: `Hello ${fullName || 'there'},\n\nYour HabitAI password reset code is: ${otp}\n\nThis code expires in 5 minutes. If you did not request this, you can ignore this email.`,
-    html: `
-      <div style="font-family: Arial, sans-serif; color: #1d2435; line-height: 1.6;">
-        <h3 style="margin-bottom: 12px;">Password Reset Request</h3>
-        <p>Hello ${fullName || 'there'},</p>
-        <p>Your HabitAI password reset code is:</p>
-        <p style="font-size: 28px; font-weight: 700; letter-spacing: 4px; margin: 16px 0;">${otp}</p>
-        <p>This code expires in 5 minutes.</p>
-        <p>If you did not request this, you can safely ignore this email.</p>
-      </div>
-    `,
+    ...passwordResetCodeEmail({ name: fullName, code: otp, minutes: 5 }),
   });
 }
 
@@ -1559,18 +1548,18 @@ app.post('/api/insights/assistant', expensiveApiLimiter, async (request, respons
     response.status(503).json({ error: 'AI service is not configured on the server.' });
     return;
   }
-  const safeSummary = JSON.stringify(summary ?? {}).slice(0, 6000);
-  const prompt = mode === 'coach'
-    ? `You are HabitMind's personal habit coach. Use only the user's progress data below. Answer the user's question with one specific, realistic next action and one brief reason. Do not invent habits, scores, or personal facts. Keep the answer to 2-4 helpful sentences. User progress: ${safeSummary}. Question: ${String(question || 'What should I focus on next?').slice(0, 500)}`
-    : `You are HabitMind's support and progress assistant. Use only the supplied app context and user progress. Answer the question directly in 2-4 concise, practical sentences. Do not invent account details or claim actions were completed. App context: ${safeSummary}. Question: ${String(question || 'What should I focus on next?').slice(0, 500)}`;
+  // The offline SQLite server has no relational habit tables, so it grounds the
+  // shared prompts in the client summary; the Neon API builds context from the database.
+  const context = JSON.stringify(summary ?? {}).length <= 6000 ? summary ?? {} : { note: 'Progress summary was too large to include.' };
 
   try {
-    const answer = z.string().trim().min(1).max(4000).safeParse(await generateGeminiText(prompt, { maxOutputTokens: 180, profile: mode }));
-    if (!answer.success) {
+    const text = await generateGeminiText(buildUserPrompt({ question, context }), { system: systemPromptFor(mode), maxOutputTokens: 400, temperature: 0.6, profile: mode });
+    const answer = cleanAnswer(text);
+    if (!answer) {
       response.status(502).json({ error: 'The AI service returned an invalid response.' });
       return;
     }
-    response.json({ answer: answer.data });
+    response.json({ answer });
   } catch (error) {
     console.error('Gemini request failed', error);
     response.status(502).json({ error: 'The AI service is temporarily unavailable.' });
@@ -1593,19 +1582,10 @@ app.post('/api/goals/generate', expensiveApiLimiter, async (request, response) =
   const focusTarget = input.focusTarget || '4 habits';
   const timeline = input.timeline || '30-60 days';
 
-  const prompt = `Create a practical personal growth plan for this goal: ${goal}
-The user prefers a focus of ${focusTarget} and a timeline of ${timeline}. Honor those preferences in the plan.
-Return valid JSON only with these keys:
-category (one of Career, Health, Finance, Education, Relationships, Personal Growth),
-summary (2 concise sentences), intensity (one of High focus, Balanced, Quick win),
-focusAreas (exactly 3 short strings),
-actionPlan (exactly 4 short actionable strings, each under 70 characters), actionDueDates (exactly 4 dates: today, tomorrow, 3 days from now, and 7 days from now), nextMilestone (one sentence),
-risk (one sentence), riskAction (one sentence explaining exactly what to do if that risk happens),
-timeline (one of 7-14 days, 30-60 days, 90 days), nextCheckIn (a specific date 7 days from today),
-status (Fresh plan). Do not include progress; the app calculates progress from completed steps. Keep every action realistic, specific to the exact goal, and avoid generic advice.`;
+  const prompt = goalPlannerPrompt({ goal, focusTarget, timeline });
 
   try {
-    const completionText = await generateGeminiText(prompt, { json: true, maxOutputTokens: 700, profile: 'goals' });
+    const completionText = await generateGeminiText(prompt, { system: GOAL_PLANNER_SYSTEM, schema: goalPlanJsonSchema, maxOutputTokens: 1200, temperature: 0.7, profile: 'goals' });
     let rawPlan;
     try {
       rawPlan = JSON.parse(completionText);
@@ -1614,7 +1594,7 @@ status (Fresh plan). Do not include progress; the app calculates progress from c
       return;
     }
 
-    const plan = goalPlanSchema.safeParse(rawPlan);
+    const plan = goalPlanSchema.safeParse(normalizeGoalPlan(rawPlan, { timeline, timeZone: input.timeZone || 'Asia/Manila' }));
     if (!plan.success) {
       response.status(502).json({ error: 'The AI goal planner returned an invalid plan.' });
       return;

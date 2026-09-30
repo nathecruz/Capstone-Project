@@ -1,16 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { getHabitCategories, type HabitCategory } from '@/authentication';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { requestNotificationAccess, useAppColorScheme } from '@/hooks/color-scheme-context';
 
-const categories = [
-  { label: 'Health', icon: 'heart-outline' }, { label: 'Mind', icon: 'bulb-outline' },
-  { label: 'Productivity', icon: 'locate-outline' }, { label: 'Lifestyle', icon: 'leaf-outline' },
-  { label: 'Academics', icon: 'school-outline' }, { label: 'Other', icon: 'ellipsis-horizontal' },
+// Built-in categories, used until (or if) the Admin Panel's managed list loads from the backend.
+const defaultCategories: HabitCategory[] = [
+  { label: 'Health', icon: 'heart-outline', color: '#E58D8D' }, { label: 'Mind', icon: 'bulb-outline', color: '#7A6AED' },
+  { label: 'Productivity', icon: 'locate-outline', color: '#4BA3FF' }, { label: 'Lifestyle', icon: 'leaf-outline', color: '#57B991' },
+  { label: 'Academics', icon: 'school-outline', color: '#57B991' }, { label: 'Other', icon: 'ellipsis-horizontal', color: '#57B991' },
 ];
 const frequencies = ['Daily', 'Weekly', 'Monthly', 'Custom'];
 const popularHabits = ['Drink Water', 'Exercise / Workout', 'Read a Book', 'Sleep Early', 'Meditate', 'Eat Healthy'];
@@ -44,6 +46,7 @@ export default function AddScreen() {
   const { isDarkMode, addHabit: createHabit, ringInterval, snoozeFrequency } = useAppColorScheme();
   const { habit: selectedHabit } = useLocalSearchParams<{ habit?: string }>();
   const [name, setName] = useState(selectedHabit ?? '');
+  const [categories, setCategories] = useState<HabitCategory[]>(defaultCategories);
   const [category, setCategory] = useState('Health');
   const [frequency, setFrequency] = useState('Daily');
   const [startDate, setStartDate] = useState(() => formatDate(new Date()));
@@ -69,6 +72,18 @@ export default function AddScreen() {
   const [messageVisible, setMessageVisible] = useState(false);
   const [messageContent, setMessageContent] = useState({ title: '', body: '' });
   const [cancelVisible, setCancelVisible] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void getHabitCategories().then((managed) => {
+      if (!active || !managed?.length) return;
+      setCategories(managed);
+      setCategory((current) => (managed.some((item) => item.label === current) ? current : managed[0].label));
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const showMessage = (title: string, body: string) => {
     setMessageContent({ title, body });
@@ -117,7 +132,7 @@ export default function AddScreen() {
       category,
       frequency,
       icon: (selectedCategory?.icon || 'ellipse-outline') as keyof typeof Ionicons.glyphMap,
-      color: category === 'Health' ? '#E58D8D' : category === 'Mind' ? '#7A6AED' : category === 'Productivity' ? '#4BA3FF' : '#57B991',
+      color: selectedCategory?.color || '#57B991',
       goal: Number.parseInt(goal, 10) || 1,
       reminderEnabled: reminder && reminderTimes.length > 0,
       reminderTime: reminderTimes[0] || '07:00 AM',
@@ -186,7 +201,7 @@ export default function AddScreen() {
 
   const resetForm = () => {
     setName('');
-    setCategory('Health');
+    setCategory(categories[0]?.label ?? 'Health');
     setFrequency('Daily');
     setStartDate(formatDate(new Date()));
     setCustomFrequency('Weekdays only');

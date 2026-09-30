@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { getApiBaseUrl, getAuthenticatedHeaders } from '@/authentication';
 import { getHabitCompletionHistory, getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { getPredictionPresentation } from '@/utils/ai-presentation';
+import { askAi } from '@/utils/ai-client';
 
 type HeatmapView = 'Days' | 'Weeks' | 'Months';
 type HeatmapRow = { label: string; average: string; values: number[]; isToday?: boolean };
@@ -222,33 +223,18 @@ export default function InsightsScreen() {
     setAssistantResponse('Thinking...');
     setAssistantResponseSource(null);
     setAssistantError('');
-    const apiUrl = getApiBaseUrl();
     setAssistantLoading(true);
     try {
-      const authHeaders = await getAuthenticatedHeaders();
-      const response = await fetch(`${apiUrl}/api/insights/assistant`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify({ question: assistantQuestion || 'What should I focus on next?', mode: 'assistant', summary: { completionPercent, averageProgress, completed, missedHabits, maxStreak, habits: habits.map((habit) => ({ label: habit.label, progress: habit.progress, streak: habit.streak, done: habit.done })) } }),
-      });
-      if (response.ok) {
-        const result = await response.json() as { answer?: string };
-        if (result.answer) {
-          setAssistantResponse(result.answer);
-          setAssistantResponseSource('gemini');
-        } else {
-          setAssistantResponse(localReply);
-          setAssistantResponseSource('local');
-        }
+      // The server reads the student's habits and check-ins itself; only the question is sent.
+      const result = await askAi('assistant', assistantQuestion || 'What should I focus on next?');
+      if (result.ok) {
+        setAssistantResponse(result.answer);
+        setAssistantResponseSource('gemini');
       } else {
         setAssistantResponse(localReply);
         setAssistantResponseSource('local');
-        setAssistantError(response.status === 401 ? 'Please sign in again to use live AI guidance.' : 'Live AI guidance is temporarily unavailable.');
+        setAssistantError(result.message);
       }
-    } catch {
-      setAssistantResponse(localReply);
-      setAssistantResponseSource('local');
-      setAssistantError('Could not reach the AI service. Check that the backend is running.');
     } finally {
       setAssistantLoading(false);
     }

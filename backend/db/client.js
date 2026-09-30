@@ -1,5 +1,7 @@
-import 'dotenv/config';
 import pg from 'pg';
+import { loadEnvironment } from '../config/env.js';
+
+loadEnvironment();
 
 const { Pool, types } = pg;
 types.setTypeParser(20, (value) => Number(value));

@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
-import { getSessionToken, logoutUser, requestPasswordReset, saveSessionToken } from '@/authentication/session';
+import { resetPassword } from '@/authentication/authService';
+import { getSessionToken, logoutUser, saveSessionToken } from '@/authentication/session';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
   __esModule: true,
@@ -113,7 +114,7 @@ describe('session token storage', () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     try {
-      await requestPasswordReset('test@example.org');
+      await resetPassword('test@example.org');
       expect(fetchMock).toHaveBeenCalledWith(
         'https://api.example.org/api/auth/forgot-password',
         expect.any(Object),

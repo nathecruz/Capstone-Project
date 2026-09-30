@@ -1,5 +1,5 @@
+// Local session storage only. All network calls live in authService.ts.
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
@@ -21,11 +21,6 @@ function getWebSessionStorage(): Storage | null {
     return null;
   }
 }
-
-export type StoredUser = {
-  fullName: string;
-  email: string;
-};
 
 export type SessionUser = {
   id?: string;
@@ -50,15 +45,6 @@ async function purgeLegacyCredentialStorage() {
   ]);
 }
 
-export async function readSavedAccounts(): Promise<StoredUser[]> {
-  try {
-    await purgeLegacyCredentialStorage();
-    return [];
-  } catch {
-    return [];
-  }
-}
-
 export async function getRememberedEmail(): Promise<string> {
   try {
     return (await AsyncStorage.getItem(REMEMBERED_EMAIL_KEY)) ?? '';
@@ -75,211 +61,6 @@ export async function setRememberedEmail(email: string) {
   }
 
   await AsyncStorage.setItem(REMEMBERED_EMAIL_KEY, normalizedEmail);
-}
-
-function isLocalUrl(value: string) {
-  try {
-    const hostname = new URL(value).hostname;
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
-  } catch {
-    return false;
-  }
-}
-
-function isLocalWebHost() {
-  if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
-  const hostname = window.location.hostname;
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
-}
-
-function isAllowedLocalWebApiUrl(value: string) {
-  return isLocalWebHost() && isLocalUrl(value);
-}
-
-function isPlaceholderUrl(value: string) {
-  const normalized = value.trim().toLowerCase();
-  return normalized.includes('replace-with')
-    || normalized.includes('your-')
-    || normalized.includes('your_')
-    || normalized.includes('@example.')
-    || normalized.includes('example.com')
-    || normalized.includes('localhost')
-    || normalized.includes('127.0.0.1')
-    || normalized.includes('::1');
-}
-
-function getApiBaseUrl() {
-  const envUrl = (process.env.EXPO_PUBLIC_API_URL || process.env.EXPO_PUBLIC_AI_API_URL)?.trim();
-  if (envUrl) {
-    const hasInvalidProductionUrl = !envUrl.startsWith('https://') || isPlaceholderUrl(envUrl) || isLocalUrl(envUrl);
-    if (process.env.NODE_ENV === 'production' && hasInvalidProductionUrl && !isAllowedLocalWebApiUrl(envUrl)) {
-      throw new Error('Production API is not configured. Set EXPO_PUBLIC_API_URL to the deployed backend URL.');
-    }
-    return envUrl.replace(/\/$/, '');
-  }
-
-  if (process.env.NODE_ENV === 'production') {
-    if (isLocalWebHost()) {
-      return `http://${window.location.hostname}:8787`;
-    }
-    throw new Error('Production API is not configured. Set EXPO_PUBLIC_API_URL to the deployed backend URL.');
-  }
-
-  if (Platform.OS === 'web') {
-    const host = typeof window === 'undefined' ? 'localhost' : window.location.hostname;
-    return `http://${host}:8787`;
-  }
-
-  const hostUri = Constants.expoConfig?.hostUri;
-  if (hostUri) {
-    const host = hostUri.split(':')[0];
-    return `http://${host}:8787`;
-  }
-
-  if (Platform.OS === 'android') {
-    return 'http://10.0.2.2:8787';
-  }
-
-  return 'http://localhost:8787';
-}
-
-function isValidEmailFormat(email: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-}
-
-class ApiRequestError extends Error {
-  status: number;
-
-  constructor(message: string, status: number) {
-    super(message);
-    this.name = 'ApiRequestError';
-    this.status = status;
-  }
-}
-
-function isNetworkError(error: unknown) {
-  return error instanceof TypeError;
-}
-
-async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers ?? {}),
-    },
-  });
-
-  const rawBody = await response.text();
-  let payload: unknown = {};
-
-  if (rawBody) {
-    try {
-      payload = JSON.parse(rawBody);
-    } catch {
-      payload = rawBody;
-    }
-  }
-
-  if (!response.ok) {
-    const message = typeof payload === 'object' && payload !== null && 'message' in payload && typeof payload.message === 'string'
-      ? payload.message
-      : typeof payload === 'string' && payload.trim()
-        ? payload.trim()
-        : 'Request failed.';
-    throw new ApiRequestError(message, response.status);
-  }
-
-  return payload as T;
-}
-
-export async function requestPasswordReset(email: string) {
-  const normalizedEmail = email.trim();
-  if (!normalizedEmail || !isValidEmailFormat(normalizedEmail)) {
-    return { ok: false, message: 'Please enter a valid email address.' };
-  }
-
-  try {
-    const payload = await apiRequest<{ ok: boolean; message?: string; email?: string }>('/api/auth/forgot-password', {
-      method: 'POST',
-      body: JSON.stringify({ email: normalizedEmail }),
-    });
-
-    return {
-      ok: payload.ok,
-      message: payload.message || 'A verification code was sent to your email.',
-      email: payload.email || normalizedEmail,
-    };
-  } catch (error) {
-    if (isNetworkError(error)) {
-      return { ok: false, message: 'Unable to reach the account service. Connect to the internet and try again.' };
-    }
-
-    return {
-      ok: false,
-      message: error instanceof Error ? error.message : 'Unable to process your password reset request.',
-    };
-  }
-}
-
-export async function verifyResetCode(email: string, otp: string) {
-  const normalizedEmail = email.trim();
-  const normalizedOtp = otp.trim();
-
-  if (!normalizedEmail || !normalizedOtp) {
-    return { ok: false, message: 'Please enter the OTP and email address.' };
-  }
-
-  try {
-    const payload = await apiRequest<{ ok: boolean; message?: string }>('/api/auth/verify-otp', {
-      method: 'POST',
-      body: JSON.stringify({ email: normalizedEmail, otp: normalizedOtp }),
-    });
-
-    return {
-      ok: payload.ok,
-      message: payload.message || 'OTP verified successfully.',
-    };
-  } catch (error) {
-    if (isNetworkError(error)) {
-      return { ok: false, message: 'Password reset requires a connection to the account service.' };
-    }
-
-    return {
-      ok: false,
-      message: error instanceof Error ? error.message : 'Unable to verify the reset code.',
-    };
-  }
-}
-
-export async function completePasswordReset(email: string, otp: string, newPassword: string) {
-  const normalizedEmail = email.trim();
-  const normalizedOtp = otp.trim();
-
-  if (!normalizedEmail || !normalizedOtp || !newPassword.trim()) {
-    return { ok: false, message: 'Please provide the email, OTP, and new password.' };
-  }
-
-  try {
-    const payload = await apiRequest<{ ok: boolean; message?: string }>('/api/auth/reset-password', {
-      method: 'POST',
-      body: JSON.stringify({ email: normalizedEmail, otp: normalizedOtp, newPassword }),
-    });
-
-    return {
-      ok: payload.ok,
-      message: payload.message || 'Your password has been reset successfully.',
-    };
-  } catch (error) {
-    if (isNetworkError(error)) {
-      return { ok: false, message: 'Unable to reach the account service. Connect to the internet and try again.' };
-    }
-
-    return {
-      ok: false,
-      message: error instanceof Error ? error.message : 'Unable to reset your password.',
-    };
-  }
 }
 
 type AuthListener = () => void;
@@ -300,14 +81,6 @@ function notifyAuthListeners() {
       // Ignore listener errors so auth state changes remain resilient.
     }
   });
-}
-
-export async function saveNewAccount(user: { fullName: string; email: string; password: string }) {
-  return { ok: false, message: 'Connect to the account service to create your account.' };
-}
-
-export async function loginWithStoredAccount(email: string, password: string) {
-  return { ok: false, message: 'Connect to the account service to sign in.' };
 }
 
 export async function getCurrentSession(): Promise<SessionUser | null> {
