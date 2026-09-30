@@ -92,7 +92,6 @@ function RootNavigator() {
         <Stack.Screen name="stats-progress" options={{ headerShown: false }} />
         <Stack.Screen name="activity-history" options={{ headerShown: false }} />
         <Stack.Screen name="achievements" options={{ headerShown: false }} />
-        <Stack.Screen name="goals" options={{ headerShown: false }} />
         <Stack.Screen name="all-habits" options={{ headerShown: false }} />
         <Stack.Screen name="sync-activity" options={{ headerShown: false }} />
         <Stack.Screen name="sync-complete" options={{ headerShown: false }} />
