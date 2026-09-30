@@ -150,7 +150,8 @@ describe('auth service offline behavior', () => {
     });
 
     await expect(signUp({
-      fullName: 'Test User',
+      firstName: 'Test',
+      lastName: 'User',
       username: 'testuser',
       email: 'test@example.com',
       password: 'StrongPass!123',
@@ -162,6 +163,14 @@ describe('auth service offline behavior', () => {
       ok: false,
       message: 'Registration is temporarily disabled.',
     });
+  });
+
+  it('registers with a separate first and last name', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 400, text: async () => JSON.stringify({ ok: false, message: 'stop' }) });
+    await signUp({ firstName: ' Juan ', lastName: 'Dela Cruz', username: 'juan', email: 'juan@example.com', password: 'StrongPass!123', dateOfBirth: 'April 2, 2005', gender: 'Male', region: 'Philippines', privacyConsent: true });
+    const body = JSON.parse(fetchMock.mock.calls.at(-1)[1].body);
+    expect(body).toMatchObject({ firstName: 'Juan', lastName: 'Dela Cruz' });
+    expect(body.fullName).toBeUndefined();
   });
 
   it('shows the backend password reset error instead of the offline fallback', async () => {

@@ -62,7 +62,10 @@ export type Habit = {
 };
 
 export type Profile = {
+  /** "First Last", kept in step with firstName and lastName. */
   fullName: string;
+  firstName: string;
+  lastName: string;
   email: string;
   username: string;
   dateOfBirth: string;
@@ -120,6 +123,8 @@ export const initialPreferences: Preferences = {
 
 export const initialProfile: Profile = {
   fullName: '',
+  firstName: '',
+  lastName: '',
   email: '',
   username: '',
   dateOfBirth: '',

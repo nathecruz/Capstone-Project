@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supportedRegions } from '@/constants/i18n';
+import { joinName } from '@/utils/names';
 
 import { AppDialog, type AppDialogVariant } from '@/components/ui/app-dialog';
 import {
@@ -41,7 +42,9 @@ const formatDateInputValue = (date: Date) => {
 };
 
 export default function RegisterScreen() {
-  const [fullName, setFullName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const fullName = joinName(firstName, lastName);
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
@@ -94,7 +97,7 @@ export default function RegisterScreen() {
       return;
     }
 
-    if (!fullName.trim() || !username.trim() || !email.trim() || !dateOfBirth.trim() || !gender.trim() || !region.trim() || !password.trim()) {
+    if (!firstName.trim() || !lastName.trim() || !username.trim() || !email.trim() || !dateOfBirth.trim() || !gender.trim() || !region.trim() || !password.trim()) {
       showDialog('Missing details', 'Please complete all required fields.');
       return;
     }
@@ -135,7 +138,7 @@ export default function RegisterScreen() {
     setIsSubmitting(true);
 
     try {
-      const result = await signUp({ fullName, username, email, password, dateOfBirth, gender, region, privacyConsent });
+      const result = await signUp({ firstName, lastName, username, email, password, dateOfBirth, gender, region, privacyConsent });
 
       if (!result.ok) {
         showDialog('Registration failed', result.message || 'Unable to create account.');
@@ -172,12 +175,25 @@ export default function RegisterScreen() {
           </View>
 
           <View style={styles.card}>
-          <Text style={styles.label}>Full Name</Text>
+          <Text style={styles.label}>First Name</Text>
           <TextInput
-            value={fullName}
-            onChangeText={setFullName}
-            placeholder="Full Name"
+            value={firstName}
+            onChangeText={setFirstName}
+            placeholder="First Name"
             autoCapitalize="words"
+            autoComplete="given-name"
+            textContentType="givenName"
+            style={styles.input}
+          />
+
+          <Text style={styles.label}>Last Name</Text>
+          <TextInput
+            value={lastName}
+            onChangeText={setLastName}
+            placeholder="Last Name"
+            autoCapitalize="words"
+            autoComplete="family-name"
+            textContentType="familyName"
             style={styles.input}
           />
 

@@ -25,7 +25,10 @@ export interface Admin {
 
 export interface UserRow {
   id: string;
+  /** "First Last" */
   fullName: string;
+  firstName: string;
+  lastName: string;
   username: string;
   email: string;
   role: Role;

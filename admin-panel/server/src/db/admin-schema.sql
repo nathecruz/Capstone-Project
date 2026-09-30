@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS user_activity_days (
 );
 CREATE INDEX IF NOT EXISTS user_activity_days_date_idx ON user_activity_days(activity_date);
 
+-- First and last names (the app backend keeps full_name as "First Last").
+ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT NOT NULL DEFAULT '';
+
 -- Habit schedule columns written by the app backend; used for live streaks (lib/streaks.js).
 ALTER TABLE habits ADD COLUMN IF NOT EXISTS frequency TEXT NOT NULL DEFAULT '';
 ALTER TABLE habits ADD COLUMN IF NOT EXISTS start_date TEXT NOT NULL DEFAULT '';

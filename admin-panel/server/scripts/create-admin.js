@@ -1,6 +1,7 @@
 // Creates an Admin Panel account, or promotes an existing HabitAI account.
 //
-//   npm run create-admin -- --email admin@psau.edu.ph --name "Maria Santos"
+//   npm run create-admin -- --email admin@psau.edu.ph --first-name Maria --last-name Santos
+//   npm run create-admin -- --email admin@psau.edu.ph --name "Maria Santos"          (split into first/last)
 //   npm run create-admin -- --email faculty@psau.edu.ph --name "Jose Rizal" --role faculty
 //   npm run create-admin -- --email existing@student.com --role admin          (promote existing)
 //   npm run create-admin -- --email admin@psau.edu.ph --reset-password          (new password)
@@ -12,6 +13,7 @@ import { parseArgs } from 'node:util';
 import { assertConfig } from '../src/config.js';
 import { closePool, query } from '../src/db.js';
 import { migrate } from '../src/db/migrate.js';
+import { joinName, namesFromInput } from '../src/lib/names.js';
 import { generatePassword, hashPassword, passwordProblem } from '../src/lib/passwords.js';
 import { ROLE_LABELS, STAFF_ROLES } from '../src/lib/permissions.js';
 
@@ -19,6 +21,8 @@ const { values } = parseArgs({
   options: {
     email: { type: 'string' },
     name: { type: 'string' },
+    'first-name': { type: 'string' },
+    'last-name': { type: 'string' },
     username: { type: 'string' },
     role: { type: 'string', default: 'admin' },
     password: { type: 'string' },
@@ -35,10 +39,11 @@ async function main() {
   await migrate({ log: () => {} });
 
   const existing = (await query('SELECT id, full_name AS "fullName", username FROM users WHERE email = $1', [email])).rows[0];
+  const names = namesFromInput({ firstName: values['first-name'], lastName: values['last-name'], fullName: values.name });
   const wantsPassword = !existing || values['reset-password'] || Boolean(values.password);
   const password = wantsPassword ? (values.password || generatePassword()) : null;
   if (password) {
-    const problem = passwordProblem(password, { fullName: values.name ?? existing?.fullName, username: values.username ?? existing?.username, email });
+    const problem = passwordProblem(password, { fullName: names.fullName || existing?.fullName, username: values.username ?? existing?.username, email });
     if (problem) throw new Error(problem);
   }
 
@@ -53,17 +58,17 @@ async function main() {
     }
     console.log(`Updated ${email}: role is now ${ROLE_LABELS[values.role]}.`);
   } else {
-    const fullName = values.name?.trim();
-    if (!fullName || fullName.length < 2) throw new Error('Provide --name for a new account.');
+    if (!names.firstName || !names.lastName) throw new Error('Provide --first-name and --last-name (or --name "First Last") for a new account.');
+    const fullName = joinName(names.firstName, names.lastName);
     const baseUsername = (values.username || email.split('@')[0]).replace(/[^a-zA-Z0-9_.-]/g, '').slice(0, 24) || 'admin';
     let username = baseUsername;
     while ((await query('SELECT 1 FROM users WHERE lower(username) = lower($1)', [username])).rowCount) {
       username = `${baseUsername}${crypto.randomInt(10, 99)}`;
     }
     await query(
-      `INSERT INTO users (id, full_name, username, email, date_of_birth, gender, region, about, password_hash, created_at, role, status, is_admin, status_changed_at, email_verified_at)
-       VALUES ($1, $2, $3, $4, '', '', '', '', $5, $6, $7, 'active', $8, $6, $6)`,
-      [crypto.randomUUID(), fullName, username, email, await hashPassword(password), Date.now(), values.role, values.role === 'admin'],
+      `INSERT INTO users (id, full_name, username, email, date_of_birth, gender, region, about, password_hash, created_at, role, status, is_admin, status_changed_at, email_verified_at, first_name, last_name)
+       VALUES ($1, $2, $3, $4, '', '', '', '', $5, $6, $7, 'active', $8, $6, $6, $9, $10)`,
+      [crypto.randomUUID(), fullName, username, email, await hashPassword(password), Date.now(), values.role, values.role === 'admin', names.firstName, names.lastName],
     );
     console.log(`Created ${ROLE_LABELS[values.role]} account ${email} (username: ${username}).`);
   }

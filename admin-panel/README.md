@@ -58,8 +58,8 @@ columns to `users` and creates `admin_sessions`, `habit_categories`, `notificati
 ### Creating administrator accounts
 
 ```bash
-npm run create-admin -- --email admin@psau.edu.ph --name "Maria Santos"
-npm run create-admin -- --email faculty@psau.edu.ph --name "Jose Reyes" --role faculty
+npm run create-admin -- --email admin@psau.edu.ph --first-name Maria --last-name Santos
+npm run create-admin -- --email faculty@psau.edu.ph --first-name Jose --last-name Reyes --role faculty
 npm run create-admin -- --email existing.user@gmail.com --role admin        # promote an existing account
 npm run create-admin -- --email admin@psau.edu.ph --reset-password           # issue a new temporary password
 ```

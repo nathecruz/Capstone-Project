@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { query, withTransaction } from '../db/client.js';
 import { loginLimiter, registerLimiter, resendVerificationLimiter } from '../http/rate-limits.js';
 import { authToken, hashToken, normalizeEmail, parse } from '../lib/http.js';
+import { namesFromInput } from '../lib/names.js';
 import { loginSchema, passwordSchema, profileSchema, registerSchema } from '../schemas.js';
 import { createSession, findUser, requireAuth, userFromRow } from '../services/accounts.js';
 import { passwordChangedEmail } from '../services/email-templates.js';
@@ -16,8 +17,22 @@ const timingDummyHash = await hashPassword(crypto.randomUUID());
 const deviceLabel = (input, request) => input.device || request.get('user-agent')?.slice(0, 160) || 'Unknown device';
 
 export function notifyPasswordChanged(user) {
-  const email = passwordChangedEmail({ name: user.fullName });
+  const email = passwordChangedEmail({ name: user.firstName || user.fullName });
   sendEmail({ to: user.email, ...email }).catch((error) => console.warn(`[mail] password-changed notice failed: ${error?.code ?? error?.message}`));
+}
+
+/**
+ * First and last name from the request (older app versions send one `fullName`, which is split).
+ * Sends a 400 and returns null when a name is missing.
+ */
+function requireNames(input, response) {
+  const names = namesFromInput(input);
+  const usesSplitFields = input.firstName !== undefined || input.lastName !== undefined;
+  if (!names.firstName || (usesSplitFields && !names.lastName)) {
+    response.status(400).json({ ok: false, message: 'Please enter your first name and last name.' });
+    return null;
+  }
+  return names;
 }
 
 export default function registerAuthRoutes(app) {
@@ -26,8 +41,10 @@ export default function registerAuthRoutes(app) {
     if (!input) return;
     // Data Privacy Act (RA 10173): personal data is only collected with the student's consent.
     if (input.privacyConsent !== true) return response.status(400).json({ ok: false, message: 'Please read and agree to the Privacy Notice to create an account.' });
+    const names = requireNames(input, response);
+    if (!names) return;
     const emailAddress = normalizeEmail(input.email);
-    const passwordError = passwordStrength(input.password, { fullName: input.fullName, username: input.username, email: emailAddress });
+    const passwordError = passwordStrength(input.password, { fullName: names.fullName, username: input.username, email: emailAddress });
     if (passwordError) return response.status(400).json({ ok: false, message: passwordError });
 
     const existing = await query('SELECT email FROM users WHERE email = $1 OR lower(username) = lower($2)', [emailAddress, input.username]);
@@ -38,7 +55,7 @@ export default function registerAuthRoutes(app) {
 
     const user = {
       id: crypto.randomUUID(),
-      fullName: input.fullName,
+      ...names,
       username: input.username,
       email: emailAddress,
       dateOfBirth: input.dateOfBirth,
@@ -54,8 +71,8 @@ export default function registerAuthRoutes(app) {
     user.privacyConsentAt = now;
     await withTransaction(async (db) => {
       await db.query(
-        'INSERT INTO users (id, full_name, username, email, date_of_birth, gender, region, about, password_hash, created_at, email_verified_at, privacy_consent_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
-        [user.id, user.fullName, user.username, user.email, user.dateOfBirth, user.gender, user.region, user.about, user.passwordHash, now, user.emailVerifiedAt, now],
+        'INSERT INTO users (id, full_name, first_name, last_name, username, email, date_of_birth, gender, region, about, password_hash, created_at, email_verified_at, privacy_consent_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)',
+        [user.id, user.fullName, user.firstName, user.lastName, user.username, user.email, user.dateOfBirth, user.gender, user.region, user.about, user.passwordHash, now, user.emailVerifiedAt, now],
       );
       await db.query('INSERT INTO login_activity (id,user_id,device,created_at) VALUES ($1,$2,$3,$4)', [crypto.randomUUID(), user.id, deviceLabel(input, request), now]);
     });
@@ -90,7 +107,7 @@ export default function registerAuthRoutes(app) {
     const session = await requireAuth(request, response, { allowUnverified: true });
     if (!session) return;
     if (session.emailVerifiedAt) return response.json({ ok: true, alreadyVerified: true, message: 'Your email is already confirmed.' });
-    const result = await sendVerificationCode({ id: session.userId, email: session.email, fullName: session.fullName });
+    const result = await sendVerificationCode({ id: session.userId, email: session.email, firstName: session.firstName, fullName: session.fullName });
     if (result.retryAfterSeconds && !result.sent) return response.status(429).json({ ok: false, retryAfterSeconds: result.retryAfterSeconds, message: `Please wait ${result.retryAfterSeconds} seconds before requesting another code.` });
     if (!result.sent) return response.status(503).json({ ok: false, message: 'We could not send the email right now. Please try again in a few minutes.' });
     response.json({ ok: true, message: `A new code was sent to ${session.email}.`, ...result });
@@ -131,14 +148,16 @@ export default function registerAuthRoutes(app) {
     if (!session) return;
     const input = parse(profileSchema, request, response);
     if (!input) return;
+    const names = requireNames(input, response);
+    if (!names) return;
     const emailAddress = normalizeEmail(input.email);
     const duplicate = await query('SELECT id FROM users WHERE (email = $1 OR lower(username) = lower($2)) AND id <> $3', [emailAddress, input.username, session.userId]);
     if (duplicate.rows[0]) return response.status(409).json({ ok: false, message: 'This email or username is already in use.' });
     const emailChanged = emailAddress !== session.email;
     const reverify = emailChanged && verificationEnabled();
     await query(
-      'UPDATE users SET full_name=$1,username=$2,email=$3,date_of_birth=$4,gender=$5,about=$6, email_verified_at = CASE WHEN $8 THEN NULL ELSE email_verified_at END WHERE id=$7',
-      [input.fullName, input.username, emailAddress, input.dateOfBirth, input.gender, input.about, session.userId, reverify],
+      'UPDATE users SET full_name=$1,username=$2,email=$3,date_of_birth=$4,gender=$5,about=$6, email_verified_at = CASE WHEN $8 THEN NULL ELSE email_verified_at END, first_name=$9, last_name=$10 WHERE id=$7',
+      [names.fullName, input.username, emailAddress, input.dateOfBirth, input.gender, input.about, session.userId, reverify, names.firstName, names.lastName],
     );
     const user = await findUser(emailAddress);
     if (reverify) await sendVerificationCode(user, { respectCooldown: false });
@@ -155,7 +174,7 @@ export default function registerAuthRoutes(app) {
     if (!session) return;
     const id = session.userId;
     const [profile, habits, completions, goals, tokens, achievements, notifications, logins, preferences, reports, suggestions] = await Promise.all([
-      query('SELECT full_name AS "fullName", username, email, date_of_birth AS "dateOfBirth", gender, region, about, created_at AS "createdAt", privacy_consent_at AS "privacyConsentAt" FROM users WHERE id=$1', [id]),
+      query('SELECT first_name AS "firstName", last_name AS "lastName", full_name AS "fullName", username, email, date_of_birth AS "dateOfBirth", gender, region, about, created_at AS "createdAt", privacy_consent_at AS "privacyConsentAt" FROM users WHERE id=$1', [id]),
       query('SELECT label, category, meta, goal, streak, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime" FROM habits WHERE user_id=$1 ORDER BY sort_order', [id]),
       query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1 ORDER BY completed_date', [id]),
       query('SELECT title, category, progress, status, details_json AS details FROM goals WHERE user_id=$1', [id]),

@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { updateAuthenticatedProfile } from '@/authentication';
 import { type Profile, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { joinName } from '@/utils/names';
 
 const formatDateOfBirth = (date: Date) => date.toLocaleDateString('en-US', {
   month: 'long',
@@ -21,7 +22,8 @@ const parseDateOfBirth = (value: string) => {
 };
 
 const detailFields: { key: keyof Profile; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { key: 'fullName', label: 'Full Name', icon: 'person-outline' },
+  { key: 'firstName', label: 'First Name', icon: 'person-outline' },
+  { key: 'lastName', label: 'Last Name', icon: 'person-outline' },
   { key: 'email', label: 'Email', icon: 'mail-outline' },
   { key: 'username', label: 'Username', icon: 'at-outline' },
   { key: 'dateOfBirth', label: 'Date of Birth', icon: 'calendar-outline' },
@@ -79,13 +81,15 @@ export default function PersonalInformationScreen() {
 
   const saveProfile = async () => {
     if (isSaving) return;
-    if (!draftProfile.fullName.trim() || !draftProfile.email.trim() || !draftProfile.username.trim()) {
-      showAlert('Incomplete information', 'Please complete your name, email, and username.');
+    if (!draftProfile.firstName.trim() || !draftProfile.lastName.trim() || !draftProfile.email.trim() || !draftProfile.username.trim()) {
+      showAlert('Incomplete information', 'Please complete your first name, last name, email, and username.');
       return;
     }
     const nextProfile = {
       ...draftProfile,
-      fullName: draftProfile.fullName.trim(),
+      firstName: draftProfile.firstName.trim(),
+      lastName: draftProfile.lastName.trim(),
+      fullName: joinName(draftProfile.firstName, draftProfile.lastName),
       email: draftProfile.email.trim(),
       username: draftProfile.username.trim(),
       dateOfBirth: formatDateOfBirth(draftBirthDate),

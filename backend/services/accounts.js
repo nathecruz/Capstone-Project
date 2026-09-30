@@ -2,14 +2,15 @@ import crypto from 'node:crypto';
 import { config } from '../config/index.js';
 import { query } from '../db/client.js';
 import { authToken, hashToken, normalizeEmail } from '../lib/http.js';
+import { namesFromRow } from '../lib/names.js';
 
-const USER_COLUMNS = `u.full_name AS "fullName", u.username, u.email, u.date_of_birth AS "dateOfBirth", u.gender, u.region, u.about,
+const USER_COLUMNS = `u.full_name AS "fullName", u.first_name AS "firstName", u.last_name AS "lastName", u.username, u.email, u.date_of_birth AS "dateOfBirth", u.gender, u.region, u.about,
   u.email_verified_at AS "emailVerifiedAt", u.privacy_consent_at AS "privacyConsentAt"`;
 
 export function userFromRow(row) {
   return {
     id: row.id ?? row.userId,
-    fullName: row.fullName,
+    ...namesFromRow(row),
     username: row.username || '',
     email: row.email,
     dateOfBirth: row.dateOfBirth || '',

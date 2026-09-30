@@ -45,7 +45,7 @@ function PasswordReveal({ password }: { password: string }) {
 export function UserFormModal({ open, user, onClose, onSaved }: { open: boolean; user?: UserRow | null; onClose: () => void; onSaved: (user: UserRow) => void }) {
   const editing = Boolean(user);
   const toast = useToast();
-  const [form, setForm] = useState({ fullName: '', username: '', email: '', role: 'user' as Role, dateOfBirth: '', gender: '', region: '', password: '' });
+  const [form, setForm] = useState({ firstName: '', lastName: '', username: '', email: '', role: 'user' as Role, dateOfBirth: '', gender: '', region: '', password: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<{ email: string; password: string } | null>(null);
@@ -55,7 +55,8 @@ export function UserFormModal({ open, user, onClose, onSaved }: { open: boolean;
     setError(null);
     setCreated(null);
     setForm({
-      fullName: user?.fullName ?? '',
+      firstName: user?.firstName ?? '',
+      lastName: user?.lastName ?? '',
       username: user?.username ?? '',
       email: user?.email ?? '',
       role: user?.role ?? 'user',
@@ -72,7 +73,7 @@ export function UserFormModal({ open, user, onClose, onSaved }: { open: boolean;
     event.preventDefault();
     setBusy(true);
     setError(null);
-    const profile = { fullName: form.fullName, username: form.username, email: form.email, dateOfBirth: fromDateInput(form.dateOfBirth), gender: form.gender, region: form.region };
+    const profile = { firstName: form.firstName, lastName: form.lastName, username: form.username, email: form.email, dateOfBirth: fromDateInput(form.dateOfBirth), gender: form.gender, region: form.region };
     try {
       if (editing && user) {
         const result = await patch<{ user: UserRow }>(`/users/${user.id}`, profile);
@@ -116,7 +117,8 @@ export function UserFormModal({ open, user, onClose, onSaved }: { open: boolean;
     >
       <form id="user-form" onSubmit={submit} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {error && <div className="sm:col-span-2"><Alert tone="critical">{error}</Alert></div>}
-        <div className="sm:col-span-2"><Field label="Full name" htmlFor="u-name"><Input id="u-name" required value={form.fullName} onChange={set('fullName')} maxLength={100} /></Field></div>
+        <Field label="First name" htmlFor="u-first-name"><Input id="u-first-name" required autoComplete="given-name" value={form.firstName} onChange={set('firstName')} maxLength={60} /></Field>
+        <Field label="Last name" htmlFor="u-last-name"><Input id="u-last-name" required autoComplete="family-name" value={form.lastName} onChange={set('lastName')} maxLength={60} /></Field>
         <Field label="Email" htmlFor="u-email"><Input id="u-email" type="email" required value={form.email} onChange={set('email')} /></Field>
         <Field label="Username" htmlFor="u-username" hint="Letters, numbers, dot, dash, underscore"><Input id="u-username" required value={form.username} onChange={set('username')} maxLength={30} /></Field>
         {!editing && (

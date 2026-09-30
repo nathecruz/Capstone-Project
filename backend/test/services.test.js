@@ -146,7 +146,9 @@ test('streaks follow the habit schedule and reset after a missed scheduled day',
 
 test('leaderboards show first name and last initial only', async () => {
   const { leaderboardName } = await import('../lib/display.js');
-  assert.equal(leaderboardName('Juan Dela Cruz'), 'Juan C.');
+  assert.equal(leaderboardName('Juan', 'Dela Cruz'), 'Juan D.');
+  assert.equal(leaderboardName('Juan Dela Cruz'), 'Juan D.', 'older accounts: surname particles stay with the last name');
+  assert.equal(leaderboardName('Maria Clara', 'Santos'), 'Maria Clara S.');
   assert.equal(leaderboardName('Maria'), 'Maria');
   assert.equal(leaderboardName(''), 'Student');
 });
@@ -199,4 +201,14 @@ test('merges keep a reorder and new offline check-ins, but not undone ones', asy
 
   const baseless = mergeAppState({}, current, { habits: [] });
   assert.deepEqual(baseless.habits.map((item) => item.id), ['a', 'b', 'c'], 'an empty device without a base deletes nothing');
+});
+
+test('names are split and joined consistently', async () => {
+  const { joinName, namesFromInput, splitFullName } = await import('../lib/names.js');
+  assert.deepEqual(splitFullName('Maria Clara de los Santos'), { firstName: 'Maria Clara', lastName: 'de los Santos' });
+  assert.deepEqual(splitFullName('Jose Rizal Jr.'), { firstName: 'Jose', lastName: 'Rizal Jr.' });
+  assert.deepEqual(splitFullName('Zaira'), { firstName: 'Zaira', lastName: '' });
+  assert.equal(joinName(' Ana ', 'Reyes '), 'Ana Reyes');
+  assert.deepEqual(namesFromInput({ firstName: 'Ana', lastName: 'Reyes', fullName: 'Ignored Name' }), { firstName: 'Ana', lastName: 'Reyes', fullName: 'Ana Reyes' });
+  assert.deepEqual(namesFromInput({ fullName: 'Juan Dela Cruz' }), { firstName: 'Juan', lastName: 'Dela Cruz', fullName: 'Juan Dela Cruz' });
 });

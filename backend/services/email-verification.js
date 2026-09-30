@@ -40,7 +40,7 @@ export async function sendVerificationCode(user, { respectCooldown = true } = {}
     [user.id, await bcrypt.hash(code, 10), now + CODE_LIFETIME_MS, now],
   );
   try {
-    await sendEmail({ to: user.email, ...emailVerificationCodeEmail({ name: user.fullName, code, minutes: CODE_LIFETIME_MS / 60000 }) });
+    await sendEmail({ to: user.email, ...emailVerificationCodeEmail({ name: user.firstName || user.fullName, code, minutes: CODE_LIFETIME_MS / 60000 }) });
     return { sent: true, expiresInSeconds: CODE_LIFETIME_MS / 1000, retryAfterSeconds: RESEND_COOLDOWN_MS / 1000 };
   } catch (error) {
     console.error(`[mail] verification email failed: ${error?.code ?? ''} ${error?.message ?? ''}`.trim());

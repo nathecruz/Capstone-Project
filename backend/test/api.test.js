@@ -165,7 +165,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
   };
 
   const password = 'Violet!Orbit7!Cedar2!Mint';
-  const registration = { fullName: 'Test User', username: 'test_user', email: 'test@example.com', password, dateOfBirth: 'May 14, 1998', gender: 'Prefer not to say' };
+  const registration = { firstName: 'Test', lastName: 'User', username: 'test_user', email: 'test@example.com', password, dateOfBirth: 'May 14, 1998', gender: 'Prefer not to say' };
   let token;
   let userId;
   let authHeaders;
@@ -179,6 +179,12 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(created.response.status, 201, JSON.stringify(created.body));
     assert.equal(created.response.headers.get('access-control-allow-origin'), 'http://localhost:8081');
     assert.equal(created.body.user.emailVerified, false);
+    assert.deepEqual([created.body.user.firstName, created.body.user.lastName, created.body.user.fullName], ['Test', 'User', 'Test User']);
+    const noLastName = await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, lastName: '', email: 'nolast@example.com', username: 'no_last', privacyConsent: true }) });
+    assert.equal(noLastName.response.status, 400, 'first and last name are both required');
+    const legacy = await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ fullName: 'Juan Dela Cruz', username: 'legacy_user', email: 'legacy@example.com', password, dateOfBirth: 'May 14, 1998', gender: 'Male', privacyConsent: true }) });
+    assert.equal(legacy.response.status, 201, 'older app versions still send one full name');
+    assert.deepEqual([legacy.body.user.firstName, legacy.body.user.lastName], ['Juan', 'Dela Cruz']);
     assert.ok(created.body.user.privacyConsentAt);
     token = created.body.token;
     userId = created.body.user.id;
@@ -381,7 +387,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
   });
 
   await t.test('leaderboards hide full names and respect opt-out', async () => {
-    const second = await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, fullName: 'Second Student', username: 'second_user', email: 'second@example.com', password: 'Silver!Meadow8!Cloud3!Pine', privacyConsent: true }) });
+    const second = await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, firstName: 'Second', lastName: 'Student', username: 'second_user', email: 'second@example.com', password: 'Silver!Meadow8!Cloud3!Pine', privacyConsent: true }) });
     await db.query('UPDATE users SET email_verified_at = 1 WHERE email = $1', ['second@example.com']);
     const secondHeaders = { Authorization: `Bearer ${second.body.token}` };
     await request('/api/app-state', { method: 'PUT', headers: secondHeaders, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], label: 'Second user habit' }] }) });

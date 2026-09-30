@@ -143,7 +143,7 @@ async function resolveAudience(audience) {
   };
   const filter = filters[audience.kind];
   const { rows } = await query(
-    `SELECT u.id, u.full_name AS "fullName", u.username,
+    `SELECT u.id, u.full_name AS "fullName", u.first_name AS "firstName", u.username,
             (SELECT count(*)::int FROM habits h WHERE h.user_id = u.id) AS "habitCount",
             ARRAY(SELECT h.id FROM habits h WHERE h.user_id = u.id) AS "habitIds"
        FROM users u

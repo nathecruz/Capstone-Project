@@ -9,6 +9,7 @@ import { addDays, dateRange, habitFrequency, todayInZone } from '../lib/metrics.
 import { generatePassword, hashPassword, passwordProblem } from '../lib/passwords.js';
 import { ROLES, ROLE_LABELS, STAFF_ROLES } from '../lib/permissions.js';
 import { loadLiveStreaks } from '../lib/streaks.js';
+import { joinName, namesFromRow } from '../lib/names.js';
 import { requirePermission } from '../middleware/auth.js';
 
 const router = Router();
@@ -17,7 +18,8 @@ const canManage = requirePermission('users:manage');
 
 const username = z.string().trim().min(2).max(30).regex(/^[a-zA-Z0-9_.-]+$/, 'Username may only contain letters, numbers, dots, dashes and underscores.');
 const profileFields = {
-  fullName: z.string().trim().min(2).max(100),
+  firstName: z.string().trim().min(1, 'Enter the first name.').max(60),
+  lastName: z.string().trim().min(1, 'Enter the last name.').max(60),
   username,
   email: z.string().trim().toLowerCase().email().max(254),
   dateOfBirth: z.string().trim().max(40).default(''),
@@ -48,7 +50,7 @@ function likePattern(value) {
 function serializeUser(row) {
   return {
     id: row.id,
-    fullName: row.fullName,
+    ...namesFromRow(row),
     username: row.username,
     email: row.email,
     role: row.role,
@@ -73,7 +75,7 @@ router.get('/', canView, async (request, response) => {
 
   const [list, summary] = await Promise.all([
     query(
-      `SELECT u.id, u.full_name AS "fullName", u.username, u.email, u.role, u.status,
+      `SELECT u.id, u.full_name AS "fullName", u.first_name AS "firstName", u.last_name AS "lastName", u.username, u.email, u.role, u.status,
               u.status_reason AS "statusReason", u.created_at AS "createdAt", u.gender, u.region,
               u.date_of_birth AS "dateOfBirth",
               GREATEST(
@@ -114,7 +116,7 @@ router.get('/', canView, async (request, response) => {
 
 async function loadUser(id, runner = { query }) {
   const { rows } = await runner.query(
-    `SELECT id, full_name AS "fullName", username, email, role, status, status_reason AS "statusReason",
+    `SELECT id, full_name AS "fullName", first_name AS "firstName", last_name AS "lastName", username, email, role, status, status_reason AS "statusReason",
             status_changed_at AS "statusChangedAt", created_at AS "createdAt", date_of_birth AS "dateOfBirth",
             gender, region, about
        FROM users WHERE id = $1`,
@@ -211,16 +213,17 @@ router.post('/', canManage, async (request, response) => {
 
   const generated = !input.password;
   const password = input.password || generatePassword();
-  const problem = passwordProblem(password, input);
+  const fullName = joinName(input.firstName, input.lastName);
+  const problem = passwordProblem(password, { ...input, fullName });
   if (problem) throw new HttpError(400, problem);
 
   const id = crypto.randomUUID();
   const hash = await hashPassword(password);
   await withTransaction(async (client) => {
     await client.query(
-      `INSERT INTO users (id, full_name, username, email, date_of_birth, gender, region, about, password_hash, created_at, role, status, is_admin, status_changed_at, email_verified_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, '', $8, $9, $10, 'active', $11, $9, $9)`,
-      [id, input.fullName, input.username, input.email, input.dateOfBirth, input.gender, input.region, hash, Date.now(), input.role, input.role === 'admin'],
+      `INSERT INTO users (id, full_name, username, email, date_of_birth, gender, region, about, password_hash, created_at, role, status, is_admin, status_changed_at, email_verified_at, first_name, last_name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, '', $8, $9, $10, 'active', $11, $9, $9, $12, $13)`,
+      [id, fullName, input.username, input.email, input.dateOfBirth, input.gender, input.region, hash, Date.now(), input.role, input.role === 'admin', input.firstName, input.lastName],
     );
     await audit(request, {
       action: 'user.created',
@@ -244,10 +247,11 @@ router.patch('/:id', canManage, async (request, response) => {
 
   await withTransaction(async (client) => {
     await client.query(
-      'UPDATE users SET full_name = $1, username = $2, email = $3, date_of_birth = $4, gender = $5, region = $6 WHERE id = $7',
-      [input.fullName, input.username, input.email, input.dateOfBirth, input.gender, input.region, before.id],
+      'UPDATE users SET full_name = $1, username = $2, email = $3, date_of_birth = $4, gender = $5, region = $6, first_name = $8, last_name = $9 WHERE id = $7',
+      [joinName(input.firstName, input.lastName), input.username, input.email, input.dateOfBirth, input.gender, input.region, before.id, input.firstName, input.lastName],
     );
-    const changed = Object.keys(input).filter((key) => (before[key] ?? '') !== input[key]);
+    const beforeNames = namesFromRow(before);
+    const changed = Object.keys(input).filter((key) => ((key in beforeNames ? beforeNames[key] : before[key]) ?? '') !== input[key]);
     await audit(request, {
       action: 'user.updated',
       targetType: 'user',

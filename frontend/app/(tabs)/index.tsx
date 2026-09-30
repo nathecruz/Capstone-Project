@@ -119,7 +119,7 @@ export default function HomeScreen() {
 
           <View style={[styles.heroHeader, { paddingHorizontal: contentPadding }]}>
             <View style={styles.heroSection}>
-              <Text style={styles.greeting}>{profile.fullName ? `Good morning, ${profile.fullName.split(' ')[0]}!` : 'Good morning!'}</Text>
+              <Text style={styles.greeting}>{profile.firstName || profile.fullName ? `Good morning, ${profile.firstName || profile.fullName.split(' ')[0]}!` : 'Good morning!'}</Text>
               <Text style={[styles.titleText, compact && styles.compactTitle]}>{'Small Habits,\nBig Progress.'}</Text>
               <Text style={styles.subtitleText}>{'Every habit you build today\nshapes your better tomorrow.'}</Text>
             </View>

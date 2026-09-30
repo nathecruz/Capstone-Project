@@ -24,7 +24,10 @@ function getWebSessionStorage(): Storage | null {
 
 export type SessionUser = {
   id?: string;
+  /** "First Last"; kept for older sessions and screens that show the whole name. */
   fullName: string;
+  firstName?: string;
+  lastName?: string;
   username?: string;
   email: string;
   region?: string;
@@ -103,6 +106,8 @@ export async function getCurrentSession(): Promise<SessionUser | null> {
     return {
       id: parsed.id ? String(parsed.id) : undefined,
       fullName: String(parsed.fullName),
+      firstName: parsed.firstName ? String(parsed.firstName) : undefined,
+      lastName: parsed.lastName ? String(parsed.lastName) : undefined,
       username: parsed.username ? String(parsed.username) : undefined,
       email: String(parsed.email),
       region: parsed.region ? String(parsed.region) : '',

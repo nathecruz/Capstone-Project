@@ -90,7 +90,7 @@ export default function registerPasswordResetRoutes(app) {
 
     if (canReset) {
       try {
-        await sendEmail({ to: emailAddress, ...passwordResetCodeEmail({ name: user.fullName, code: otp, minutes }) });
+        await sendEmail({ to: emailAddress, ...passwordResetCodeEmail({ name: user.firstName || user.fullName, code: otp, minutes }) });
       } catch (error) {
         await clearReset(emailAddress);
         console.error(`[mail] password reset email failed: ${error?.code ?? ''} ${error?.responseCode ?? ''} ${error?.message ?? ''}`.trim());

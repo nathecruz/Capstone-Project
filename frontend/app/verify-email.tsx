@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { getCurrentSession, resendEmailVerification, updateAuthenticatedProfile, verifyEmailCode, type SessionUser } from '@/authentication';
 import { AppDialog, type AppDialogVariant } from '@/components/ui/app-dialog';
+import { namesOf } from '@/utils/names';
 
 // Shown after sign-up (or an email change) until the student enters the code we emailed.
 // The root navigator sends unverified accounts here and moves on once the email is confirmed.
@@ -72,8 +73,10 @@ export default function VerifyEmailScreen() {
     }
     setBusy('email');
     try {
+      const { firstName, lastName } = namesOf(user);
       const result = await updateAuthenticatedProfile({
-        fullName: user.fullName,
+        firstName,
+        lastName,
         username: user.username || '',
         email,
         dateOfBirth: user.dateOfBirth || '',

@@ -217,7 +217,7 @@ export async function apiRequest<T>(path: string, options: RequestInit & { timeo
   return payload as T;
 }
 
-export async function signUp(user: { fullName: string; username: string; email: string; password: string; dateOfBirth: string; gender: string; region: string; privacyConsent: boolean }) {
+export async function signUp(user: { firstName: string; lastName: string; username: string; email: string; password: string; dateOfBirth: string; gender: string; region: string; privacyConsent: boolean }) {
   const email = user.email.trim();
   if (!isValidEmailFormat(email)) {
     return { ok: false, message: 'Please enter a valid email address.' };
@@ -227,7 +227,8 @@ export async function signUp(user: { fullName: string; username: string; email: 
     const payload = await apiRequest<{ ok: boolean; message?: string; token?: string; user?: SessionUser }>('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify({
-        fullName: user.fullName.trim(),
+        firstName: user.firstName.trim(),
+        lastName: user.lastName.trim(),
         username: user.username.trim(),
         email,
         password: user.password,
@@ -528,7 +529,7 @@ export async function getRemoteAppState(since?: number | null) {
   }
 }
 
-export async function updateAuthenticatedProfile(profile: { fullName: string; username: string; email: string; dateOfBirth: string; gender: string; about: string }) {
+export async function updateAuthenticatedProfile(profile: { firstName: string; lastName: string; username: string; email: string; dateOfBirth: string; gender: string; about: string }) {
   const token = await getSessionToken();
   if (!token) return { ok: false, message: 'You are not signed in.' };
 

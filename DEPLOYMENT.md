@@ -78,7 +78,7 @@ With `frontend` as the project root, Vercel runs `npm ci` and `npm run export:we
 ### Admin Panel
 
 1. After the Blueprint sync creates `habitai-admin`, open its URL (for example `https://habitai-admin.onrender.com`). The first request after 15 idle minutes takes about a minute on the free plan.
-2. Sign in with an existing administrator account. To create one, run `npm run create-admin -- --email you@psau.edu.ph --role admin` from `admin-panel/` with `server/.env` pointing at the production `DATABASE_URL`; the temporary password is printed once. Change it under **Settings → My account**, then add other staff from **Users**.
+2. Sign in with an existing administrator account. To create one, run `npm run create-admin -- --email you@psau.edu.ph --first-name Juan --last-name "Dela Cruz" --role admin` from `admin-panel/` with `server/.env` pointing at the production `DATABASE_URL`; the temporary password is printed once. Change it under **Settings → My account**, then add other staff from **Users**.
 3. The session cookie is `Secure` and `SameSite=Strict`, so the panel only works over HTTPS (Render provides it). No CORS settings are needed because the client and API share one origin.
 
 ## 3) Important production notes

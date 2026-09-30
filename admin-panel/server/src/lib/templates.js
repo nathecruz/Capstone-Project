@@ -25,8 +25,9 @@ export function unknownPlaceholders(text) {
 
 export function recipientVariables(recipient, appName) {
   const fullName = String(recipient.fullName || '').trim();
+  const firstName = String(recipient.firstName || '').trim() || fullName.split(/\s+/)[0];
   return {
-    first_name: fullName.split(/\s+/)[0] || recipient.username || 'there',
+    first_name: firstName || recipient.username || 'there',
     full_name: fullName || recipient.username || 'there',
     username: recipient.username || '',
     habit_count: Number(recipient.habitCount) || 0,

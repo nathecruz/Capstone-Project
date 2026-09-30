@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { query, withTransaction } from '../db/client.js';
 import { leaderboardName } from '../lib/display.js';
+import { namesFromRow } from '../lib/names.js';
 import { getPeriodStart, parse } from '../lib/http.js';
 import { leaderboardSchema, rewardRedemptionSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
@@ -9,6 +10,12 @@ import { getWallet, POINTS_PER_CHECK_IN, spendTokens } from '../services/wallet.
 
 // Rewards that can only be redeemed once per account.
 const PERMANENT_REWARDS = new Set(['plant-buddy', 'premium-theme', 'custom-title']);
+
+/** First name and last initial; accounts from before the name split fall back to splitting full_name. */
+function displayName(row) {
+  const { firstName, lastName } = namesFromRow(row);
+  return leaderboardName(firstName, lastName);
+}
 
 export default function registerGamificationRoutes(app) {
   app.post('/api/rewards/redeem', async (request, response) => {
@@ -44,14 +51,14 @@ export default function registerGamificationRoutes(app) {
     if (!['This Week', 'This Month', 'All Time'].includes(period)) return response.status(400).json({ ok: false, message: 'Unsupported leaderboard period.' });
     const start = period === 'All Time' ? null : getPeriodStart(period);
     const result = await query(
-      `SELECT u.id, u.full_name AS "fullName", (COUNT(c.completed_date)::integer * $3) AS points, COALESCE(l.avatar, LEFT(u.full_name, 1)) AS avatar
+      `SELECT u.id, u.full_name AS "fullName", u.first_name AS "firstName", u.last_name AS "lastName", (COUNT(c.completed_date)::integer * $3) AS points, COALESCE(l.avatar, LEFT(u.full_name, 1)) AS avatar
          FROM users u
          LEFT JOIN habit_completions c ON c.user_id=u.id AND ($1::date IS NULL OR c.completed_date >= $1::date)
          LEFT JOIN leaderboard_users l ON l.user_id=u.id
          LEFT JOIN user_preferences p ON p.user_id=u.id
         WHERE u.role = 'user' AND u.status = 'active'
           AND (u.id = $2 OR (p.preferences_json->'showOnLeaderboard') IS DISTINCT FROM 'false'::jsonb)
-        GROUP BY u.id,u.full_name,l.avatar
+        GROUP BY u.id,u.full_name,u.first_name,u.last_name,l.avatar
         ORDER BY points DESC,u.full_name ASC`,
       [start, session.userId, POINTS_PER_CHECK_IN],
     );
@@ -60,7 +67,7 @@ export default function registerGamificationRoutes(app) {
       date: period === 'All Time' ? 'Since joining' : period,
       leaders: result.rows.map((row, index) => ({
         rank: index + 1,
-        name: row.id === session.userId ? `${leaderboardName(row.fullName)} (You)` : leaderboardName(row.fullName),
+        name: `${displayName(row)}${row.id === session.userId ? ' (You)' : ''}`,
         points: row.points,
         avatar: row.avatar,
         isYou: row.id === session.userId,

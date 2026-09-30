@@ -6,6 +6,7 @@ import { getCurrentSession, subscribeToAuthChanges, type SessionUser } from '@/a
 import { getRemoteAppState, getRemoteHabitCompletions, saveRemoteAppState, saveRemoteHabitCompletion, type AppStateSyncBase, type AppStateSyncPayload } from '@/authentication/authService';
 import { normalizeHabitFields } from '@/utils/habit-data';
 import { canCompleteHabitForDate } from '@/utils/habit-visibility';
+import { namesOf } from '@/utils/names';
 import { computeStreak } from '@/utils/streaks';
 import { applyRemoteCompletionDates, applyVisibleOrder, getLocalDateKey } from './app-state/habit-progress';
 import { clearSyncMeta, loadSyncMeta, persistSyncBase, persistUnsaved } from './app-state/sync-storage';
@@ -191,10 +192,14 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       if (cancelled || version !== sessionLoadVersion) return;
       setActiveUserEmail(email);
       setAvatarImage(savedState.avatarImage ?? null);
+      // Names come from the account (the server's copy); older sessions fall back to the saved full name.
+      const names = namesOf(session.firstName || session.lastName ? session : { fullName: session.fullName || savedState.profile?.fullName });
       setProfile({
         ...initialProfile,
         ...(savedState.profile ?? {}),
-        fullName: savedState.profile?.fullName || session.fullName,
+        fullName: names.fullName || savedState.profile?.fullName || session.fullName,
+        firstName: names.firstName,
+        lastName: names.lastName,
         username: savedState.profile?.username || session.username || '',
         email: savedState.profile?.email || session.email,
         dateOfBirth: savedState.profile?.dateOfBirth || session.dateOfBirth || '',

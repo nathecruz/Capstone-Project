@@ -2,6 +2,7 @@
 import { readFile } from 'node:fs/promises';
 import { query, withTransaction } from './client.js';
 import { seedCatalog } from './seed-data.js';
+import { splitFullName } from '../lib/names.js';
 import { backfillActivityFromSnapshots } from '../services/activity.js';
 
 /** Runs a data migration exactly once per database, recorded in app_migrations. */
@@ -28,6 +29,9 @@ export async function ensureNeonSchema({ log = () => {} } = {}) {
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'");
   await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at BIGINT');
   await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_consent_at BIGINT');
+  // First and last name are stored separately; full_name stays as "First Last".
+  await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT NOT NULL DEFAULT ''");
+  await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT NOT NULL DEFAULT ''");
 
   const appStateId = await query(`
     SELECT 1 FROM information_schema.columns
@@ -60,6 +64,15 @@ export async function ensureNeonSchema({ log = () => {} } = {}) {
 
   // Accounts created before email verification existed are treated as verified (once only).
   await runOnce('email-verification-backfill', () => query('UPDATE users SET email_verified_at = created_at WHERE email_verified_at IS NULL'));
+
+  // Accounts created with a single full name get a first and last name once; students can correct them in the app.
+  await runOnce('split-full-names', async () => {
+    const accounts = await query("SELECT id, full_name AS \"fullName\" FROM users WHERE first_name = '' AND last_name = ''");
+    for (const account of accounts.rows) {
+      const { firstName, lastName } = splitFullName(account.fullName);
+      await query('UPDATE users SET first_name = $1, last_name = $2 WHERE id = $3', [firstName, lastName, account.id]);
+    }
+  });
 
   // Keep day-level engagement history before services/maintenance.js trims old snapshots.
   await backfillActivityFromSnapshots();
