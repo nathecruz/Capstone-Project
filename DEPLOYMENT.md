@@ -30,7 +30,7 @@ The root `render.yaml` deploys all services as one Blueprint:
 - `habitai-backend`: Express API. Its ML service URL and API key are linked automatically.
 - `habitai-frontend`: Expo web export hosted as a Static Site. Its API URLs are linked automatically to the backend; its Neon Auth URL is provided separately.
 - `habitai-admin`: Admin Panel (`admin-panel/`, Docker). It builds the React client, serves it from its Express API, reuses the backend's `DATABASE_URL`, and applies its own idempotent migration at start-up.
-- `habitai-web-push`: Cron job that sends Web Push reminders every minute.
+- `habitai-web-push` (commented out in `render.yaml`): Cron job that sends Web Push reminders every minute. Render cron jobs are paid, so it is disabled until the workspace has a payment method; see below.
 
 1. Create or connect a Neon project and have its `DATABASE_URL` ready. Neon Auth (`AUTH_URL`, `JWKS_URL`, `EXPO_PUBLIC_AUTH_URL`) is optional: HabitAI signs users in with its own accounts and hashed session tokens. If you set them, the JWKS URL must end in `/.well-known/jwks.json`.
 2. Push the repository to GitHub.
@@ -50,7 +50,7 @@ Web Push lets scheduled reminders arrive when the browser/PWA is backgrounded or
 	```
 
 2. From `backend/.env`, copy `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY`, and `WEB_PUSH_VAPID_SUBJECT` into the `habitai-backend` service's Render **Environment**. Never commit or share the private key. `WEB_PUSH_API_URL` is linked to the backend service URL in the Blueprint.
-3. Confirm the `habitai-web-push` Cron Job is created and its database/VAPID variables reference the backend service. Render does not prompt for new `sync: false` secrets when syncing an existing Blueprint, so add the keys in the dashboard.
+3. Add a payment method to the Render workspace and uncomment the `habitai-web-push` block in `render.yaml` (a paid resource in the Blueprint makes every sync fail with `need_payment_info`, including changes to free services). Confirm the `habitai-web-push` Cron Job is created and its database/VAPID variables reference the backend service. Render does not prompt for new `sync: false` secrets when syncing an existing Blueprint, so add the keys in the dashboard.
 4. Deploy the frontend over HTTPS. On iPhone, open the site in Safari, add HabitAI to the Home Screen, open that installed web app, then enable Custom Reminders and allow notifications. On Android, use Chrome and allow notifications.
 
 The dispatcher checks saved habit schedules, custom weekdays, and each device timezone. Web Push reminders include a one-use Snooze action; the cron delivers snoozed reminders using the saved interval and count. Delivery is normally within a minute; after a delayed or interrupted Cron run, it retries reminders up to five minutes late. Mobile operating systems may apply their own notification delivery policies.

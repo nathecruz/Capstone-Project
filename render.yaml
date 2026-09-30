@@ -67,42 +67,46 @@ services:
       - key: WEB_PUSH_VAPID_SUBJECT
         sync: false
 
-  - type: cron
-    name: habitai-web-push
-    runtime: node
-    plan: 0.5c-512mb
-    rootDir: backend
-    buildCommand: npm install
-    schedule: '* * * * *'
-    startCommand: npm run push:dispatch
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: DATABASE_URL
-        fromService:
-          type: web
-          name: habitai-backend
-          envVarKey: DATABASE_URL
-      - key: WEB_PUSH_VAPID_PUBLIC_KEY
-        fromService:
-          type: web
-          name: habitai-backend
-          envVarKey: WEB_PUSH_VAPID_PUBLIC_KEY
-      - key: WEB_PUSH_VAPID_PRIVATE_KEY
-        fromService:
-          type: web
-          name: habitai-backend
-          envVarKey: WEB_PUSH_VAPID_PRIVATE_KEY
-      - key: WEB_PUSH_VAPID_SUBJECT
-        fromService:
-          type: web
-          name: habitai-backend
-          envVarKey: WEB_PUSH_VAPID_SUBJECT
-      - key: WEB_PUSH_API_URL
-        fromService:
-          type: web
-          name: habitai-backend
-          envVarKey: RENDER_EXTERNAL_URL
+  # Web Push reminder cron (disabled). Render cron jobs are paid (from about $1/month) and
+  # need a payment method on the workspace; while this block was active every Blueprint sync
+  # failed with "need_payment_info", so no service in this file was updated or created.
+  # To enable it, add a payment method in Render and uncomment the block below.
+  # - type: cron
+  #   name: habitai-web-push
+  #   runtime: node
+  #   plan: 0.5c-512mb
+  #   rootDir: backend
+  #   buildCommand: npm install
+  #   schedule: '* * * * *'
+  #   startCommand: npm run push:dispatch
+  #   envVars:
+  #     - key: NODE_ENV
+  #       value: production
+  #     - key: DATABASE_URL
+  #       fromService:
+  #         type: web
+  #         name: habitai-backend
+  #         envVarKey: DATABASE_URL
+  #     - key: WEB_PUSH_VAPID_PUBLIC_KEY
+  #       fromService:
+  #         type: web
+  #         name: habitai-backend
+  #         envVarKey: WEB_PUSH_VAPID_PUBLIC_KEY
+  #     - key: WEB_PUSH_VAPID_PRIVATE_KEY
+  #       fromService:
+  #         type: web
+  #         name: habitai-backend
+  #         envVarKey: WEB_PUSH_VAPID_PRIVATE_KEY
+  #     - key: WEB_PUSH_VAPID_SUBJECT
+  #       fromService:
+  #         type: web
+  #         name: habitai-backend
+  #         envVarKey: WEB_PUSH_VAPID_SUBJECT
+  #     - key: WEB_PUSH_API_URL
+  #       fromService:
+  #         type: web
+  #         name: habitai-backend
+  #         envVarKey: RENDER_EXTERNAL_URL
 
   - type: web
     name: habitai-ml
