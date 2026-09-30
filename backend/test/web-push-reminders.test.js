@@ -111,3 +111,47 @@ test('uses the Admin Panel reminder template when one is active', () => {
   );
   assert.equal(getReminderText({}, { title: '', body: '' }).title, 'Habit reminder');
 });
+
+test('the scheduler plans reminder minutes ahead and a longer lookback catches late runs', async () => {
+  const { getReminderWakeTimes } = await import('../services/web-push-reminders.js');
+  const habit = { id: 'h1', label: 'Walk', reminderEnabled: true, frequency: 'Daily', reminderTimes: ['08:30 AM', '09:00 AM'], completionDates: [] };
+  const rows = [
+    { timeZone: 'Asia/Manila', state: { habits: [habit] } },
+    { timeZone: 'Asia/Manila', state: { habits: [{ ...habit, id: 'h2' }], preferences: { notificationsEnabled: false } } },
+  ];
+  const now = new Date('2026-10-01T00:10:00.000Z'); // 08:10 in Manila
+  assert.deepEqual(getReminderWakeTimes(rows, now, 70).map((time) => new Date(time).toISOString()), ['2026-10-01T00:30:00.000Z', '2026-10-01T01:00:00.000Z']);
+  assert.deepEqual(getReminderWakeTimes(rows, now, 10), []);
+
+  const twentyMinutesLate = new Date('2026-10-01T00:50:00.000Z');
+  assert.deepEqual(getDueHabitReminders(habit, 'Asia/Manila', twentyMinutesLate), []);
+  assert.deepEqual(getDueHabitReminders(habit, 'Asia/Manila', twentyMinutesLate, 30), [{ date: '2026-10-01', time: '08:30' }]);
+});
+
+test('the scheduler only wakes the database when something is due', async () => {
+  const { decideWake, lookbackMinutes, nextPlan, parsePlan } = await import('../services/web-push-schedule.js');
+  const now = Date.parse('2026-10-01T00:22:00.000Z');
+  const plan = { version: 1, refreshedAt: now - 20 * 60_000, lastWakeAt: now - 20 * 60_000, wakeTimes: [now + 8 * 60_000, now + 40 * 60_000] };
+
+  assert.equal(decideWake(plan, now).wake, false, 'next reminder is 8 minutes away');
+  assert.deepEqual(decideWake(plan, now + 3 * 60_000), { wake: true, at: now + 8 * 60_000, reason: 'reminder due in the next few minutes' });
+  assert.equal(decideWake(plan, now + 9 * 60_000).at, now + 9 * 60_000, 'a late run wakes immediately');
+  assert.equal(decideWake({ ...plan, lastWakeAt: now + 8 * 60_000 }, now + 9 * 60_000).wake, false, 'already handled');
+  assert.equal(decideWake(plan, now + 41 * 60_000).reason, 'hourly refresh');
+  assert.equal(decideWake(null, Date.parse('2026-10-01T01:02:00.000Z')).wake, true, 'first plan at the top of the hour');
+  assert.equal(decideWake(null, Date.parse('2026-10-01T01:32:00.000Z')).wake, false, 'a lost cache cannot wake the database every run');
+  assert.equal(decideWake(plan, now, { force: true }).wake, true);
+
+  assert.equal(lookbackMinutes(null, now), 30);
+  assert.equal(lookbackMinutes(plan, now), 20);
+  assert.equal(lookbackMinutes({ ...plan, lastWakeAt: now - 60_000 }, now), 5);
+
+  const woke = nextPlan(plan, now + 8 * 60_000, { followUps: [now + 50 * 60_000] });
+  assert.deepEqual(woke.wakeTimes, [now + 40 * 60_000, now + 50 * 60_000]);
+  assert.equal(woke.refreshedAt, plan.refreshedAt);
+  const refreshed = nextPlan(plan, now + 41 * 60_000, { refreshed: true, wakeTimes: [now + 90 * 60_000, now + 30 * 60_000] });
+  assert.deepEqual(refreshed.wakeTimes, [now + 90 * 60_000]);
+  assert.equal(refreshed.refreshedAt, now + 41 * 60_000);
+  assert.deepEqual(parsePlan(JSON.stringify(refreshed)), refreshed);
+  assert.equal(parsePlan('not json'), null);
+});

@@ -70,7 +70,8 @@ services:
   # Web Push reminder cron (disabled). Render cron jobs are paid (from about $1/month) and
   # need a payment method on the workspace; while this block was active every Blueprint sync
   # failed with "need_payment_info", so no service in this file was updated or created.
-  # To enable it, add a payment method in Render and uncomment the block below.
+  # Reminders are sent for free by .github/workflows/web-push-reminders.yml instead. To use
+  # this cron instead, add a payment method in Render and uncomment the block below.
   # - type: cron
   #   name: habitai-web-push
   #   runtime: node

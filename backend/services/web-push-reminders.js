@@ -100,12 +100,13 @@ function getLocalParts(date, timeZone) {
   }
 }
 
-export function getDueHabitReminders(habit, timeZone, now = new Date()) {
+/** Reminders due in the last `lookbackMinutes` (covers a late or skipped dispatcher run). */
+export function getDueHabitReminders(habit, timeZone, now = new Date(), lookbackMinutes = 5) {
   if (!habit.reminderEnabled || typeof habit.label !== 'string') return [];
   const times = getHabitReminderTimes(habit);
   const days = getHabitReminderDays(habit);
   const due = new Map();
-  for (let minutesAgo = 0; minutesAgo <= 5; minutesAgo += 1) {
+  for (let minutesAgo = 0; minutesAgo <= lookbackMinutes; minutesAgo += 1) {
     const candidate = new Date(now.getTime() - minutesAgo * 60_000);
     const local = getLocalParts(candidate, timeZone);
     if (!local || !isScheduledReminderDay(habit, local, days)) continue;
@@ -119,6 +120,26 @@ export function getDueHabitReminders(habit, timeZone, now = new Date()) {
     }
   }
   return [...due.values()];
+}
+
+/**
+ * Minutes (epoch ms, minute-aligned) in (now, now + horizonMinutes] at which any reminder of
+ * these subscriptions is due. `rows` are { timeZone, state } as loaded by the dispatcher. The
+ * scheduler only wakes the database at these times, so Neon can scale to zero in between.
+ */
+export function getReminderWakeTimes(rows, now = new Date(), horizonMinutes = 70) {
+  const start = Math.floor(now.getTime() / 60_000) * 60_000;
+  const wakeTimes = new Set();
+  for (const { timeZone, state } of rows) {
+    if (state?.preferences?.notificationsEnabled === false) continue;
+    const habits = (Array.isArray(state?.habits) ? state.habits : []).filter((habit) => habit?.reminderEnabled && getHabitReminderTimes(habit).length);
+    if (!habits.length) continue;
+    for (let minute = 1; minute <= horizonMinutes; minute += 1) {
+      const at = start + minute * 60_000;
+      if (habits.some((habit) => getDueHabitReminders(habit, timeZone, new Date(at), 0).length)) wakeTimes.add(at);
+    }
+  }
+  return [...wakeTimes].sort((a, b) => a - b);
 }
 
 /**

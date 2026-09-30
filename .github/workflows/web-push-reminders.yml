@@ -1,0 +1,96 @@
+name: Web Push reminders
+
+# Free replacement for the paid Render cron job. Runs every 5 minutes, but only connects to
+# Neon when a reminder or snooze is due or once an hour to refresh the reminder plan, so the
+# free database can still scale to zero in between (see backend/services/web-push-schedule.js).
+#
+# Setup: add the repository secrets DATABASE_URL, WEB_PUSH_VAPID_PUBLIC_KEY,
+# WEB_PUSH_VAPID_PRIVATE_KEY and WEB_PUSH_VAPID_SUBJECT (the same values as the Render backend).
+# Until they exist every run ends immediately.
+on:
+  schedule:
+    - cron: '2-59/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      refresh:
+        description: Rebuild the reminder plan now
+        type: boolean
+        default: false
+
+concurrency:
+  group: web-push-reminders
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      WEB_PUSH_VAPID_PUBLIC_KEY: ${{ secrets.WEB_PUSH_VAPID_PUBLIC_KEY }}
+      WEB_PUSH_VAPID_PRIVATE_KEY: ${{ secrets.WEB_PUSH_VAPID_PRIVATE_KEY }}
+      WEB_PUSH_VAPID_SUBJECT: ${{ secrets.WEB_PUSH_VAPID_SUBJECT }}
+      # Base URL of the backend for the notification's Snooze action.
+      WEB_PUSH_API_URL: ${{ vars.WEB_PUSH_API_URL || 'https://habitai-backend.onrender.com' }}
+      WEB_PUSH_PLAN_FILE: ${{ github.workspace }}/.web-push/plan.json
+      WEB_PUSH_FORCE_REFRESH: ${{ inputs.refresh || 'false' }}
+      NODE_ENV: production
+    steps:
+      - name: Check configuration
+        id: config
+        run: |
+          if [ -n "$DATABASE_URL" ] && [ -n "$WEB_PUSH_VAPID_PRIVATE_KEY" ] && [ -n "$WEB_PUSH_VAPID_PUBLIC_KEY" ] && [ -n "$WEB_PUSH_VAPID_SUBJECT" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Web Push reminders are off: add the DATABASE_URL and WEB_PUSH_VAPID_* repository secrets."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.config.outputs.configured == 'true'
+        with:
+          sparse-checkout: backend
+
+      - name: Restore reminder plan
+        if: steps.config.outputs.configured == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: .web-push
+          key: web-push-plan-${{ github.run_id }}
+          restore-keys: web-push-plan-
+
+      - name: Decide whether to wake the database
+        id: check
+        if: steps.config.outputs.configured == 'true'
+        working-directory: backend
+        run: node scripts/web-push-scheduler.js check
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.wake == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        if: steps.check.outputs.wake == 'true'
+        working-directory: backend
+        run: npm ci --omit=dev --no-audit --no-fund
+
+      - name: Send due reminders
+        id: run
+        if: steps.check.outputs.wake == 'true'
+        working-directory: backend
+        env:
+          WEB_PUSH_WAKE_AT: ${{ steps.check.outputs.at }}
+        run: node scripts/web-push-scheduler.js run
+
+      - name: Save reminder plan
+        if: steps.run.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: .web-push
+          key: web-push-plan-${{ github.run_id }}

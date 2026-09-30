@@ -7,7 +7,7 @@ share one Neon PostgreSQL database:
 | --- | --- | --- | --- |
 | Student app (`frontend/`) | Expo, React Native, Expo Router, TypeScript | Vercel / Render static site (web), Android/iOS builds | Habits, streaks, goals, AI coach, rewards, notifications |
 | App API (`backend/`) | Node.js, Express 5, Zod, bcrypt, `pg` | Render web service | Accounts, sync, AI prompts, email, reminders |
-| Reminder dispatcher (`backend/scripts/send-web-push-reminders.js`) | Node.js cron job, Web Push (VAPID) | Render cron, every minute | Sends due habit reminders and snoozes |
+| Reminder scheduler (`backend/scripts/web-push-scheduler.js`) | Node.js, Web Push (VAPID) | GitHub Actions, every 5 minutes (free) | Sends due habit reminders and snoozes; wakes the database only when something is due |
 | ML service (`ml-service/`) | Python, FastAPI, scikit-learn, XGBoost | Render (Docker) | Habit completion / drop-out predictions |
 | Admin Panel (`admin-panel/`) | React + Vite, Express, `pg` | Render web service (Docker) | User, category and notification management; anonymized analytics |
 
@@ -27,7 +27,7 @@ flowchart LR
   api -- prompts with DB context --> gemini[Google Gemini]
   api -- X-ML-Service-Key --> ml[ML service<br/>FastAPI]
   api -- SMTP --> mail[SMTP provider]
-  cron[Reminder dispatcher<br/>Render cron, every minute] --> db
+  cron[Reminder scheduler<br/>GitHub Actions] --> db
   cron -- VAPID Web Push --> push[Browser push services]
   push --> app
   mail --> student
@@ -293,13 +293,16 @@ sequenceDiagram
   participant A as Student app (browser/PWA)
   participant API as App API
   participant DB as Neon
-  participant C as Reminder cron
+  participant C as Reminder scheduler (GitHub Actions)
   participant P as Push service
   A->>API: POST /api/web-push/subscriptions {subscription, timeZone}
   API->>DB: upsert web_push_subscriptions
-  loop every minute
+  loop every 5 minutes
+    C->>C: read cached plan of reminder times (no database)
+  end
+  opt hourly, or a planned reminder / snooze follow-up is due
     C->>DB: subscriptions of active accounts + latest app state
-    C->>C: due reminders per habit schedule and device time zone
+    C->>C: due reminders per habit schedule and device time zone; next hour's plan
     C->>DB: claim delivery (idempotent), load "habit reminder" template
     C->>P: encrypted push (title/body from template, Snooze action)
     C->>DB: record notification
@@ -317,7 +320,7 @@ The Admin Panel reads and writes the same database with its own staff sessions:
 role and status changes take effect in the app immediately (deactivated accounts lose their
 sessions), habit categories are served to the app by `GET /api/habit-categories`,
 notification broadcasts appear in the app's Notifications screen, and the "Habit reminder"
-template is used by the reminder cron. Its analytics are aggregated and k-anonymized.
+template is used by the reminder scheduler. Its analytics are aggregated and k-anonymized.
 
 ## 5. Security summary
 
