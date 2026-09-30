@@ -21,6 +21,7 @@ import {
   todayInZone,
 } from '../lib/metrics.js';
 import { getSettings } from '../lib/settings.js';
+import { loadLiveStreaks } from '../lib/streaks.js';
 import { requirePermission } from '../middleware/auth.js';
 import { buildCategoryRows, loadCategoryOrder } from './overview.js';
 
@@ -149,6 +150,9 @@ export async function computeAnalytics(range) {
     loadCategoryOrder(),
   ]);
 
+  // Stored streaks are only as fresh as each student's last sync; use live ones.
+  const liveStreaks = await loadLiveStreaks(tz);
+  for (const habit of habitRows.rows) habit.streak = liveStreaks.get(habit.id) ?? 0;
   const prepared = prepareHabits(habitRows.rows, tz);
   const completionsByUser = new Map(perUser.rows.map((row) => [row.userId, row.n]));
   const totalCompletions = perUser.rows.reduce((sum, row) => sum + row.n, 0);

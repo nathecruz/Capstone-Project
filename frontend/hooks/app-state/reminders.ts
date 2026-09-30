@@ -1,7 +1,6 @@
 // Reminder schedules and notification permissions (native notifications and Web Push).
 import { Platform } from 'react-native';
 import { getWebPushVapidPublicKey, saveWebPushSubscription } from '@/authentication/authService';
-import { getLocalDateKey } from './habit-progress';
 import type { Habit } from './types';
 
 export type NotificationsModule = typeof import('expo-notifications');
@@ -144,16 +143,4 @@ export async function requestNotificationAccess() {
   return requested.status === 'granted';
 }
 
-export function isHabitMissedToday(habit: Pick<Habit, 'completionDates' | 'startDate' | 'reminderEnabled' | 'reminderTime' | 'reminderTimes'>, now = new Date()) {
-  const today = getLocalDateKey(now);
-  if (habit.completionDates.includes(today) || (habit.startDate && habit.startDate > today) || !habit.reminderEnabled) return false;
-  const reminderTimes = habit.reminderTimes?.length ? habit.reminderTimes : [habit.reminderTime];
-  let hasValidReminderTime = false;
-  for (const reminderTime of reminderTimes) {
-    const time = parseReminderTime(reminderTime);
-    if (!time) continue;
-    hasValidReminderTime = true;
-    if (now.getHours() < time.hour || (now.getHours() === time.hour && now.getMinutes() < time.minute)) return false;
-  }
-  return hasValidReminderTime;
-}
+export { isHabitMissedToday } from '@/utils/habit-visibility';

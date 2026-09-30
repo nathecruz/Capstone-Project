@@ -57,3 +57,16 @@ export function applyRemoteCompletionDates(habit: Habit, completionDates: string
     streak: computeStreak(habit, completionDates, today),
   }) as Habit;
 }
+
+/**
+ * Applies the order of the habits shown on screen, which may be a filtered subset (active only,
+ * one tab, a search). Habits that are not shown keep their places; they used to be dropped,
+ * and the sync then deleted them and their check-ins on the server.
+ */
+export function applyVisibleOrder<T extends { id: string }>(current: T[], shownInOrder: { id: string }[]) {
+  const shownIds = new Set(shownInOrder.map((habit) => habit.id));
+  const byId = new Map(current.map((habit) => [habit.id, habit]));
+  const reordered = shownInOrder.map((habit) => byId.get(habit.id)).filter((habit): habit is T => Boolean(habit));
+  let next = 0;
+  return current.map((habit) => (shownIds.has(habit.id) ? reordered[next++] ?? habit : habit));
+}

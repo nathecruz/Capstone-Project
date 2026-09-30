@@ -50,6 +50,21 @@ function mergeIdentifiedArray(base, current, incoming) {
   return merged;
 }
 
+const orderOf = (items, ids) => (items || []).map((item) => item?.id).filter((id) => ids.has(id));
+
+/** Keeps a reorder made on the incoming side (the id-based merge above follows the base order). */
+function applyIncomingOrder(merged, base, current, incoming) {
+  const ids = new Set(merged.map((item) => item.id));
+  const baseOrder = orderOf(base, ids);
+  const incomingOrder = orderOf(incoming, ids);
+  if (valuesEqual(incomingOrder, baseOrder) || !valuesEqual(orderOf(current, ids), baseOrder)) return merged;
+  const rank = new Map(incomingOrder.map((id, index) => [id, index]));
+  return merged
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => (rank.get(a.item.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.item.id) ?? Number.MAX_SAFE_INTEGER) || a.index - b.index)
+    .map(({ item }) => item);
+}
+
 export function normalizeAppState(state) {
   if (!state || typeof state !== 'object') return state;
   const seenHabitIds = new Set();
@@ -66,11 +81,33 @@ export function normalizeAppState(state) {
   };
 }
 
+const datesOf = (habit) => (Array.isArray(habit?.completionDates) ? habit.completionDates.filter((date) => typeof date === 'string') : []);
+
+/**
+ * Check-ins the device added since its base (made offline) are kept even when the server's
+ * copy of the habit wins the merge. Dates the base already had are not re-added, so a check-in
+ * undone on another device stays undone.
+ */
+export function withNewIncomingCheckIns(state, base, incoming) {
+  const baseById = new Map((base?.habits || []).map((habit) => [habit?.id, habit]));
+  const incomingById = new Map((incoming?.habits || []).map((habit) => [habit?.id, habit]));
+  return {
+    ...state,
+    habits: (state.habits || []).map((habit) => {
+      const known = new Set(datesOf(baseById.get(habit.id)));
+      const added = datesOf(incomingById.get(habit.id)).filter((date) => !known.has(date));
+      const dates = new Set(datesOf(habit));
+      if (added.every((date) => dates.has(date))) return habit;
+      return { ...habit, completionDates: [...new Set([...dates, ...added])].sort() };
+    }),
+  };
+}
+
 export function mergeAppState(base, current, incoming) {
   const merged = { ...current };
   merged.profile = mergeObject(base.profile, current.profile, incoming.profile);
   merged.preferences = mergeObject(base.preferences, current.preferences, incoming.preferences);
-  merged.habits = mergeIdentifiedArray(base.habits, current.habits, incoming.habits);
+  merged.habits = applyIncomingOrder(mergeIdentifiedArray(base.habits, current.habits, incoming.habits), base.habits, current.habits, incoming.habits);
   merged.tokenHistory = mergeIdentifiedArray(base.tokenHistory, current.tokenHistory, incoming.tokenHistory);
   for (const key of ['avatarImage', 'darkModeOverride', 'ringInterval', 'snoozeFrequency']) {
     merged[key] = valuesEqual(incoming[key], base[key]) ? current[key] : valuesEqual(current[key], base[key]) ? incoming[key] : current[key];
@@ -78,10 +115,8 @@ export function mergeAppState(base, current, incoming) {
   if ('goals' in incoming) {
     merged.goals = valuesEqual(incoming.goals, base.goals) ? current.goals : valuesEqual(current.goals, base.goals) ? incoming.goals : current.goals;
   }
-  for (const key of ['points', 'tokens']) {
-    const incomingChanged = incoming[key] !== base[key];
-    const currentChanged = current[key] !== base[key];
-    merged[key] = incomingChanged && currentChanged ? current[key] + (incoming[key] - base[key]) : incomingChanged ? incoming[key] : current[key];
-  }
+  // Points and tokens come from the server's ledger (services/wallet.js), never from a device.
+  merged.points = current.points;
+  merged.tokens = current.tokens;
   return normalizeAppState(merged);
 }

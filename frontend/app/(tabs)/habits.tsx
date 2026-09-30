@@ -15,7 +15,7 @@ export default function HabitsScreen() {
   const { isDarkMode, habits: habitList, toggleHabit, deleteHabit, reorderHabits } = useAppColorScheme();
   const [selectedTab, setSelectedTab] = useState('All');
   const [filterMode, setFilterMode] = useState<'all' | 'active' | 'done'>('active');
-  const [sortMode, setSortMode] = useState<'progress' | 'streak' | 'name'>('progress');
+  const [sortMode, setSortMode] = useState<'custom' | 'progress' | 'streak' | 'name'>('progress');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -108,7 +108,11 @@ export default function HabitsScreen() {
         activationDistance={Platform.OS === 'web' ? 1_000_000 : 10}
         autoscrollThreshold={20}
         autoscrollSpeed={40}
-        onDragEnd={({ data }) => reorderHabits(data)}
+        onDragEnd={({ data }) => {
+          reorderHabits(data);
+          // Keep the order just dragged on screen instead of re-sorting it by progress.
+          setSortMode('custom');
+        }}
         renderItem={({ item, drag, isActive }) => (
           <ScaleDecorator>
             <Pressable
@@ -259,16 +263,16 @@ export default function HabitsScreen() {
                     <Ionicons name="close-circle-outline" size={18} color={isDarkMode ? '#AAA4B7' : '#85808D'} />
                   </Pressable>
                 </View>
-                {(showFilterMenu ? ['all', 'active', 'done'] : ['progress', 'streak', 'name']).map((option) => {
+                {(showFilterMenu ? ['all', 'active', 'done'] : ['custom', 'progress', 'streak', 'name']).map((option) => {
                   const selected = showFilterMenu ? filterMode === option : sortMode === option;
-                  const label = option === 'all' ? 'All Habits' : option === 'active' ? 'Active Only' : option === 'done' ? 'Completed Only' : option === 'progress' ? 'Progress' : option === 'streak' ? 'Longest Streak' : 'A to Z';
+                  const label = option === 'all' ? 'All Habits' : option === 'active' ? 'Active Only' : option === 'done' ? 'Completed Only' : option === 'custom' ? 'My Order' : option === 'progress' ? 'Progress' : option === 'streak' ? 'Longest Streak' : 'A to Z';
                   return (
                     <Pressable
                       key={option}
                       style={[styles.dropdownOption, selected && styles.dropdownOptionSelected]}
                       onPress={() => {
                         if (showFilterMenu) setFilterMode(option as 'all' | 'active' | 'done');
-                        else setSortMode(option as 'progress' | 'streak' | 'name');
+                        else setSortMode(option as 'custom' | 'progress' | 'streak' | 'name');
                         setShowFilterMenu(false);
                         setShowSortMenu(false);
                       }}

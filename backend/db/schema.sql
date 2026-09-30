@@ -97,6 +97,10 @@ CREATE TABLE IF NOT EXISTS habits (
   updated_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS habits_user_sort_idx ON habits(user_id, sort_order);
+-- Schedule of each habit, so the Admin Panel and AI can compute live streaks from check-ins.
+ALTER TABLE habits ADD COLUMN IF NOT EXISTS frequency TEXT NOT NULL DEFAULT '';
+ALTER TABLE habits ADD COLUMN IF NOT EXISTS start_date TEXT NOT NULL DEFAULT '';
+ALTER TABLE habits ADD COLUMN IF NOT EXISTS reminder_days JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 CREATE TABLE IF NOT EXISTS goals (
   id TEXT PRIMARY KEY,

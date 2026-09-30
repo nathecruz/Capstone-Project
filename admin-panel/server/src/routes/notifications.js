@@ -7,6 +7,7 @@ import { audit } from '../lib/audit.js';
 import { HttpError, validate } from '../lib/http.js';
 import { addDays, todayInZone } from '../lib/metrics.js';
 import { getSettings } from '../lib/settings.js';
+import { loadLiveStreaks } from '../lib/streaks.js';
 import { TEMPLATE_VARIABLES, recipientVariables, renderTemplate, sampleVariables, unknownPlaceholders } from '../lib/templates.js';
 import { requirePermission } from '../middleware/auth.js';
 
@@ -144,11 +145,17 @@ async function resolveAudience(audience) {
   const { rows } = await query(
     `SELECT u.id, u.full_name AS "fullName", u.username,
             (SELECT count(*)::int FROM habits h WHERE h.user_id = u.id) AS "habitCount",
-            (SELECT COALESCE(max(h.streak), 0)::int FROM habits h WHERE h.user_id = u.id) AS "bestStreak"
+            ARRAY(SELECT h.id FROM habits h WHERE h.user_id = u.id) AS "habitIds"
        FROM users u
       WHERE u.status = 'active' AND (${filter.sql})`,
     filter.params,
   );
+  // {{best_streak}} uses live streaks, not the value stored at the student's last sync.
+  const liveStreaks = rows.length ? await loadLiveStreaks(config.timeZone) : new Map();
+  for (const recipient of rows) {
+    recipient.bestStreak = Math.max(0, ...(recipient.habitIds || []).map((habitId) => liveStreaks.get(habitId) ?? 0));
+    delete recipient.habitIds;
+  }
   const label = audience.kind === 'users'
     ? (rows.length === 1 ? `1 selected account` : `${rows.length} selected accounts`)
     : filter.label;

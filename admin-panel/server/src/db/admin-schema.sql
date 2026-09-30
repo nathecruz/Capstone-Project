@@ -39,6 +39,11 @@ CREATE TABLE IF NOT EXISTS user_activity_days (
 );
 CREATE INDEX IF NOT EXISTS user_activity_days_date_idx ON user_activity_days(activity_date);
 
+-- Habit schedule columns written by the app backend; used for live streaks (lib/streaks.js).
+ALTER TABLE habits ADD COLUMN IF NOT EXISTS frequency TEXT NOT NULL DEFAULT '';
+ALTER TABLE habits ADD COLUMN IF NOT EXISTS start_date TEXT NOT NULL DEFAULT '';
+ALTER TABLE habits ADD COLUMN IF NOT EXISTS reminder_days JSONB NOT NULL DEFAULT '[]'::jsonb;
+
 -- Admin panel sessions (separate from mobile app sessions) ---------------------
 CREATE TABLE IF NOT EXISTS admin_sessions (
   token_hash TEXT PRIMARY KEY,

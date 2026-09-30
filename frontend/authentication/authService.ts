@@ -584,7 +584,7 @@ export async function saveRemoteHabitCompletion(completion: HabitCompletion & { 
   const token = await getSessionToken();
   if (!token) return null;
   try {
-    return await apiRequest<{ ok: boolean; completions?: HabitCompletion[]; points?: number; tokens?: number; tokenHistory?: object[]; habit?: { id: string; streak: number; done: boolean } | null }>('/api/habit-completions', {
+    return await apiRequest<{ ok: boolean; updatedAt?: number; state?: AppStateSyncPayload; completions?: HabitCompletion[]; points?: number; tokens?: number; tokenHistory?: object[]; habit?: { id: string; streak: number; done: boolean } | null }>('/api/habit-completions', {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({ ...completion, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }),

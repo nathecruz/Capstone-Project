@@ -48,6 +48,11 @@ function isScheduledDay(schedule: Schedule, dateKey: string) {
   return true;
 }
 
+/** Whether the habit is due on this day (YYYY-MM-DD) according to its schedule. */
+export function isHabitScheduledOn(habit: StreakHabit, dateKey: string) {
+  return isScheduledDay(habitSchedule(habit), dateKey);
+}
+
 /**
  * Consecutive scheduled days completed, counting back from `today` (YYYY-MM-DD).
  * An unfinished today never breaks the streak; unscheduled days are skipped.

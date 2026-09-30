@@ -303,7 +303,8 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
 
     const stale = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...appState, preferences: { language: 'Filipino' } }) });
     assert.equal(stale.response.status, 200);
-    assert.deepEqual(stale.body.state.habits[0].completionDates, [today], 'a device without the check-in cannot erase it');
+    const habitOne = (state) => state.habits.find((habit) => habit.id === 'habit-1');
+    assert.deepEqual(habitOne(stale.body.state).completionDates, [today], 'a device without the check-in cannot erase it');
 
     const undo = await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'habit-1', date: today, completed: false, timeZone: 'UTC' }) });
     assert.equal(undo.body.tokens, 0);
@@ -311,13 +312,61 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(undo.body.habit.streak, 0);
 
     const offline = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], completionDates: [today] }] }) });
-    assert.deepEqual(offline.body.state.habits[0].completionDates, [today], 'offline check-ins from a synced state are kept');
+    assert.deepEqual(habitOne(offline.body.state).completionDates, [today], 'offline check-ins from a synced state are kept');
     assert.equal(offline.body.state.tokens, 5);
     stateUpdatedAt = offline.body.updatedAt;
 
     const unchanged = await request(`/api/app-state?since=${stateUpdatedAt}`, { headers: authHeaders });
     assert.equal(unchanged.body.unchanged, true);
     assert.equal(normalizeAppState({ habits: [{ id: 'a' }, { id: 'a' }] }).habits.length, 1);
+  });
+
+  await t.test('habits and check-ins survive empty, stale and reordering devices', async () => {
+    const habit = (id, label) => ({ ...appState.habits[0], id, label, completionDates: [] });
+    const latest = async () => (await request('/api/app-state', { headers: authHeaders })).body;
+    let current = await latest();
+    const saved = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...current.state, habits: [habit('h-a', 'Alpha'), habit('h-b', 'Beta'), habit('h-c', 'Gamma')], baseUpdatedAt: current.updatedAt, baseState: current.state }) });
+    assert.deepEqual(saved.body.state.habits.map((item) => item.id), ['h-a', 'h-b', 'h-c']);
+    const checkIn = await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'h-b', date: today, completed: true, timeZone: 'UTC' }) });
+    assert.ok(checkIn.body.state && checkIn.body.updatedAt, 'the check-in returns the new snapshot to use as the sync base');
+
+    // A device that never loaded the server state (fresh install during a cold start) sends an empty list.
+    const empty = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...appState, habits: [] }) });
+    assert.equal(empty.response.status, 200);
+    current = await latest();
+    assert.deepEqual(current.state.habits.map((item) => item.id).filter((id) => id.startsWith('h-')), ['h-a', 'h-b', 'h-c'], 'a save without a base cannot delete habits');
+    assert.ok(current.completions.some((row) => row.habitId === 'h-b' && row.date === today), 'or their check-ins');
+
+    // Reordering right after a check-in, using the check-in response as the base: no merge, order kept.
+    const base = { updatedAt: current.updatedAt, state: current.state };
+    const reordered = [...current.state.habits].reverse();
+    const reorder = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...current.state, habits: reordered, baseUpdatedAt: base.updatedAt, baseState: base.state }) });
+    assert.deepEqual(reorder.body.state.habits.map((item) => item.id), reordered.map((item) => item.id));
+
+    // A second device with an older base reorders too, while the server changed meanwhile: its order still wins.
+    await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'h-a', date: today, completed: true, timeZone: 'UTC' }) });
+    const staleOrder = [...reorder.body.state.habits].sort((left, right) => left.id.localeCompare(right.id));
+    const merged = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...reorder.body.state, habits: staleOrder, baseUpdatedAt: reorder.body.updatedAt, baseState: reorder.body.state }) });
+    assert.equal(merged.body.merged, true);
+    assert.deepEqual(merged.body.state.habits.map((item) => item.id), staleOrder.map((item) => item.id), 'a reorder survives a merge');
+    assert.ok(merged.body.state.habits.find((item) => item.id === 'h-a').completionDates.includes(today), "and so does the other device's check-in");
+
+    // Offline check-in on a device whose copy of the habit conflicts with the server's: still kept.
+    const before = merged.body;
+    await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'h-c', date: today, completed: true, timeZone: 'UTC' }) });
+    const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+    const offlineHabits = before.state.habits.map((item) => (item.id === 'h-c' ? { ...item, completionDates: [...item.completionDates, yesterday] } : item));
+    const offline = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...before.state, habits: offlineHabits, baseUpdatedAt: before.updatedAt, baseState: before.state }) });
+    assert.deepEqual(offline.body.state.habits.find((item) => item.id === 'h-c').completionDates, [yesterday, today].sort(), "offline check-in merged with the other device's");
+
+    // A check-in undone on another device is not brought back by a device that still shows it.
+    await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'h-a', date: today, completed: false, timeZone: 'UTC' }) });
+    const resurrect = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...offline.body.state, ringInterval: 25, baseUpdatedAt: offline.body.updatedAt, baseState: offline.body.state }) });
+    assert.ok(!resurrect.body.state.habits.find((item) => item.id === 'h-a').completionDates.includes(today), 'an undone check-in stays undone');
+
+    const columns = (await db.query("SELECT frequency, start_date AS \"startDate\", reminder_days AS \"reminderDays\" FROM habits WHERE id = $1", [`${userId}:habit:h-a`])).rows[0];
+    assert.equal(columns.frequency, appState.habits[0].frequency || '');
+    assert.ok(Array.isArray(columns.reminderDays), 'the schedule is stored for live streaks');
   });
 
   await t.test('achievement notifications keep their read state', async () => {

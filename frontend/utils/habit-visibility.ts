@@ -1,6 +1,11 @@
+import { isHabitScheduledOn } from './streaks';
+
 export type HabitVisibilityCandidate = {
   completionDates: string[];
   startDate?: string;
+  frequency?: string;
+  meta?: string;
+  reminderDays?: string[];
   reminderEnabled?: boolean;
   reminderTime?: string;
   reminderTimes?: string[];
@@ -38,6 +43,8 @@ export function parseReminderTime(reminderTime?: string) {
 export function isHabitMissedToday(habit: HabitVisibilityCandidate, now = new Date()) {
   const today = getLocalDateKey(now);
   if (habit.completionDates.includes(today) || (habit.startDate && habit.startDate > today) || !habit.reminderEnabled) return false;
+  // A Mon/Wed/Fri habit is not missed on a Tuesday: only scheduled days count.
+  if (!isHabitScheduledOn(habit, today)) return false;
   const reminderTimes = habit.reminderTimes?.length ? habit.reminderTimes : [habit.reminderTime];
   let hasValidReminderTime = false;
   for (const reminderTime of reminderTimes) {

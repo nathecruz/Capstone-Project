@@ -8,6 +8,7 @@ import { HttpError, validate } from '../lib/http.js';
 import { addDays, dateRange, habitFrequency, todayInZone } from '../lib/metrics.js';
 import { generatePassword, hashPassword, passwordProblem } from '../lib/passwords.js';
 import { ROLES, ROLE_LABELS, STAFF_ROLES } from '../lib/permissions.js';
+import { loadLiveStreaks } from '../lib/streaks.js';
 import { requirePermission } from '../middleware/auth.js';
 
 const router = Router();
@@ -170,12 +171,15 @@ router.get('/:id', canView, async (request, response) => {
   ]);
 
   const byDay = new Map(daily.rows.map((row) => [row.day, row.completions]));
+  const liveStreaks = await loadLiveStreaks(config.timeZone, user.id);
+  const bestStreak = Math.max(0, ...habits.rows.map((habit) => liveStreaks.get(habit.id) ?? 0));
   response.json({
     ok: true,
     user: { ...serializeUser(user), about: user.about ?? '' },
-    stats: { ...stats.rows[0], habitCount: habits.rowCount },
+    stats: { ...stats.rows[0], bestStreak, habitCount: habits.rowCount },
     habits: habits.rows.map((habit) => ({
       ...habit,
+      streak: liveStreaks.get(habit.id) ?? 0,
       id: habit.id.replace(`${user.id}:habit:`, ''),
       frequency: habitFrequency(habit.meta),
     })),

@@ -3,7 +3,7 @@ import { aiLimiter } from '../http/rate-limits.js';
 import { parse } from '../lib/http.js';
 import { assistantSchema, goalGenerationSchema, goalPlanSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
-import { buildHabitContext, dateKeyInZone } from '../services/ai-context.js';
+import { buildHabitContext, dateKeyInZone, shiftDay } from '../services/ai-context.js';
 import {
   GOAL_PLANNER_SYSTEM,
   buildUserPrompt,
@@ -15,6 +15,7 @@ import {
 } from '../services/ai-prompts.js';
 import { refreshSnapshot } from '../services/app-state-store.js';
 import { generateGeminiText, isGeminiConfigured } from '../services/gemini.js';
+import { computeStreak, habitFromRow } from '../services/streaks.js';
 import { COACH_TOKEN_COST, getWallet, spendTokens, tokenBalance } from '../services/wallet.js';
 
 const DEFAULT_TIME_ZONE = 'Asia/Manila';
@@ -23,13 +24,23 @@ const DEFAULT_TIME_ZONE = 'Asia/Manila';
 export async function loadAiContext(userId, timeZone = DEFAULT_TIME_ZONE) {
   const today = dateKeyInZone(new Date(), timeZone);
   const [habits, completions, goals] = await Promise.all([
-    query('SELECT id, label, category, meta, streak, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime" FROM habits WHERE user_id=$1 ORDER BY sort_order, id', [userId]),
-    query("SELECT habit_id AS \"habitId\", completed_date::text AS date FROM habit_completions WHERE user_id=$1 AND completed_date >= ($2::date - 27)", [userId, today]),
+    query('SELECT id, label, category, meta, frequency, start_date, reminder_days, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime" FROM habits WHERE user_id=$1 ORDER BY sort_order, id', [userId]),
+    query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1', [userId]),
     query('SELECT title, category, progress, status, details_json AS details FROM goals WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 5', [userId]),
   ]);
+  const datesByHabit = new Map();
+  for (const completion of completions.rows) {
+    if (!datesByHabit.has(completion.habitId)) datesByHabit.set(completion.habitId, []);
+    datesByHabit.get(completion.habitId).push(completion.date);
+  }
+  const recentStart = shiftDay(today, -27);
   return buildHabitContext({
-    habits: habits.rows.map((habit) => ({ ...habit, id: String(habit.id).replace(`${userId}:habit:`, '') })),
-    completions: completions.rows,
+    // The stored streak is only as fresh as the last sync; compute it from check-ins instead.
+    habits: habits.rows.map((row) => {
+      const id = String(row.id).replace(`${userId}:habit:`, '');
+      return { ...row, id, streak: computeStreak(habitFromRow(row), datesByHabit.get(id) || [], today) };
+    }),
+    completions: completions.rows.filter((completion) => completion.date >= recentStart),
     goals: goals.rows,
     timeZone,
   });

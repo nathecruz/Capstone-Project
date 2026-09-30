@@ -34,6 +34,20 @@ export function isScheduledDay(schedule, dateKey) {
 }
 
 /**
+ * A `habits` table row (frequency, start_date, reminder_days, meta) as the habit shape used
+ * here. Rows synced before those columns existed fall back to the frequency in `meta`.
+ */
+export function habitFromRow(row) {
+  const metaFrequency = String(row?.meta || '').split('•')[0].trim();
+  return {
+    frequency: row?.frequency || (['Weekly', 'Monthly', 'Custom'].includes(metaFrequency) ? metaFrequency : 'Daily'),
+    startDate: row?.start_date || row?.startDate || '',
+    reminderDays: Array.isArray(row?.reminder_days) ? row.reminder_days : Array.isArray(row?.reminderDays) ? row.reminderDays : [],
+    meta: row?.meta || '',
+  };
+}
+
+/**
  * Consecutive scheduled days completed, counting back from `today`.
  * Today only extends the streak once done; an unfinished today never breaks it.
  * Unscheduled days are skipped, so a Mon/Wed/Fri habit is not broken on Tuesday.

@@ -9,7 +9,7 @@ export function dateKeyInZone(date, timeZone = 'Asia/Manila') {
   }
 }
 
-function shiftDay(dateKey, days) {
+export function shiftDay(dateKey, days) {
   const [year, month, day] = dateKey.split('-').map(Number);
   return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
 }

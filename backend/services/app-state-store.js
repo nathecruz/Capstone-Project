@@ -207,9 +207,10 @@ export async function syncNormalizedState(userId, state, updatedAt, connection) 
     const goal = Math.max(1, Number(habit.goal) || 1);
     const habitId = String(habit.id).trim();
     await connection.query(
-      `INSERT INTO habits(id,user_id,label,meta,category,icon,color,goal,progress,total,streak,done,reminder_enabled,reminder_time,sort_order,updated_at)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
-      [`${userId}:habit:${habitId}`, userId, habit.label || habit.name || habitId, habit.meta || '', habit.category || '', habit.icon || 'ellipse-outline', habit.color || '', goal, habit.progress, habit.total, habit.streak, habit.done, Boolean(habit.reminderEnabled), habit.reminderTime || '', sortOrder, updatedAt],
+      `INSERT INTO habits(id,user_id,label,meta,category,icon,color,goal,progress,total,streak,done,reminder_enabled,reminder_time,sort_order,updated_at,frequency,start_date,reminder_days)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+      [`${userId}:habit:${habitId}`, userId, habit.label || habit.name || habitId, habit.meta || '', habit.category || '', habit.icon || 'ellipse-outline', habit.color || '', goal, habit.progress, habit.total, habit.streak, habit.done, Boolean(habit.reminderEnabled), habit.reminderTime || '', sortOrder, updatedAt,
+        String(habit.frequency || ''), /^\d{4}-\d{2}-\d{2}$/.test(habit.startDate || '') ? habit.startDate : '', JSON.stringify(Array.isArray(habit.reminderDays) ? habit.reminderDays : [])],
     );
   }
 

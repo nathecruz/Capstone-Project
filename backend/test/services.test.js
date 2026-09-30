@@ -172,3 +172,31 @@ test('ML training rows use past features and the observed next-week outcome, wit
   assert.equal(csv.split('\n')[0], TRAINING_COLUMNS.join(','));
   assert.ok(!csv.includes('Secret') && !csv.includes('h1'));
 });
+
+test('live streaks from a habits row fall back to the frequency in meta', async () => {
+  const { computeStreak, habitFromRow } = await import('../services/streaks.js');
+  const today = '2026-09-30'; // Wednesday
+  const custom = habitFromRow({ meta: 'Custom • 08:00 AM • Mon, Wed', frequency: '', start_date: '', reminder_days: [] });
+  assert.equal(custom.frequency, 'Custom');
+  assert.equal(computeStreak(custom, ['2026-09-25', '2026-09-28', '2026-09-30'], today), 2, 'Friday is not scheduled for this habit');
+  const stale = habitFromRow({ meta: 'Daily • 07:00 AM', frequency: 'Daily', start_date: '2026-09-01', reminder_days: [] });
+  assert.equal(computeStreak(stale, ['2026-09-20', '2026-09-21'], today), 0, 'a stored streak would still say 2');
+});
+
+test('merges keep a reorder and new offline check-ins, but not undone ones', async () => {
+  const { mergeAppState, withNewIncomingCheckIns } = await import('../services/app-state-sync.js');
+  const habit = (id, completionDates = []) => ({ id, label: id, completionDates });
+  const base = { habits: [habit('a', ['2026-09-29']), habit('b'), habit('c')] };
+  const current = { habits: [habit('a'), habit('b', ['2026-09-30']), habit('c')], points: 40, tokens: 10 };
+  const incoming = { habits: [habit('c', ['2026-09-28']), habit('a', ['2026-09-29']), habit('b')], points: 999, tokens: 999 };
+  const merged = withNewIncomingCheckIns(mergeAppState(base, current, incoming), base, incoming);
+  assert.deepEqual(merged.habits.map((item) => item.id), ['c', 'a', 'b'], 'the incoming reorder wins when the server kept the base order');
+  assert.deepEqual(merged.habits.find((item) => item.id === 'c').completionDates, ['2026-09-28'], 'offline check-in kept');
+  assert.deepEqual(merged.habits.find((item) => item.id === 'a').completionDates, [], 'a check-in undone elsewhere stays undone');
+  assert.deepEqual(merged.habits.find((item) => item.id === 'b').completionDates, ['2026-09-30']);
+  assert.equal(merged.points, 40, 'points and tokens always come from the server');
+  assert.equal(merged.tokens, 10);
+
+  const baseless = mergeAppState({}, current, { habits: [] });
+  assert.deepEqual(baseless.habits.map((item) => item.id), ['a', 'b', 'c'], 'an empty device without a base deletes nothing');
+});
