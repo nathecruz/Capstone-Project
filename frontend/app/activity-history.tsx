@@ -64,7 +64,7 @@ export default function ActivityHistoryScreen() {
               <TextInput value={search} onChangeText={setSearch} placeholder="Search your activity..." placeholderTextColor="#9A94A4" style={[styles.searchInput, isDarkMode && styles.darkText]} accessibilityLabel="Search activity history" />
               {search.length > 0 && <Pressable onPress={() => setSearch('')} accessibilityLabel="Clear activity search"><Ionicons name="close-circle" size={18} color="#8B8496" /></Pressable>}
             </View>
-            {normalizedSearch && <Text style={[styles.resultText, isDarkMode && styles.darkMutedText]}>{activityEntries.length} matching completion{activityEntries.length === 1 ? '' : 's'}</Text>}
+            {normalizedSearch ? <Text style={[styles.resultText, isDarkMode && styles.darkMutedText]}>{activityEntries.length} matching completion{activityEntries.length === 1 ? '' : 's'}</Text> : null}
 
             <View style={styles.metricsCard}>
               <View style={styles.metricCell}><Text style={styles.metricValue}>{completed}</Text><Text style={styles.metricLabel}>Completions</Text></View>

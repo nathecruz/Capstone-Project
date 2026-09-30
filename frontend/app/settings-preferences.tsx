@@ -16,7 +16,7 @@ function SettingRow({ icon, iconColor, title, subtitle, value, onPress, trailing
   return <Pressable style={[styles.settingRow, { borderBottomColor: isDarkMode ? '#302C3B' : '#F0F0F5' }, last && styles.lastRow]} onPress={onPress} disabled={!onPress} accessibilityRole={onPress ? 'button' : undefined} accessibilityLabel={title}>
     <View style={[styles.rowIcon, { backgroundColor: `${iconColor}18` }]}><Ionicons name={icon} size={20} color={iconColor} /></View>
     <View style={styles.rowCopy}><Text style={[styles.rowTitle, { color: isDarkMode ? '#F5F2FA' : '#182044' }, danger && styles.dangerText]}>{title}</Text><Text style={[styles.rowSubtitle, { color: isDarkMode ? '#AAA4B7' : '#8990A5' }]}>{subtitle}</Text></View>
-    {value && <Text style={[styles.rowValue, { color: isDarkMode ? '#CFC8E7' : '#6545C8' }]}>{value}</Text>}
+    {value ? <Text style={[styles.rowValue, { color: isDarkMode ? '#CFC8E7' : '#6545C8' }]}>{value}</Text> : null}
     {trailing || (onPress && <Ionicons name="chevron-forward" size={19} color={isDarkMode ? '#AAA4B7' : '#778099'} />)}
   </Pressable>;
 }

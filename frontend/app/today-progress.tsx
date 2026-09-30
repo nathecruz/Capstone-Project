@@ -5,7 +5,6 @@ import React, { useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
-import { getVisibleHabitsForDate } from '@/utils/habit-visibility';
 
 const weekdays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const monthNames = [
@@ -60,7 +59,8 @@ export default function InsightsScreen() {
   });
   const [calendarVisible, setCalendarVisible] = useState(false);
   const selectedDateKey = getDateKey(selectedDate);
-  const visibleHabits = getVisibleHabitsForDate(habits, selectedDate, new Date());
+  // Every habit can be completed all day, so all of them are listed for the selected date.
+  const visibleHabits = habits;
   const selectedDateProgress = visibleHabits.filter((habit) => habit.completionDates.includes(selectedDateKey));
   const selectedCompletedCount = selectedDateProgress.length;
   const selectedCompletionPercent = visibleHabits.length ? Math.round((selectedCompletedCount / visibleHabits.length) * 100) : 0;

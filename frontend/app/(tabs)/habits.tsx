@@ -1,11 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
-import { isHabitMissedToday, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { isHabitMissedYesterday, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { filterHabitsByStatus } from '@/utils/habit-data';
 
 const tabs = ['All', 'Daily', 'Weekly', 'Monthly', 'Custom'];
@@ -22,38 +22,14 @@ export default function HabitsScreen() {
   const [search, setSearch] = useState('');
   const [suggestion, setSuggestion] = useState('');
   const [currentTime, setCurrentTime] = useState(() => new Date());
-  const [dismissedMissedHabitIds, setDismissedMissedHabitIds] = useState<string[]>([]);
-  const missedTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 30_000);
+    // Keeps "missed yesterday" correct after midnight while the screen stays open.
+    const timer = setInterval(() => setCurrentTime(new Date()), 60_000);
     return () => clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    const activeMissedHabits = habitList.filter((habit) => isHabitMissedToday(habit, currentTime) && !dismissedMissedHabitIds.includes(habit.id));
-    const currentlyTrackedIds = new Set<string>();
-
-    for (const habit of activeMissedHabits) {
-      currentlyTrackedIds.add(habit.id);
-      if (missedTimersRef.current[habit.id]) continue;
-
-      missedTimersRef.current[habit.id] = setTimeout(() => {
-        setDismissedMissedHabitIds((current) => current.includes(habit.id) ? current : [...current, habit.id]);
-        delete missedTimersRef.current[habit.id];
-      }, 15_000);
-    }
-
-    for (const [habitId, timer] of Object.entries(missedTimersRef.current)) {
-      if (currentlyTrackedIds.has(habitId)) continue;
-      clearTimeout(timer);
-      delete missedTimersRef.current[habitId];
-    }
-  }, [currentTime, dismissedMissedHabitIds, habitList]);
-
-  const visibleHabitList = useMemo(
-    () => habitList.filter((habit) => !dismissedMissedHabitIds.includes(habit.id)),
-    [dismissedMissedHabitIds, habitList],
-  );
+  // Habits stay on the list and can be checked in all day; one only counts as missed once its day is over.
+  const visibleHabitList = habitList;
   const completedCount = visibleHabitList.filter((habit) => habit.done).length;
   const overallProgress = visibleHabitList.length
     ? Math.round(visibleHabitList.reduce((sum, habit) => sum + habit.progress, 0) / visibleHabitList.length)
@@ -117,14 +93,14 @@ export default function HabitsScreen() {
           <ScaleDecorator>
             <Pressable
               onLongPress={Platform.OS === 'web' ? undefined : drag}
-              style={[styles.habitCard, isDarkMode && styles.darkCard, isHabitMissedToday(item, currentTime) && styles.missedHabitCard, isActive && styles.habitCardDragging]}
+              style={[styles.habitCard, isDarkMode && styles.darkCard, isActive && styles.habitCardDragging]}
             >
               <View style={styles.habitCardHeader}>
                 <View style={styles.habitTitleWrap}>
                   <View style={[styles.habitIconWrap, { backgroundColor: `${item.color}22` }]}>
                     <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={19} color={item.color} />
                   </View>
-                  <Text style={[styles.habitTitle, isDarkMode && styles.darkText, isHabitMissedToday(item, currentTime) && styles.missedHabitText]}>{item.label}</Text>
+                  <Text style={[styles.habitTitle, isDarkMode && styles.darkText]}>{item.label}</Text>
                 </View>
                 <View style={styles.progressPill}>
                   <Text style={styles.progressPillText}>{item.total}</Text>
@@ -142,7 +118,7 @@ export default function HabitsScreen() {
               </View>
 
               <View style={styles.metaRow}>
-                <Text style={[styles.metaText, isDarkMode && styles.darkMutedText]}>{isHabitMissedToday(item, currentTime) ? 'MISSED TODAY · ' : ''}{item.meta}</Text>
+                <Text style={[styles.metaText, isDarkMode && styles.darkMutedText]}>{isHabitMissedYesterday(item, currentTime) ? 'MISSED YESTERDAY · ' : ''}{item.meta}</Text>
                 <View style={styles.streakRow}>
                   <Ionicons name="flame-outline" size={12} color="#F29A3D" />
                   <Text style={[styles.streakText, isDarkMode && styles.darkText]}>{item.streak}</Text>
@@ -164,13 +140,12 @@ export default function HabitsScreen() {
               <View style={styles.progressPercentRow}>
                 <Text style={[styles.progressPercent, isDarkMode && styles.darkMutedText]}>{item.progress}%</Text>
                 <Pressable
-                  style={[styles.checkButton, item.done ? styles.checkButtonDone : styles.checkButtonEmpty, isHabitMissedToday(item, currentTime) && { opacity: 0.45 }]}
+                  style={[styles.checkButton, item.done ? styles.checkButtonDone : styles.checkButtonEmpty]}
                   onPress={() => {
                     toggleHabit(item.id);
                     setFilterMode('active');
                   }}
-                  disabled={isHabitMissedToday(item, currentTime)}
-                  accessibilityState={{ checked: item.done, disabled: isHabitMissedToday(item, currentTime) }}
+                  accessibilityState={{ checked: item.done }}
                 >
                   {item.done ? <Ionicons name="checkmark" size={18} color="#FFFFFF" /> : null}
                 </Pressable>
@@ -333,7 +308,7 @@ export default function HabitsScreen() {
                 <Text style={styles.primaryButtonText}>Get Suggestions</Text>
                 <Ionicons name="sparkles-outline" size={16} color="#FFFFFF" />
               </Pressable>
-              {suggestion && (
+              {suggestion ? (
                 <View style={[styles.suggestionResult, isDarkMode && styles.darkCard]}>
                   <View style={styles.suggestionResultCopy}>
                     <Text style={[styles.suggestionResultLabel, isDarkMode && styles.darkMutedText]}>Suggested habit</Text>
@@ -344,7 +319,7 @@ export default function HabitsScreen() {
                     <Ionicons name="arrow-forward" size={14} color="#FFFFFF" />
                   </Pressable>
                 </View>
-              )}
+              ) : null}
             </View>
           </View>
         }
@@ -675,14 +650,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.14,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 6 },
-  },
-  missedHabitCard: {
-    borderWidth: 2,
-    borderColor: '#D94B58',
-    backgroundColor: '#FFF4F4',
-  },
-  missedHabitText: {
-    color: '#C73545',
   },
   emptyState: {
     alignItems: 'center',

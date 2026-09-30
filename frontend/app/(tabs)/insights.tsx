@@ -168,7 +168,8 @@ export default function InsightsScreen() {
   }));
   const trendSegments = getChartSegments(dailyRates);
   const trendChange = dailyRates.length > 1 ? dailyRates[dailyRates.length - 1] - dailyRates[0] : 0;
-  const missedHabits = Math.max(0, habits.length - completed);
+  // Not missed yet: a habit can be completed until the day is over.
+  const openHabits = Math.max(0, habits.length - completed);
   const successRate = habits.length ? Math.round(habits.reduce((total, habit) => total + habit.progress, 0) / habits.length) : 0;
   const strongestHabit = [...habits].sort((a, b) => b.progress - a.progress || b.streak - a.streak)[0];
   const weakestHabit = [...habits].sort((a, b) => a.progress - b.progress || a.streak - b.streak)[0];
@@ -434,7 +435,7 @@ export default function InsightsScreen() {
                     <Text style={[styles.insightTitle, isDarkMode && styles.darkPrimaryText]}>Weekly Insight</Text>
                   </View>
                   <Text style={styles.insightHeadline}>{weeklyInsight}</Text>
-                  <Text style={[styles.insightBody, isDarkMode && styles.darkMutedText]}>{completed} completed and {missedHabits} missed today. Your current average progress is {averageProgress}%.</Text>
+                  <Text style={[styles.insightBody, isDarkMode && styles.darkMutedText]}>{completed} completed and {openHabits} still open today. Your current average progress is {averageProgress}%.</Text>
                 </View>
 
                 <View style={[styles.suggestionCard, isDarkMode && styles.darkCard]}>
@@ -514,8 +515,8 @@ export default function InsightsScreen() {
                     </View>
                     <View style={styles.predictionStatCard}>
                       <View style={styles.trendPillLarge}><Ionicons name="close-circle" size={16} color="#D56A6A" /></View>
-                      <Text style={styles.predictionStatValue}>{missedHabits}</Text>
-                      <Text style={styles.predictionStatLabel}>missed today</Text>
+                      <Text style={styles.predictionStatValue}>{openHabits}</Text>
+                      <Text style={styles.predictionStatLabel}>open today</Text>
                     </View>
                   </View>
                 </View>
@@ -685,7 +686,7 @@ export default function InsightsScreen() {
                   {([
                     { title: 'Completed today', value: `${completed} habit${completed === 1 ? '' : 's'}`, detail: `${completionPercent}% of your tracked habits are complete today.`, tone: 'green', icon: 'trophy', tag: 'Live progress' },
                     { title: 'Success rate', value: `${successRate}%`, detail: `${averageProgress}% average progress across your current habits.`, tone: 'blue', icon: 'calendar', tag: 'Live progress' },
-                    { title: 'Missed habits', value: String(missedHabits), detail: `${maxStreak}-day best streak. Keep the next action small.`, tone: 'orange', icon: 'flash', tag: 'Live progress' },
+                    { title: 'Open habits', value: String(openHabits), detail: `${maxStreak}-day best streak. Keep the next action small.`, tone: 'orange', icon: 'flash', tag: 'Live progress' },
                   ] as const).map((card) => (
                     <View key={card.title} style={[styles.quickCard, toneStyles[card.tone]]}>
                       <View style={styles.quickCardTopRow}>

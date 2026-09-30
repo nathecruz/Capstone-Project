@@ -143,4 +143,4 @@ export async function requestNotificationAccess() {
   return requested.status === 'granted';
 }
 
-export { isHabitMissedToday } from '@/utils/habit-visibility';
+export { isHabitMissedYesterday } from '@/utils/habit-visibility';

@@ -6,9 +6,6 @@ export type HabitVisibilityCandidate = {
   frequency?: string;
   meta?: string;
   reminderDays?: string[];
-  reminderEnabled?: boolean;
-  reminderTime?: string;
-  reminderTimes?: string[];
 };
 
 export function getLocalDateKey(date = new Date()) {
@@ -18,57 +15,30 @@ export function getLocalDateKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-export function parseReminderTime(reminderTime?: string) {
-  if (!reminderTime) return null;
-  const match = /^\s*(\d{1,2}):(\d{2})(?:\s*(AM|PM))?\s*$/i.exec(reminderTime.trim());
-  if (!match) return null;
-
-  let hour = Number(match[1]);
-  const minute = Number(match[2]);
-  const period = match[3]?.toUpperCase();
-
-  if (!Number.isInteger(minute) || minute > 59) return null;
-
-  if (period) {
-    if (hour < 1 || hour > 12) return null;
-    if (period === 'PM' && hour !== 12) hour += 12;
-    if (period === 'AM' && hour === 12) hour = 0;
-  } else if (hour > 23) {
-    return null;
-  }
-
-  return { hour, minute };
+function previousDateKey(now: Date) {
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  return getLocalDateKey(yesterday);
 }
 
-export function isHabitMissedToday(habit: HabitVisibilityCandidate, now = new Date()) {
-  const today = getLocalDateKey(now);
-  if (habit.completionDates.includes(today) || (habit.startDate && habit.startDate > today) || !habit.reminderEnabled) return false;
-  // A Mon/Wed/Fri habit is not missed on a Tuesday: only scheduled days count.
-  if (!isHabitScheduledOn(habit, today)) return false;
-  const reminderTimes = habit.reminderTimes?.length ? habit.reminderTimes : [habit.reminderTime];
-  let hasValidReminderTime = false;
-  for (const reminderTime of reminderTimes) {
-    const time = parseReminderTime(reminderTime);
-    if (!time) continue;
-    hasValidReminderTime = true;
-    if (now.getHours() < time.hour || (now.getHours() === time.hour && now.getMinutes() < time.minute)) return false;
-  }
-  return hasValidReminderTime;
+/**
+ * A habit is missed only once its day is over: it was scheduled that day (and already
+ * started) and was not completed. During the day it can be completed at any time, even
+ * after its reminder time.
+ */
+export function isHabitMissedOn(habit: HabitVisibilityCandidate, dateKey: string, now = new Date()) {
+  if (dateKey >= getLocalDateKey(now)) return false;
+  if (habit.startDate && habit.startDate > dateKey) return false;
+  if (habit.completionDates.includes(dateKey)) return false;
+  return isHabitScheduledOn(habit, dateKey);
 }
 
-export function canCompleteHabitForDate(habit: HabitVisibilityCandidate, date: Date | string, now = new Date()) {
+export function isHabitMissedYesterday(habit: HabitVisibilityCandidate, now = new Date()) {
+  return isHabitMissedOn(habit, previousDateKey(now), now);
+}
+
+/** Check-ins are allowed for today and earlier days, never for the future (the server rejects those too). */
+export function canCompleteHabitForDate(date: Date | string, now = new Date()) {
   const dateKey = typeof date === 'string' ? date : getLocalDateKey(date);
-  if (dateKey !== getLocalDateKey(now)) return true;
-  return !isHabitMissedToday(habit, now);
-}
-
-export function getVisibleHabitsForDate<T extends HabitVisibilityCandidate>(habits: T[], selectedDate: Date | string, now = new Date()): T[] {
-  const selectedDateKey = typeof selectedDate === 'string' ? selectedDate : getLocalDateKey(selectedDate);
-  const todayKey = getLocalDateKey(now);
-
-  return habits.filter((habit) => {
-    if (habit.completionDates.includes(selectedDateKey)) return true;
-    if (selectedDateKey !== todayKey) return true;
-    return !isHabitMissedToday(habit, now);
-  });
+  return dateKey <= getLocalDateKey(now);
 }

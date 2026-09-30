@@ -14,7 +14,7 @@ import { initialPreferences, initialProfile, type Goal, type Habit, type Persist
 
 export * from './app-state/types';
 export { getHabitCompletionHistory, getHabitProgressSummary } from './app-state/habit-progress';
-export { getHabitReminderDays, getHabitReminderSchedule, getHabitReminderTimes, getNotificationsModule, getSnoozeLimit, isHabitMissedToday, isHabitReminderDay, requestNotificationAccess } from './app-state/reminders';
+export { getHabitReminderDays, getHabitReminderSchedule, getHabitReminderTimes, getNotificationsModule, getSnoozeLimit, isHabitMissedYesterday, isHabitReminderDay, requestNotificationAccess } from './app-state/reminders';
 
 type ColorScheme = 'light' | 'dark';
 let nextHabitId = 0;
@@ -433,7 +433,8 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     const isToday = dateKey === getLocalDateKey();
     const completionTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
     const currentHabit = habits.find((habit) => habit.id === id);
-    if (isToday && currentHabit && !canCompleteHabitForDate(currentHabit, date)) return;
+    // Any time today (a habit only counts as missed once its day is over) or an earlier day.
+    if (!canCompleteHabitForDate(date)) return;
     if (!currentHabit) return;
     // The same intent goes to the screen and the server, so a quick double tap cannot leave them disagreeing.
     const completed = !currentHabit.completionDates.includes(dateKey);

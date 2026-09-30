@@ -148,7 +148,7 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
         await Notifications.scheduleNotificationAsync({
           content: {
             title: 'Smart Reminder',
-            body: `${habit.label} may have been missed. Complete it now to keep your routine moving.`,
+            body: `${habit.label} is still open for today. Complete it before the day ends to keep your streak.`,
             sound: soundEnabled ? 'reminder_sound.mp3' : false,
             data: { habitId: habit.id, type: 'missed-habit', snoozeCount: 0 },
             categoryIdentifier: 'habit-reminder-snooze',

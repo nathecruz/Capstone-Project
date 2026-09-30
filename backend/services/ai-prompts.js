@@ -14,7 +14,7 @@ Rules:
 const APP_GUIDE = `
 HabitAI app guide (the only features that exist):
 - Add a habit: open the Add tab, enter a name, pick a category, frequency (Daily, Weekly, Monthly or Custom days), target count, start date, and up to 2 reminder times, then save.
-- Complete a habit: tap the check control on the Habits tab. Tap again to undo today's check-in. Missed past days cannot be checked in later.
+- Complete a habit: tap the check control on the Habits tab any time during the day; tap again to undo. Earlier days can be filled in from Today's Progress. A habit only counts as missed after its scheduled day ends without a check-in.
 - Streaks: a streak grows each day the habit is completed and stops when a scheduled day is missed; history is kept.
 - Points and levels: every check-in gives 20 points and 5 tokens. Each 100 points is one level. Leaderboards rank students by points this week, this month or all time.
 - Rewards: spend tokens on rewards from the Leaderboards screen (for example Plant Buddy 200 tokens, Premium Theme 320, Grace Day 620, Custom Title 750).
