@@ -24,11 +24,13 @@ Use the same values described in [README.md](README.md) and [.env.example](.env.
 
 ## 2) Deploy the system on Render
 
-The root `render.yaml` deploys all three services as one Blueprint:
+The root `render.yaml` deploys all services as one Blueprint:
 
 - `habitai-ml`: FastAPI service. Render generates its `ML_SERVICE_API_KEY`.
 - `habitai-backend`: Express API. Its ML service URL and API key are linked automatically.
 - `habitai-frontend`: Expo web export hosted as a Static Site. Its API URLs are linked automatically to the backend; its Neon Auth URL is provided separately.
+- `habitai-admin`: Admin Panel (`admin-panel/`, Docker). It builds the React client, serves it from its Express API, reuses the backend's `DATABASE_URL`, and applies its own idempotent migration at start-up.
+- `habitai-web-push`: Cron job that sends Web Push reminders every minute.
 
 1. Create or connect a Neon project and have its `DATABASE_URL` ready. Neon Auth (`AUTH_URL`, `JWKS_URL`, `EXPO_PUBLIC_AUTH_URL`) is optional: HabitAI signs users in with its own accounts and hashed session tokens. If you set them, the JWKS URL must end in `/.well-known/jwks.json`.
 2. Push the repository to GitHub.
@@ -70,6 +72,12 @@ For Vercel frontend-only hosting, either set the project root to `frontend` (rec
 
 With `frontend` as the project root, Vercel runs `npm ci` and `npm run export:web`, publishing `dist`. With the repository root, it runs `npm --prefix frontend ci` and `npm --prefix frontend run export:web`, publishing `frontend/dist`. Both configs rewrite direct route requests such as `/login` to `index.html`.
 
+### Admin Panel
+
+1. After the Blueprint sync creates `habitai-admin`, open its URL (for example `https://habitai-admin.onrender.com`). The first request after 15 idle minutes takes about a minute on the free plan.
+2. Sign in with an existing administrator account. To create one, run `npm run create-admin -- --email you@psau.edu.ph --role admin` from `admin-panel/` with `server/.env` pointing at the production `DATABASE_URL`; the temporary password is printed once. Change it under **Settings → My account**, then add other staff from **Users**.
+3. The session cookie is `Secure` and `SameSite=Strict`, so the panel only works over HTTPS (Render provides it). No CORS settings are needed because the client and API share one origin.
+
 ## 3) Important production notes
 
 - The backend checks that `ML_SERVICE_URL` is not localhost in production.
@@ -92,6 +100,7 @@ When using the Render Blueprint, create the Neon database first, then sync the B
 2. ML service
 3. Backend
 4. Frontend
+5. Admin Panel
 
 That keeps the environment variables aligned and avoids broken API calls.
 

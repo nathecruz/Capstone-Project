@@ -1,0 +1,18 @@
+{
+  "name": "habitai-admin-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HabitAI Admin Panel: user, category, notification and analytics management for PSAU administrators.",
+  "scripts": {
+    "install:all": "npm install && npm --prefix server install && npm --prefix client install",
+    "dev": "concurrently -k -n api,web -c magenta,cyan \"npm --prefix server run dev\" \"npm --prefix client run dev\"",
+    "build": "npm --prefix client run build",
+    "start": "npm --prefix server start",
+    "migrate": "npm --prefix server run migrate",
+    "create-admin": "npm --prefix server run create-admin --",
+    "test": "npm --prefix server test && npm --prefix client run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
+  }
+}

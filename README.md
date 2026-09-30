@@ -26,6 +26,14 @@ must not use `completionDates` in synced app state as an authoritative source.
 The backend requires `DATABASE_URL` (Neon or any PostgreSQL); the old SQLite fallback
 was removed so there is a single data layer to test and maintain.
 
+## Admin Panel
+
+`admin-panel/` is the web dashboard for PSAU faculty and administrators (user roles and
+deactivation, habit categories, notification templates, usage statistics and anonymized
+analytics). It shares the Neon database with the app and is deployed as the `habitai-admin`
+service in `render.yaml`. See [admin-panel/README.md](admin-panel/README.md) for local setup and
+creating the first administrator account.
+
 ## Architecture
 
 See **[ARCHITECTURE.md](ARCHITECTURE.md)** for the system diagram, API modules, data model

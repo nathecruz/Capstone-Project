@@ -9,7 +9,7 @@ share one Neon PostgreSQL database:
 | App API (`backend/`) | Node.js, Express 5, Zod, bcrypt, `pg` | Render web service | Accounts, sync, AI prompts, email, reminders |
 | Reminder dispatcher (`backend/scripts/send-web-push-reminders.js`) | Node.js cron job, Web Push (VAPID) | Render cron, every minute | Sends due habit reminders and snoozes |
 | ML service (`ml-service/`) | Python, FastAPI, scikit-learn, XGBoost | Render (Docker) | Habit completion / drop-out predictions |
-| Admin Panel (`../Admin Dashboard/`) | React + Vite, Express, `pg` | Separate web service | User, category and notification management; anonymized analytics |
+| Admin Panel (`admin-panel/`) | React + Vite, Express, `pg` | Render web service (Docker) | User, category and notification management; anonymized analytics |
 
 External services: **Neon** (PostgreSQL), **Google Gemini** (AI text), **SMTP** (a project
 mailbox or transactional provider for verification codes and notices), **browser push services** (FCM, Apple, Mozilla).

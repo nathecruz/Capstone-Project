@@ -53,6 +53,25 @@ jobs:
       - run: npm run lint
       - run: npm test
 
+  admin-panel:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin-panel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            admin-panel/server/package-lock.json
+            admin-panel/client/package-lock.json
+      - run: npm ci --prefix server
+      - run: npm ci --prefix client
+      - run: npm --prefix server test
+      - run: npm --prefix client run build
+
   ml-service:
     runs-on: ubuntu-latest
     steps:

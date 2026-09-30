@@ -130,6 +130,31 @@ services:
       - key: NODE_ENV
         value: production
 
+  # Admin Panel for PSAU faculty and administrators (admin-panel/). It serves its own
+  # React client and API and shares the app's Neon database. Migrations run at start-up.
+  - type: web
+    name: habitai-admin
+    runtime: docker
+    plan: free
+    rootDir: admin-panel
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "true"
+      - key: APP_TIME_ZONE
+        value: Asia/Manila
+      - key: ADMIN_SESSION_HOURS
+        value: 12
+      - key: DATABASE_URL
+        fromService:
+          type: web
+          name: habitai-backend
+          envVarKey: DATABASE_URL
+
   - type: web
     name: habitai-frontend
     runtime: static
