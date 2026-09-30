@@ -55,12 +55,12 @@ The dispatcher checks saved habit schedules, custom weekdays, and each device ti
 
 Issue report attachments are stored as database binary data (SQLite BLOB locally, Neon BYTEA in production) and can be forwarded to `SUPPORT_EMAIL` through the configured SMTP account. Malware scanning is not yet integrated.
 
-For Vercel frontend-only hosting, set the project root to `frontend` and add these build-time environment variables in Project Settings:
+For Vercel frontend-only hosting, either set the project root to `frontend` (recommended) or leave it at the repository root. The frontend config supports the first option; the root `vercel.json` supports the second. Add these build-time environment variables in Project Settings:
 
 - `EXPO_PUBLIC_API_URL`: deployed backend HTTPS URL
 - `EXPO_PUBLIC_AUTH_URL`: Neon Auth client endpoint
 
-The Vercel config runs `npm ci` and `npm run export:web`, publishing `dist`. The web output is a single-page app, so `frontend/vercel.json` rewrites direct route requests such as `/login` to `index.html`.
+With `frontend` as the project root, Vercel runs `npm ci` and `npm run export:web`, publishing `dist`. With the repository root, it runs `npm --prefix frontend ci` and `npm --prefix frontend run export:web`, publishing `frontend/dist`. Both configs rewrite direct route requests such as `/login` to `index.html`.
 
 ## 3) Important production notes
 

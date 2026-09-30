@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "installCommand": "npm --prefix frontend ci",
+  "buildCommand": "npm --prefix frontend run export:web",
+  "outputDirectory": "frontend/dist",
+  "headers": [
+    {
+      "source": "/service-worker.js",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+    }
+  ],
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
