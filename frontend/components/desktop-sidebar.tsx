@@ -3,10 +3,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, type Tabs } from 'expo-router';
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, type PressableStateCallbackType, StyleSheet, Text, View } from 'react-native';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 
 type IconName = keyof typeof Ionicons.glyphMap;
+/** Pressable state on the web also carries `hovered` (react-native-web); native leaves it out. */
+type HoverState = PressableStateCallbackType & { hovered?: boolean };
 /** The props expo-router's Tabs passes to a custom tab bar. */
 type TabBarProps = Parameters<NonNullable<React.ComponentProps<typeof Tabs>['tabBar']>>[0];
 
@@ -43,7 +45,7 @@ export function DesktopSidebar({ state, descriptors, navigation }: TabBarProps) 
 
       {addRoute && (
         <Pressable
-          style={({ hovered }: { hovered?: boolean }) => [styles.addButton, hovered && styles.addButtonHovered]}
+          style={({ hovered }: HoverState) => [styles.addButton, hovered && styles.addButtonHovered]}
           onPress={() => open(addRoute.name, addRoute.key, state.routes[state.index].key === addRoute.key)}
           accessibilityRole="button"
           accessibilityLabel="Add a habit"
@@ -61,7 +63,7 @@ export function DesktopSidebar({ state, descriptors, navigation }: TabBarProps) 
           return (
             <Pressable
               key={route.key}
-              style={({ hovered }: { hovered?: boolean }) => [
+              style={({ hovered }: HoverState) => [
                 styles.navItem,
                 focused ? { backgroundColor: colors.activeBackground } : hovered && { backgroundColor: colors.hoverBackground },
               ]}
@@ -79,7 +81,7 @@ export function DesktopSidebar({ state, descriptors, navigation }: TabBarProps) 
 
       <View style={[styles.footer, { borderTopColor: colors.border }]}>
         <Pressable
-          style={({ hovered }: { hovered?: boolean }) => [styles.navItem, hovered && { backgroundColor: colors.hoverBackground }]}
+          style={({ hovered }: HoverState) => [styles.navItem, hovered && { backgroundColor: colors.hoverBackground }]}
           onPress={() => router.push('/settings-preferences')}
           accessibilityRole="button"
         >
@@ -87,7 +89,7 @@ export function DesktopSidebar({ state, descriptors, navigation }: TabBarProps) 
           <Text style={[styles.navLabel, { color: colors.text }]}>Settings</Text>
         </Pressable>
         <Pressable
-          style={({ hovered }: { hovered?: boolean }) => [styles.navItem, hovered && { backgroundColor: colors.hoverBackground }]}
+          style={({ hovered }: HoverState) => [styles.navItem, hovered && { backgroundColor: colors.hoverBackground }]}
           onPress={() => router.push('/help-support')}
           accessibilityRole="button"
         >
