@@ -104,7 +104,7 @@ export default function ProfileScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={[styles.container, width >= 700 && styles.wideContainer, { paddingHorizontal: compactLayout ? 12 : 20 }]}>
           <View style={styles.headerRow}>
-            <Text style={styles.headerTitle}>{t('profile')}</Text>
+            <Text style={[styles.headerTitle, isDarkMode && styles.darkText]}>{t('profile')}</Text>
             <Pressable style={styles.headerButton} onPress={() => router.push('/settings-preferences')} accessibilityLabel={t('profileSettings')}>
               <Ionicons name="options-outline" size={18} color="#3B3548" />
             </Pressable>
@@ -121,7 +121,7 @@ export default function ProfileScreen() {
                 <Ionicons name="camera" size={12} color="#FFFFFF" />
               </View>
             </Pressable>
-            <Text style={styles.name}>{displayName}</Text>
+            <Text style={[styles.name, isDarkMode && styles.darkText]}>{displayName}</Text>
             <Text style={styles.username}>{displayUsername}</Text>
             <View style={styles.levelPill}>
               <Text style={styles.levelText}>Level {level}</Text>
@@ -133,7 +133,7 @@ export default function ProfileScreen() {
           <View style={[styles.firstActionCard, isDarkMode && styles.darkCard]}>
             <View style={styles.firstActionIcon}><Ionicons name={isNewUser ? 'flag-outline' : 'checkmark-circle-outline'} size={21} color="#5B42D8" /></View>
             <View style={styles.firstActionCopy}>
-              <Text style={[styles.firstActionEyebrow, isDarkMode && styles.darkMutedText]}>{isNewUser ? 'YOUR NEXT STEP' : 'TODAY&apos;S WIN'}</Text>
+              <Text style={[styles.firstActionEyebrow, isDarkMode && styles.darkMutedText]}>{isNewUser ? 'YOUR NEXT STEP' : "TODAY'S WIN"}</Text>
               <Text style={[styles.firstActionTitle, isDarkMode && styles.darkText]}>{isNewUser ? 'Build your first growth plan' : completed === 0 ? 'One completed task starts your streak' : 'You are building momentum'}</Text>
               <Text style={[styles.firstActionBody, isDarkMode && styles.darkMutedText]}>{isNewUser ? 'Turn one intention into a clear, doable plan.' : completed === 0 ? 'Choose one small task and earn your first points.' : 'Keep the loop going with one more focused action.'}</Text>
             </View>

@@ -114,14 +114,14 @@ export default function HomeScreen() {
     <SafeAreaView edges={['left', 'right']} style={[styles.screen, isDarkMode && styles.darkScreen]}>
       <View style={[styles.content, { paddingTop: insets.top + 16, paddingBottom: 104 + insets.bottom }]}>
           <View style={[styles.deviceFrame, isDarkMode && styles.darkDeviceFrame]}>
-          <View style={styles.backgroundBlobOne} />
-          <View style={styles.backgroundBlobTwo} />
+          <View style={[styles.backgroundBlobOne, isDarkMode && styles.darkBlob]} />
+          <View style={[styles.backgroundBlobTwo, isDarkMode && styles.darkBlob]} />
 
           <View style={[styles.heroHeader, { paddingHorizontal: contentPadding }]}>
             <View style={styles.heroSection}>
-              <Text style={styles.greeting}>{profile.firstName || profile.fullName ? `Good morning, ${profile.firstName || profile.fullName.split(' ')[0]}!` : 'Good morning!'}</Text>
-              <Text style={[styles.titleText, compact && styles.compactTitle]}>{'Small Habits,\nBig Progress.'}</Text>
-              <Text style={styles.subtitleText}>{'Every habit you build today\nshapes your better tomorrow.'}</Text>
+              <Text style={[styles.greeting, isDarkMode && styles.darkGreeting]}>{profile.firstName || profile.fullName ? `Good morning, ${profile.firstName || profile.fullName.split(' ')[0]}!` : 'Good morning!'}</Text>
+              <Text style={[styles.titleText, compact && styles.compactTitle, isDarkMode && styles.darkTitleText]}>{'Small Habits,\nBig Progress.'}</Text>
+              <Text style={[styles.subtitleText, isDarkMode && styles.darkSubtitleText]}>{'Every habit you build today\nshapes your better tomorrow.'}</Text>
             </View>
 
             <View style={styles.topControls}>
@@ -247,6 +247,11 @@ const styles = StyleSheet.create({
   },
   darkScreen: { backgroundColor: '#111018' },
   darkDeviceFrame: { backgroundColor: '#111018' },
+  // The hero was light-only: dark text over pale blobs was unreadable in dark mode.
+  darkBlob: { backgroundColor: '#3B3266', opacity: 0.55 },
+  darkGreeting: { color: '#CFC8DE' },
+  darkTitleText: { color: '#F4F0FA' },
+  darkSubtitleText: { color: '#A9A2B8' },
   content: {
     flexGrow: 1,
     justifyContent: 'center',

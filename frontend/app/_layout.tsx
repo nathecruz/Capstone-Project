@@ -1,4 +1,4 @@
-import { Stack, router, useSegments } from 'expo-router';
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider, router, useSegments } from 'expo-router';
 import Head from 'expo-router/head';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, LogBox, StyleSheet, Text, View } from 'react-native';
@@ -11,10 +11,15 @@ import { ColorSchemeProvider, useAppColorScheme } from '@/hooks/color-scheme-con
 import { AppDialogProvider } from '@/components/ui/app-dialog';
 import { getSession, subscribeToAuthChanges, type SessionUser } from '@/authentication';
 import { ServerStatusBanner } from '@/components/server-status-banner';
+import { CONTENT_MAX_WIDTH, pageBackground, useResponsiveLayout } from '@/hooks/use-responsive-layout';
 
 LogBox.ignoreLogs([
   "InteractionManager has been deprecated and will be removed in a future release. Please refactor long tasks into smaller ones, and  use 'requestIdleCallback' instead.",
 ]);
+
+// Screens that fill the window on wide screens: the tabs (they center themselves next to the
+// sidebar) and the sign-in flow, whose decorated backgrounds are designed edge to edge.
+const FULL_WIDTH_ROUTES = new Set(['(tabs)', 'login', 'register', 'logout', 'verify-email', 'privacy-notice', 'snooze-settings', 'modal']);
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -36,6 +41,11 @@ export default function RootLayout() {
 
 function RootNavigator() {
   const { colorScheme } = useAppColorScheme();
+  const { isCentered } = useResponsiveLayout();
+  const background = pageBackground(colorScheme === 'dark');
+  // Navigation containers use the app's page color, so the sides of centered screens match them.
+  const baseTheme = colorScheme === 'dark' ? DarkTheme : DefaultTheme;
+  const navigationTheme = { ...baseTheme, colors: { ...baseTheme.colors, background, card: background } };
   const segments = useSegments();
   // undefined while checking; null when signed out.
   const [sessionUser, setSessionUser] = useState<SessionUser | null | undefined>(undefined);
@@ -93,7 +103,15 @@ function RootNavigator() {
         <meta name="apple-mobile-web-app-title" content="HabitAI" />
         <meta name="mobile-web-app-capable" content="yes" />
       </Head>
-      <Stack>
+      <ThemeProvider value={navigationTheme}>
+      <View style={[styles.stackRoot, { backgroundColor: background }]}>
+      <Stack
+        screenOptions={({ route }) => ({
+          contentStyle: isCentered && !FULL_WIDTH_ROUTES.has(route.name)
+            ? { width: '100%', maxWidth: CONTENT_MAX_WIDTH, alignSelf: 'center', backgroundColor: background }
+            : undefined,
+        })}
+      >
         <Stack.Screen name="login" options={{ headerShown: false }} />
         <Stack.Screen name="register" options={{ headerShown: false }} />
         <Stack.Screen name="logout" options={{ headerShown: false }} />
@@ -112,6 +130,8 @@ function RootNavigator() {
         <Stack.Screen name="help-support" options={{ headerShown: false }} />
         <Stack.Screen name="report-issue" options={{ headerShown: false }} />
         <Stack.Screen name="leaderboards" options={{ headerShown: false }} />
+        <Stack.Screen name="today-progress" options={{ headerShown: false }} />
+        <Stack.Screen name="help-support-faq" options={{ headerShown: false }} />
         <Stack.Screen
           name="snooze-settings"
           options={{
@@ -124,6 +144,8 @@ function RootNavigator() {
         <Stack.Screen name="notifications" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
+      </View>
+      </ThemeProvider>
       {isAuthenticated === null && (
         <View
           accessibilityLabel="Checking your session"
@@ -148,6 +170,9 @@ function RootNavigator() {
 }
 
 const styles = StyleSheet.create({
+  stackRoot: {
+    flex: 1,
+  },
   loadingPage: {
     flex: 1,
     alignItems: 'center',

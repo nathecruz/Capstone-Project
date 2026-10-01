@@ -47,7 +47,7 @@ export default function AchievementsScreen() {
               <Pressable style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back">
                 <Ionicons name="chevron-back" size={21} color="#292633" />
               </Pressable>
-              <Text style={styles.headerTitle}>Achievements &amp; Badges</Text>
+              <Text style={[styles.headerTitle, isDarkMode && styles.darkHeaderTitle]}>Achievements &amp; Badges</Text>
               <View style={styles.headerSpacer} />
             </View>
 
@@ -109,6 +109,7 @@ const styles = StyleSheet.create({
   backButton: { width: 38, height: 38, justifyContent: 'center' },
   headerSpacer: { width: 38 },
   headerTitle: { fontSize: 17, fontWeight: '800', color: '#24212D' },
+  darkHeaderTitle: { color: '#F2EFF8' },
   tabs: { flexDirection: 'row', backgroundColor: '#ECE9F3', borderRadius: 14, padding: 4, marginBottom: 20 },
   tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 11 },
   activeTab: { backgroundColor: '#5B42D8' },

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type DimensionValue } from 'react-native';
+import { Animated, Easing, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { AppState } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getApiBaseUrl, getAuthenticatedHeaders } from '@/authentication';
@@ -44,17 +44,22 @@ function getHabitMachineLearningSignal(habit: { completionDates: string[]; progr
   };
 }
 
-function getChartSegments(rates: number[]) {
-  return rates.slice(0, -1).map((rate, index) => {
-    const nextRate = rates[index + 1] ?? rate;
-    const x = 8 + (index * 80) / Math.max(1, rates.length - 1);
-    const nextX = 8 + ((index + 1) * 80) / Math.max(1, rates.length - 1);
-    const y = 100 - rate;
-    const nextY = 100 - nextRate;
-    const dx = nextX - x;
-    const dy = nextY - y;
-    return { left: `${x}%` as DimensionValue, top: `${y}%` as DimensionValue, width: `${Math.sqrt((dx * 0.9) ** 2 + dy ** 2)}%` as DimensionValue, rotate: `${Math.atan2(dy, dx) * (180 / Math.PI)}deg` };
+const CHART_X_INSET = 16;
+
+/**
+ * Points and connecting segments in pixels of the measured plot. (Percentages used to mix the
+ * plot's width and height, so lines pointed the wrong way whenever the chart was not phone-sized.)
+ */
+function getChartGeometry(rates: number[], width: number, height: number) {
+  const step = (width - CHART_X_INSET * 2) / Math.max(1, rates.length - 1);
+  const points = rates.map((rate, index) => ({ x: CHART_X_INSET + index * step, y: height - (Math.max(0, Math.min(100, rate)) / 100) * height }));
+  const segments = points.slice(0, -1).map((point, index) => {
+    const next = points[index + 1];
+    const dx = next.x - point.x;
+    const dy = next.y - point.y;
+    return { left: point.x, top: point.y - 1, width: Math.sqrt(dx ** 2 + dy ** 2), transform: [{ rotate: `${Math.atan2(dy, dx) * (180 / Math.PI)}deg` }] };
   });
+  return { points, segments };
 }
 
 function getHeatmapData(view: HeatmapView, selectedMonth: number, selectedWeekOffset: number, completionDates: Set<string>, today = new Date()) {
@@ -162,11 +167,8 @@ export default function InsightsScreen() {
   const { completed, completionPercent, averageProgress, maxStreak } = getHabitProgressSummary(habits);
   const completionHistory = getHabitCompletionHistory(habits, 7);
   const dailyRates = completionHistory.map((entry) => habits.length ? Math.round((entry.count / habits.length) * 100) : 0);
-  const trendPoints: { left: DimensionValue; top: DimensionValue }[] = dailyRates.map((rate, index) => ({
-    left: `${8 + (index * 80) / Math.max(1, dailyRates.length - 1)}%`,
-    top: `${100 - rate}%`,
-  }));
-  const trendSegments = getChartSegments(dailyRates);
+  const [chartSize, setChartSize] = useState({ width: 0, height: 0 });
+  const trendChart = getChartGeometry(dailyRates, chartSize.width, chartSize.height);
   const trendChange = dailyRates.length > 1 ? dailyRates[dailyRates.length - 1] - dailyRates[0] : 0;
   // Not missed yet: a habit can be completed until the day is over.
   const openHabits = Math.max(0, habits.length - completed);
@@ -412,19 +414,21 @@ export default function InsightsScreen() {
                       <Text style={styles.axisText}>25%</Text>
                       <Text style={styles.axisText}>0%</Text>
                     </View>
-                    <View style={styles.chartPlot}>
+                    <View style={styles.chartPlot} onLayout={(event) => setChartSize({ width: event.nativeEvent.layout.width, height: event.nativeEvent.layout.height })}>
                       {[0, 1, 2, 3, 4].map((line) => <View key={line} style={[styles.chartGuide, isDarkMode && styles.darkChartGuide]} />)}
-                      {trendSegments.map((segment, index) => (
+                      {chartSize.width > 0 && trendChart.segments.map((segment, index) => (
                         <View key={`segment-${index}`} style={[styles.chartSegment, segment]} />
                       ))}
-                      {trendPoints.map((point, index) => (
-                        <View key={`point-${index}`} style={[styles.chartPoint, point]}>
+                      {chartSize.width > 0 && trendChart.points.map((point, index) => (
+                        <View key={`point-${index}`} style={[styles.chartPoint, { left: point.x, top: point.y }]}>
                           <View style={styles.chartPointInner} />
                         </View>
                       ))}
                     </View>
                     <View style={styles.xAxis}>
-                      {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => <Text key={day} style={styles.axisText}>{day}</Text>)}
+                      {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => (
+                        <Text key={day} style={[styles.axisText, styles.xAxisLabel, { left: trendChart.points[index]?.x ?? 0 }]}>{day}</Text>
+                      ))}
                     </View>
                   </View>
                 </View>
@@ -806,7 +810,8 @@ const styles = StyleSheet.create({
   chartSegment: { position: 'absolute', height: 2, backgroundColor: '#5B42D8', transformOrigin: 'left center' },
   chartPoint: { position: 'absolute', width: 9, height: 9, borderRadius: 5, backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: '#5B42D8', marginLeft: -4, marginTop: -4 },
   chartPointInner: { flex: 1, margin: 2, borderRadius: 3, backgroundColor: '#5B42D8' },
-  xAxis: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', justifyContent: 'space-between' },
+  xAxis: { position: 'absolute', left: 36, right: 0, bottom: 0, height: 14 },
+  xAxisLabel: { position: 'absolute', width: 30, marginLeft: -15, textAlign: 'center' },
   insightCard: { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 17, marginBottom: 12 },
   insightHeading: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   statusDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: '#42A85F', marginRight: 8 },

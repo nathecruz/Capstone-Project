@@ -4,13 +4,19 @@ import { Tabs } from 'expo-router';
 import React, { useEffect } from 'react';
 import { StatusBar, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { DesktopSidebar } from '@/components/desktop-sidebar';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
+import { CONTENT_MAX_WIDTH, pageBackground, useResponsiveLayout } from '@/hooks/use-responsive-layout';
 
 export default function TabLayout() {
   const { isDarkMode, t } = useAppColorScheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+  const { isDesktop, isCentered } = useResponsiveLayout();
   const compact = width < 370;
+  const background = pageBackground(isDarkMode);
+  // Wider than a phone, screens are centered at a readable width instead of stretched.
+  const centered = isCentered ? { width: '100%' as const, maxWidth: CONTENT_MAX_WIDTH, alignSelf: 'center' as const, backgroundColor: background } : undefined;
   const tabBarHeight = compact ? 74 : 78;
   const systemBarColor = isDarkMode ? '#111018' : '#F3F2F8';
 
@@ -21,9 +27,14 @@ export default function TabLayout() {
   return (
     <>
       <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} backgroundColor={systemBarColor} />
+      <View style={[styles.root, { backgroundColor: background }]}>
       <Tabs
+        // Laptops and desktops get a labelled sidebar instead of the phone tab bar.
+        tabBar={isDesktop ? (props) => <DesktopSidebar {...props} /> : undefined}
         screenOptions={{
           headerShown: false,
+          tabBarPosition: isDesktop ? 'left' : 'bottom',
+          sceneStyle: centered,
           tabBarShowLabel: false,
           tabBarHideOnKeyboard: true,
           tabBarStyle: [
@@ -33,6 +44,7 @@ export default function TabLayout() {
               height: tabBarHeight + insets.bottom,
               paddingBottom: insets.bottom + 10,
             },
+            centered,
           ],
           tabBarActiveTintColor: '#4F2AC8',
           tabBarInactiveTintColor: isDarkMode ? '#B6B0C3' : '#7A7D8A',
@@ -96,11 +108,15 @@ export default function TabLayout() {
         }}
       />
       </Tabs>
+      </View>
     </>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   tabBar: {
     height: 78,
     backgroundColor: '#FFFFFF',

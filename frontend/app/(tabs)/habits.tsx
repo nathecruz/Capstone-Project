@@ -170,7 +170,7 @@ export default function HabitsScreen() {
                 <Text style={[styles.title, isDarkMode && styles.darkText]}>My Habits</Text>
                 <View style={styles.subtitleRow}>
                   <Text style={[styles.subtitle, isDarkMode && styles.darkMutedText]}>Small steps, big change.</Text>
-                  <Text style={styles.subtitleIcon}>â™¥</Text>
+                  <Text style={styles.subtitleIcon}>♥</Text>
                 </View>
               </View>
 

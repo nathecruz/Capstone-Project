@@ -113,13 +113,13 @@ export default function NotificationsScreen() {
     <SafeAreaView style={[styles.screen, isDarkMode && styles.darkScreen]}>
       <View style={[styles.container, isDarkMode && styles.darkContainer]}>
         <View style={styles.header}>
-          <Pressable onPress={handleBack} style={styles.backButton} hitSlop={8}>
+          <Pressable onPress={handleBack} style={[styles.backButton, isDarkMode && styles.darkIconButton]} hitSlop={8}>
             <Ionicons name="arrow-back" size={22} color={isDarkMode ? '#F2EFF8' : '#1d1d24'} />
           </Pressable>
 
           <Text style={[styles.title, isDarkMode && styles.darkText]}>Notifications</Text>
 
-          <Pressable onPress={() => setScreenMode('settings')} style={styles.actionButton} hitSlop={8}>
+          <Pressable onPress={() => setScreenMode('settings')} style={[styles.actionButton, isDarkMode && styles.darkIconButton]} hitSlop={8}>
             <Ionicons name="settings-outline" size={20} color={isDarkMode ? '#F2EFF8' : '#1d1d24'} />
           </Pressable>
         </View>
@@ -259,6 +259,10 @@ const styles = StyleSheet.create({
   },
   darkText: { color: '#F2EFF8' },
   darkMutedText: { color: '#AAA4B7' },
+  // Light icons need a dark button in dark mode (they were white on white).
+  darkIconButton: {
+    backgroundColor: '#221F2C',
+  },
   backButton: {
     width: 36,
     height: 36,
