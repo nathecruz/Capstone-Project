@@ -9,6 +9,7 @@ import { config } from './config.js';
 import { query } from './db.js';
 import { HttpError } from './lib/http.js';
 import { loadAdmin, requireAuth, requireCsrfHeader } from './middleware/auth.js';
+import accessRequestRoutes from './routes/access-requests.js';
 import analyticsRoutes from './routes/analytics.js';
 import auditRoutes from './routes/audit.js';
 import authRoutes from './routes/auth.js';
@@ -63,6 +64,7 @@ export function createApp() {
   api.use(requireAuth);
   api.use('/overview', overviewRoutes);
   api.use('/users', userRoutes);
+  api.use('/access-requests', accessRequestRoutes);
   api.use('/categories', categoryRoutes);
   api.use('/notifications', notificationRoutes);
   api.use('/analytics', analyticsRoutes);

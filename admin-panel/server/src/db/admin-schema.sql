@@ -133,3 +133,18 @@ CREATE TABLE IF NOT EXISTS admin_settings (
   updated_by TEXT REFERENCES users(id) ON DELETE SET NULL,
   updated_at BIGINT NOT NULL
 );
+
+-- Admin Panel access requests from the sign-in page's registration form. Nothing here can sign
+-- in: a System Administrator approves a request (creating the account) or rejects it (deleting it).
+CREATE TABLE IF NOT EXISTS admin_access_requests (
+  id TEXT PRIMARY KEY,
+  first_name TEXT NOT NULL,
+  last_name TEXT NOT NULL,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  requested_role TEXT NOT NULL CHECK (requested_role IN ('faculty', 'admin')),
+  reason TEXT NOT NULL DEFAULT '',
+  ip TEXT NOT NULL DEFAULT '',
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS admin_access_requests_created_idx ON admin_access_requests(created_at);

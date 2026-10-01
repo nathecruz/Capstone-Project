@@ -10,6 +10,7 @@ import { CategoriesPage } from './pages/Categories';
 import { LoginPage } from './pages/Login';
 import { NotificationsPage } from './pages/Notifications';
 import { OverviewPage } from './pages/Overview';
+import { RegisterPage } from './pages/Register';
 import { SettingsPage } from './pages/Settings';
 import { SupportPage } from './pages/Support';
 import { UserDetailPage } from './pages/UserDetail';
@@ -27,7 +28,14 @@ function Guard({ permission, children }: { permission?: Permission; children: Re
 function AppRoutes() {
   const { admin, checking } = useAuth();
   if (checking) return <div className="flex min-h-screen items-center justify-center bg-page"><Spinner label="Loading the Admin Panel" /></div>;
-  if (!admin) return <LoginPage />;
+  if (!admin) {
+    return (
+      <Routes>
+        <Route path="register" element={<RegisterPage />} />
+        <Route path="*" element={<LoginPage />} />
+      </Routes>
+    );
+  }
 
   return (
     <Routes>

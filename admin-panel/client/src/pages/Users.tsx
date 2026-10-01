@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, UserPlus, Users as UsersIcon } from 'lucide-react';
+import { AccessRequestsCard } from '../components/AccessRequests';
 import { UserActionMenu, UserFormModal, useUserActions } from '../components/UserActions';
 import { Alert, Avatar, Badge, Button, Card, cx, EmptyState, Input, PageHeader, Pagination, Select, Spinner, Table, Td, Th } from '../components/ui';
 import { useAuth } from '../lib/auth';
@@ -61,6 +62,8 @@ export function UsersPage() {
         description="Create accounts, assign roles, and deactivate or reactivate access to HabitAI."
         actions={manage && <Button variant="primary" icon={<UserPlus className="size-4" />} onClick={() => setCreating(true)}>Add account</Button>}
       />
+
+      {manage && <AccessRequestsCard onApproved={() => reload()} />}
 
       <div className="mb-4 flex flex-wrap gap-2">
         {filterChips.map((chip) => (

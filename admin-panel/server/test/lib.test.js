@@ -19,6 +19,7 @@ import {
 import { generatePassword, passwordProblem } from '../src/lib/passwords.js';
 import { hasPermission, permissionsFor } from '../src/lib/permissions.js';
 import { recipientVariables, renderTemplate, unknownPlaceholders } from '../src/lib/templates.js';
+import { availableUsername, usernameBase } from '../src/lib/usernames.js';
 import { buildCategoryRows } from '../src/routes/overview.js';
 
 test('date helpers work in local calendar days', () => {
@@ -124,4 +125,16 @@ test('Neon connection strings keep TLS verification and channel binding', () => 
   assert.equal(config.enableChannelBinding, true);
   assert.equal(new URL(config.connectionString).searchParams.has('sslmode'), false);
   assert.equal(buildPoolConfig('postgresql://u:p@localhost/db').ssl, false);
+});
+
+test('usernames come from the email and avoid taken ones', async () => {
+  assert.equal(usernameBase('maria.santos+admin'), 'maria.santosadmin');
+  assert.equal(usernameBase('juan-dela_cruz'), 'juan-dela_cruz');
+  assert.equal(usernameBase('a'.repeat(40)), 'a'.repeat(24));
+  assert.equal(usernameBase('+++'), 'admin');
+
+  const taken = new Set(['maria']);
+  const run = async (_sql, [name]) => ({ rowCount: taken.has(name.toLowerCase()) ? 1 : 0 });
+  assert.equal(await availableUsername(run, 'jose'), 'jose');
+  assert.match(await availableUsername(run, 'Maria'), /^Maria\d{2}$/);
 });

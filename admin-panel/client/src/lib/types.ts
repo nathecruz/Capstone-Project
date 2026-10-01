@@ -23,6 +23,19 @@ export interface Admin {
   permissions: Permission[];
 }
 
+/** A pending request for Admin Panel access, sent from the sign-in page. */
+export interface AccessRequest {
+  id: string;
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  email: string;
+  requestedRole: 'faculty' | 'admin';
+  requestedRoleLabel: string;
+  reason: string;
+  createdAt: number;
+}
+
 export interface UserRow {
   id: string;
   /** "First Last" */

@@ -31,8 +31,8 @@ const CATEGORIES = [
 ];
 
 function actionTone(action: string) {
-  if (/deleted|deactivated|failed|denied/.test(action)) return 'critical' as const;
-  if (/created|reactivated|broadcast/.test(action)) return 'good' as const;
+  if (/deleted|deactivated|failed|denied|rejected/.test(action)) return 'critical' as const;
+  if (/created|reactivated|broadcast|approved/.test(action)) return 'good' as const;
   if (action.startsWith('auth.')) return 'neutral' as const;
   return 'accent' as const;
 }

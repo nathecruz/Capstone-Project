@@ -4,7 +4,7 @@ import { query, withTransaction } from '../db.js';
 import { defaultCategories, defaultTemplates, defaultSettings } from './seed-data.js';
 
 async function hasCurrentSchema(schemaHash) {
-  const exists = await query("SELECT to_regclass('public.admin_settings') AS name");
+  const exists = await query("SELECT to_regclass('admin_settings') AS name");
   if (!exists.rows[0]?.name) return false;
   const stored = await query("SELECT value FROM admin_settings WHERE key = 'schema_hash'");
   return stored.rows[0]?.value === schemaHash;
@@ -22,7 +22,7 @@ async function seedOnce(client, flag, seed) {
 }
 
 export async function migrate({ force = false, log = console.log } = {}) {
-  const baseTables = await query("SELECT to_regclass('public.users') AS users, to_regclass('public.habits') AS habits");
+  const baseTables = await query("SELECT to_regclass('users') AS users, to_regclass('habits') AS habits");
   if (!baseTables.rows[0]?.users || !baseTables.rows[0]?.habits) {
     throw new Error('HabitAI app tables were not found. Run the app backend migration (npm run db:migrate:neon) first.');
   }

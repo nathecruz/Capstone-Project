@@ -10,6 +10,8 @@ export const ROLE_OPTIONS: { value: Role; label: string; description: string }[]
   { value: 'faculty', label: 'PSAU Faculty', description: 'Admin Panel: overview and anonymized analytics (read-only).' },
   { value: 'admin', label: 'System Administrator', description: 'Full Admin Panel access, including user management.' },
 ];
+/** The roles that can sign in to the Admin Panel. */
+export const STAFF_ROLE_OPTIONS = ROLE_OPTIONS.filter((option) => option.value !== 'user');
 const GENDERS = ['Female', 'Male', 'Non-binary', 'Prefer not to say'];
 
 function toDateInput(value: string) {

@@ -53,7 +53,7 @@ npm run dev
 
 The server applies its own database migration on start (idempotent). It adds `role` and `status`
 columns to `users` and creates `admin_sessions`, `habit_categories`, `notification_templates`,
-`notification_broadcasts`, `admin_audit_log` and `admin_settings`. It never removes app data.
+`notification_broadcasts`, `admin_audit_log`, `admin_settings` and `admin_access_requests`. It never removes app data.
 
 ### Creating administrator accounts
 
@@ -66,6 +66,12 @@ npm run create-admin -- --email admin@psau.edu.ph --reset-password           # i
 
 A generated temporary password is printed once (or written to a file with `--save <file>`).
 Sign in and change it under **Settings → My account**. More staff can then be added from **Users**.
+
+The command line is only needed for the first administrator. After that, faculty and other
+administrators can use **Request access** on the sign-in page: they choose their own password and the
+access they need, and the request waits under **Users → Access requests** (with a count in the
+sidebar) until a System Administrator approves it with a role or rejects it. Nothing can sign in
+before approval. Requests are rate limited, expire after 30 days, and are recorded in the audit log.
 
 ## Production
 

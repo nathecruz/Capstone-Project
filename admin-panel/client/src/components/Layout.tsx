@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { Bell, ChartColumn, LayoutDashboard, LifeBuoy, LogOut, Menu, Monitor, Moon, ScrollText, Settings, Sun, Tags, Users, X, type LucideIcon } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { useTheme } from '../lib/theme';
+import { usePendingAccessRequests } from './AccessRequests';
 import type { Permission } from '../lib/types';
 import { Avatar, cx, IconButton } from './ui';
 
@@ -38,6 +39,7 @@ export function Layout() {
   const location = useLocation();
 
   useEffect(() => setOpen(false), [location.pathname]);
+  const pendingRequests = usePendingAccessRequests(can('users:manage'), location.pathname);
 
   if (!admin) return null;
   const items = NAV.filter((item) => !item.permission || can(item.permission));
@@ -59,6 +61,11 @@ export function Layout() {
             >
               <item.icon className="size-4 shrink-0" aria-hidden />
               {item.label}
+              {item.to === '/users' && pendingRequests > 0 && (
+                <span className="tabular ml-auto rounded-full bg-accent px-1.5 text-[11px] font-semibold leading-[18px] text-on-accent" aria-label={`${pendingRequests} access request${pendingRequests === 1 ? '' : 's'} waiting`}>
+                  {pendingRequests}
+                </span>
+              )}
             </NavLink>
           </li>
         ))}

@@ -16,6 +16,7 @@ import { migrate } from '../src/db/migrate.js';
 import { joinName, namesFromInput } from '../src/lib/names.js';
 import { generatePassword, hashPassword, passwordProblem } from '../src/lib/passwords.js';
 import { ROLE_LABELS, STAFF_ROLES } from '../src/lib/permissions.js';
+import { availableUsername, usernameBase } from '../src/lib/usernames.js';
 
 const { values } = parseArgs({
   options: {
@@ -60,11 +61,7 @@ async function main() {
   } else {
     if (!names.firstName || !names.lastName) throw new Error('Provide --first-name and --last-name (or --name "First Last") for a new account.');
     const fullName = joinName(names.firstName, names.lastName);
-    const baseUsername = (values.username || email.split('@')[0]).replace(/[^a-zA-Z0-9_.-]/g, '').slice(0, 24) || 'admin';
-    let username = baseUsername;
-    while ((await query('SELECT 1 FROM users WHERE lower(username) = lower($1)', [username])).rowCount) {
-      username = `${baseUsername}${crypto.randomInt(10, 99)}`;
-    }
+    const username = await availableUsername(query, usernameBase(values.username || email.split('@')[0]));
     await query(
       `INSERT INTO users (id, full_name, username, email, date_of_birth, gender, region, about, password_hash, created_at, role, status, is_admin, status_changed_at, email_verified_at, first_name, last_name)
        VALUES ($1, $2, $3, $4, '', '', '', '', $5, $6, $7, 'active', $8, $6, $6, $9, $10)`,
