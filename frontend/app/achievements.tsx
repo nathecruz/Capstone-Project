@@ -39,22 +39,22 @@ export default function AchievementsScreen() {
 
   return (
     <>
-      <StatusBar style="dark" />
+      <StatusBar style={isDarkMode ? 'light' : 'dark'} />
       <SafeAreaView style={[styles.screen, isDarkMode && styles.darkScreen]}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.container}>
             <View style={styles.headerRow}>
               <Pressable style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back">
-                <Ionicons name="chevron-back" size={21} color="#292633" />
+                <Ionicons name="chevron-back" size={21} color={isDarkMode ? '#F2EFF8' : '#292633'} />
               </Pressable>
               <Text style={[styles.headerTitle, isDarkMode && styles.darkHeaderTitle]}>Achievements &amp; Badges</Text>
               <View style={styles.headerSpacer} />
             </View>
 
-            <View style={styles.tabs}>
+            <View style={[styles.tabs, isDarkMode && styles.darkTabs]}>
               {(['Badges', 'Milestones'] as const).map((tab) => (
                 <Pressable key={tab} style={[styles.tab, activeTab === tab && styles.activeTab]} onPress={() => setActiveTab(tab)}>
-                  <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>{tab}</Text>
+                  <Text style={[styles.tabText, isDarkMode && styles.darkMutedText, activeTab === tab && styles.activeTabText]}>{tab}</Text>
                 </Pressable>
               ))}
             </View>
@@ -62,36 +62,36 @@ export default function AchievementsScreen() {
             {activeTab === 'Badges' ? (
               <>
                 <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>Your Badges</Text>
-                  <Text style={styles.sectionCount}>{earnedCount} / {badges.length} earned</Text>
+                  <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>Your Badges</Text>
+                  <Text style={[styles.sectionCount, isDarkMode && styles.darkMutedText]}>{earnedCount} / {badges.length} earned</Text>
                 </View>
                 <View style={styles.badgeGrid}>
                   {badges.map((badge) => {
                     const earned = earnedBadges.has(badge.title);
-                    return <Pressable key={badge.title} style={[styles.badgeCard, !earned && styles.lockedBadgeCard]} onPress={() => router.push('/(tabs)/habits')} accessibilityRole="button">
-                      <View style={[styles.badgeIcon, { backgroundColor: earned ? badge.background : '#EEF0F4' }]}>
-                        <Ionicons name={earned ? badge.icon as keyof typeof Ionicons.glyphMap : 'lock-closed'} size={28} color={earned ? badge.color : '#9BA1AE'} />
+                    return <Pressable key={badge.title} style={[styles.badgeCard, isDarkMode && styles.darkCard, !earned && styles.lockedBadgeCard]} onPress={() => router.push('/(tabs)/habits')} accessibilityRole="button">
+                      <View style={[styles.badgeIcon, { backgroundColor: earned ? (isDarkMode ? `${badge.color}2E` : badge.background) : (isDarkMode ? '#2A2635' : '#EEF0F4') }]}>
+                        <Ionicons name={earned ? badge.icon as keyof typeof Ionicons.glyphMap : 'lock-closed'} size={28} color={earned ? badge.color : isDarkMode ? '#8C8599' : '#9BA1AE'} />
                       </View>
-                      <Text style={styles.badgeTitle}>{badge.title}</Text>
-                      <Text style={styles.badgeSubtitle}>{earned ? 'Earned' : badge.subtitle}</Text>
+                      <Text style={[styles.badgeTitle, isDarkMode && styles.darkText]}>{badge.title}</Text>
+                      <Text style={[styles.badgeSubtitle, isDarkMode && styles.darkMutedText]}>{earned ? 'Earned' : badge.subtitle}</Text>
                     </Pressable>
                   })}
                 </View>
 
                 <View style={styles.sectionHeaderRecent}>
-                  <Text style={styles.sectionTitle}>Recent Unlocks</Text>
-                  <Pressable onPress={() => setActiveTab('Badges')}><Text style={styles.viewAll}>View all</Text></Pressable>
+                  <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>Recent Unlocks</Text>
+                  <Pressable onPress={() => setActiveTab('Badges')}><Text style={[styles.viewAll, isDarkMode && styles.darkLink]}>View all</Text></Pressable>
                 </View>
-                <View style={styles.recentCard}>
-                  {badges.filter((badge) => earnedBadges.has(badge.title)).slice(0, 2).map((item, index) => <View key={item.title} style={[styles.recentRow, index === 0 && styles.recentBorder]}><View style={[styles.recentIcon, { backgroundColor: `${item.color}20` }]}><Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={18} color={item.color} /></View><View style={styles.recentText}><Text style={styles.recentTitle}>{item.title}</Text><Text style={styles.recentDate}>Earned from your current habit progress</Text></View><Ionicons name="checkmark-circle" size={18} color="#48A66A" /></View>)}
-                  {!earnedCount && <Text style={styles.emptyRecent}>Complete habits to unlock your first badge.</Text>}
+                <View style={[styles.recentCard, isDarkMode && styles.darkCard]}>
+                  {badges.filter((badge) => earnedBadges.has(badge.title)).slice(0, 2).map((item, index) => <View key={item.title} style={[styles.recentRow, index === 0 && styles.recentBorder, index === 0 && isDarkMode && styles.darkDivider]}><View style={[styles.recentIcon, { backgroundColor: `${item.color}20` }]}><Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={18} color={item.color} /></View><View style={styles.recentText}><Text style={[styles.recentTitle, isDarkMode && styles.darkText]}>{item.title}</Text><Text style={[styles.recentDate, isDarkMode && styles.darkMutedText]}>Earned from your current habit progress</Text></View><Ionicons name="checkmark-circle" size={18} color="#48A66A" /></View>)}
+                  {!earnedCount && <Text style={[styles.emptyRecent, isDarkMode && styles.darkMutedText]}>Complete habits to unlock your first badge.</Text>}
                 </View>
               </>
             ) : (
-              <View style={styles.milestoneCard}>
-                <Ionicons name="flag-outline" size={32} color="#5B42D8" />
-                <Text style={styles.milestoneTitle}>Your milestones are on the way</Text>
-                <Text style={styles.milestoneBody}>Complete more habits to unlock new milestones and celebrate your progress.</Text>
+              <View style={[styles.milestoneCard, isDarkMode && styles.darkCard]}>
+                <Ionicons name="flag-outline" size={32} color={isDarkMode ? '#B9A9FF' : '#5B42D8'} />
+                <Text style={[styles.milestoneTitle, isDarkMode && styles.darkText]}>Your milestones are on the way</Text>
+                <Text style={[styles.milestoneBody, isDarkMode && styles.darkMutedText]}>Complete more habits to unlock new milestones and celebrate your progress.</Text>
               </View>
             )}
           </View>
@@ -110,6 +110,12 @@ const styles = StyleSheet.create({
   headerSpacer: { width: 38 },
   headerTitle: { fontSize: 17, fontWeight: '800', color: '#24212D' },
   darkHeaderTitle: { color: '#F2EFF8' },
+  darkText: { color: '#F2EFF8' },
+  darkMutedText: { color: '#AAA4B7' },
+  darkLink: { color: '#C9BCFF' },
+  darkCard: { backgroundColor: '#1D1A24' },
+  darkTabs: { backgroundColor: '#1F1B28' },
+  darkDivider: { borderBottomColor: '#302B3B' },
   tabs: { flexDirection: 'row', backgroundColor: '#ECE9F3', borderRadius: 14, padding: 4, marginBottom: 20 },
   tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 11 },
   activeTab: { backgroundColor: '#5B42D8' },
