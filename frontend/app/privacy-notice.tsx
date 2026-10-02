@@ -30,7 +30,7 @@ const SECTIONS: { title: string; items: string[] }[] = [
     title: 'Why we use it',
     items: [
       'To run the app: sign you in, sync your data across devices, send reminders and verification codes, and show progress, rewards and leaderboards.',
-      'To give AI guidance: when you ask the AI Coach, assistants or goal planner, your question and a summary of your habits and check-ins (without your name or email) are sent to Google Gemini to generate the answer.',
+      'To give AI guidance: when you ask the AI Coach, assistants or goal planner, your question and a summary of your habits and check-ins (without your name or email) are sent to Groq, our AI provider, to generate the answer.',
       'To keep accounts secure and to answer support requests.',
       'For research on the app\'s effect on student habits: PSAU faculty only see aggregated, anonymized statistics. Groups too small to hide individuals are combined or withheld.',
     ],
@@ -41,7 +41,7 @@ const SECTIONS: { title: string; items: string[] }[] = [
       'You can see all of your data in the app.',
       'Other students only see your first name and last initial on leaderboards, and you can hide yourself in Settings & Preferences.',
       'Authorized HabitAI administrators can view account and support details to manage accounts and help you. Their actions are logged.',
-      'Service providers that host or process data for us: Neon (database), Render/Vercel (app hosting), Google (Gemini AI and email delivery). We do not sell your data.',
+      'Service providers that host or process data for us: Neon (database), Render/Vercel (app hosting), Groq (AI answers) and Brevo (email delivery). We do not sell your data.',
     ],
   },
   {
@@ -103,7 +103,7 @@ export default function PrivacyNoticeScreen() {
             <Text style={styles.bannerText}>We updated how HabitAI explains the data it uses. Please review and accept this notice to continue.</Text>
           </View>
         )}
-        <Text style={styles.updated}>Effective September 30, 2026</Text>
+        <Text style={styles.updated}>Effective October 2, 2026</Text>
         {SECTIONS.map((section) => (
           <View key={section.title} style={styles.section}>
             <Text style={styles.sectionTitle}>{section.title}</Text>

@@ -11,7 +11,7 @@ share one Neon PostgreSQL database:
 | ML service (`ml-service/`) | Python, FastAPI, scikit-learn, XGBoost | Render (Docker) | Habit completion / drop-out predictions |
 | Admin Panel (`admin-panel/`) | React + Vite, Express, `pg` | Render web service (Docker) | User, category and notification management; anonymized analytics |
 
-External services: **Neon** (PostgreSQL), **Google Gemini** (AI text), **SMTP** (a project
+External services: **Neon** (PostgreSQL), **Groq** (AI text, `llama-3.3-70b-versatile`), **SMTP** (a project
 mailbox or transactional provider for verification codes and notices), **browser push services** (FCM, Apple, Mozilla).
 
 ## 1. System context
@@ -24,7 +24,7 @@ flowchart LR
   app -- HTTPS JSON + Bearer token --> api[App API<br/>Express on Render]
   api --> db[(Neon PostgreSQL)]
   admin --> db
-  api -- prompts with DB context --> gemini[Google Gemini]
+  api -- prompts with DB context --> groq[Groq]
   api -- X-ML-Service-Key --> ml[ML service<br/>FastAPI]
   api -- SMTP --> mail[SMTP provider]
   cron[Reminder scheduler<br/>GitHub Actions] --> db
@@ -38,7 +38,7 @@ Design rules that the data flows below rely on:
 - The **database is the single source of truth**. The app keeps a local copy for offline
   use and syncs it; the Admin Panel and AI features only read what is in the database.
 - **Secrets stay on servers.** The app only holds the public API URL and its own session
-  token. Gemini, SMTP, ML and database credentials exist only in server environments.
+  token. Groq, email, ML and database credentials exist only in server environments.
 - **Everything the client sends is validated** with Zod schemas (`backend/schemas.js`),
   and every change that matters (points, leaderboard, check-ins) is recomputed on the server.
 
@@ -62,7 +62,7 @@ flowchart TB
   routes --> services
   subgraph services[services/]
     accounts[accounts.js<br/>sessions] --- store[app-state-store.js<br/>sync + snapshots]
-    mailer[mailer.js + email-templates.js] --- gem[gemini.js<br/>client, timeout, retry]
+    mailer[mailer.js + email-templates.js] --- gem[groq.js<br/>client, timeout, retry]
     prompts[ai-prompts.js<br/>system prompts, schemas] --- ctx[ai-context.js<br/>context from DB]
     activity[activity.js] --- pw[passwords.js]
     wallet[wallet.js<br/>token ledger] --- streaks[streaks.js<br/>schedule-aware streaks]
@@ -261,12 +261,12 @@ sequenceDiagram
   participant A as Student app
   participant API as App API
   participant DB as Neon
-  participant G as Gemini
+  participant G as Groq
   A->>API: POST /api/insights/assistant {mode, question, timeZone}
   API->>API: auth + per-student AI rate limit (30 per 15 min)
   API->>DB: habits, 28 days of check-ins, goals
   API->>API: build compact context (streaks, last 7 days, habit needing attention)
-  API->>G: system instruction (role + rules) + USER DATA + fenced question
+  API->>G: system message (role + rules) + USER DATA + fenced question
   G-->>API: text
   API->>API: strip markdown, trim length
   API-->>A: {answer}
@@ -276,15 +276,15 @@ sequenceDiagram
 
 - The **context is built from the database**, not from numbers the app reports, so answers
   are grounded in real check-ins and cannot be manipulated from the client.
-- Instructions live in the **system instruction**; the student's text is fenced as data,
+- Instructions live in the **system message**; the student's text is fenced as data,
   which resists prompt injection ("ignore previous instructions...").
 - Replies follow the student's language (English, Filipino or Taglish), avoid medical
   advice and point to the NCMH hotline (1553) if a crisis is mentioned.
-- The **goal planner** uses Gemini structured output with a JSON Schema; the server then
+- The **goal planner** uses Groq JSON mode and gives the model the JSON Schema; the server then
   normalises the plan (lengths, allowed values) and computes due dates from the chosen
   timeline, retrying once if the output is unusable.
 - Calls time out, retry once on transient errors (429/5xx), and are disabled cleanly when
-  no real API key is configured (`/health` reports which AI profiles are available).
+  no real API key is configured (`/health` reports `aiConfigured` and the model in use).
 
 ### 4.6 Reminders
 
@@ -345,5 +345,5 @@ npm run dev          # backend :8787, ML :8000, app :8082
 ```
 
 The backend reads `backend/.env` and falls back to the root `.env` for any value that is
-missing or still a template placeholder. Set a real `GEMINI_API_KEY` (Google AI Studio) to
-enable AI features; check with `npm --prefix backend run smoke:gemini`.
+missing or still a template placeholder. Set a real `GROQ_API_KEY` (console.groq.com) to
+enable AI features; check with `npm --prefix backend run smoke:ai`.

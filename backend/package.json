@@ -9,14 +9,13 @@
     "db:migrate:neon": "node scripts/migrate-neon.js",
     "push:dispatch": "node scripts/send-web-push-reminders.js",
     "push:generate-vapid-keys": "node scripts/generate-vapid-keys.js",
-    "smoke:gemini": "node scripts/smoke-gemini.js",
+    "smoke:ai": "node scripts/smoke-ai.js",
     "backup": "node scripts/backup-db.js",
     "ml:export": "node scripts/export-ml-training-data.js",
-    "test": "node --test test/services.test.js test/web-push-reminders.test.js test/api.test.js",
-    "test:unit": "node --test test/services.test.js test/web-push-reminders.test.js"
+    "test": "node --test test/services.test.js test/groq.test.js test/web-push-reminders.test.js test/api.test.js",
+    "test:unit": "node --test test/services.test.js test/groq.test.js test/web-push-reminders.test.js"
   },
   "dependencies": {
-    "@google/genai": "^2.24.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",

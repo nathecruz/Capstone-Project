@@ -34,16 +34,12 @@ services:
         value: https://project-b3gc.vercel.app,https://capstone-project-b3gc.vercel.app,https://capstone-project-indol-five.vercel.app,https://capstone-project-*-team-c14.vercel.app,https://habitai-frontend.onrender.com
       - key: EXTERNAL_REQUEST_TIMEOUT_MS
         value: 15000
-      - key: GEMINI_API_KEY
+      # AI Coach, assistants and goal planner. GROQ_API_KEY comes from console.groq.com
+      # (API Keys); set it in the Render dashboard. GROQ_MODEL is any Groq chat model.
+      - key: GROQ_API_KEY
         sync: false
-      - key: GEMINI_API_KEY_GOALS
-        sync: false
-      - key: GEMINI_API_KEY_COACH
-        sync: false
-      - key: GEMINI_API_KEY_ASSISTANT
-        sync: false
-      - key: GEMINI_MODEL
-        value: gemini-2.5-flash
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
       # Verification, password reset and support emails. Free Render web services block
       # outbound SMTP (ports 25/465/587), so production sends through Brevo's HTTPS API:
       # BREVO_API_KEY from brevo.com (SMTP & API -> API keys) and EMAIL_FROM, a sender

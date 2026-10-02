@@ -2,19 +2,19 @@ import { loadEnvironment } from '../config/env.js';
 
 loadEnvironment();
 
-const { generateGeminiText, getGeminiModel, isGeminiConfigured } = await import('../services/gemini.js');
+const { generateAiText, getAiModel, isAiConfigured } = await import('../services/groq.js');
 
-if (!isGeminiConfigured()) {
-  console.error('Gemini smoke test failed: set a real GEMINI_API_KEY (from Google AI Studio) in backend/.env or the root .env.');
+if (!isAiConfigured()) {
+  console.error('AI smoke test failed: set a real GROQ_API_KEY (from console.groq.com) in backend/.env or the root .env.');
   process.exit(1);
 }
 
 try {
-  const result = await generateGeminiText('Reply with exactly: HabitAI smoke test passed.', { maxOutputTokens: 24 });
+  const result = await generateAiText('Reply with exactly: HabitAI smoke test passed.', { maxOutputTokens: 24 });
   if (!result) throw new Error('The model returned an empty response.');
-  console.log(`Gemini smoke test passed using ${getGeminiModel()}.`);
+  console.log(`AI smoke test passed using Groq ${getAiModel()}.`);
 } catch (error) {
   const status = error && typeof error === 'object' && 'status' in error ? ` (HTTP ${error.status})` : '';
-  console.error(`Gemini smoke test failed${status}. Check the key, model name, and provider access.`);
+  console.error(`AI smoke test failed${status}. Check the key, model name, and provider access.`);
   process.exit(1);
 }

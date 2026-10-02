@@ -15,7 +15,7 @@ param(
     [string]$AllowedOrigins = "https://habitai.app,https://www.habitai.app",
     [string]$ApiUrl = "https://api.habitai.app",
     [string]$MlKey = "",
-    [string]$GeminiKey = "",
+    [string]$GroqKey = "",
     [string]$SmtpUser = "",
     [string]$SmtpPassword = "",
     [string]$SmtpFrom = ""
@@ -57,7 +57,7 @@ $commands = @(
     "docker push $BackendImage",
     "docker build -t $MlImage ./ml-service",
     "docker push $MlImage",
-    "az containerapp create --name $BackendName --resource-group $ResourceGroup --environment $EnvironmentName --image $BackendImage --target-port 8787 --ingress external --registry-server $AcrName.azurecr.io --env-vars NODE_ENV=production PORT=8787 DATABASE_URL=\"$DatabaseUrl\" AUTH_URL=\"$AuthUrl\" JWKS_URL=\"$JwksUrl\" ALLOWED_ORIGINS=\"$AllowedOrigins\" ML_SERVICE_URL=\"$MlServiceUrl\" ML_SERVICE_API_KEY=\"$MlKey\" GEMINI_API_KEY=\"$GeminiKey\" SMTP_HOST=smtp.gmail.com SMTP_PORT=465 SMTP_SECURE=true SMTP_USER=\"$SmtpUser\" SMTP_PASSWORD=\"$SmtpPassword\" SMTP_FROM=\"$SmtpFrom\"",
+    "az containerapp create --name $BackendName --resource-group $ResourceGroup --environment $EnvironmentName --image $BackendImage --target-port 8787 --ingress external --registry-server $AcrName.azurecr.io --env-vars NODE_ENV=production PORT=8787 DATABASE_URL=\"$DatabaseUrl\" AUTH_URL=\"$AuthUrl\" JWKS_URL=\"$JwksUrl\" ALLOWED_ORIGINS=\"$AllowedOrigins\" ML_SERVICE_URL=\"$MlServiceUrl\" ML_SERVICE_API_KEY=\"$MlKey\" GROQ_API_KEY=\"$GroqKey\" SMTP_HOST=smtp.gmail.com SMTP_PORT=465 SMTP_SECURE=true SMTP_USER=\"$SmtpUser\" SMTP_PASSWORD=\"$SmtpPassword\" SMTP_FROM=\"$SmtpFrom\"",
     "az containerapp create --name $MlName --resource-group $ResourceGroup --environment $EnvironmentName --image $MlImage --target-port 8000 --ingress external --registry-server $AcrName.azurecr.io --env-vars NODE_ENV=production ML_SERVICE_PORT=8000 ML_SERVICE_API_KEY=\"$MlKey\" ALLOWED_ORIGINS=\"$AllowedOrigins\"",
     "curl https://<backend-app-url>/health",
     "curl https://<ml-app-url>/health",
@@ -96,7 +96,7 @@ $commandsToRun = @(
     "docker push $BackendImage",
     "docker build -t $MlImage ./ml-service",
     "docker push $MlImage",
-    "az containerapp create --name $BackendName --resource-group $ResourceGroup --environment $EnvironmentName --image $BackendImage --target-port 8787 --ingress external --registry-server $AcrName.azurecr.io --env-vars NODE_ENV=production PORT=8787 DATABASE_URL=\"$DatabaseUrl\" AUTH_URL=\"$AuthUrl\" JWKS_URL=\"$JwksUrl\" ALLOWED_ORIGINS=\"$AllowedOrigins\" ML_SERVICE_URL=\"$MlServiceUrl\" ML_SERVICE_API_KEY=\"$MlKey\" GEMINI_API_KEY=\"$GeminiKey\" SMTP_HOST=smtp.gmail.com SMTP_PORT=465 SMTP_SECURE=true SMTP_USER=\"$SmtpUser\" SMTP_PASSWORD=\"$SmtpPassword\" SMTP_FROM=\"$SmtpFrom\"",
+    "az containerapp create --name $BackendName --resource-group $ResourceGroup --environment $EnvironmentName --image $BackendImage --target-port 8787 --ingress external --registry-server $AcrName.azurecr.io --env-vars NODE_ENV=production PORT=8787 DATABASE_URL=\"$DatabaseUrl\" AUTH_URL=\"$AuthUrl\" JWKS_URL=\"$JwksUrl\" ALLOWED_ORIGINS=\"$AllowedOrigins\" ML_SERVICE_URL=\"$MlServiceUrl\" ML_SERVICE_API_KEY=\"$MlKey\" GROQ_API_KEY=\"$GroqKey\" SMTP_HOST=smtp.gmail.com SMTP_PORT=465 SMTP_SECURE=true SMTP_USER=\"$SmtpUser\" SMTP_PASSWORD=\"$SmtpPassword\" SMTP_FROM=\"$SmtpFrom\"",
     "az containerapp create --name $MlName --resource-group $ResourceGroup --environment $EnvironmentName --image $MlImage --target-port 8000 --ingress external --registry-server $AcrName.azurecr.io --env-vars NODE_ENV=production ML_SERVICE_PORT=8000 ML_SERVICE_API_KEY=\"$MlKey\" ALLOWED_ORIGINS=\"$AllowedOrigins\"",
     "cd frontend; eas build --platform android --profile production"
 )

@@ -14,7 +14,7 @@ import {
   systemPromptFor,
 } from '../services/ai-prompts.js';
 import { refreshSnapshot } from '../services/app-state-store.js';
-import { generateGeminiText, isGeminiConfigured } from '../services/gemini.js';
+import { generateAiText, isAiConfigured } from '../services/groq.js';
 import { computeStreak, habitFromRow } from '../services/streaks.js';
 import { COACH_TOKEN_COST, getWallet, spendTokens, tokenBalance } from '../services/wallet.js';
 
@@ -57,7 +57,7 @@ export default function registerAiRoutes(app) {
     const input = parse(assistantSchema, request, response);
     if (!input) return;
     const mode = input.mode;
-    if (!isGeminiConfigured(mode)) return response.status(503).json({ ok: false, error: 'Gemini AI service is not configured on the server.' });
+    if (!isAiConfigured()) return response.status(503).json({ ok: false, error: 'The AI service is not configured on the server.' });
 
     // The coach costs tokens: check the balance first, charge only after a real answer.
     if (mode === 'coach' && (await tokenBalance({ query }, session.userId)) < COACH_TOKEN_COST) {
@@ -68,11 +68,10 @@ export default function registerAiRoutes(app) {
       const context = mode === 'support'
         ? { app: 'HabitAI' } // no personal data is needed to explain the app
         : await loadAiContext(session.userId, input.timeZone || DEFAULT_TIME_ZONE);
-      const text = await generateGeminiText(buildUserPrompt({ question: input.question, context }), {
+      const text = await generateAiText(buildUserPrompt({ question: input.question, context }), {
         system: systemPromptFor(mode),
         maxOutputTokens: 400,
         temperature: 0.6,
-        profile: mode,
       });
       const answer = cleanAnswer(text);
       if (!answer) return response.status(502).json({ ok: false, error: 'The AI service returned an empty response.' });
@@ -94,16 +93,16 @@ export default function registerAiRoutes(app) {
   app.post('/api/goals/generate', aiLimiter, async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
-    if (!isGeminiConfigured('goals')) return response.status(503).json({ ok: false, error: 'Gemini AI service is not configured on the server.' });
+    if (!isAiConfigured()) return response.status(503).json({ ok: false, error: 'The AI service is not configured on the server.' });
     const input = parse(goalGenerationSchema, request, response);
     if (!input) return;
     const timeline = input.timeline || '30-60 days';
     const prompt = goalPlannerPrompt({ goal: input.goal, focusTarget: input.focusTarget || '4 habits', timeline });
 
     try {
-      // Structured output makes invalid plans rare; one retry covers truncated responses.
+      // JSON mode plus the schema makes invalid plans rare; one retry covers the rest.
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        const text = await generateGeminiText(prompt, { system: GOAL_PLANNER_SYSTEM, schema: goalPlanJsonSchema, maxOutputTokens: 1200, temperature: 0.7, profile: 'goals' });
+        const text = await generateAiText(prompt, { system: GOAL_PLANNER_SYSTEM, schema: goalPlanJsonSchema, maxOutputTokens: 1200, temperature: 0.7 });
         let raw;
         try {
           raw = JSON.parse(text);

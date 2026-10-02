@@ -80,7 +80,7 @@ export const GOAL_CATEGORIES = ['Career', 'Health', 'Finance', 'Education', 'Rel
 export const GOAL_INTENSITIES = ['High focus', 'Balanced', 'Quick win'];
 export const GOAL_TIMELINES = ['7-14 days', '30-60 days', '90 days'];
 
-/** JSON Schema handed to Gemini's structured output; mirrors goalPlanSchema in schemas.js. */
+/** JSON Schema the goal planner must follow (sent with Groq's JSON mode); mirrors goalPlanSchema in schemas.js. */
 export const goalPlanJsonSchema = {
   type: 'object',
   properties: {

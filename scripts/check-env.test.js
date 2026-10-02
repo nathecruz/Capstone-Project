@@ -19,7 +19,7 @@ const productionEnvironment = {
   JWKS_URL: 'https://auth.example.org/habit/.well-known/jwks.json',
   EXPO_PUBLIC_API_URL: 'https://api.example.org',
   EXPO_PUBLIC_AUTH_URL: 'https://auth.example.org/habit/auth',
-  GEMINI_API_KEY: 'release-gemini-key-for-validation',
+  GROQ_API_KEY: 'release-groq-key-for-validation',
   SMTP_USER: 'release-smtp-user',
   SMTP_PASSWORD: 'release-smtp-password',
 };
@@ -44,11 +44,11 @@ test('accepts valid production settings supplied by the platform environment', (
   assert.match(result.stdout, /Environment configuration passed validation/);
 });
 
-test('allows initial deployment with ML disabled and optional Gemini/email unavailable', () => {
+test('allows initial deployment with ML disabled and optional AI/email unavailable', () => {
   const environment = {
     ...productionEnvironment,
     ML_MODEL_RELEASE_APPROVED: 'false',
-    GEMINI_API_KEY: '',
+    GROQ_API_KEY: '',
     SMTP_USER: '',
     SMTP_PASSWORD: '',
     GMAIL_USER: '',
@@ -60,7 +60,7 @@ test('allows initial deployment with ML disabled and optional Gemini/email unava
   assert.equal(result.status, 0, output);
   assert.match(output, /Deployment preflight passed/);
   assert.match(output, /Live ML predictions are intentionally disabled/);
-  assert.match(output, /Gemini Coach, Assistant, and Goal generation will be unavailable/);
+  assert.match(output, /AI Coach, Assistant, and Goal generation will be unavailable/);
   assert.match(output, /password-reset emails will be unavailable/);
 });
 
@@ -90,12 +90,12 @@ test('rejects development ML credentials and local production endpoints without 
 test('rejects private API keys exposed through Expo public variables', () => {
   const environment = {
     ...productionEnvironment,
-    EXPO_PUBLIC_GEMINI_API_KEY: 'do-not-print-this-secret',
+    EXPO_PUBLIC_GROQ_API_KEY: 'do-not-print-this-secret',
   };
   const result = runValidator(environment);
   const output = `${result.stdout}${result.stderr}`;
 
   assert.equal(result.status, 1);
   assert.match(output, /Do not expose API keys/);
-  assert.equal(output.includes(environment.EXPO_PUBLIC_GEMINI_API_KEY), false);
+  assert.equal(output.includes(environment.EXPO_PUBLIC_GROQ_API_KEY), false);
 });

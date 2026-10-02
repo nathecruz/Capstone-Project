@@ -139,7 +139,7 @@ export default function InsightsScreen() {
   const [assistantVisible, setAssistantVisible] = useState(false);
   const [assistantQuestion, setAssistantQuestion] = useState('');
   const [assistantResponse, setAssistantResponse] = useState('');
-  const [assistantResponseSource, setAssistantResponseSource] = useState<'gemini' | 'local' | null>(null);
+  const [assistantResponseSource, setAssistantResponseSource] = useState<'ai' | 'local' | null>(null);
   const [assistantError, setAssistantError] = useState('');
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [keyboardInset, setKeyboardInset] = useState(0);
@@ -217,7 +217,7 @@ export default function InsightsScreen() {
       const result = await askAi('assistant', assistantQuestion || 'What should I focus on next?');
       if (result.ok) {
         setAssistantResponse(result.answer);
-        setAssistantResponseSource('gemini');
+        setAssistantResponseSource('ai');
       } else {
         setAssistantResponse(localReply);
         setAssistantResponseSource('local');
@@ -720,7 +720,7 @@ export default function InsightsScreen() {
               <View style={styles.assistantModalHeaderCopy}><Text style={[styles.assistantModalTitle, isDarkMode && styles.darkPrimaryText]}>Ask AI Assistant</Text><Text style={[styles.assistantModalSubtitle, isDarkMode && styles.darkMutedText]}>Personal guidance from your habit data</Text></View>
               <Pressable onPress={() => setAssistantVisible(false)} accessibilityLabel="Close AI Assistant"><Ionicons name="close-circle" size={25} color={isDarkMode ? '#AAA4B7' : '#888291'} /></Pressable>
             </View>
-            <View style={styles.assistantReply}><Text style={[styles.assistantReplyLabel, isDarkMode && styles.darkMutedText]}>{assistantResponseSource === 'gemini' ? 'Gemini response' : assistantResponseSource === 'local' ? 'Local guidance' : 'Your insight'}</Text><Text style={[styles.assistantReplyText, isDarkMode && styles.darkPrimaryText]}>{assistantResponse || assistantReply}</Text>{assistantError ? <Text style={styles.assistantError}>{assistantError}</Text> : null}</View>
+            <View style={styles.assistantReply}><Text style={[styles.assistantReplyLabel, isDarkMode && styles.darkMutedText]}>{assistantResponseSource === 'ai' ? 'AI response' : assistantResponseSource === 'local' ? 'Local guidance' : 'Your insight'}</Text><Text style={[styles.assistantReplyText, isDarkMode && styles.darkPrimaryText]}>{assistantResponse || assistantReply}</Text>{assistantError ? <Text style={styles.assistantError}>{assistantError}</Text> : null}</View>
             <TextInput
               ref={assistantInputRef}
               value={assistantQuestion}
@@ -736,7 +736,7 @@ export default function InsightsScreen() {
               onFocus={() => setTimeout(() => assistantScrollRef.current?.scrollToEnd({ animated: true }), 100)}
             />
             <Pressable style={[styles.assistantSendButton, assistantLoading && styles.assistantSendButtonDisabled]} onPress={requestAssistantGuidance} disabled={assistantLoading} accessibilityRole="button"><Ionicons name="send" size={16} color={themeColor('#FFFFFF')} /><Text style={styles.assistantSendText}>{assistantLoading ? 'Thinking...' : 'Get guidance'}</Text></Pressable>
-            <Text style={[styles.assistantFootnote, isDarkMode && styles.darkMutedText]}>Powered by your secure Gemini backend.</Text>
+            <Text style={[styles.assistantFootnote, isDarkMode && styles.darkMutedText]}>Powered by the secure HabitAI server (Groq AI).</Text>
           </View>
         </View>
       </Modal>

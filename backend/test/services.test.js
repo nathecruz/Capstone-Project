@@ -11,10 +11,10 @@ import { getEmailConfig, sendEmail } from '../services/mailer.js';
 import { passwordStrength } from '../services/passwords.js';
 
 test('recognises template values copied from .env.example', () => {
-  for (const value of ['', 'your-gemini-api-key', 'replace-with-a-long-random-secret', 'postgresql://user:password@ep-example.us-east-2.aws.neon.tech/habitai', 'your-email@gmail.com', 'xxxx']) {
+  for (const value of ['', 'your-groq-api-key','replace-with-a-long-random-secret', 'postgresql://user:password@ep-example.us-east-2.aws.neon.tech/habitai', 'your-email@gmail.com', 'xxxx']) {
     assert.equal(isTemplateValue(value), true, value);
   }
-  for (const value of ['AIzaSyA-real-looking-key-1234567890abcd', 'student.sender@gmail.com', 'postgresql://neondb_owner:secret@ep-plain-flower.aws.neon.tech/db', 'gemini-2.5-flash']) {
+  for (const value of ['gsk_RealLookingGroqKey1234567890abcdefghijklmnop', 'student.sender@gmail.com', 'postgresql://neondb_owner:secret@ep-plain-flower.aws.neon.tech/db', 'llama-3.3-70b-versatile']) {
     assert.equal(isTemplateValue(value), false, value);
   }
 });
@@ -36,12 +36,12 @@ test('a real value in the root .env wins over a placeholder in backend/.env', as
   const folder = mkdtempSync(path.join(tmpdir(), 'habitai-env-'));
   const backendFile = path.join(folder, 'backend.env');
   const rootFile = path.join(folder, 'root.env');
-  writeFileSync(backendFile, 'DATABASE_URL=postgresql://user:password@ep-example.neon.tech/db\nGEMINI_MODEL=gemini-2.5-flash\n');
-  writeFileSync(rootFile, 'DATABASE_URL=postgresql://owner:secret@ep-real.neon.tech/db\nGEMINI_MODEL=other\n');
+  writeFileSync(backendFile, 'DATABASE_URL=postgresql://user:password@ep-example.neon.tech/db\nGROQ_MODEL=llama-3.3-70b-versatile\n');
+  writeFileSync(rootFile, 'DATABASE_URL=postgresql://owner:secret@ep-real.neon.tech/db\nGROQ_MODEL=other\n');
   const target = { EXISTING: 'kept' };
   loadEnvironment({ files: [backendFile, rootFile], target, force: true });
   assert.equal(target.DATABASE_URL, 'postgresql://owner:secret@ep-real.neon.tech/db');
-  assert.equal(target.GEMINI_MODEL, 'gemini-2.5-flash');
+  assert.equal(target.GROQ_MODEL, 'llama-3.3-70b-versatile');
   assert.equal(target.EXISTING, 'kept');
 });
 

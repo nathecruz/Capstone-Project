@@ -1,6 +1,6 @@
 import { config, isConfiguredSecret } from '../config/index.js';
 import { query } from '../db/client.js';
-import { isGeminiConfigured } from '../services/gemini.js';
+import { getAiModel, isAiConfigured } from '../services/groq.js';
 import { getEmailConfig } from '../services/mailer.js';
 
 async function isMlServiceReady() {
@@ -24,12 +24,11 @@ export default function registerHealthRoutes(app) {
   app.get('/health', async (_request, response) => {
     try {
       await query('SELECT 1');
-      const ai = Object.fromEntries(['goals', 'coach', 'assistant'].map((profile) => [profile, isGeminiConfigured(profile)]));
-      const aiConfigured = Object.values(ai).some(Boolean);
+      const aiConfigured = isAiConfigured();
       const mlConfigured = isConfiguredSecret(config.ml.key, !config.isProduction);
       const mlServiceReady = !config.isProduction || await isMlServiceReady();
       const ready = !config.isProduction || (aiConfigured && mlConfigured && mlServiceReady);
-      response.status(ready ? 200 : 503).json({ ok: ready, database: 'neon', aiConfigured, ai, emailConfigured: getEmailConfig().configured, mlConfigured, mlServiceReady, mlServiceUrl: config.ml.url });
+      response.status(ready ? 200 : 503).json({ ok: ready, database: 'neon', aiConfigured, aiProvider: 'groq', aiModel: getAiModel(), emailConfigured: getEmailConfig().configured, mlConfigured, mlServiceReady, mlServiceUrl: config.ml.url });
     } catch {
       response.status(503).json({ ok: false, database: 'neon' });
     }
