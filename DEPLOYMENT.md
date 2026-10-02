@@ -62,7 +62,14 @@ Issue report attachments are stored in Neon (`BYTEA`) and can be forwarded to `S
 
 ### Email sender
 
-Sign-ups now send a verification code, so use a dedicated sender instead of a personal Gmail (Gmail allows about 500 messages a day and ties delivery to one person's account). Any SMTP provider works: for example Brevo (`smtp-relay.brevo.com`, port 587), Resend (`smtp.resend.com`, port 465) or a PSAU project mailbox. Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` and `SMTP_FROM` in the Render dashboard; `render.yaml` no longer contains any personal address, and values already set on the service are kept when the Blueprint syncs. Set `WEB_PUSH_VAPID_SUBJECT` to a `mailto:` address of the project team. `REQUIRE_EMAIL_VERIFICATION=false` turns verification off if the sender is unavailable.
+Sign-ups send a verification code and password resets send a code, so email must work in production. **Free Render web services block outbound SMTP (ports 25, 465 and 587)**, so Gmail or any other SMTP server times out there. The backend therefore sends through Brevo's HTTPS API:
+
+1. Create a free account at [brevo.com](https://www.brevo.com) (300 emails a day).
+2. Under **Senders, domains & dedicated IPs → Senders**, add and verify the address the emails should come from (a project Gmail works; Brevo emails it a confirmation link).
+3. Under **SMTP & API → API keys**, generate an API key.
+4. In the Render dashboard, open **habitai-backend → Environment** and set `BREVO_API_KEY` (the key) and `EMAIL_FROM` (the verified sender). Save; the service redeploys and its log shows `[mail] Brevo API key verified`.
+
+`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` and `SMTP_FROM` are only used when `BREVO_API_KEY` is empty (local development or a paid Render plan). `render.yaml` contains no personal address, and values already set on the service are kept when the Blueprint syncs. Set `WEB_PUSH_VAPID_SUBJECT` to a `mailto:` address of the project team. `REQUIRE_EMAIL_VERIFICATION=false` turns verification off if the sender is unavailable.
 
 ### Free-tier cold starts
 
@@ -78,7 +85,7 @@ With `frontend` as the project root, Vercel runs `npm ci` and `npm run export:we
 ### Admin Panel
 
 1. After the Blueprint sync creates `habitai-admin`, open its URL (for example `https://habitai-admin.onrender.com`). The first request after 15 idle minutes takes about a minute on the free plan.
-2. Sign in with an existing administrator account. To create one, run `npm run create-admin -- --email you@psau.edu.ph --first-name Juan --last-name "Dela Cruz" --role admin` from `admin-panel/` with `server/.env` pointing at the production `DATABASE_URL`; the temporary password is printed once. Change it under **Settings → My account**, then add other staff from **Users**.
+2. Sign in with an existing administrator account. Faculty and other administrators can use **Request access** on the sign-in page; an administrator approves them under **Users → Access requests**. To create the very first administrator, run `npm run create-admin -- --email you@psau.edu.ph --first-name Juan --last-name "Dela Cruz" --role admin` from `admin-panel/` with `server/.env` pointing at the production `DATABASE_URL`; the temporary password is printed once. Change it under **Settings → My account**, then add other staff from **Users**.
 3. The session cookie is `Secure` and `SameSite=Strict`, so the panel only works over HTTPS (Render provides it). No CORS settings are needed because the client and API share one origin.
 
 ## 3) Important production notes
@@ -88,7 +95,7 @@ With `frontend` as the project root, Vercel runs `npm ci` and `npm run export:we
 - Render uses `/healthz` to verify that each service is running; `/health` reports dependency/model readiness and may return HTTP 503 until the ML release is approved.
 - The backend no longer requires `AUTH_URL` and `JWKS_URL`; in production it requires `DATABASE_URL`, `ML_SERVICE_URL`, a real `ML_SERVICE_API_KEY` and `ALLOWED_ORIGINS`, and reports all missing values at once.
 - Redeploy both the backend and the frontend together: the app now polls `GET /api/app-state?since=` and sends `mode: "support"` for the Help assistant.
-- Full production readiness validation requires at least one of `GEMINI_API_KEY`, `GEMINI_API_KEY_GOALS`, `GEMINI_API_KEY_COACH`, or `GEMINI_API_KEY_ASSISTANT`, plus an SMTP username/password pair; without them, AI or password-reset email features are unavailable and the production readiness check fails.
+- Full production readiness validation requires at least one of `GEMINI_API_KEY`, `GEMINI_API_KEY_GOALS`, `GEMINI_API_KEY_COACH`, or `GEMINI_API_KEY_ASSISTANT`, plus working email (`BREVO_API_KEY` with `EMAIL_FROM`, or an SMTP username/password pair); without them, AI or verification and password-reset emails are unavailable and the production readiness check fails.
 - The app validates that `ML_SERVICE_API_KEY` is a real secret and not a placeholder.
 - The backend also expects `ALLOWED_ORIGINS` to be defined in production.
 - If you want AI features, set the dedicated Gemini keys when possible: `GEMINI_API_KEY_GOALS`, `GEMINI_API_KEY_COACH`, and `GEMINI_API_KEY_ASSISTANT`.

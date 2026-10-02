@@ -124,7 +124,7 @@ def get_model_readiness() -> dict[str, Any]:
     return {'ready': True, 'reason': 'approved model and holdout evaluation available'}
 
 
-def _fallback_prediction(signal: HabitSignal) -> dict[str, Any]:
+def _fallback_prediction(signal: HabitSignal, reason: str = 'trained model artifacts could not be loaded') -> dict[str, Any]:
     recent_completion_rate = sum(signal.last_7_days) / max(len(signal.last_7_days), 1)
     completion_probability = _safe_float(
         signal.completion_rate * 0.5
@@ -144,7 +144,7 @@ def _fallback_prediction(signal: HabitSignal) -> dict[str, Any]:
         'confidence': 0.0,
         'recommended_action': recommendation,
         'suggested_reminder_time': '19:00' if completion_probability >= 0.5 else '07:30',
-        'summary': f'{signal.habit_name.title()} has a deterministic fallback forecast because trained model artifacts could not be loaded. {recommendation}',
+        'summary': f'{signal.habit_name.title()} has a deterministic fallback forecast because {reason}. {recommendation}',
         'models_used': ['Deterministic fallback'],
         'prediction_source': 'fallback',
         'is_fallback': True,
@@ -152,8 +152,10 @@ def _fallback_prediction(signal: HabitSignal) -> dict[str, Any]:
 
 
 def predict_habit(signal: HabitSignal) -> dict[str, Any]:
+    # Production never serves a model without an approved, independently evaluated release;
+    # until one exists it answers with the labelled activity-based fallback instead of an error.
     if os.getenv('NODE_ENV', '').lower() == 'production' and not get_model_readiness()['ready']:
-        raise RuntimeError('Production ML predictions are disabled until an approved model and independent holdout evaluation are available.')
+        return _fallback_prediction(signal, 'no approved trained model is deployed yet')
 
     try:
         artifact = _load_models()

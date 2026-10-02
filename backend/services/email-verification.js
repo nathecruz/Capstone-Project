@@ -11,7 +11,7 @@ const MAX_ATTEMPTS = 5;
 
 /**
  * Verification is enforced unless REQUIRE_EMAIL_VERIFICATION=false. Without working
- * SMTP it cannot be completed, so new accounts are then marked verified automatically
+ * email delivery it cannot be completed, so new accounts are then marked verified automatically
  * (logged as a warning) instead of being locked out.
  */
 export function verificationEnabled() {

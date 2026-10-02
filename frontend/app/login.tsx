@@ -315,6 +315,8 @@ export default function LoginScreen() {
           <TextInput
             value={password}
             onChangeText={setPassword}
+            onSubmitEditing={() => void handleLogin()}
+            returnKeyType="go"
             placeholder="Password"
             secureTextEntry
             style={styles.input}
@@ -366,6 +368,8 @@ export default function LoginScreen() {
                 <TextInput
                   value={resetEmail}
                   onChangeText={setResetEmail}
+                  onSubmitEditing={() => void sendResetCode(false)}
+                  returnKeyType="send"
                   placeholder="Email address"
                   keyboardType="email-address"
                   autoCapitalize="none"
@@ -451,6 +455,8 @@ export default function LoginScreen() {
                 <TextInput
                   value={confirmResetPassword}
                   onChangeText={setConfirmResetPassword}
+                  onSubmitEditing={() => void handleSetNewPassword()}
+                  returnKeyType="done"
                   placeholder="Confirm new password"
                   secureTextEntry
                   style={styles.resetInput}

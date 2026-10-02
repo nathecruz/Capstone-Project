@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { createContext, useContext, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, Text, View } from 'react-native';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 export type AppDialogVariant = 'error' | 'success' | 'info';
 export type AppDialogButton = { text: string; style?: 'default' | 'cancel' | 'destructive'; onPress?: () => void };
@@ -32,20 +33,32 @@ const variantStyles = {
   },
 };
 
+type DialogContent = Pick<AppDialogProps, 'title' | 'message' | 'variant' | 'buttons'>;
+const buttonLabels = (list?: readonly AppDialogButton[]) => list?.map((button) => button.text).join('|') ?? '';
+
 export function AppDialog({ visible, title, message, variant = 'info', onClose, buttons }: AppDialogProps) {
-  const appearance = variantStyles[variant];
-  const dialogButtons = buttons?.length ? buttons : [{ text: 'OK', onPress: onClose }];
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
+  // Callers clear their dialog state on close while the fade-out is still running; keep
+  // showing the last content until it is gone instead of an empty box.
+  const [lastShown, setLastShown] = useState<DialogContent>({ title, message, variant, buttons });
+  if (visible && (lastShown.title !== title || lastShown.message !== message || lastShown.variant !== variant || buttonLabels(lastShown.buttons) !== buttonLabels(buttons))) {
+    setLastShown({ title, message, variant, buttons });
+  }
+  const content: DialogContent = visible ? { title, message, variant, buttons } : lastShown;
+  const appearance = variantStyles[content.variant ?? 'info'];
+  const dialogButtons = content.buttons?.length ? content.buttons : [{ text: 'OK', onPress: onClose }];
   const useStackedButtons = dialogButtons.length >= 3;
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <View style={styles.dialog} accessibilityViewIsModal>
-          <View style={[styles.iconWrap, { backgroundColor: appearance.backgroundColor }]}>
+          <View style={[styles.iconWrap, { backgroundColor: themeColor(appearance.backgroundColor, 'backgroundColor') }]}>
             <Ionicons name={appearance.icon} size={30} color={appearance.color} />
           </View>
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.message}>{message}</Text>
+          <Text style={styles.title}>{content.title}</Text>
+          <Text style={styles.message}>{content.message}</Text>
           <View style={[styles.buttonRow, useStackedButtons && styles.buttonColumn]}>
             {dialogButtons.map((button, index) => {
               const isDestructive = button.style === 'destructive';
@@ -71,7 +84,7 @@ export function useAppDialog() {
   return useContext(AppDialogContext);
 }
 
-const styles = StyleSheet.create({
+const themedStyles = createThemedStyles({
   backdrop: {
     flex: 1,
     alignItems: 'center',

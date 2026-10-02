@@ -9,12 +9,13 @@ import { canCompleteHabitForDate } from '@/utils/habit-visibility';
 import { namesOf } from '@/utils/names';
 import { computeStreak } from '@/utils/streaks';
 import { applyRemoteCompletionDates, applyVisibleOrder, getLocalDateKey } from './app-state/habit-progress';
+import { DarkModeContext } from './dark-mode-context';
 import { clearSyncMeta, loadSyncMeta, persistSyncBase, persistUnsaved } from './app-state/sync-storage';
 import { useHabitReminders } from './app-state/use-habit-reminders';
 import { initialPreferences, initialProfile, type Goal, type Habit, type PersistedAppState, type Preferences, type Profile, type TokenTransaction } from './app-state/types';
 
 export * from './app-state/types';
-export { getHabitCompletionHistory, getHabitProgressSummary } from './app-state/habit-progress';
+export { getHabitCompletionHistory, getHabitProgressSummary, getRecentCompletionHistory } from './app-state/habit-progress';
 export { getHabitReminderDays, getHabitReminderSchedule, getHabitReminderTimes, getNotificationsModule, getSnoozeLimit, isHabitMissedYesterday, isHabitReminderDay, requestNotificationAccess } from './app-state/reminders';
 
 type ColorScheme = 'light' | 'dark';
@@ -619,7 +620,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     [avatarImage, colorScheme, darkModeOverride, getAppStateSnapshot, goals, habits, points, preferences, profile, ringInterval, snoozeFrequency, syncAppState, tokenHistory, tokens],
   );
 
-  return <ColorSchemeContext.Provider value={value}>{children}</ColorSchemeContext.Provider>;
+  return <ColorSchemeContext.Provider value={value}><DarkModeContext.Provider value={value.isDarkMode}>{children}</DarkModeContext.Provider></ColorSchemeContext.Provider>;
 }
 
 export function useAppColorScheme() {

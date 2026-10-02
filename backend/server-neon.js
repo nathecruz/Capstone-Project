@@ -21,6 +21,12 @@ const maintenance = scheduleMaintenance();
 
 const server = createApp().listen(config.port, '0.0.0.0', () => console.log(`Neon Insights API listening on http://0.0.0.0:${config.port}`));
 
+// Free Render instances sleep when idle. This API starts when a student opens the app, so it
+// wakes the ML service too; its forecast is then ready by the time Insights asks for it.
+if (config.ml.key) {
+  fetch(`${config.ml.url.replace(/\/$/, '')}/healthz`, { signal: AbortSignal.timeout(120000) }).catch(() => {});
+}
+
 async function shutdown() {
   clearInterval(maintenance);
   server.close();

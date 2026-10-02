@@ -6,7 +6,7 @@ import { buildHabitContext, habitFrequency } from '../services/ai-context.js';
 import { buildUserPrompt, cleanAnswer, normalizeGoalPlan, systemPromptFor } from '../services/ai-prompts.js';
 import { sameState, stableStringify } from '../services/app-state-sync.js';
 import { escapeHtml, passwordChangedEmail, passwordResetCodeEmail } from '../services/email-templates.js';
-import { getEmailConfig } from '../services/mailer.js';
+import { getEmailConfig, sendEmail } from '../services/mailer.js';
 import { passwordStrength } from '../services/passwords.js';
 
 test('recognises template values copied from .env.example', () => {
@@ -50,6 +50,41 @@ test('email is only configured with real SMTP credentials', () => {
   assert.equal(getEmailConfig({ SMTP_USER: 'your-email@gmail.com', SMTP_PASSWORD: 'your-16-character-gmail-app-password' }).configured, false);
   assert.equal(getEmailConfig({ GMAIL_USER: 'sender@gmail.com', GMAIL_APP_PASSWORD: 'abcdabcdabcdabcd' }).configured, true);
   assert.equal(getEmailConfig({ SMTP_USER: 'a@b.co', SMTP_PASSWORD: 'x1', SMTP_PORT: '465' }).secure, true);
+});
+
+test('the Brevo API wins over SMTP and needs a sender address', () => {
+  const brevo = { BREVO_API_KEY: 'xkeysib-0123456789abcdef', EMAIL_FROM: 'habitai.sender@gmail.com' };
+  assert.equal(getEmailConfig({ ...brevo, SMTP_USER: 'a@b.co', SMTP_PASSWORD: 'x1' }).provider, 'brevo');
+  assert.equal(getEmailConfig({ BREVO_API_KEY: brevo.BREVO_API_KEY }).configured, false);
+  assert.equal(getEmailConfig({ BREVO_API_KEY: brevo.BREVO_API_KEY, SMTP_USER: 'a@b.co', SMTP_PASSWORD: 'x1' }).sender, 'a@b.co');
+  assert.equal(getEmailConfig({ SMTP_USER: 'a@b.co', SMTP_PASSWORD: 'x1' }).provider, 'smtp');
+  assert.equal(getEmailConfig({}).provider, 'none');
+});
+
+test('Brevo emails go over HTTPS from the verified sender, and failures are raised', async () => {
+  const environment = { BREVO_API_KEY: 'xkeysib-0123456789abcdef', EMAIL_FROM: 'habitai.sender@gmail.com' };
+  const calls = [];
+  const original = globalThis.fetch;
+  let status = 201;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init });
+    return new Response(JSON.stringify(status === 201 ? { messageId: '<m1@brevo>' } : { message: 'Key not found' }), { status });
+  };
+  try {
+    await sendEmail({ to: 'student@example.com', subject: 'Hi', text: 'a < b', replyTo: 'reply@example.com' }, environment);
+    status = 401;
+    await assert.rejects(sendEmail({ to: 'student@example.com', subject: 'Hi', text: 'x' }, environment), { code: 'BREVO_401' });
+  } finally {
+    globalThis.fetch = original;
+  }
+  assert.equal(calls[0].url, 'https://api.brevo.com/v3/smtp/email');
+  assert.equal(calls[0].init.headers['api-key'], environment.BREVO_API_KEY);
+  const body = JSON.parse(calls[0].init.body);
+  assert.deepEqual(body.sender, { name: 'HabitAI', email: 'habitai.sender@gmail.com' });
+  assert.deepEqual(body.to, [{ email: 'student@example.com' }]);
+  assert.deepEqual(body.replyTo, { email: 'reply@example.com' });
+  assert.equal(body.textContent, 'a < b');
+  assert.match(body.htmlContent, /a &lt; b/);
 });
 
 test('password rules reject personal details and weak patterns', () => {

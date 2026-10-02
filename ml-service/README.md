@@ -94,7 +94,10 @@ python -m app.services.model_training
 Build the ML container only after the trained artifact and its matching
 `models/evaluation-report.json` are in the image build context. The ML `/health`
 endpoint returns HTTP 503 in production until the artifact, independent report,
-approval, provenance hashes, and quality thresholds all match.
+approval, provenance hashes, and quality thresholds all match. Until then
+`/api/predict/habit` never uses the unapproved model: it answers with the deterministic,
+activity-based fallback (`prediction_source: "fallback"`, `is_fallback: true`), which the
+app labels as such.
 
 ## Endpoint
 

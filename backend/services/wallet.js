@@ -1,6 +1,7 @@
 // Server-side token ledger and points. Every token change is a row in
 // token_transactions written by the server; the app only displays the result.
 import crypto from 'node:crypto';
+import { runAll } from '../db/run-all.js';
 
 export const POINTS_PER_CHECK_IN = 20;
 export const TOKENS_PER_CHECK_IN = 5;
@@ -46,15 +47,15 @@ export async function spendTokens(db, userId, amount, label, now = Date.now()) {
 
 /** Points, token balance and recent token history exactly as the server records them. */
 export async function getWallet(db, userId) {
-  const [balance, history, points] = await Promise.all([
-    tokenBalance(db, userId),
-    db.query(
+  const [balance, history, points] = await runAll(db, [
+    () => tokenBalance(db, userId),
+    () => db.query(
       `SELECT id, amount, label, transaction_date AS date, created_at AS "createdAt"
          FROM token_transactions WHERE user_id=$1
         ORDER BY transaction_date DESC, created_at DESC LIMIT $2`,
       [userId, HISTORY_LIMIT],
     ),
-    db.query('SELECT COUNT(*)::int AS checkins FROM habit_completions WHERE user_id=$1', [userId]),
+    () => db.query('SELECT COUNT(*)::int AS checkins FROM habit_completions WHERE user_id=$1', [userId]),
   ]);
   return {
     tokens: Math.max(0, balance),

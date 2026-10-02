@@ -1,12 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, AppState, Easing, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Animated, AppState, Easing, Keyboard, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getApiBaseUrl, getAuthenticatedHeaders } from '@/authentication';
-import { getHabitCompletionHistory, getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { getHabitProgressSummary, getRecentCompletionHistory, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { getChartGeometry } from '@/utils/line-chart';
 import { getPredictionPresentation } from '@/utils/ai-presentation';
 import { askAi } from '@/utils/ai-client';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 type HeatmapView = 'Days' | 'Weeks' | 'Months';
 type HeatmapRow = { label: string; average: string; values: number[]; isToday?: boolean };
@@ -41,24 +43,6 @@ function getHabitMachineLearningSignal(habit: { completionDates: string[]; progr
     priority: habit.progress < 40 ? 'high' : habit.progress < 75 ? 'balanced' : 'low',
     goal_type: goalType,
   };
-}
-
-const CHART_X_INSET = 16;
-
-/**
- * Points and connecting segments in pixels of the measured plot. (Percentages used to mix the
- * plot's width and height, so lines pointed the wrong way whenever the chart was not phone-sized.)
- */
-function getChartGeometry(rates: number[], width: number, height: number) {
-  const step = (width - CHART_X_INSET * 2) / Math.max(1, rates.length - 1);
-  const points = rates.map((rate, index) => ({ x: CHART_X_INSET + index * step, y: height - (Math.max(0, Math.min(100, rate)) / 100) * height }));
-  const segments = points.slice(0, -1).map((point, index) => {
-    const next = points[index + 1];
-    const dx = next.x - point.x;
-    const dy = next.y - point.y;
-    return { left: point.x, top: point.y - 1, width: Math.sqrt(dx ** 2 + dy ** 2), transform: [{ rotate: `${Math.atan2(dy, dx) * (180 / Math.PI)}deg` }] };
-  });
-  return { points, segments };
 }
 
 function getHeatmapData(view: HeatmapView, selectedMonth: number, selectedWeekOffset: number, completionDates: Set<string>, today = new Date()) {
@@ -141,6 +125,8 @@ function useDeviceDate() {
 }
 
 export default function InsightsScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   const { isDarkMode, habits } = useAppColorScheme();
   const deviceDate = useDeviceDate();
   const [activeTab, setActiveTab] = useState<'Insights' | 'Predictions'>('Insights');
@@ -164,7 +150,7 @@ export default function InsightsScreen() {
   const [predictionLoading, setPredictionLoading] = useState(false);
   const [predictionProgress] = useState(() => new Animated.Value(0));
   const { completed, completionPercent, averageProgress, maxStreak } = getHabitProgressSummary(habits);
-  const completionHistory = getHabitCompletionHistory(habits, 7);
+  const completionHistory = getRecentCompletionHistory(habits, 7);
   const dailyRates = completionHistory.map((entry) => habits.length ? Math.round((entry.count / habits.length) * 100) : 0);
   const [chartSize, setChartSize] = useState({ width: 0, height: 0 });
   const trendChart = getChartGeometry(dailyRates, chartSize.width, chartSize.height);
@@ -352,18 +338,20 @@ export default function InsightsScreen() {
                 <Text style={[styles.headerTitle, isDarkMode && styles.darkPrimaryText]}>AI Insights</Text>
               </View>
               <View style={[styles.headerBadge, isDarkMode && styles.darkBadge]}>
-                <Ionicons name="sparkles" size={16} color="#5B42D8" />
+                <Ionicons name="sparkles" size={16} color={themeColor('#5B42D8')} />
               </View>
             </View>
 
-            <View style={styles.segmentedControl}>
+            <View style={[styles.segmentedControl, isDarkMode && styles.darkSegmentedControl]} accessibilityRole="tablist">
               {(['Insights', 'Predictions'] as const).map((tab) => (
                 <Pressable
                   key={tab}
                   style={[styles.segment, activeTab === tab && styles.segmentActive]}
                   onPress={() => setActiveTab(tab)}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: activeTab === tab }}
                 >
-                  <Text style={[styles.segmentText, activeTab === tab && styles.segmentTextActive]}>{tab}</Text>
+                  <Text style={[styles.segmentText, isDarkMode && styles.darkSegmentText, activeTab === tab && styles.segmentTextActive]}>{tab}</Text>
                 </Pressable>
               ))}
             </View>
@@ -403,7 +391,7 @@ export default function InsightsScreen() {
                       <Text style={[styles.cardTitle, isDarkMode && styles.darkPrimaryText]}>Consistency trend</Text>
                       <Text style={[styles.cardSubtitle, isDarkMode && styles.darkMutedText]}>Last 7 days</Text>
                     </View>
-                    <View style={[styles.trendPill, trendChange < 0 && styles.trendPillDown]}><Ionicons name={trendChange < 0 ? 'arrow-down' : 'arrow-up'} size={12} color={trendChange < 0 ? '#D56A6A' : '#42A85F'} /><Text style={[styles.trendPillText, trendChange < 0 && styles.trendPillTextDown]}>{trendChange >= 0 ? '+' : ''}{trendChange}%</Text></View>
+                    <View style={[styles.trendPill, trendChange < 0 && styles.trendPillDown]}><Ionicons name={trendChange < 0 ? 'arrow-down' : 'arrow-up'} size={12} color={trendChange < 0 ? themeColor('#D56A6A') : themeColor('#42A85F')} /><Text style={[styles.trendPillText, trendChange < 0 && styles.trendPillTextDown]}>{trendChange >= 0 ? '+' : ''}{trendChange}%</Text></View>
                   </View>
                   <View style={styles.chart}>
                     <View style={styles.yAxis}>
@@ -425,8 +413,8 @@ export default function InsightsScreen() {
                       ))}
                     </View>
                     <View style={styles.xAxis}>
-                      {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => (
-                        <Text key={day} style={[styles.axisText, styles.xAxisLabel, { left: trendChart.points[index]?.x ?? 0 }]}>{day}</Text>
+                      {completionHistory.map((day, index) => (
+                        <Text key={day.dateKey} style={[styles.axisText, styles.xAxisLabel, { left: trendChart.points[index]?.x ?? 0 }]}>{index === completionHistory.length - 1 ? 'Today' : day.label}</Text>
                       ))}
                     </View>
                   </View>
@@ -443,7 +431,7 @@ export default function InsightsScreen() {
 
                 <View style={[styles.suggestionCard, isDarkMode && styles.darkCard]}>
                   <View style={styles.suggestionHeading}>
-                    <Ionicons name="sparkles" size={18} color="#5B42D8" />
+                    <Ionicons name="sparkles" size={18} color={themeColor('#5B42D8')} />
                     <Text style={[styles.insightTitle, isDarkMode && styles.darkPrimaryText]}>Habit suggestion</Text>
                   </View>
                   <Text style={[styles.insightBody, isDarkMode && styles.darkMutedText]}>{suggestion}</Text>
@@ -455,7 +443,7 @@ export default function InsightsScreen() {
                   <View style={styles.heroLabelRow}>
                     <View style={styles.liveDot} />
                     <Text style={styles.heroLabel}>NEXT WEEK</Text>
-                      <View style={styles.forecastPill}><Ionicons name={predictionPresentation.icon as keyof typeof Ionicons.glyphMap} size={11} color="#5B42D8" /><Text style={styles.forecastPillText}>{predictionPresentation.label}</Text></View>
+                      <View style={styles.forecastPill}><Ionicons name={predictionPresentation.icon as keyof typeof Ionicons.glyphMap} size={11} color={themeColor('#5B42D8')} /><Text style={styles.forecastPillText}>{predictionPresentation.label}</Text></View>
                   </View>
 
                   <View style={styles.predictionHeroLayout}>
@@ -507,17 +495,17 @@ export default function InsightsScreen() {
                       <Text style={styles.predictionStatLabel}>model agreement (uncalibrated)</Text>
                     </View>
                     <View style={styles.predictionStatCard}>
-                      <View style={styles.trendPillLarge}><Ionicons name="trending-up" size={16} color="#2E9D5C" /></View>
+                      <View style={styles.trendPillLarge}><Ionicons name="trending-up" size={16} color={themeColor('#2E9D5C')} /></View>
                       <Text style={styles.predictionStatValue}>{averageProgress}%</Text>
                       <Text style={styles.predictionStatLabel}>average progress</Text>
                     </View>
                     <View style={styles.predictionStatCard}>
-                      <View style={styles.trophyBadgeLarge}><Ionicons name="trophy" size={16} color="#E8A126" /></View>
+                      <View style={styles.trophyBadgeLarge}><Ionicons name="trophy" size={16} color={themeColor('#E8A126')} /></View>
                       <Text style={styles.predictionStatValue}>{habits.length}</Text>
                       <Text style={styles.predictionStatLabel}>habits tracked</Text>
                     </View>
                     <View style={styles.predictionStatCard}>
-                      <View style={styles.trendPillLarge}><Ionicons name="close-circle" size={16} color="#D56A6A" /></View>
+                      <View style={styles.trendPillLarge}><Ionicons name="close-circle" size={16} color={themeColor('#D56A6A')} /></View>
                       <Text style={styles.predictionStatValue}>{openHabits}</Text>
                       <Text style={styles.predictionStatLabel}>open today</Text>
                     </View>
@@ -526,7 +514,7 @@ export default function InsightsScreen() {
 
                 <View style={[styles.suggestionCard, isDarkMode && styles.darkCard]}>
                   <View style={styles.suggestionHeading}>
-                    <Ionicons name="bulb-outline" size={18} color="#5B42D8" />
+                    <Ionicons name="bulb-outline" size={18} color={themeColor('#5B42D8')} />
                     <Text style={[styles.insightTitle, isDarkMode && styles.darkPrimaryText]}>Prediction action</Text>
                   </View>
                   <Text style={[styles.insightBody, isDarkMode && styles.darkMutedText]}>{displayedRecommendation}</Text>
@@ -541,15 +529,15 @@ export default function InsightsScreen() {
                   <View style={styles.cardHeaderRow}>
                     <View>
                       <View style={styles.heatmapTitleRow}>
-                        <View style={styles.heatmapIcon}><Ionicons name="grid-outline" size={16} color="#5B42D8" /></View>
+                        <View style={styles.heatmapIcon}><Ionicons name="grid-outline" size={16} color={themeColor('#5B42D8')} /></View>
                         <Text style={[styles.cardTitle, isDarkMode && styles.darkPrimaryText]}>Completion heatmap</Text>
                       </View>
                       <Text style={[styles.cardSubtitle, isDarkMode && styles.darkMutedText]}>{selectedHeatmap.subtitle}</Text>
                     </View>
                     <Pressable style={styles.heatmapRangeBadge} onPress={() => setMonthDropdownOpen((open) => !open)} accessibilityRole="button" accessibilityLabel={heatmapView === 'Weeks' ? 'Choose heatmap week' : 'Choose heatmap month'} accessibilityState={{ expanded: monthDropdownOpen }}>
-                      <Ionicons name="calendar-outline" size={13} color="#5B42D8" />
+                      <Ionicons name="calendar-outline" size={13} color={themeColor('#5B42D8')} />
                       <Text style={styles.heatmapRangeText}>{heatmapView === 'Days' || heatmapView === 'Months' ? formatDate(new Date(currentYear, activeMonth, 1), { month: 'short', year: 'numeric' }) : selectedHeatmap.badge}</Text>
-                      <Ionicons name="chevron-down" size={13} color="#5B42D8" />
+                      <Ionicons name="chevron-down" size={13} color={themeColor('#5B42D8')} />
                     </Pressable>
                   </View>
 
@@ -557,7 +545,7 @@ export default function InsightsScreen() {
                     <View style={[styles.calendarDropdown, isDarkMode && styles.darkCalendarDropdown]}>
                       <View style={styles.calendarDropdownHeader}>
                         <View style={styles.calendarDropdownTitleRow}>
-                          <View style={styles.calendarDropdownIcon}><Ionicons name="calendar" size={15} color="#5B42D8" /></View>
+                          <View style={styles.calendarDropdownIcon}><Ionicons name="calendar" size={15} color={themeColor('#5B42D8')} /></View>
                           <View>
                             <Text style={[styles.calendarDropdownTitle, isDarkMode && styles.darkPrimaryText]}>Calendar range</Text>
                             <Text style={[styles.calendarDropdownSubtitle, isDarkMode && styles.darkMutedText]}>Live device calendar · {currentYear}</Text>
@@ -580,9 +568,9 @@ export default function InsightsScreen() {
                               accessibilityState={{ selected: isSelected }}
                               accessibilityLabel={`Show week ending ${formatDate(weekEnd, { month: 'long', day: 'numeric' })}`}
                             >
-                              <Ionicons name="calendar-outline" size={13} color={isSelected ? '#FFFFFF' : '#5B42D8'} />
+                              <Ionicons name="calendar-outline" size={13} color={isSelected ? themeColor('#FFFFFF') : themeColor('#5B42D8')} />
                               <Text style={[styles.calendarMonthText, isSelected && styles.calendarMonthTextActive]}>{offset === 0 ? 'This week' : `${offset} week${offset === 1 ? '' : 's'} ago`}</Text>
-                              {isSelected && <Ionicons name="checkmark" size={12} color="#FFFFFF" />}
+                              {isSelected && <Ionicons name="checkmark" size={12} color={themeColor('#FFFFFF')} />}
                             </Pressable>
                           );
                         }) : Array.from({ length: currentMonth + 1 }, (_, index) => {
@@ -598,7 +586,7 @@ export default function InsightsScreen() {
                               accessibilityLabel={`Show ${formatDate(month, { month: 'long' })} calendar data`}
                             >
                               <Text style={[styles.calendarMonthText, isSelected && styles.calendarMonthTextActive]}>{formatDate(month, { month: 'short' })}</Text>
-                              {isSelected && <Ionicons name="checkmark" size={12} color="#FFFFFF" />}
+                              {isSelected && <Ionicons name="checkmark" size={12} color={themeColor('#FFFFFF')} />}
                             </Pressable>
                           );
                         })}
@@ -622,9 +610,9 @@ export default function InsightsScreen() {
                   </View>
 
                   <Pressable style={[styles.habitFilterButton, isDarkMode && styles.darkHabitFilterButton]} onPress={() => setHabitDropdownOpen((open) => !open)} accessibilityRole="button" accessibilityLabel="Choose habit for heatmap" accessibilityState={{ expanded: habitDropdownOpen }}>
-                    <Ionicons name="options-outline" size={14} color="#5B42D8" />
+                    <Ionicons name="options-outline" size={14} color={themeColor('#5B42D8')} />
                     <Text style={styles.habitFilterText}>{selectedHabit?.label || 'All habits'}</Text>
-                    <Ionicons name={habitDropdownOpen ? 'chevron-up' : 'chevron-down'} size={13} color="#5B42D8" />
+                    <Ionicons name={habitDropdownOpen ? 'chevron-up' : 'chevron-down'} size={13} color={themeColor('#5B42D8')} />
                   </Pressable>
 
                   {habitDropdownOpen && (
@@ -634,18 +622,18 @@ export default function InsightsScreen() {
                           <Text style={[styles.habitDropdownTitle, isDarkMode && styles.darkPrimaryText]}>Your habits</Text>
                           <Text style={[styles.habitDropdownSubtitle, isDarkMode && styles.darkMutedText]}>{habits.length} habit{habits.length === 1 ? '' : 's'} tracked</Text>
                         </View>
-                        <Ionicons name="sparkles-outline" size={16} color="#5B42D8" />
+                        <Ionicons name="sparkles-outline" size={16} color={themeColor('#5B42D8')} />
                       </View>
                       <Pressable style={[styles.habitOption, selectedHabitId === 'all' && styles.habitOptionActive]} onPress={() => { setSelectedHabitId('all'); setHabitDropdownOpen(false); }} accessibilityRole="button" accessibilityState={{ selected: selectedHabitId === 'all' }}>
-                        <View style={[styles.habitOptionIcon, selectedHabitId === 'all' && styles.habitOptionIconActive]}><Ionicons name="layers-outline" size={16} color={selectedHabitId === 'all' ? '#FFFFFF' : '#5B42D8'} /></View>
+                        <View style={[styles.habitOptionIcon, selectedHabitId === 'all' && styles.habitOptionIconActive]}><Ionicons name="layers-outline" size={16} color={selectedHabitId === 'all' ? themeColor('#FFFFFF') : themeColor('#5B42D8')} /></View>
                         <View style={styles.habitOptionCopy}><Text style={[styles.habitOptionTitle, selectedHabitId === 'all' && styles.habitOptionTextActive]}>All habits</Text><Text style={[styles.habitOptionMeta, selectedHabitId === 'all' && styles.habitOptionMetaActive]}>Combined consistency</Text></View>
-                        {selectedHabitId === 'all' && <Ionicons name="checkmark-circle" size={17} color="#FFFFFF" />}
+                        {selectedHabitId === 'all' && <Ionicons name="checkmark-circle" size={17} color={themeColor('#FFFFFF')} />}
                       </Pressable>
                       {habits.map((habit) => (
                         <Pressable key={habit.id} style={[styles.habitOption, selectedHabitId === habit.id && styles.habitOptionActive]} onPress={() => { setSelectedHabitId(habit.id); setHabitDropdownOpen(false); }} accessibilityRole="button" accessibilityState={{ selected: selectedHabitId === habit.id }}>
-                          <View style={[styles.habitOptionIcon, { backgroundColor: selectedHabitId === habit.id ? 'rgba(255,255,255,0.2)' : `${habit.color}22` }]}><Ionicons name={habit.icon as keyof typeof Ionicons.glyphMap} size={16} color={selectedHabitId === habit.id ? '#FFFFFF' : habit.color} /></View>
+                          <View style={[styles.habitOptionIcon, { backgroundColor: selectedHabitId === habit.id ? 'rgba(255,255,255,0.2)' : `${habit.color}22` }]}><Ionicons name={habit.icon as keyof typeof Ionicons.glyphMap} size={16} color={selectedHabitId === habit.id ? themeColor('#FFFFFF') : habit.color} /></View>
                           <View style={styles.habitOptionCopy}><Text style={[styles.habitOptionTitle, selectedHabitId === habit.id && styles.habitOptionTextActive]} numberOfLines={1}>{habit.label}</Text><Text style={[styles.habitOptionMeta, selectedHabitId === habit.id && styles.habitOptionMetaActive]}>{habit.progress}% progress{habit.done ? ' · Done today' : ''}</Text></View>
-                          {selectedHabitId === habit.id && <Ionicons name="checkmark-circle" size={17} color="#FFFFFF" />}
+                          {selectedHabitId === habit.id && <Ionicons name="checkmark-circle" size={17} color={themeColor('#FFFFFF')} />}
                         </Pressable>
                       ))}
                       {habits.length === 0 && <Text style={[styles.habitEmptyText, isDarkMode && styles.darkMutedText]}>Add a habit to view its heatmap.</Text>}
@@ -653,9 +641,9 @@ export default function InsightsScreen() {
                   )}
 
                   <View style={styles.heatmapHeaderRow}>
-                    <View style={[styles.heatmapHeaderLabel, selectedHeatmap.isDaily && styles.heatmapDailySpacer]}><Ionicons name="calendar-outline" size={14} color="#6E6887" /><Text style={styles.heatmapHeaderText}>{selectedHeatmap.isDaily ? 'Date' : 'Period'}</Text></View>
-                    {selectedHeatmap.isDaily ? <View style={styles.heatmapCompletionHeader}><Ionicons name="briefcase-outline" size={14} color="#6E6887" /><Text style={styles.heatmapHeaderText}>Completion</Text></View> : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => <Text key={day} style={styles.heatmapDayLabel}>{day}</Text>)}
-                    <View style={styles.heatmapAverageHeader}><Ionicons name="trending-up-outline" size={14} color="#6E6887" /><Text style={styles.heatmapHeaderText}>Avg.</Text></View>
+                    <View style={[styles.heatmapHeaderLabel, selectedHeatmap.isDaily && styles.heatmapDailySpacer]}><Ionicons name="calendar-outline" size={14} color={themeColor('#6E6887')} /><Text style={styles.heatmapHeaderText}>{selectedHeatmap.isDaily ? 'Date' : 'Period'}</Text></View>
+                    {selectedHeatmap.isDaily ? <View style={styles.heatmapCompletionHeader}><Ionicons name="briefcase-outline" size={14} color={themeColor('#6E6887')} /><Text style={styles.heatmapHeaderText}>Completion</Text></View> : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => <Text key={day} style={styles.heatmapDayLabel}>{day}</Text>)}
+                    <View style={styles.heatmapAverageHeader}><Ionicons name="trending-up-outline" size={14} color={themeColor('#6E6887')} /><Text style={styles.heatmapHeaderText}>Avg.</Text></View>
                   </View>
                   {selectedHeatmap.rows.map((week) => (
                     <View key={week.label} style={[styles.heatmapRow, selectedHeatmap.isDaily && styles.dailyHeatmapRow, week.isToday && styles.todayHeatmapRow, week.isToday && isDarkMode && styles.darkTodayHeatmapRow]}>
@@ -670,7 +658,7 @@ export default function InsightsScreen() {
                   <View style={styles.heatmapFooter}>
                     <Text style={styles.heatmapGuide}>{selectedHeatmap.isDaily ? 'Live view based on your current habit status' : 'Each square represents one day'}</Text>
                     <View style={styles.heatmapLegend}><Text style={styles.legendText}>Less</Text>{['#F0ECFF', '#DCD2FF', '#A998F2', '#5B42D8'].map((color) => <View key={color} style={[styles.heatmapLegendCell, { backgroundColor: color }]} />)}<Text style={styles.legendText}>More</Text></View>
-                    <View style={styles.heatmapNote}><Ionicons name="trending-up" size={14} color="#2E9D5C" /><Text style={styles.heatmapNoteText}>{completed ? `${completed} habit${completed === 1 ? '' : 's'} completed today` : 'Complete a habit to build your activity history'}</Text></View>
+                    <View style={styles.heatmapNote}><Ionicons name="trending-up" size={14} color={themeColor('#2E9D5C')} /><Text style={styles.heatmapNoteText}>{completed ? `${completed} habit${completed === 1 ? '' : 's'} completed today` : 'Complete a habit to build your activity history'}</Text></View>
                   </View>
                 </View>
 
@@ -681,7 +669,7 @@ export default function InsightsScreen() {
                   </View>
                   <Pressable style={styles.viewAllTextWrap} onPress={() => setActiveTab('Predictions')} accessibilityRole="button">
                     <Text style={styles.viewAllText}>View All</Text>
-                    <Ionicons name="chevron-forward" size={13} color="#5B42D8" />
+                    <Ionicons name="chevron-forward" size={13} color={themeColor('#5B42D8')} />
                   </Pressable>
                 </View>
 
@@ -693,7 +681,7 @@ export default function InsightsScreen() {
                   ] as const).map((card) => (
                     <View key={card.title} style={[styles.quickCard, toneStyles[card.tone]]}>
                       <View style={styles.quickCardTopRow}>
-                        <View style={styles.quickIconWrap}><Ionicons name={card.icon as keyof typeof Ionicons.glyphMap} size={18} color={card.tone === 'green' ? '#2E9D5C' : card.tone === 'blue' ? '#4D57D4' : '#D9841A'} /></View>
+                        <View style={styles.quickIconWrap}><Ionicons name={card.icon as keyof typeof Ionicons.glyphMap} size={18} color={card.tone === 'green' ? themeColor('#2E9D5C') : card.tone === 'blue' ? themeColor('#4D57D4') : themeColor('#D9841A')} /></View>
                         <View style={styles.quickTag}><Text style={styles.quickTagText}>{card.tag}</Text></View>
                       </View>
                       <Text style={styles.quickCardTitle}>{card.title}</Text>
@@ -704,7 +692,7 @@ export default function InsightsScreen() {
                 </View>
 
                 <View style={[styles.finalInsightBanner, isDarkMode && styles.darkCard]}>
-                  <View style={styles.bannerIcon}><Ionicons name="flag" size={20} color="#5B42D8" /></View>
+                  <View style={styles.bannerIcon}><Ionicons name="flag" size={20} color={themeColor('#5B42D8')} /></View>
                   <View style={styles.bannerCopy}>
                     <Text style={[styles.bannerTitle, isDarkMode && styles.darkPrimaryText]}>Small steps, big results!</Text>
                     <Text style={[styles.bannerSubtitle, isDarkMode && styles.darkMutedText]}>Stay consistent and make next week even better.</Text>
@@ -714,7 +702,7 @@ export default function InsightsScreen() {
             )}
 
             <Pressable style={styles.assistantButton} onPress={askAssistant} accessibilityRole="button">
-              <Ionicons name="sparkles" size={16} color="#FFFFFF" />
+              <Ionicons name="sparkles" size={16} color={themeColor('#FFFFFF')} />
               <Text style={styles.assistantText}>Ask AI Assistant</Text>
             </Pressable>
           </View>
@@ -728,7 +716,7 @@ export default function InsightsScreen() {
             keyboardInset > 0 ? { marginBottom: Math.min(keyboardInset, 260) } : null,
           ]}>
             <View style={styles.assistantModalHeader}>
-              <View style={styles.assistantModalIcon}><Ionicons name="sparkles" size={20} color="#5B42D8" /></View>
+              <View style={styles.assistantModalIcon}><Ionicons name="sparkles" size={20} color={themeColor('#5B42D8')} /></View>
               <View style={styles.assistantModalHeaderCopy}><Text style={[styles.assistantModalTitle, isDarkMode && styles.darkPrimaryText]}>Ask AI Assistant</Text><Text style={[styles.assistantModalSubtitle, isDarkMode && styles.darkMutedText]}>Personal guidance from your habit data</Text></View>
               <Pressable onPress={() => setAssistantVisible(false)} accessibilityLabel="Close AI Assistant"><Ionicons name="close-circle" size={25} color={isDarkMode ? '#AAA4B7' : '#888291'} /></Pressable>
             </View>
@@ -747,7 +735,7 @@ export default function InsightsScreen() {
               textAlignVertical="top"
               onFocus={() => setTimeout(() => assistantScrollRef.current?.scrollToEnd({ animated: true }), 100)}
             />
-            <Pressable style={[styles.assistantSendButton, assistantLoading && styles.assistantSendButtonDisabled]} onPress={requestAssistantGuidance} disabled={assistantLoading} accessibilityRole="button"><Ionicons name="send" size={16} color="#FFFFFF" /><Text style={styles.assistantSendText}>{assistantLoading ? 'Thinking...' : 'Get guidance'}</Text></Pressable>
+            <Pressable style={[styles.assistantSendButton, assistantLoading && styles.assistantSendButtonDisabled]} onPress={requestAssistantGuidance} disabled={assistantLoading} accessibilityRole="button"><Ionicons name="send" size={16} color={themeColor('#FFFFFF')} /><Text style={styles.assistantSendText}>{assistantLoading ? 'Thinking...' : 'Get guidance'}</Text></Pressable>
             <Text style={[styles.assistantFootnote, isDarkMode && styles.darkMutedText]}>Powered by your secure Gemini backend.</Text>
           </View>
         </View>
@@ -756,7 +744,7 @@ export default function InsightsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const themedStyles = createThemedStyles({
   screen: { flex: 1, backgroundColor: '#F5F4F9' }, darkScreen: { backgroundColor: '#111018' },
   content: { flexGrow: 1, paddingBottom: 110 },
   container: { flex: 1, paddingHorizontal: 18, paddingTop: 8 },
@@ -773,6 +761,8 @@ const styles = StyleSheet.create({
   segmentActive: { backgroundColor: '#5B42D8' },
   segmentText: { fontSize: 13, color: '#777283', fontWeight: '700' },
   segmentTextActive: { color: '#FFFFFF' },
+  darkSegmentedControl: { backgroundColor: '#1F1B28', borderColor: '#302B3B' },
+  darkSegmentText: { color: '#AAA4B7' },
   darkCard: { backgroundColor: '#1B1823' },
   darkHeroCard: { backgroundColor: '#30215A' },
   darkPrimaryText: { color: '#F7F4FF' },

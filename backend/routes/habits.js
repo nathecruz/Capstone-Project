@@ -40,7 +40,7 @@ export default function registerHabitRoutes(app) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-ML-Service-Key': config.ml.key },
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(config.timeoutMs),
+        signal: AbortSignal.timeout(config.ml.timeoutMs),
       });
       if (!result.ok) throw new Error('ML service returned a non-OK response.');
       response.json(await result.json());

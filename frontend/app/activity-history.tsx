@@ -2,11 +2,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 export default function ActivityHistoryScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   const { isDarkMode, habits } = useAppColorScheme();
   const [rangeDays, setRangeDays] = useState(7);
   const [showActiveDaysOnly, setShowActiveDaysOnly] = useState(false);
@@ -43,7 +46,7 @@ export default function ActivityHistoryScreen() {
           <View style={styles.container}>
             <View style={styles.headerRow}>
               <Pressable style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back">
-                <Ionicons name="chevron-back" size={21} color="#292633" />
+                <Ionicons name="chevron-back" size={21} color={themeColor('#292633')} />
               </Pressable>
               <Text style={styles.headerTitle}>Activity History</Text>
               <Pressable style={[styles.filterButton, isDarkMode && styles.darkCard]} onPress={() => setSettingsVisible(true)} accessibilityLabel="Open activity history settings">
@@ -55,14 +58,14 @@ export default function ActivityHistoryScreen() {
               {[7, 30].map((days) => <Pressable key={days} style={[styles.rangeOption, rangeDays === days && styles.rangeOptionActive]} onPress={() => setRangeDays(days)} accessibilityRole="button"><Text style={[styles.rangeOptionText, isDarkMode && styles.darkMutedText, rangeDays === days && styles.rangeOptionTextActive]}>{days} days</Text></Pressable>)}
             </View>
             <View style={styles.rangeRow}>
-              <Ionicons name="calendar-outline" size={14} color="#716B7C" />
+              <Ionicons name="calendar-outline" size={14} color={themeColor('#716B7C')} />
               <Text style={styles.rangeText}>{rangeLabel}</Text>
             </View>
 
             <View style={[styles.searchBox, isDarkMode && styles.darkCard]}>
-              <Ionicons name="search-outline" size={17} color="#8B8496" />
-              <TextInput value={search} onChangeText={setSearch} placeholder="Search your activity..." placeholderTextColor="#9A94A4" style={[styles.searchInput, isDarkMode && styles.darkText]} accessibilityLabel="Search activity history" />
-              {search.length > 0 && <Pressable onPress={() => setSearch('')} accessibilityLabel="Clear activity search"><Ionicons name="close-circle" size={18} color="#8B8496" /></Pressable>}
+              <Ionicons name="search-outline" size={17} color={themeColor('#8B8496')} />
+              <TextInput value={search} onChangeText={setSearch} placeholder="Search your activity..." placeholderTextColor={themeColor('#9A94A4')} style={[styles.searchInput, isDarkMode && styles.darkText]} accessibilityLabel="Search activity history" />
+              {search.length > 0 && <Pressable onPress={() => setSearch('')} accessibilityLabel="Clear activity search"><Ionicons name="close-circle" size={18} color={themeColor('#8B8496')} /></Pressable>}
             </View>
             {normalizedSearch ? <Text style={[styles.resultText, isDarkMode && styles.darkMutedText]}>{activityEntries.length} matching completion{activityEntries.length === 1 ? '' : 's'}</Text> : null}
 
@@ -97,7 +100,7 @@ export default function ActivityHistoryScreen() {
                     <Ionicons name={habit.icon} size={17} color={habit.color} />
                   </View>
                   <View style={styles.activityCopy}><Text style={styles.activityTitle}>{habit.label}</Text><Text style={styles.activityDate}>{new Date(`${dateKey}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text></View>
-                  <Ionicons name="checkmark-circle" size={17} color="#48A66A" />
+                  <Ionicons name="checkmark-circle" size={17} color={themeColor('#48A66A')} />
                 </Pressable>
               )) : <Text style={styles.emptyText}>Complete a habit to build your activity history.</Text>}
             </View>
@@ -109,7 +112,7 @@ export default function ActivityHistoryScreen() {
           <View style={[styles.settingsSheet, isDarkMode && styles.darkCard]}>
             <View style={styles.sheetHeader}>
               <View><Text style={[styles.sheetEyebrow, isDarkMode && styles.darkMutedText]}>ACTIVITY HISTORY</Text><Text style={[styles.sheetTitle, isDarkMode && styles.darkText]}>History Settings</Text></View>
-              <Pressable style={styles.closeButton} onPress={() => setSettingsVisible(false)} accessibilityLabel="Close activity history settings"><Ionicons name="close" size={20} color="#655E75" /></Pressable>
+              <Pressable style={styles.closeButton} onPress={() => setSettingsVisible(false)} accessibilityLabel="Close activity history settings"><Ionicons name="close" size={20} color={themeColor('#655E75')} /></Pressable>
             </View>
             <Text style={[styles.settingLabel, isDarkMode && styles.darkMutedText]}>DATE RANGE</Text>
             <View style={styles.sheetRangeRow}>{[7, 30].map((days) => <Pressable key={days} style={[styles.sheetRangeOption, rangeDays === days && styles.sheetRangeOptionActive]} onPress={() => setRangeDays(days)}><Text style={[styles.sheetRangeText, rangeDays === days && styles.sheetRangeTextActive]}>{days} days</Text></Pressable>)}</View>
@@ -129,7 +132,7 @@ export default function ActivityHistoryScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const themedStyles = createThemedStyles({
   screen: { flex: 1, backgroundColor: '#F5F4F9', paddingTop: 35 }, darkScreen: { backgroundColor: '#111018' },
   darkText: { color: '#F2EFF8' },
   content: { paddingBottom: 110 },

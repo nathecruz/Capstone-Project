@@ -12,6 +12,7 @@
 import crypto from 'node:crypto';
 import { config } from '../config/index.js';
 import { query, withTransaction } from '../db/client.js';
+import { runAll } from '../db/run-all.js';
 import { sameState } from './app-state-sync.js';
 import { getDateKeyInTimeZone } from './completion-date.js';
 import { computeStreak } from './streaks.js';
@@ -91,7 +92,7 @@ export async function getCanonicalHabits(userId) {
 
 /** The state as the app should see it: server check-ins, streaks, points and tokens applied. */
 export async function buildServerState(userId, state, runner = { query }) {
-  const [completions, wallet] = await Promise.all([getServerCompletions(userId, runner), getWallet(runner, userId)]);
+  const [completions, wallet] = await runAll(runner, [() => getServerCompletions(userId, runner), () => getWallet(runner, userId)]);
   const byHabit = completionsByHabit(completions);
   const habits = (Array.isArray(state?.habits) ? state.habits : []).map((habit) => withServerProgress(habit, byHabit.get(String(habit.id)) || []));
   return applyWallet({ ...state, habits }, wallet);

@@ -3,12 +3,13 @@ import DateTimePicker, { type DateTimePickerChangeEvent } from '@react-native-co
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Image, Modal, Platform, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { updateAuthenticatedProfile } from '@/authentication';
 import { type Profile, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { joinName } from '@/utils/names';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 const formatDateOfBirth = (date: Date) => date.toLocaleDateString('en-US', {
   month: 'long',
@@ -33,6 +34,8 @@ const detailFields: { key: keyof Profile; label: string; icon: keyof typeof Ioni
 const genderOptions = ['Female', 'Male', 'Non-binary', 'Prefer not to say'];
 
 export default function PersonalInformationScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   const showAlert = useAppDialog();
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
@@ -146,16 +149,16 @@ export default function PersonalInformationScreen() {
             <Pressable style={styles.avatarPressable} onPress={openAvatarActions} accessibilityLabel="Change profile picture">
               <View style={styles.avatarRing}>
                 <View style={styles.avatarCircle}>
-                  {avatarImage ? <Image source={{ uri: avatarImage }} style={styles.avatarImage} /> : <Text style={styles.avatarEmoji}>A</Text>}
+                  {avatarImage ? <Image source={{ uri: avatarImage }} style={styles.avatarImage} /> : <Text style={styles.avatarEmoji}>{(profile.firstName || profile.fullName || 'H').trim().charAt(0).toUpperCase()}</Text>}
                 </View>
               </View>
               <View style={styles.cameraBadge}>
-                <Ionicons name="camera" size={15} color="#FFFFFF" />
+                <Ionicons name="camera" size={15} color={themeColor('#FFFFFF')} />
               </View>
             </Pressable>
             <Text style={[styles.name, isDarkMode && styles.darkText]}>{profile.fullName}</Text>
             <View style={styles.verifiedPill}>
-              <Ionicons name="checkmark-circle" size={17} color="#2879D8" />
+              <Ionicons name="checkmark-circle" size={17} color={themeColor('#2879D8')} />
               <Text style={styles.verifiedText}>{profile.fullName && profile.email ? 'Profile complete' : 'Complete your profile'}</Text>
             </View>
             </View>
@@ -166,13 +169,13 @@ export default function PersonalInformationScreen() {
               <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>Personal details</Text>
               <Text style={[styles.sectionSubtitle, isDarkMode && styles.darkSecondaryText]}>Your information at a glance</Text>
             </View>
-            <Ionicons name="shield-checkmark-outline" size={20} color="#5B42D8" />
+            <Ionicons name="shield-checkmark-outline" size={20} color={themeColor('#5B42D8')} />
           </View>
           <View style={[styles.detailsCard, isDarkMode && styles.darkCard]}>
             {detailFields.map((detail, index) => (
               <View key={detail.label} style={[styles.detailRow, index < detailFields.length - 1 && styles.detailBorder]}>
                 <View style={styles.detailIcon}>
-                  <Ionicons name={detail.icon as keyof typeof Ionicons.glyphMap} size={22} color="#5B42D8" />
+                  <Ionicons name={detail.icon as keyof typeof Ionicons.glyphMap} size={22} color={themeColor('#5B42D8')} />
                 </View>
                 <View style={styles.detailCopy}>
                   <Text style={styles.detailLabel}>{detail.label}</Text>
@@ -182,7 +185,7 @@ export default function PersonalInformationScreen() {
             ))}
             <View style={styles.detailRow}>
               <View style={styles.detailIcon}>
-                <Ionicons name="time-outline" size={22} color="#5B42D8" />
+                <Ionicons name="time-outline" size={22} color={themeColor('#5B42D8')} />
               </View>
               <View style={styles.detailCopy}>
                 <Text style={styles.detailLabel}>Time Management</Text>
@@ -193,7 +196,7 @@ export default function PersonalInformationScreen() {
 
           <View style={[styles.aboutCard, isDarkMode && styles.darkCard]}>
             <View style={styles.aboutIcon}>
-              <Ionicons name="person" size={23} color="#5B42D8" />
+              <Ionicons name="person" size={23} color={themeColor('#5B42D8')} />
             </View>
             <View style={styles.aboutCopy}>
               <Text style={styles.aboutLabel}>About Me</Text>
@@ -202,7 +205,7 @@ export default function PersonalInformationScreen() {
           </View>
 
           <Pressable style={({ pressed }) => [styles.editButton, pressed && styles.editButtonPressed]} onPress={startEditing}>
-            <Ionicons name="create-outline" size={16} color="#FFFFFF" />
+            <Ionicons name="create-outline" size={16} color={themeColor('#FFFFFF')} />
             <Text style={styles.editButtonText}>Edit Profile</Text>
           </Pressable>
         </View>
@@ -284,7 +287,7 @@ export default function PersonalInformationScreen() {
                   <Text style={[styles.cancelButtonText, isDarkMode && styles.darkText]}>Cancel</Text>
                 </Pressable>
                 <Pressable style={styles.saveButton} onPress={saveProfile}>
-                  <Ionicons name="checkmark" size={17} color="#FFFFFF" />
+                  <Ionicons name="checkmark" size={17} color={themeColor('#FFFFFF')} />
                   <Text style={styles.editButtonText}>Save Changes</Text>
                 </Pressable>
               </View>
@@ -305,7 +308,7 @@ export default function PersonalInformationScreen() {
             {genderOptions.map((gender) => (
               <Pressable key={gender} style={[styles.genderOption, isDarkMode && styles.darkGenderOption]} onPress={() => chooseGender(gender)}>
                 <Text style={[styles.genderOptionText, isDarkMode && styles.darkText]}>{gender}</Text>
-                {draftProfile.gender === gender && <Ionicons name="checkmark-circle" size={22} color="#5B42D8" />}
+                {draftProfile.gender === gender && <Ionicons name="checkmark-circle" size={22} color={themeColor('#5B42D8')} />}
               </Pressable>
             ))}
           </View>
@@ -316,7 +319,7 @@ export default function PersonalInformationScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const themedStyles = createThemedStyles({
   screen: { flex: 1, backgroundColor: '#F5F4F9', paddingTop: 16 }, darkScreen: { backgroundColor: '#111018' },
   content: { paddingBottom: 110, paddingTop: 4 },
   container: { width: '100%', maxWidth: 680, alignSelf: 'center' },
@@ -335,7 +338,7 @@ const styles = StyleSheet.create({
   avatarPressable: { position: 'relative', marginBottom: 10 },
   avatarRing: { width: 106, height: 106, borderRadius: 53, backgroundColor: '#BDA5EF', borderWidth: 4, borderColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', shadowColor: '#5B42D8', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.18, shadowRadius: 8, elevation: 4 },
   avatarCircle: { width: 88, height: 88, borderRadius: 44, backgroundColor: '#F3DAD5', alignItems: 'center', justifyContent: 'center' },
-  avatarEmoji: { fontSize: 48 },
+  avatarEmoji: { fontSize: 48, fontWeight: '800', color: '#5B42D8' },
   avatarImage: { width: '100%', height: '100%', borderRadius: 44 },
   cameraBadge: { position: 'absolute', right: -1, bottom: 0, width: 34, height: 34, borderRadius: 17, backgroundColor: '#5B42D8', borderWidth: 2, borderColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
   name: { fontSize: 22, fontWeight: '800', color: '#24212D', marginBottom: 7 },

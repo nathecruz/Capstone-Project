@@ -2,12 +2,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { Animated, Pressable, ScrollView, Share, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 export default function SyncActivityScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   const { habits, preferences, profile, syncAppState } = useAppColorScheme();
   const showAlert = useAppDialog();
   const [syncing, setSyncing] = useState(false);
@@ -93,7 +96,7 @@ export default function SyncActivityScreen() {
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.container}>
             <View style={styles.headerRow}>
-              <Pressable style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back"><Ionicons name="chevron-back" size={21} color="#292633" /></Pressable>
+              <Pressable style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back"><Ionicons name="chevron-back" size={21} color={themeColor('#292633')} /></Pressable>
               <Text style={styles.headerTitle}>Sync Activity</Text>
               <View style={styles.headerSpacer} />
             </View>
@@ -118,19 +121,19 @@ export default function SyncActivityScreen() {
                 const itemComplete = progress >= (index + 1) * (100 / syncItems.length);
                 const itemActive = !itemComplete && progress >= index * (100 / syncItems.length);
                 const itemSubtitle = itemComplete ? item.detail : itemActive && syncing ? 'Preparing...' : 'Waiting...';
-                const itemColor = itemComplete ? '#48A66A' : itemActive ? '#5B42D8' : '#8B8495';
+                const itemColor = themeColor(itemComplete ? '#48A66A' : itemActive ? '#5B42D8' : '#8B8495');
                 return (
                 <View key={item.title} style={[styles.syncRow, index < syncItems.length - 1 && styles.rowBorder]}>
                   <View style={[styles.itemIcon, { backgroundColor: `${itemColor}20` }]}><Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={17} color={itemColor} /></View>
                   <View style={styles.itemCopy}><Text style={styles.itemTitle}>{item.title}</Text><Text style={[styles.itemSubtitle, { color: itemColor }]}>{itemSubtitle}</Text></View>
-                  {itemComplete ? <View style={styles.doneIcon}><Ionicons name="checkmark" size={13} color="#FFFFFF" /></View> : itemActive && syncing ? <View style={styles.spinner}><Ionicons name="sync-outline" size={16} color="#5B42D8" /></View> : <Ionicons name="time-outline" size={18} color="#B1ABB8" />}
+                  {itemComplete ? <View style={styles.doneIcon}><Ionicons name="checkmark" size={13} color={themeColor('#FFFFFF')} /></View> : itemActive && syncing ? <View style={styles.spinner}><Ionicons name="sync-outline" size={16} color={themeColor('#5B42D8')} /></View> : <Ionicons name="time-outline" size={18} color={themeColor('#B1ABB8')} />}
                 </View>
                 );
               })}
             </View>
 
-            <View style={styles.tipCard}><Ionicons name="information-circle" size={18} color="#5B42D8" /><Text style={styles.tipText}>Keep the app open on both devices for a successful sync.</Text></View>
-            <Pressable style={styles.syncButton} onPress={syncNow}><Ionicons name="sync-outline" size={17} color="#FFFFFF" /><Text style={styles.buttonText}>{syncing ? 'Syncing...' : progress >= 100 ? 'Sync Again' : 'Start Sync'}</Text></Pressable>
+            <View style={styles.tipCard}><Ionicons name="information-circle" size={18} color={themeColor('#5B42D8')} /><Text style={styles.tipText}>Keep the app open on both devices for a successful sync.</Text></View>
+            <Pressable style={styles.syncButton} onPress={syncNow}><Ionicons name="sync-outline" size={17} color={themeColor('#FFFFFF')} /><Text style={styles.buttonText}>{syncing ? 'Syncing...' : progress >= 100 ? 'Sync Again' : 'Start Sync'}</Text></Pressable>
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -138,7 +141,7 @@ export default function SyncActivityScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const themedStyles = createThemedStyles({
   screen: { flex: 1, backgroundColor: '#F5F4F9', paddingTop: 35 },
   content: { paddingBottom: 110 },
   container: { width: '100%', maxWidth: 680, alignSelf: 'center', paddingHorizontal: 20 },

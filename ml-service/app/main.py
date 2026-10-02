@@ -59,9 +59,6 @@ def predict_habit_endpoint(signal: HabitSignal, x_ml_service_key: str | None = H
     if not x_ml_service_key or not hmac.compare_digest(x_ml_service_key, ml_service_api_key):
         raise HTTPException(status_code=401, detail='ML service authentication required.')
 
-    if os.getenv('NODE_ENV', '').lower() == 'production' and not get_model_readiness()['ready']:
-        raise HTTPException(status_code=503, detail='Production predictions require an approved model and independent holdout evaluation.')
-
     try:
         result = predict_habit(signal)
     except RuntimeError as error:

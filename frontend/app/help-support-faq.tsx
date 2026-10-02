@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 const faqList = [
   {
@@ -54,6 +55,8 @@ const faqList = [
 ];
 
 export default function HelpSupportFaqScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   const { isDarkMode } = useAppColorScheme();
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
@@ -77,11 +80,11 @@ export default function HelpSupportFaqScreen() {
         <View style={[styles.container, { paddingHorizontal: compactLayout ? 12 : 20 }]}>
           <View style={styles.headerRow}>
             <Pressable style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back">
-              <Ionicons name="chevron-back" size={22} color="#1F1F29" />
+              <Ionicons name="chevron-back" size={22} color={themeColor('#1F1F29')} />
             </Pressable>
               <Text style={[styles.headerTitle, isDarkMode && styles.darkText]}>FAQ</Text>
             <View style={styles.headerAction}>
-              <Ionicons name="help-circle" size={20} color="#5B42D8" />
+              <Ionicons name="help-circle" size={20} color={themeColor('#5B42D8')} />
             </View>
           </View>
 
@@ -91,17 +94,17 @@ export default function HelpSupportFaqScreen() {
           </View>
 
           <View style={styles.searchBox}>
-            <Ionicons name="search-outline" size={18} color="#8A8492" />
+            <Ionicons name="search-outline" size={18} color={themeColor('#8A8492')} />
               <TextInput
               value={search}
               onChangeText={setSearch}
               placeholder="Search question..."
-              placeholderTextColor="#9A94A4"
+              placeholderTextColor={themeColor('#9A94A4')}
               style={[styles.searchInput, isDarkMode && styles.darkText]}
             />
             {search.length > 0 && (
               <Pressable onPress={() => setSearch('')} accessibilityLabel="Clear search">
-                <Ionicons name="close-circle" size={17} color="#9A94A4" />
+                <Ionicons name="close-circle" size={17} color={themeColor('#9A94A4')} />
               </Pressable>
             )}
           </View>
@@ -113,13 +116,13 @@ export default function HelpSupportFaqScreen() {
                 <View key={section.title} style={[styles.faqCard, isDarkMode && styles.darkCard]}>
                   <Pressable style={styles.faqHeader} onPress={() => setOpenSection(isOpen ? '' : section.title)}>
                     <View style={styles.faqIconWrap}>
-                      <Ionicons name={section.icon as keyof typeof Ionicons.glyphMap} size={18} color="#5B42D8" />
+                      <Ionicons name={section.icon as keyof typeof Ionicons.glyphMap} size={18} color={themeColor('#5B42D8')} />
                     </View>
 
                     <Text style={[styles.faqTitle, isDarkMode && styles.darkText]}>{section.title}</Text>
 
                     <View style={styles.toggleWrap}>
-                      <Ionicons name={isOpen ? 'remove' : 'add'} size={18} color="#2A2A33" />
+                      <Ionicons name={isOpen ? 'remove' : 'add'} size={18} color={themeColor('#2A2A33')} />
                     </View>
                   </Pressable>
 
@@ -127,9 +130,9 @@ export default function HelpSupportFaqScreen() {
                     <View style={styles.answerList}>
                       {section.items.map((item) => (
                         <Pressable key={item.question} style={styles.answerRow} onPress={() => setOpenQuestion(openQuestion === item.question ? null : item.question)}>
-                          <Ionicons name="checkmark-circle" size={14} color="#6A4AE4" />
+                          <Ionicons name="checkmark-circle" size={14} color={themeColor('#6A4AE4')} />
                           <View style={styles.answerCopy}><Text style={[styles.answerText, isDarkMode && styles.darkMutedText]}>{item.question}</Text>{openQuestion === item.question && <Text style={[styles.answerDetail, isDarkMode && styles.darkMutedText]}>{item.answer}</Text>}</View>
-                          <Ionicons name={openQuestion === item.question ? 'chevron-up' : 'chevron-down'} size={15} color="#8A8492" />
+                          <Ionicons name={openQuestion === item.question ? 'chevron-up' : 'chevron-down'} size={15} color={themeColor('#8A8492')} />
                         </Pressable>
                       ))}
                     </View>
@@ -144,7 +147,7 @@ export default function HelpSupportFaqScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const themedStyles = createThemedStyles({
   screen: {
     flex: 1,
     backgroundColor: '#F3F2F7',

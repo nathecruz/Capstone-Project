@@ -66,7 +66,7 @@ export default function registerAuthRoutes(app) {
     };
     const now = Date.now();
     const mustVerify = verificationEnabled();
-    if (!mustVerify) console.warn('[auth] email verification skipped for a new account: SMTP is not configured or REQUIRE_EMAIL_VERIFICATION=false.');
+    if (!mustVerify) console.warn('[auth] email verification skipped for a new account: email is not configured or REQUIRE_EMAIL_VERIFICATION=false.');
     user.emailVerifiedAt = mustVerify ? null : now;
     user.privacyConsentAt = now;
     await withTransaction(async (db) => {
@@ -77,9 +77,14 @@ export default function registerAuthRoutes(app) {
       await db.query('INSERT INTO login_activity (id,user_id,device,created_at) VALUES ($1,$2,$3,$4)', [crypto.randomUUID(), user.id, deviceLabel(input, request), now]);
     });
     const verification = mustVerify ? await sendVerificationCode(user, { respectCooldown: false }) : null;
+    const createdMessage = !mustVerify
+      ? 'Account created successfully.'
+      : verification?.sent
+        ? 'Account created. Enter the code we emailed you to confirm your address.'
+        : 'Account created, but we could not send the confirmation email yet. On the next screen, tap Resend code.';
     response.status(201).json({
       ok: true,
-      message: mustVerify ? 'Account created. Enter the code we emailed you to confirm your address.' : 'Account created successfully.',
+      message: createdMessage,
       token: await createSession(user.id),
       user: userFromRow(user),
       verification,
@@ -160,10 +165,15 @@ export default function registerAuthRoutes(app) {
       [names.fullName, input.username, emailAddress, input.dateOfBirth, input.gender, input.about, session.userId, reverify, names.firstName, names.lastName],
     );
     const user = await findUser(emailAddress);
-    if (reverify) await sendVerificationCode(user, { respectCooldown: false });
+    const verification = reverify ? await sendVerificationCode(user, { respectCooldown: false }) : null;
+    const updatedMessage = !reverify
+      ? 'Profile updated successfully.'
+      : verification.sent
+        ? 'Profile updated. Enter the code we sent to your new email address to confirm it.'
+        : 'Profile updated, but we could not send the confirmation email yet. Tap Resend code to try again.';
     response.json({
       ok: true,
-      message: reverify ? 'Profile updated. Enter the code we sent to your new email address to confirm it.' : 'Profile updated successfully.',
+      message: updatedMessage,
       user: userFromRow(user),
     });
   });

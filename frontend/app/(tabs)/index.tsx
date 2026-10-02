@@ -2,11 +2,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React from 'react';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Image, Modal, Platform, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { greetingFor } from '@/utils/greeting';
 import { filterHabitsByStatus } from '@/utils/habit-data';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 const popularHabits = ['Drink Water', 'Exercise / Workout', 'Read a Book', 'Sleep Early', 'Meditate', 'Eat Healthy'];
 const quickRepeatOptions = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -26,6 +28,8 @@ function displayDate(value: string) {
 }
 
 export default function HomeScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   const showAlert = useAppDialog();
   const { isDarkMode, avatarImage, habits, profile, addHabit: createHabit } = useAppColorScheme();
   const insets = useSafeAreaInsets();
@@ -33,11 +37,18 @@ export default function HomeScreen() {
   const compact = width < 370;
   const contentPadding = Math.max(16, Math.min(28, width * 0.07));
   const characterSize = Math.min(170, Math.max(132, width * 0.42));
+  const [now, setNow] = React.useState(() => new Date());
   const [quickAddVisible, setQuickAddVisible] = React.useState(false);
   const [quickHabitName, setQuickHabitName] = React.useState('');
   const [quickCategory, setQuickCategory] = React.useState('Health');
   const [quickFrequency, setQuickFrequency] = React.useState('Daily');
   const [quickStartDate, setQuickStartDate] = React.useState(() => formatDate(new Date()));
+  React.useEffect(() => {
+    // Keeps the greeting right when the app stays open across morning, afternoon and evening.
+    const clock = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(clock);
+  }, []);
+  const greeting = greetingFor(now);
   const [quickStartDatePickerVisible, setQuickStartDatePickerVisible] = React.useState(false);
   const [quickCustomFrequency, setQuickCustomFrequency] = React.useState('Every week');
   const [quickRepeatDays, setQuickRepeatDays] = React.useState(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
@@ -119,7 +130,7 @@ export default function HomeScreen() {
 
           <View style={[styles.heroHeader, { paddingHorizontal: contentPadding }]}>
             <View style={styles.heroSection}>
-              <Text style={[styles.greeting, isDarkMode && styles.darkGreeting]}>{profile.firstName || profile.fullName ? `Good morning, ${profile.firstName || profile.fullName.split(' ')[0]}!` : 'Good morning!'}</Text>
+              <Text style={[styles.greeting, isDarkMode && styles.darkGreeting]}>{profile.firstName || profile.fullName ? `${greeting}, ${profile.firstName || profile.fullName.split(' ')[0]}!` : `${greeting}!`}</Text>
               <Text style={[styles.titleText, compact && styles.compactTitle, isDarkMode && styles.darkTitleText]}>{'Small Habits,\nBig Progress.'}</Text>
               <Text style={[styles.subtitleText, isDarkMode && styles.darkSubtitleText]}>{'Every habit you build today\nshapes your better tomorrow.'}</Text>
             </View>
@@ -138,7 +149,7 @@ export default function HomeScreen() {
                 onPress={() => router.push('/notifications')}
                 hitSlop={8}
               >
-                <Ionicons name="notifications-outline" size={18} color="#1d1d1d" />
+                <Ionicons name="notifications-outline" size={18} color={themeColor('#1d1d1d')} />
               </Pressable>
             </View>
           </View>
@@ -173,7 +184,7 @@ export default function HomeScreen() {
                 <View key={habit.id} style={styles.habitRow}>
                   <View style={styles.habitMeta}>
                     <View style={styles.habitIconWrap}>
-                      <Ionicons name={habit.icon as keyof typeof Ionicons.glyphMap} size={18} color="#5b42d8" />
+                      <Ionicons name={habit.icon as keyof typeof Ionicons.glyphMap} size={18} color={themeColor('#5b42d8')} />
                     </View>
                     <Text style={styles.habitLabel}>{habit.label}</Text>
                   </View>
@@ -198,7 +209,7 @@ export default function HomeScreen() {
 
           <Pressable style={styles.progressLink} onPress={() => router.push('/progress')} accessibilityRole="button" accessibilityLabel="View habit progress">
             <Text style={styles.progressLinkText}>View Progress</Text>
-            <Ionicons name="arrow-forward" size={16} color="#4f2ac8" />
+            <Ionicons name="arrow-forward" size={16} color={themeColor('#4f2ac8')} />
           </Pressable>
         </View>
       </View>
@@ -220,15 +231,15 @@ export default function HomeScreen() {
                 <Ionicons name="close-circle" size={27} color={isDarkMode ? '#AAA4B7' : '#888291'} />
               </Pressable>
               </View>
-            <View style={styles.quickXpRow}><View style={styles.quickXpBadge}><Ionicons name="star" size={17} color="#FFD44D" /></View><Text style={styles.quickXpText}>{completionPercent} / 100 XP</Text><View style={styles.quickXpTrack}><View style={[styles.quickXpFill, { width: `${completionPercent}%` }]} /></View></View>
-            <View style={styles.quickSection}><Text style={styles.quickSectionNumber}>1.</Text><Text style={styles.quickSectionTitle}>Name your habit</Text><TextInput value={quickHabitName} onChangeText={setQuickHabitName} placeholder="e.g. Read 20 pages a day" placeholderTextColor="#928DAA" style={styles.quickNameInput} autoFocus /></View>
-            <View style={styles.quickSection}><Text style={styles.quickSectionNumber}>2.</Text><Text style={styles.quickSectionTitle}>Choose a category</Text><View style={styles.quickCategoryGrid}>{['Health', 'Mind', 'Productivity', 'Lifestyle', 'Study', 'Finance', 'Creativity', 'Others'].map((category) => <Pressable key={category} style={[styles.quickCategoryChoice, quickCategory === category && styles.quickChoiceActive]} onPress={() => setQuickCategory(category)}><Ionicons name={category === 'Health' ? 'heart' : category === 'Mind' ? 'leaf' : category === 'Productivity' ? 'locate' : category === 'Lifestyle' ? 'water' : category === 'Study' ? 'school' : category === 'Finance' ? 'wallet' : category === 'Creativity' ? 'brush' : 'ellipsis-horizontal'} size={18} color={quickCategory === category ? '#FF7BD8' : '#B8B0D8'} /><Text style={[styles.quickChoiceText, quickCategory === category && styles.quickChoiceTextActive]}>{category}</Text></Pressable>)}</View></View>
-            <View style={styles.quickSection}><View style={styles.quickSectionHeading}><Text style={styles.quickSectionNumber}>3.</Text><Text style={styles.quickSectionTitle}>Set reminder</Text><Pressable style={[styles.quickToggle, quickReminder && styles.quickToggleOn]} onPress={() => { if (Platform.OS === 'web') { showAlert('Device reminders need the mobile app', 'Scheduled reminders are available in native iOS and Android builds.'); return; } setQuickReminder(!quickReminder); }} accessibilityRole="switch" accessibilityState={{ checked: quickReminder, disabled: Platform.OS === 'web' }}><View style={[styles.quickToggleKnob, quickReminder && styles.quickToggleKnobOn]} /></Pressable></View><View style={styles.quickReminderRow}><Pressable style={styles.quickTimeButton} onPress={openQuickTimePicker}><Ionicons name="time-outline" size={17} color="#D0C8E9" /><Text style={styles.quickTimeText}>{quickReminderTime}</Text><Ionicons name="chevron-down" size={14} color="#A8A0C5" /></Pressable><Text style={styles.quickReminderHint}>{Platform.OS === 'web' ? 'Requires the mobile app' : quickReminder ? 'Reminder enabled' : 'Tap toggle to enable'}</Text></View></View>
-            <View style={styles.quickSection}><Text style={styles.quickSectionNumber}>4.</Text><Text style={styles.quickSectionTitle}>Frequency</Text><View style={styles.quickFrequencySelect}><Ionicons name={quickFrequency === 'Daily' ? 'sunny-outline' : quickFrequency === 'Weekly' ? 'calendar-outline' : quickFrequency === 'Monthly' ? 'calendar-number-outline' : 'options-outline'} size={17} color="#D0C8E9" /><Text style={styles.quickFrequencySelectText}>{quickFrequency}</Text><Ionicons name="chevron-down" size={14} color="#A8A0C5" /></View><View style={styles.quickChoiceRow}>{quickFrequencies.map((frequency) => <Pressable key={frequency.label} style={[styles.quickFrequencyChoice, quickFrequency === frequency.label && styles.quickChoiceActive]} onPress={() => setQuickFrequency(frequency.label)}><Ionicons name={frequency.icon as keyof typeof Ionicons.glyphMap} size={19} color={quickFrequency === frequency.label ? '#FFFFFF' : '#B8B0D8'} /><Text style={[styles.quickChoiceText, quickFrequency === frequency.label && styles.quickChoiceTextActive]}>{frequency.label}</Text></Pressable>)}</View>{quickFrequency === 'Custom' && <View style={styles.quickCustomFrequencyCard}><Text style={styles.quickCustomFrequencyTitle}>Create your own schedule</Text><TextInput value={quickCustomFrequency} onChangeText={setQuickCustomFrequency} placeholder="e.g., Every 2 weeks" placeholderTextColor="#928DAA" style={styles.quickCustomFrequencyInput} /><Text style={styles.quickCustomFrequencyHint}>Choose the days to repeat.</Text><View style={styles.quickDaysRow}>{quickRepeatOptions.map((day) => <Pressable key={day} style={[styles.quickDayButton, quickRepeatDays.includes(day) && styles.quickDayButtonActive]} onPress={() => setQuickRepeatDays((days) => days.includes(day) ? days.filter((item) => item !== day) : [...days, day])}><Text style={[styles.quickDayText, quickRepeatDays.includes(day) && styles.quickDayTextActive]}>{day}</Text></Pressable>)}</View></View>}</View>
-            <View style={styles.quickSection}><Text style={styles.quickSectionNumber}>5.</Text><Text style={styles.quickSectionTitle}>Start date</Text><Pressable style={styles.quickDateButton} onPress={() => setQuickStartDatePickerVisible(true)}><Ionicons name="calendar-outline" size={17} color="#D0C8E9" /><Text style={styles.quickDateText}>{displayDate(quickStartDate)}</Text><Ionicons name="chevron-down" size={14} color="#A8A0C5" /></Pressable><Text style={styles.quickReminderHint}>Reminders and tracking begin on this date.</Text></View>
+            <View style={styles.quickXpRow}><View style={styles.quickXpBadge}><Ionicons name="star" size={17} color={themeColor('#FFD44D')} /></View><Text style={styles.quickXpText}>{completionPercent} / 100 XP</Text><View style={styles.quickXpTrack}><View style={[styles.quickXpFill, { width: `${completionPercent}%` }]} /></View></View>
+            <View style={styles.quickSection}><Text style={styles.quickSectionNumber}>1.</Text><Text style={styles.quickSectionTitle}>Name your habit</Text><TextInput value={quickHabitName} onChangeText={setQuickHabitName} placeholder="e.g. Read 20 pages a day" placeholderTextColor={themeColor('#928DAA')} style={styles.quickNameInput} autoFocus /></View>
+            <View style={styles.quickSection}><Text style={styles.quickSectionNumber}>2.</Text><Text style={styles.quickSectionTitle}>Choose a category</Text><View style={styles.quickCategoryGrid}>{['Health', 'Mind', 'Productivity', 'Lifestyle', 'Study', 'Finance', 'Creativity', 'Others'].map((category) => <Pressable key={category} style={[styles.quickCategoryChoice, quickCategory === category && styles.quickChoiceActive]} onPress={() => setQuickCategory(category)}><Ionicons name={category === 'Health' ? 'heart' : category === 'Mind' ? 'leaf' : category === 'Productivity' ? 'locate' : category === 'Lifestyle' ? 'water' : category === 'Study' ? 'school' : category === 'Finance' ? 'wallet' : category === 'Creativity' ? 'brush' : 'ellipsis-horizontal'} size={18} color={quickCategory === category ? themeColor('#FF7BD8') : themeColor('#B8B0D8')} /><Text style={[styles.quickChoiceText, quickCategory === category && styles.quickChoiceTextActive]}>{category}</Text></Pressable>)}</View></View>
+            <View style={styles.quickSection}><View style={styles.quickSectionHeading}><Text style={styles.quickSectionNumber}>3.</Text><Text style={styles.quickSectionTitle}>Set reminder</Text><Pressable style={[styles.quickToggle, quickReminder && styles.quickToggleOn]} onPress={() => { if (Platform.OS === 'web') { showAlert('Device reminders need the mobile app', 'Scheduled reminders are available in native iOS and Android builds.'); return; } setQuickReminder(!quickReminder); }} accessibilityRole="switch" accessibilityState={{ checked: quickReminder, disabled: Platform.OS === 'web' }}><View style={[styles.quickToggleKnob, quickReminder && styles.quickToggleKnobOn]} /></Pressable></View><View style={styles.quickReminderRow}><Pressable style={styles.quickTimeButton} onPress={openQuickTimePicker}><Ionicons name="time-outline" size={17} color={themeColor('#D0C8E9')} /><Text style={styles.quickTimeText}>{quickReminderTime}</Text><Ionicons name="chevron-down" size={14} color={themeColor('#A8A0C5')} /></Pressable><Text style={styles.quickReminderHint}>{Platform.OS === 'web' ? 'Requires the mobile app' : quickReminder ? 'Reminder enabled' : 'Tap toggle to enable'}</Text></View></View>
+            <View style={styles.quickSection}><Text style={styles.quickSectionNumber}>4.</Text><Text style={styles.quickSectionTitle}>Frequency</Text><View style={styles.quickFrequencySelect}><Ionicons name={quickFrequency === 'Daily' ? 'sunny-outline' : quickFrequency === 'Weekly' ? 'calendar-outline' : quickFrequency === 'Monthly' ? 'calendar-number-outline' : 'options-outline'} size={17} color={themeColor('#D0C8E9')} /><Text style={styles.quickFrequencySelectText}>{quickFrequency}</Text><Ionicons name="chevron-down" size={14} color={themeColor('#A8A0C5')} /></View><View style={styles.quickChoiceRow}>{quickFrequencies.map((frequency) => <Pressable key={frequency.label} style={[styles.quickFrequencyChoice, quickFrequency === frequency.label && styles.quickChoiceActive]} onPress={() => setQuickFrequency(frequency.label)}><Ionicons name={frequency.icon as keyof typeof Ionicons.glyphMap} size={19} color={quickFrequency === frequency.label ? themeColor('#FFFFFF') : themeColor('#B8B0D8')} /><Text style={[styles.quickChoiceText, quickFrequency === frequency.label && styles.quickChoiceTextActive]}>{frequency.label}</Text></Pressable>)}</View>{quickFrequency === 'Custom' && <View style={styles.quickCustomFrequencyCard}><Text style={styles.quickCustomFrequencyTitle}>Create your own schedule</Text><TextInput value={quickCustomFrequency} onChangeText={setQuickCustomFrequency} placeholder="e.g., Every 2 weeks" placeholderTextColor={themeColor('#928DAA')} style={styles.quickCustomFrequencyInput} /><Text style={styles.quickCustomFrequencyHint}>Choose the days to repeat.</Text><View style={styles.quickDaysRow}>{quickRepeatOptions.map((day) => <Pressable key={day} style={[styles.quickDayButton, quickRepeatDays.includes(day) && styles.quickDayButtonActive]} onPress={() => setQuickRepeatDays((days) => days.includes(day) ? days.filter((item) => item !== day) : [...days, day])}><Text style={[styles.quickDayText, quickRepeatDays.includes(day) && styles.quickDayTextActive]}>{day}</Text></Pressable>)}</View></View>}</View>
+            <View style={styles.quickSection}><Text style={styles.quickSectionNumber}>5.</Text><Text style={styles.quickSectionTitle}>Start date</Text><Pressable style={styles.quickDateButton} onPress={() => setQuickStartDatePickerVisible(true)}><Ionicons name="calendar-outline" size={17} color={themeColor('#D0C8E9')} /><Text style={styles.quickDateText}>{displayDate(quickStartDate)}</Text><Ionicons name="chevron-down" size={14} color={themeColor('#A8A0C5')} /></Pressable><Text style={styles.quickReminderHint}>Reminders and tracking begin on this date.</Text></View>
             {quickStartDatePickerVisible && <DateTimePicker value={new Date(`${quickStartDate}T00:00:00`)} mode="date" minimumDate={new Date()} onChange={(_event, date) => { setQuickStartDatePickerVisible(false); if (date) setQuickStartDate(formatDate(date)); }} />}
-            <View style={styles.quickPopularSection}><View style={styles.quickPopularHeader}><Text style={styles.quickPreviewLabel}>6. Choose from Popular Habits</Text><Pressable onPress={() => { setQuickAddVisible(false); router.push('/all-habits'); }} accessibilityRole="button"><Text style={styles.quickViewAll}>View All</Text></Pressable></View><View style={styles.quickPopularGrid}>{popularHabits.map((habit) => <Pressable key={habit} style={styles.quickPopularItem} onPress={() => setQuickHabitName(habit)}><Text style={styles.quickPopularText}>{habit}</Text><Ionicons name="add-circle-outline" size={17} color="#B8B0D8" /></Pressable>)}</View></View>
-              <Pressable style={styles.quickSaveButton} onPress={submitQuickHabit}><Ionicons name="star" size={19} color="#FFD44D" /><Text style={styles.quickSaveText}>Add Habit &amp; Start My Journey</Text></Pressable>
+            <View style={styles.quickPopularSection}><View style={styles.quickPopularHeader}><Text style={styles.quickPreviewLabel}>6. Choose from Popular Habits</Text><Pressable onPress={() => { setQuickAddVisible(false); router.push('/all-habits'); }} accessibilityRole="button"><Text style={styles.quickViewAll}>View All</Text></Pressable></View><View style={styles.quickPopularGrid}>{popularHabits.map((habit) => <Pressable key={habit} style={styles.quickPopularItem} onPress={() => setQuickHabitName(habit)}><Text style={styles.quickPopularText}>{habit}</Text><Ionicons name="add-circle-outline" size={17} color={themeColor('#B8B0D8')} /></Pressable>)}</View></View>
+              <Pressable style={styles.quickSaveButton} onPress={submitQuickHabit}><Ionicons name="star" size={19} color={themeColor('#FFD44D')} /><Text style={styles.quickSaveText}>Add Habit &amp; Start My Journey</Text></Pressable>
             </ScrollView>
           </View>
         </View>
@@ -240,7 +251,7 @@ export default function HomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const themedStyles = createThemedStyles({
   screen: {
     flex: 1,
     backgroundColor: '#f3f2f8',

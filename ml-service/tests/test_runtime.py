@@ -54,16 +54,26 @@ class MlRuntimeTests(unittest.TestCase):
         self.assertFalse(readiness['ready'])
         self.assertEqual(readiness['reason'], 'production model release approval missing')
 
-    def test_production_prediction_fails_closed_without_approved_evaluation(self):
-        with patch.dict(os.environ, {'NODE_ENV': 'production', 'ML_MODEL_RELEASE_APPROVED': 'false'}):
-            with self.assertRaisesRegex(RuntimeError, 'approved model and independent holdout evaluation'):
-                predict_habit(HabitSignal(habit_name='Reading'))
+    def test_production_prediction_uses_labelled_fallback_without_approved_evaluation(self):
+        signal = HabitSignal(habit_name='Reading', completion_rate=0.8, streak=6, last_7_days=[1, 1, 1, 0, 1, 1, 1])
+        with patch.dict(os.environ, {'NODE_ENV': 'production', 'ML_MODEL_RELEASE_APPROVED': 'false'}),                 patch('app.services.predictor._load_models', side_effect=AssertionError('unapproved model must not be loaded')):
+            result = predict_habit(signal)
+        self.assertTrue(result['is_fallback'])
+        self.assertEqual(result['prediction_source'], 'fallback')
+        self.assertEqual(result['models_used'], ['Deterministic fallback'])
+        self.assertIn('no approved trained model is deployed yet', result['summary'])
+        self.assertGreater(result['completion_probability'], 0.5)
 
-    def test_production_prediction_route_returns_503_until_approved(self):
+    def test_production_prediction_route_answers_with_fallback_until_approved(self):
         with patch.dict(os.environ, {'NODE_ENV': 'production', 'ML_MODEL_RELEASE_APPROVED': 'false'}):
-            with self.assertRaises(HTTPException) as error:
-                predict_habit_endpoint(HabitSignal(habit_name='Reading'), 'test-ml-service-key')
-        self.assertEqual(error.exception.status_code, 503)
+            result = predict_habit_endpoint(HabitSignal(habit_name='Reading'), 'test-ml-service-key')
+        self.assertTrue(result.is_fallback)
+        self.assertEqual(result.prediction_source, 'fallback')
+
+    def test_prediction_route_still_requires_the_service_key(self):
+        with self.assertRaises(HTTPException) as error:
+            predict_habit_endpoint(HabitSignal(habit_name='Reading'), 'wrong-key')
+        self.assertEqual(error.exception.status_code, 401)
 
     def test_production_retraining_requires_anonymized_data_attestation(self):
         with patch.dict(os.environ, {'NODE_ENV': 'production', 'ML_TRAINING_DATASET_APPROVED': 'false'}):

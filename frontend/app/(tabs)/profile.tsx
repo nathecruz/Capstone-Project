@@ -2,12 +2,13 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Image, Modal, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { askAi } from '@/utils/ai-client';
 import type { TranslationKey } from '@/constants/i18n';
 import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 const settings = [
   { key: 'personalInformation', icon: 'person-outline', route: '/personal-information' },
@@ -19,6 +20,8 @@ const settings = [
 ] as const;
 
 export default function ProfileScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   const showAlert = useAppDialog();
   const { isDarkMode, avatarImage, setAvatarImage, habits, goals, profile, points, tokens, applyWallet, t } = useAppColorScheme();
   const { width } = useWindowDimensions();
@@ -29,7 +32,8 @@ export default function ProfileScreen() {
   const level = Math.floor(points / 100) + 1;
   const displayName = profile.fullName?.trim() || 'Zaira Samson';
   const displayUsername = profile.username?.trim() ? `@${profile.username.trim()}` : '@zai';
-  const [avatar, setAvatar] = useState('A');
+  // Without a photo the avatar shows the student's initial.
+  const avatarInitial = (profile.firstName || profile.fullName || 'H').trim().charAt(0).toUpperCase();
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [coachOpen, setCoachOpen] = useState(false);
   const [coachQuestion, setCoachQuestion] = useState('');
@@ -106,7 +110,7 @@ export default function ProfileScreen() {
           <View style={styles.headerRow}>
             <Text style={[styles.headerTitle, isDarkMode && styles.darkText]}>{t('profile')}</Text>
             <Pressable style={styles.headerButton} onPress={() => router.push('/settings-preferences')} accessibilityLabel={t('profileSettings')}>
-              <Ionicons name="options-outline" size={18} color="#3B3548" />
+              <Ionicons name="options-outline" size={18} color={themeColor('#3B3548')} />
             </Pressable>
           </View>
 
@@ -114,24 +118,24 @@ export default function ProfileScreen() {
             <Pressable style={styles.avatarPressable} onPress={openAvatarActions} accessibilityLabel="Change profile picture">
               <View style={styles.avatarRing}>
               <View style={styles.avatarCircle}>
-                  {avatarImage ? <Image source={{ uri: avatarImage }} style={styles.avatarImage} /> : <Text style={styles.avatarEmoji}>{avatar}</Text>}
+                  {avatarImage ? <Image source={{ uri: avatarImage }} style={styles.avatarImage} /> : <Text style={styles.avatarEmoji}>{avatarInitial}</Text>}
               </View>
               </View>
               <View style={styles.cameraBadge}>
-                <Ionicons name="camera" size={12} color="#FFFFFF" />
+                <Ionicons name="camera" size={12} color={themeColor('#FFFFFF')} />
               </View>
             </Pressable>
             <Text style={[styles.name, isDarkMode && styles.darkText]}>{displayName}</Text>
             <Text style={styles.username}>{displayUsername}</Text>
             <View style={styles.levelPill}>
               <Text style={styles.levelText}>Level {level}</Text>
-              <Ionicons name="star" size={11} color="#F2B94B" />
+              <Ionicons name="star" size={11} color={themeColor('#F2B94B')} />
               <Text style={styles.levelText}>{points ? 'Active' : 'Getting started'}</Text>
             </View>
           </View>
 
           <View style={[styles.firstActionCard, isDarkMode && styles.darkCard]}>
-            <View style={styles.firstActionIcon}><Ionicons name={isNewUser ? 'flag-outline' : 'checkmark-circle-outline'} size={21} color="#5B42D8" /></View>
+            <View style={styles.firstActionIcon}><Ionicons name={isNewUser ? 'flag-outline' : 'checkmark-circle-outline'} size={21} color={themeColor('#5B42D8')} /></View>
             <View style={styles.firstActionCopy}>
               <Text style={[styles.firstActionEyebrow, isDarkMode && styles.darkMutedText]}>{isNewUser ? 'YOUR NEXT STEP' : "TODAY'S WIN"}</Text>
               <Text style={[styles.firstActionTitle, isDarkMode && styles.darkText]}>{isNewUser ? 'Build your first growth plan' : completed === 0 ? 'One completed task starts your streak' : 'You are building momentum'}</Text>
@@ -139,7 +143,7 @@ export default function ProfileScreen() {
             </View>
             <Pressable style={styles.firstActionButton} onPress={() => router.push(isNewUser ? '/goals' : '/')} accessibilityRole="button">
               <Text style={styles.firstActionButtonText}>{firstActionLabel}</Text>
-              <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
+              <Ionicons name="arrow-forward" size={15} color={themeColor('#FFFFFF')} />
             </Pressable>
           </View>
 
@@ -152,7 +156,7 @@ export default function ProfileScreen() {
               <Pressable onPress={() => router.push('/goals')} accessibilityRole="button" accessibilityLabel="View all goals">
                 <View style={styles.profileGoalsViewAll}>
                   <Text style={styles.profileGoalsViewAllText}>View all</Text>
-                  <Ionicons name="chevron-forward" size={15} color="#5B42D8" />
+                  <Ionicons name="chevron-forward" size={15} color={themeColor('#5B42D8')} />
                 </View>
               </Pressable>
             </View>
@@ -183,22 +187,22 @@ export default function ProfileScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Create your first goal"
               >
-                <View style={styles.profileGoalsEmptyIcon}><Ionicons name="flag-outline" size={19} color="#5B42D8" /></View>
+                <View style={styles.profileGoalsEmptyIcon}><Ionicons name="flag-outline" size={19} color={themeColor('#5B42D8')} /></View>
                 <Text style={[styles.profileGoalsEmptyText, isDarkMode && styles.darkText]}>Create your first goal</Text>
-                <Ionicons name="chevron-forward" size={17} color="#8C8498" />
+                <Ionicons name="chevron-forward" size={17} color={themeColor('#8C8498')} />
               </Pressable>
             )}
           </View>
 
           <View style={[styles.statsCard, isDarkMode && styles.darkCard]}>
             <View style={styles.statCell}>
-              <Ionicons name="flame" size={17} color="#E68D3D" />
+              <Ionicons name="flame" size={17} color={themeColor('#E68D3D')} />
               <Text style={styles.statValue}>{maxStreak}</Text>
               <Text style={styles.statLabel}>{t('dayStreak')}</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statCell}>
-              <Ionicons name="trophy" size={17} color="#E3A52E" />
+              <Ionicons name="trophy" size={17} color={themeColor('#E3A52E')} />
               <Text style={styles.statValue}>{points}</Text>
               <Text style={styles.statLabel}>{t('totalPoints')}</Text>
             </View>
@@ -220,7 +224,7 @@ export default function ProfileScreen() {
 
           {completed > 0 ? (
             <View style={[styles.dailyWinCard, isDarkMode && styles.darkCard]}>
-              <View style={styles.dailyWinIcon}><Ionicons name="sparkles" size={16} color="#E3A52E" /></View>
+              <View style={styles.dailyWinIcon}><Ionicons name="sparkles" size={16} color={themeColor('#E3A52E')} /></View>
               <View style={styles.dailyWinCopy}>
                 <Text style={[styles.dailyWinTitle, isDarkMode && styles.darkText]}>Daily win unlocked</Text>
                 <Text style={[styles.dailyWinBody, isDarkMode && styles.darkMutedText]}>Every completed task adds points and strengthens your streak.</Text>
@@ -236,7 +240,7 @@ export default function ProfileScreen() {
 
             {points === 0 ? (
               <View style={[styles.leaderboardEmptyCard, isDarkMode && styles.darkCard]}>
-                <View style={styles.leaderboardEmptyIcon}><Ionicons name="trophy-outline" size={20} color="#5B42D8" /></View>
+                <View style={styles.leaderboardEmptyIcon}><Ionicons name="trophy-outline" size={20} color={themeColor('#5B42D8')} /></View>
                 <View style={styles.leaderboardEmptyCopy}>
                   <Text style={[styles.leaderboardEmptyTitle, isDarkMode && styles.darkText]}>Your leaderboard journey starts here</Text>
                   <Text style={[styles.leaderboardEmptyBody, isDarkMode && styles.darkMutedText]}>Complete tasks to earn points and join the leaderboard.</Text>
@@ -276,7 +280,7 @@ export default function ProfileScreen() {
               accessibilityLabel="View leaderboards"
             >
               <Text style={styles.secondaryButtonText}>{t('viewLeaderboards')}</Text>
-              <Ionicons name="chevron-forward" size={16} color="#FFFFFF" />
+              <Ionicons name="chevron-forward" size={16} color={themeColor('#FFFFFF')} />
             </Pressable>
           </View>
 
@@ -326,10 +330,10 @@ export default function ProfileScreen() {
                 onPress={() => router.push(item.route)}
               >
                 <View style={styles.settingIcon}>
-                  <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={17} color="#5B42D8" />
+                  <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={17} color={themeColor('#5B42D8')} />
                 </View>
                 <Text style={styles.settingLabel}>{t(item.key as TranslationKey)}</Text>
-                <Ionicons name="chevron-forward" size={16} color="#A19CAA" />
+                <Ionicons name="chevron-forward" size={16} color={themeColor('#A19CAA')} />
               </Pressable>
             ))}
           </View>
@@ -339,7 +343,7 @@ export default function ProfileScreen() {
         <View style={styles.avatarModalBackdrop}>
           <View style={[styles.avatarModalCard, isDarkMode && styles.darkCard]}>
             <View style={styles.avatarModalIconWrap}>
-              <Ionicons name="information-circle-outline" size={28} color="#5B42D8" />
+              <Ionicons name="information-circle-outline" size={28} color={themeColor('#5B42D8')} />
             </View>
 
             <Text style={[styles.avatarModalTitle, isDarkMode && styles.darkText]}>Profile Picture</Text>
@@ -358,7 +362,7 @@ export default function ProfileScreen() {
                 <Text style={[styles.avatarOptionText, isDarkMode && styles.darkText]}>Take a Photo</Text>
               </Pressable>
 
-              <Pressable style={[styles.avatarOption, styles.primaryOption]} onPress={() => { closeAvatarActions(); setAvatar('A'); setAvatarImage(null); }}>
+              <Pressable style={[styles.avatarOption, styles.primaryOption]} onPress={() => { closeAvatarActions(); setAvatarImage(null); }}>
                 <Text style={[styles.avatarOptionText, isDarkMode && styles.darkText]}>Use default avatar</Text>
               </Pressable>
             </View>
@@ -380,7 +384,7 @@ export default function ProfileScreen() {
             </View>
 
             <View style={styles.coachTokenPill}>
-              <Ionicons name="sparkles" size={14} color="#5B42D8" />
+              <Ionicons name="sparkles" size={14} color={themeColor('#5B42D8')} />
               <Text style={styles.coachTokenText}>{tokens} tokens available</Text>
             </View>
 
@@ -417,7 +421,7 @@ export default function ProfileScreen() {
               disabled={coachLoading}
             >
               <Text style={styles.primaryButtonText}>{coachLoading ? 'Thinking...' : t('askCoach')}</Text>
-              <Ionicons name="sparkles" size={16} color="#FFFFFF" />
+              <Ionicons name="sparkles" size={16} color={themeColor('#FFFFFF')} />
             </Pressable>
           </View>
         </View>
@@ -438,7 +442,7 @@ export default function ProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const themedStyles = createThemedStyles({
   screen: {
     flex: 1,
     backgroundColor: '#F5F4F9',
@@ -610,6 +614,8 @@ const styles = StyleSheet.create({
   },
   avatarEmoji: {
     fontSize: 42,
+    fontWeight: '800',
+    color: '#5B42D8',
   },
   avatarImage: {
     width: '100%',

@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, ScrollView, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getPersistedNotifications, markPersistedNotification } from '@/authentication';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 type NotificationCategory = 'Reminders' | 'Achievements' | 'System';
 type ScreenMode = 'list' | 'empty' | 'settings';
@@ -27,6 +28,8 @@ const tabs: NotificationCategory[] = ['Reminders', 'Achievements', 'System'];
 const settingLabels = ['Notification Settings', 'Reminders', 'Achievements', 'System Updates', 'Quiet Hours'];
 
 export default function NotificationsScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   const { isDarkMode, preferences, updatePreferences } = useAppColorScheme();
   const [activeTab, setActiveTab] = useState<NotificationCategory>('Reminders');
   const [screenMode, setScreenMode] = useState<ScreenMode>('list');
@@ -145,7 +148,7 @@ export default function NotificationsScreen() {
         ) : screenMode === 'empty' ? (
           <View style={styles.emptyStateWrap}>
             <View style={styles.emptyIconWrap}>
-              <Ionicons name="notifications-off-outline" size={32} color="#8a7df8" />
+              <Ionicons name="notifications-off-outline" size={32} color={themeColor('#8a7df8')} />
             </View>
             <Text style={styles.emptyTitle}>All caught up!</Text>
             <Text style={styles.emptyText}>You have no notifications.</Text>
@@ -173,7 +176,7 @@ export default function NotificationsScreen() {
             <View style={styles.filterBar}>
               <Text style={[styles.filterLabel, isDarkMode && styles.darkMutedText]}>Priority</Text>
               <Pressable style={[styles.filterButton, isDarkMode && styles.darkCard]} onPress={() => setUnreadOnly((current) => !current)}>
-                <Ionicons name="filter-outline" size={16} color="#4a4a57" />
+                <Ionicons name="filter-outline" size={16} color={themeColor('#4a4a57')} />
                 <Text style={styles.filterButtonText}>{unreadOnly ? 'Unread' : 'All'}</Text>
               </Pressable>
             </View>
@@ -195,7 +198,7 @@ export default function NotificationsScreen() {
 
             {filteredNotifications.length === 0 ? (
               <View style={styles.emptyStateWrapCompact}>
-                <Ionicons name="notifications-off-outline" size={28} color="#8a7df8" />
+                <Ionicons name="notifications-off-outline" size={28} color={themeColor('#8a7df8')} />
                 <Text style={styles.emptyTitleSmall}>No notifications</Text>
               </View>
             ) : (
@@ -237,7 +240,7 @@ export default function NotificationsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const themedStyles = createThemedStyles({
   screen: {
     flex: 1,
     backgroundColor: '#f3f2f8',

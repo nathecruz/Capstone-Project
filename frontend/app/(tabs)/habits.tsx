@@ -2,15 +2,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
-import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { isHabitMissedYesterday, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { filterHabitsByStatus } from '@/utils/habit-data';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 const tabs = ['All', 'Daily', 'Weekly', 'Monthly', 'Custom'];
 
 export default function HabitsScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   const showAlert = useAppDialog();
   const { isDarkMode, habits: habitList, toggleHabit, deleteHabit, reorderHabits } = useAppColorScheme();
   const [selectedTab, setSelectedTab] = useState('All');
@@ -102,30 +105,30 @@ export default function HabitsScreen() {
                   </View>
                   <Text style={[styles.habitTitle, isDarkMode && styles.darkText]}>{item.label}</Text>
                 </View>
-                <View style={styles.progressPill}>
-                  <Text style={styles.progressPillText}>{item.total}</Text>
+                <View style={[styles.progressPill, isDarkMode && styles.darkProgressPill]}>
+                  <Text style={[styles.progressPillText, isDarkMode && styles.darkProgressPillText]}>{item.total}</Text>
                 </View>
                 <Pressable
-                  style={styles.deleteButton}
+                  style={[styles.deleteButton, isDarkMode && styles.darkDeleteButton]}
                   onPress={() => showAlert('Delete habit?', `Remove ${item.label} from your habits?`, [
                     { text: 'Cancel', style: 'cancel' },
                     { text: 'Delete', style: 'destructive', onPress: () => deleteHabit(item.id) },
                   ])}
                   accessibilityLabel={`Delete ${item.label}`}
                 >
-                  <Ionicons name="trash-outline" size={17} color="#D45A68" />
+                  <Ionicons name="trash-outline" size={17} color={themeColor('#D45A68')} />
                 </Pressable>
               </View>
 
               <View style={styles.metaRow}>
                 <Text style={[styles.metaText, isDarkMode && styles.darkMutedText]}>{isHabitMissedYesterday(item, currentTime) ? 'MISSED YESTERDAY · ' : ''}{item.meta}</Text>
                 <View style={styles.streakRow}>
-                  <Ionicons name="flame-outline" size={12} color="#F29A3D" />
+                  <Ionicons name="flame-outline" size={12} color={themeColor('#F29A3D')} />
                   <Text style={[styles.streakText, isDarkMode && styles.darkText]}>{item.streak}</Text>
                 </View>
               </View>
 
-              <View style={styles.progressTrack}>
+              <View style={[styles.progressTrack, isDarkMode && styles.darkProgressTrack]}>
                 <View
                   style={[
                     styles.progressFill,
@@ -140,14 +143,16 @@ export default function HabitsScreen() {
               <View style={styles.progressPercentRow}>
                 <Text style={[styles.progressPercent, isDarkMode && styles.darkMutedText]}>{item.progress}%</Text>
                 <Pressable
-                  style={[styles.checkButton, item.done ? styles.checkButtonDone : styles.checkButtonEmpty]}
+                  style={[styles.checkButton, item.done ? styles.checkButtonDone : [styles.checkButtonEmpty, isDarkMode && styles.darkCheckButtonEmpty]]}
                   onPress={() => {
                     toggleHabit(item.id);
                     setFilterMode('active');
                   }}
+                  accessibilityRole="checkbox"
+                  accessibilityLabel={`${item.label} done today`}
                   accessibilityState={{ checked: item.done }}
                 >
-                  {item.done ? <Ionicons name="checkmark" size={18} color="#FFFFFF" /> : null}
+                  {item.done ? <Ionicons name="checkmark" size={18} color={themeColor('#FFFFFF')} /> : null}
                 </Pressable>
               </View>
             </Pressable>
@@ -156,11 +161,11 @@ export default function HabitsScreen() {
         ListEmptyComponent={
           <View style={[styles.emptyState, isDarkMode && styles.darkCard]}>
             <View style={styles.emptyIconWrap}>
-              <Ionicons name="leaf-outline" size={28} color="#5B42D8" />
+              <Ionicons name="leaf-outline" size={28} color={themeColor('#5B42D8')} />
             </View>
             <Text style={[styles.emptyTitle, isDarkMode && styles.darkText]}>{search.trim() ? 'No matching habits' : 'No habits here yet'}</Text>
             <Text style={[styles.emptyText, isDarkMode && styles.darkMutedText]}>{search.trim() ? `Nothing matched "${search.trim()}". Try another habit name, schedule, or reminder time.` : 'Start with one small habit and build your rhythm from there.'}</Text>
-            {search.trim() ? <Pressable style={styles.emptyButton} onPress={() => setSearch('')}><Ionicons name="close-circle-outline" size={17} color="#FFFFFF" /><Text style={styles.primaryButtonText}>Clear Search</Text></Pressable> : <Pressable style={styles.emptyButton} onPress={() => router.push('/add')}><Ionicons name="add" size={17} color="#FFFFFF" /><Text style={styles.primaryButtonText}>Create a habit</Text></Pressable>}
+            {search.trim() ? <Pressable style={styles.emptyButton} onPress={() => setSearch('')}><Ionicons name="close-circle-outline" size={17} color={themeColor('#FFFFFF')} /><Text style={styles.primaryButtonText}>Clear Search</Text></Pressable> : <Pressable style={styles.emptyButton} onPress={() => router.push('/add')}><Ionicons name="add" size={17} color={themeColor('#FFFFFF')} /><Text style={styles.primaryButtonText}>Create a habit</Text></Pressable>}
           </View>
         }
         ListHeaderComponent={
@@ -175,16 +180,16 @@ export default function HabitsScreen() {
               </View>
 
               <View style={styles.headerActions}>
-                <Pressable style={styles.iconButton} onPress={() => setSearchOpen((open) => !open)} accessibilityLabel="Search habits" accessibilityRole="button">
+                <Pressable style={[styles.iconButton, isDarkMode && styles.darkIconButton]} onPress={() => setSearchOpen((open) => !open)} accessibilityLabel="Search habits" accessibilityRole="button">
                   <Ionicons name="search-outline" size={18} color={isDarkMode ? '#F2EFF8' : '#1F1F2A'} />
                 </Pressable>
-                <Pressable style={styles.iconButtonAlt} onPress={() => { setShowSortMenu(false); setShowFilterMenu((prev) => !prev); }}>
-                  <Ionicons name="options-outline" size={18} color="#FFFFFF" />
+                <Pressable style={styles.iconButtonAlt} onPress={() => { setShowSortMenu(false); setShowFilterMenu((prev) => !prev); }} accessibilityLabel="Filter habits" accessibilityRole="button">
+                  <Ionicons name="options-outline" size={18} color={themeColor('#FFFFFF')} />
                 </Pressable>
               </View>
             </View>
 
-            {searchOpen && <><View style={[styles.searchBox, isDarkMode && styles.darkCard]}><Ionicons name="search-outline" size={17} color="#8A8492" /><TextInput autoFocus value={search} onChangeText={setSearch} placeholder="Search habits..." placeholderTextColor="#9A94A4" style={[styles.searchInput, isDarkMode && styles.darkText]} returnKeyType="search" accessibilityLabel="Search habits" /><Pressable onPress={() => { setSearch(''); setSearchOpen(false); }} accessibilityLabel="Clear habit search"><Ionicons name="close-circle" size={18} color="#8A8492" /></Pressable></View>{search.trim() ? <View style={styles.searchResultSummary}><Ionicons name="checkmark-circle-outline" size={15} color="#46B883" /><Text style={[styles.searchResultText, isDarkMode && styles.darkMutedText]}>{filteredHabits.length} result{filteredHabits.length === 1 ? '' : 's'} for &quot;{search.trim()}&quot;</Text></View> : null}</>}
+            {searchOpen && <><View style={[styles.searchBox, isDarkMode && styles.darkCard]}><Ionicons name="search-outline" size={17} color={themeColor('#8A8492')} /><TextInput autoFocus value={search} onChangeText={setSearch} placeholder="Search habits..." placeholderTextColor={themeColor('#9A94A4')} style={[styles.searchInput, isDarkMode && styles.darkText]} returnKeyType="search" accessibilityLabel="Search habits" /><Pressable onPress={() => { setSearch(''); setSearchOpen(false); }} accessibilityLabel="Clear habit search"><Ionicons name="close-circle" size={18} color={themeColor('#8A8492')} /></Pressable></View>{search.trim() ? <View style={styles.searchResultSummary}><Ionicons name="checkmark-circle-outline" size={15} color={themeColor('#46B883')} /><Text style={[styles.searchResultText, isDarkMode && styles.darkMutedText]}>{filteredHabits.length} result{filteredHabits.length === 1 ? '' : 's'} for &quot;{search.trim()}&quot;</Text></View> : null}</>}
 
             <View style={styles.segmentRow}>
               {tabs.map((tab) => (
@@ -203,30 +208,30 @@ export default function HabitsScreen() {
                 style={[styles.actionButton, styles.actionButtonPrimary]}
                 onPress={() => router.push('/add')}
               >
-                <Ionicons name="add-outline" size={16} color="#FFFFFF" />
+                <Ionicons name="add-outline" size={16} color={themeColor('#FFFFFF')} />
                 <Text style={[styles.actionText, styles.actionTextPrimary]}>Add Habit</Text>
               </Pressable>
 
               <Pressable
-                style={[styles.actionButton, styles.actionButtonSecondary]}
+                style={[styles.actionButton, styles.actionButtonSecondary, isDarkMode && styles.darkIconButton]}
                 onPress={() => {
                   setShowSortMenu(false);
                   setShowFilterMenu((prev) => !prev);
                 }}
               >
-                <Ionicons name="filter-outline" size={16} color="#2C2B34" />
-                <Text style={styles.actionText}>Filter</Text>
+                <Ionicons name="filter-outline" size={16} color={isDarkMode ? '#F2EFF8' : '#2C2B34'} />
+                <Text style={[styles.actionText, isDarkMode && styles.darkText]}>Filter</Text>
               </Pressable>
 
               <Pressable
-                style={[styles.actionButton, styles.actionButtonSecondary]}
+                style={[styles.actionButton, styles.actionButtonSecondary, isDarkMode && styles.darkIconButton]}
                 onPress={() => {
                   setShowFilterMenu(false);
                   setShowSortMenu((prev) => !prev);
                 }}
               >
-                <Ionicons name="swap-vertical-outline" size={16} color="#2C2B34" />
-                <Text style={styles.actionText}>Sort</Text>
+                <Ionicons name="swap-vertical-outline" size={16} color={isDarkMode ? '#F2EFF8' : '#2C2B34'} />
+                <Text style={[styles.actionText, isDarkMode && styles.darkText]}>Sort</Text>
               </Pressable>
             </View>
 
@@ -253,7 +258,7 @@ export default function HabitsScreen() {
                       }}
                     >
                       <Text style={[styles.dropdownOptionText, isDarkMode && styles.darkMutedText, selected && styles.dropdownOptionTextSelected]}>{label}</Text>
-                      {selected && <Ionicons name="checkmark" size={16} color="#5B42D8" />}
+                      {selected && <Ionicons name="checkmark" size={16} color={themeColor('#5B42D8')} />}
                     </Pressable>
                   );
                 })}
@@ -276,7 +281,7 @@ export default function HabitsScreen() {
             <View style={styles.statsRow}>
               {[{ label: 'Completed', value: `${completedCount} / ${habitList.length}`, sub: 'Today', color: '#5EC09A', icon: 'checkmark-circle-outline', bg: '#EAFBF2' }, { label: 'Current Streak', value: String(Math.max(0, ...habitList.map((habit) => habit.streak))), sub: 'days', color: '#4DA3FF', icon: 'flame-outline', bg: '#EAF4FF' }, { label: 'Success Rate', value: `${overallProgress}%`, sub: 'This week', color: '#9B6BF2', icon: 'sparkles-outline', bg: '#F2EBFF' }, { label: 'Total Habits', value: String(habitList.length), sub: 'Active', color: '#F2A95B', icon: 'trophy-outline', bg: '#FFF3E7' }].map((card) => (
                 <View key={card.label} style={[styles.statCard, isDarkMode && styles.darkCard]}>
-                  <View style={[styles.statIconWrap, { backgroundColor: card.bg }]}>
+                  <View style={[styles.statIconWrap, { backgroundColor: themeColor(card.bg, 'backgroundColor') }]}>
                     <Ionicons name={card.icon as keyof typeof Ionicons.glyphMap} size={18} color={card.color} />
                   </View>
                   <Text style={[styles.statLabel, isDarkMode && styles.darkMutedText]}>{card.label}</Text>
@@ -290,7 +295,7 @@ export default function HabitsScreen() {
         ListFooterComponent={
           <View style={styles.container}>
             <View style={styles.dragHint}>
-              <Ionicons name="reorder-three-outline" size={18} color="#838AA1" />
+              <Ionicons name="reorder-three-outline" size={18} color={themeColor('#838AA1')} />
               <Text style={styles.dragHintText}>Hold & drag to reorder</Text>
             </View>
 
@@ -306,7 +311,7 @@ export default function HabitsScreen() {
 
               <Pressable style={styles.primaryButton} onPress={getSuggestion} accessibilityRole="button">
                 <Text style={styles.primaryButtonText}>Get Suggestions</Text>
-                <Ionicons name="sparkles-outline" size={16} color="#FFFFFF" />
+                <Ionicons name="sparkles-outline" size={16} color={themeColor('#FFFFFF')} />
               </Pressable>
               {suggestion ? (
                 <View style={[styles.suggestionResult, isDarkMode && styles.darkCard]}>
@@ -316,7 +321,7 @@ export default function HabitsScreen() {
                   </View>
                   <Pressable style={styles.useSuggestionButton} onPress={() => router.push({ pathname: '/add', params: { habit: suggestion } })} accessibilityRole="button">
                     <Text style={styles.useSuggestionText}>Use This</Text>
-                    <Ionicons name="arrow-forward" size={14} color="#FFFFFF" />
+                    <Ionicons name="arrow-forward" size={14} color={themeColor('#FFFFFF')} />
                   </Pressable>
                 </View>
               ) : null}
@@ -328,7 +333,7 @@ export default function HabitsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const themedStyles = createThemedStyles({
   screen: {
     flex: 1,
     backgroundColor: '#F5F4F9',
@@ -346,6 +351,12 @@ const styles = StyleSheet.create({
   darkMutedText: {
     color: '#AAA4B7',
   },
+  darkIconButton: { backgroundColor: '#221E2B' },
+  darkProgressPill: { backgroundColor: '#2A2440' },
+  darkProgressPillText: { color: '#C9BCFF' },
+  darkDeleteButton: { backgroundColor: '#3A2229' },
+  darkProgressTrack: { backgroundColor: '#2C2935' },
+  darkCheckButtonEmpty: { backgroundColor: '#1D1A24', borderColor: '#4A4458' },
   darkSegmentButton: {
     backgroundColor: '#211D2B',
   },

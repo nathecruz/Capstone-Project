@@ -157,14 +157,21 @@ if (configuredGeminiKeys.length === 0) {
   else if (isDeployment) warnings.push('GEMINI_API_KEY is missing; Gemini Coach, Assistant, and Goal generation will be unavailable.');
   else warnings.push('GEMINI_API_KEY is missing or placeholder; AI features will fall back locally.');
 }
-if ((!values.SMTP_USER || isPlaceholderValue(values.SMTP_USER)) && (!values.GMAIL_USER || isPlaceholderValue(values.GMAIL_USER))) {
-  if (isStrictProduction) deployIssues.push('SMTP_USER or GMAIL_USER must be configured for production email delivery.');
+// Email goes through Brevo's HTTPS API (BREVO_API_KEY + EMAIL_FROM) or SMTP. Free Render web
+// services block SMTP ports, so the API is the production option there.
+const brevoReady = Boolean(values.BREVO_API_KEY && !isPlaceholderValue(values.BREVO_API_KEY)
+  && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.EMAIL_FROM || '') && !isPlaceholderValue(values.EMAIL_FROM));
+if (values.BREVO_API_KEY && !isPlaceholderValue(values.BREVO_API_KEY) && !brevoReady) {
+  deployIssues.push('BREVO_API_KEY is set but EMAIL_FROM is missing or not an email address (use a sender verified in Brevo).');
+}
+if (!brevoReady && (!values.SMTP_USER || isPlaceholderValue(values.SMTP_USER)) && (!values.GMAIL_USER || isPlaceholderValue(values.GMAIL_USER))) {
+  if (isStrictProduction) deployIssues.push('Set BREVO_API_KEY and EMAIL_FROM (or SMTP_USER/GMAIL_USER on a paid plan) for production email delivery.');
   else if (isDeployment) warnings.push('SMTP/Gmail credentials are missing; password-reset emails will be unavailable.');
   else warnings.push('SMTP/Gmail credentials are not configured; password reset emails will be disabled until set.');
 }
 const emailUser = values.SMTP_USER || values.GMAIL_USER;
 const emailPassword = values.SMTP_PASSWORD || values.GMAIL_APP_PASSWORD;
-if ((!emailUser || isPlaceholderValue(emailUser)) || (!emailPassword || isPlaceholderValue(emailPassword))) {
+if (!brevoReady && ((!emailUser || isPlaceholderValue(emailUser)) || (!emailPassword || isPlaceholderValue(emailPassword)))) {
   if (isStrictProduction) deployIssues.push('A complete SMTP_USER/SMTP_PASSWORD or GMAIL_USER/GMAIL_APP_PASSWORD pair is required for production email delivery.');
   else if (isDeployment && !warnings.some((warning) => warning.includes('password-reset emails'))) warnings.push('A complete SMTP/Gmail credential pair is required for password-reset emails.');
 }

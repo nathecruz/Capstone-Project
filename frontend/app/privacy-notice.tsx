@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { acceptPrivacyNotice } from '@/authentication';
 import { AppDialog } from '@/components/ui/app-dialog';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 // Privacy Notice under the Data Privacy Act of 2012 (RA 10173). Opened from the sign-up
 // form, from Settings, and (with ?accept=1) for accounts that have not accepted it yet.
@@ -66,6 +67,8 @@ const SECTIONS: { title: string; items: string[] }[] = [
 ];
 
 export default function PrivacyNoticeScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   const { accept } = useLocalSearchParams<{ accept?: string }>();
   const mustAccept = accept === '1';
   const [busy, setBusy] = useState(false);
@@ -88,7 +91,7 @@ export default function PrivacyNoticeScreen() {
       <View style={styles.header}>
         {!mustAccept && (
           <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace('/login'))} style={styles.back} accessibilityLabel="Go back">
-            <Ionicons name="chevron-back" size={22} color="#1d1b26" />
+            <Ionicons name="chevron-back" size={22} color={themeColor('#1d1b26')} />
           </Pressable>
         )}
         <Text style={styles.headerTitle}>Privacy Notice</Text>
@@ -96,7 +99,7 @@ export default function PrivacyNoticeScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         {mustAccept && (
           <View style={styles.banner}>
-            <Ionicons name="shield-checkmark-outline" size={20} color="#5B42D8" />
+            <Ionicons name="shield-checkmark-outline" size={20} color={themeColor('#5B42D8')} />
             <Text style={styles.bannerText}>We updated how HabitAI explains the data it uses. Please review and accept this notice to continue.</Text>
           </View>
         )}
@@ -116,7 +119,7 @@ export default function PrivacyNoticeScreen() {
       {mustAccept && (
         <View style={styles.footer}>
           <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={() => void agree()} disabled={busy} accessibilityRole="button">
-            {busy && <ActivityIndicator size="small" color="#FFFFFF" />}
+            {busy && <ActivityIndicator size="small" color={themeColor('#FFFFFF')} />}
             <Text style={styles.primaryText}>I agree and continue</Text>
           </Pressable>
           <Pressable onPress={() => router.replace('/logout')} style={styles.signOut}>
@@ -129,7 +132,7 @@ export default function PrivacyNoticeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const themedStyles = createThemedStyles({
   safeArea: { flex: 1, backgroundColor: '#f4f7ff' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 12 },
   back: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },

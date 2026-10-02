@@ -98,7 +98,7 @@ export function DesktopSidebar({ state, descriptors, navigation }: TabBarProps) 
         </Pressable>
         {firstName ? (
           <View style={styles.account}>
-            <View style={styles.accountAvatar}><Text style={styles.accountAvatarText}>{firstName.charAt(0).toUpperCase()}</Text></View>
+            <View style={[styles.accountAvatar, { backgroundColor: colors.activeBackground }]}><Text style={[styles.accountAvatarText, { color: colors.active }]}>{firstName.charAt(0).toUpperCase()}</Text></View>
             <Text style={[styles.accountName, { color: colors.text }]} numberOfLines={1}>{profile.fullName || firstName}</Text>
           </View>
         ) : null}

@@ -1,13 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { submitFeatureSuggestion } from '@/authentication';
 import { askAi } from '@/utils/ai-client';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { openExternalLink } from '@/utils/platform';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 const assistantSuggestions = [
   { label: 'How do I add a new habit?', icon: 'add' },
@@ -18,6 +19,8 @@ const assistantSuggestions = [
 const supportEmail = process.env.EXPO_PUBLIC_SUPPORT_EMAIL?.trim() || '';
 
 export default function HelpSupportScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   const { isDarkMode } = useAppColorScheme();
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
@@ -57,7 +60,7 @@ export default function HelpSupportScreen() {
         <View style={[styles.container, { paddingHorizontal: compactLayout ? 12 : 20 }]}>
           <View style={styles.headerRow}>
             <Pressable style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back">
-              <Ionicons name="chevron-back" size={21} color="#292633" />
+              <Ionicons name="chevron-back" size={21} color={themeColor('#292633')} />
             </Pressable>
               <Text style={[styles.headerTitle, isDarkMode && styles.darkText]}>Help &amp; Support</Text>
             <View style={styles.headerSpacer} />
@@ -74,25 +77,25 @@ export default function HelpSupportScreen() {
               </View>
             </View>
             <View style={styles.supportAvatar}>
-              <Ionicons name="person" size={29} color="#5B42D8" />
+              <Ionicons name="person" size={29} color={themeColor('#5B42D8')} />
               <View style={styles.avatarSpark}>
-                <Ionicons name="sparkles" size={9} color="#E7A72F" />
+                <Ionicons name="sparkles" size={9} color={themeColor('#E7A72F')} />
               </View>
             </View>
           </View>
 
           <View style={styles.searchBox}>
-            <Ionicons name="search-outline" size={18} color="#8A8492" />
+            <Ionicons name="search-outline" size={18} color={themeColor('#8A8492')} />
             <TextInput
               value={search}
               onChangeText={setSearch}
               placeholder="Search for help..."
-              placeholderTextColor="#9A94A4"
+              placeholderTextColor={themeColor('#9A94A4')}
               style={styles.searchInput}
             />
             {search.length > 0 && (
               <Pressable onPress={() => setSearch('')} accessibilityLabel="Clear search">
-                <Ionicons name="close-circle" size={17} color="#9A94A4" />
+                <Ionicons name="close-circle" size={17} color={themeColor('#9A94A4')} />
               </Pressable>
             )}
           </View>
@@ -108,12 +111,12 @@ export default function HelpSupportScreen() {
                   onPress={item.action}
                 >
                   <View style={[styles.optionIcon, isFaq && styles.faqOptionIcon]}>
-                    <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={isFaq ? 20 : 19} color="#5B42D8" />
+                    <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={isFaq ? 20 : 19} color={themeColor('#5B42D8')} />
                   </View>
                   <Text style={[styles.optionTitle, isFaq && styles.faqOptionTitle]}>{item.title}</Text>
                   <Text style={[styles.optionSubtitle, isFaq && styles.faqOptionSubtitle]}>{item.subtitle}</Text>
                   <View style={[styles.quickArrowWrap, isFaq && styles.faqArrowWrap]}>
-                    <Ionicons name="arrow-forward" size={isFaq ? 20 : 15} color={isFaq ? '#5B42D8' : '#A19CAA'} />
+                    <Ionicons name="arrow-forward" size={isFaq ? 20 : 15} color={isFaq ? themeColor('#5B42D8') : themeColor('#A19CAA')} />
                   </View>
                 </Pressable>
               );
@@ -125,7 +128,7 @@ export default function HelpSupportScreen() {
           <View style={styles.immediateCard}>
             <View style={styles.immediateHeader}>
               <View style={styles.immediateIcon}>
-                <Ionicons name="chatbubbles-outline" size={25} color="#FFFFFF" />
+                <Ionicons name="chatbubbles-outline" size={25} color={themeColor('#FFFFFF')} />
               </View>
               <View style={styles.immediateCopy}>
                 <Text style={styles.immediateTitle}>Need immediate help?</Text>
@@ -136,7 +139,7 @@ export default function HelpSupportScreen() {
                 onPress={() => setAssistantOpen((open) => !open)}
                 accessibilityLabel={assistantOpen ? 'Close AI assistant' : 'Open AI assistant'}
               >
-                <Ionicons name={assistantOpen ? 'chevron-up' : 'chevron-down'} size={19} color="#FFFFFF" />
+                <Ionicons name={assistantOpen ? 'chevron-up' : 'chevron-down'} size={19} color={themeColor('#FFFFFF')} />
               </Pressable>
             </View>
 
@@ -147,7 +150,7 @@ export default function HelpSupportScreen() {
                 <View style={styles.suggestionList}>
                   {assistantSuggestions.map((suggestion) => (
                     <Pressable key={suggestion.label} style={styles.suggestionChip} onPress={() => setAssistantQuestion(suggestion.label)}>
-                      <Ionicons name={suggestion.icon as keyof typeof Ionicons.glyphMap} size={17} color="#6042C5" />
+                      <Ionicons name={suggestion.icon as keyof typeof Ionicons.glyphMap} size={17} color={themeColor('#6042C5')} />
                       <Text style={styles.suggestionText}>{suggestion.label}</Text>
                     </Pressable>
                   ))}
@@ -157,7 +160,7 @@ export default function HelpSupportScreen() {
                     value={assistantQuestion}
                     onChangeText={setAssistantQuestion}
                     placeholder="Type your question here..."
-                    placeholderTextColor="#96919E"
+                    placeholderTextColor={themeColor('#96919E')}
                     style={styles.questionInput}
                   />
                   <Pressable
@@ -167,7 +170,7 @@ export default function HelpSupportScreen() {
                     }}
                     accessibilityLabel="Send question"
                   >
-                    <Ionicons name="paper-plane-outline" size={18} color="#FFFFFF" />
+                    <Ionicons name="paper-plane-outline" size={18} color={themeColor('#FFFFFF')} />
                   </Pressable>
                 </View>
               </View>
@@ -182,8 +185,8 @@ export default function HelpSupportScreen() {
               <Text style={styles.aboutText}>Built with love to help you build better habits every day.</Text>
             </View>
             <View style={styles.aboutIcon}>
-              <Ionicons name="phone-portrait-outline" size={38} color="#5B42D8" />
-              <Ionicons name="sparkles" size={15} color="#E7A72F" />
+              <Ionicons name="phone-portrait-outline" size={38} color={themeColor('#5B42D8')} />
+              <Ionicons name="sparkles" size={15} color={themeColor('#E7A72F')} />
             </View>
           </View>
         </View>
@@ -193,7 +196,7 @@ export default function HelpSupportScreen() {
           <View style={styles.suggestionModal}>
             <Text style={styles.modalTitle}>Suggest a Feature</Text>
             <Text style={styles.modalSubtitle}>Tell us what would make HabitAI more useful.</Text>
-            <TextInput value={suggestion} onChangeText={setSuggestion} placeholder="Your idea" placeholderTextColor="#96919E" style={styles.suggestionInput} multiline maxLength={500} />
+            <TextInput value={suggestion} onChangeText={setSuggestion} placeholder="Your idea" placeholderTextColor={themeColor('#96919E')} style={styles.suggestionInput} multiline maxLength={500} />
             <View style={styles.modalActions}>
               <Pressable onPress={() => setSuggestionOpen(false)} style={styles.modalCancel}><Text style={styles.modalCancelText}>Cancel</Text></Pressable>
               <Pressable onPress={async () => {
@@ -211,7 +214,7 @@ export default function HelpSupportScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const themedStyles = createThemedStyles({
   screen: { flex: 1, backgroundColor: '#F5F4F9', paddingTop: 35 }, darkScreen: { backgroundColor: '#111018' }, darkText: { color: '#F2EFF8' },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(20, 17, 30, 0.45)', justifyContent: 'center', padding: 20 },
   suggestionModal: { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 20 },

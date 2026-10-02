@@ -2,9 +2,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 const weekdays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const monthNames = [
@@ -49,6 +50,8 @@ function getInsightMessages(completedCount: number, habitCount: number) {
 }
 
 export default function InsightsScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   const { isDarkMode, habits, toggleHabitForDate } = useAppColorScheme();
   const { date: initialDate } = useLocalSearchParams<{ date?: string }>();
   const { maxStreak } = getHabitProgressSummary(habits);
@@ -110,7 +113,7 @@ export default function InsightsScreen() {
           <View style={styles.container}>
             <View style={styles.headerRow}>
               <Pressable style={styles.backButton} accessibilityLabel="Go back" onPress={() => router.back()}>
-                <Ionicons name="chevron-back" size={17} color="#282631" />
+                <Ionicons name="chevron-back" size={17} color={themeColor('#282631')} />
               </Pressable>
               <Text style={[styles.headerTitle, isDarkMode && styles.darkText]}>Today&apos;s Progress</Text>
               <Pressable
@@ -119,18 +122,18 @@ export default function InsightsScreen() {
                 accessibilityLabel="Select date"
                 onPress={() => setCalendarVisible(true)}
               >
-                <Ionicons name="calendar-outline" size={16} color="#5B42D8" />
+                <Ionicons name="calendar-outline" size={16} color={themeColor('#5B42D8')} />
                 <Text style={styles.selectDateButtonText}>Select Date</Text>
               </Pressable>
             </View>
 
             <View style={styles.dateRow}>
               <Pressable style={styles.dateArrow} accessibilityLabel="Previous day" onPress={() => changeDate(-1)}>
-                <Ionicons name="chevron-back" size={13} color="#6D687A" />
+                <Ionicons name="chevron-back" size={13} color={themeColor('#6D687A')} />
               </Pressable>
               <Text style={styles.dateText}>{formatDate(selectedDate)}</Text>
               <Pressable style={styles.dateArrow} accessibilityLabel="Next day" onPress={() => changeDate(1)}>
-                <Ionicons name="chevron-forward" size={13} color="#6D687A" />
+                <Ionicons name="chevron-forward" size={13} color={themeColor('#6D687A')} />
               </Pressable>
             </View>
 
@@ -144,7 +147,7 @@ export default function InsightsScreen() {
                 <Text style={styles.progressMeta}>{selectedCompletedCount} / {visibleHabits.length} habits</Text>
                 <Text style={styles.progressStats}>completed</Text>
               </View>
-              <Ionicons name="chevron-forward" size={16} color="#B4B0BE" />
+              <Ionicons name="chevron-forward" size={16} color={themeColor('#B4B0BE')} />
             </View>
 
             <View style={[styles.weeklyCard, isDarkMode && styles.darkCard]}>
@@ -160,7 +163,7 @@ export default function InsightsScreen() {
                   <View style={styles.habitProgressStatus}>
                     <Text style={[styles.habitProgressPercent, isDarkMode && styles.darkText]}>{habit.completionDates.includes(selectedDateKey) ? 'Done' : 'Open'}</Text>
                     <View style={[styles.dayDot, habit.completionDates.includes(selectedDateKey) && styles.dayDotComplete]}>
-                      {habit.completionDates.includes(selectedDateKey) && <Ionicons name="checkmark" size={9} color="#FFFFFF" />}
+                      {habit.completionDates.includes(selectedDateKey) && <Ionicons name="checkmark" size={9} color={themeColor('#FFFFFF')} />}
                     </View>
                   </View>
                 </Pressable>
@@ -192,7 +195,7 @@ export default function InsightsScreen() {
 
             <View style={[styles.aiCard, isDarkMode && styles.darkAiCard]}>
               <View style={styles.aiIconWrap}>
-                <Ionicons name="sparkles" size={15} color="#5B42D8" />
+                <Ionicons name="sparkles" size={15} color={themeColor('#5B42D8')} />
               </View>
               <View style={styles.aiContent}>
                 <Text style={styles.aiTitle}>AI insight</Text>
@@ -205,13 +208,13 @@ export default function InsightsScreen() {
 
             <View style={[styles.streakCard, isDarkMode && styles.darkStreakCard]}>
               <View style={styles.streakIconWrap}>
-                <Ionicons name="flame" size={17} color="#E68D3D" />
+                <Ionicons name="flame" size={17} color={themeColor('#E68D3D')} />
               </View>
               <View style={styles.streakTextWrap}>
                 <Text style={styles.streakTitle}>You&apos;re on a {maxStreak}-day streak!</Text>
                 <Text style={styles.streakSubtitle}>Keep the momentum going.</Text>
               </View>
-              <Ionicons name="chevron-forward" size={16} color="#B4B0BE" />
+              <Ionicons name="chevron-forward" size={16} color={themeColor('#B4B0BE')} />
             </View>
           </View>
         </ScrollView>
@@ -231,19 +234,19 @@ export default function InsightsScreen() {
                 <Text style={styles.calendarSummary}>{selectedCompletedCount} of {visibleHabits.length} habits completed</Text>
               </View>
               <Pressable style={styles.closeButton} onPress={() => setCalendarVisible(false)} accessibilityLabel="Close calendar">
-                <Ionicons name="close" size={22} color="#4C4858" />
+                <Ionicons name="close" size={22} color={themeColor('#4C4858')} />
               </Pressable>
             </View>
 
             <View style={styles.monthRow}>
               <Pressable style={styles.monthArrow} onPress={() => changeMonth(-1)} accessibilityLabel="Previous month">
-                <Ionicons name="chevron-back" size={20} color="#5B42D8" />
+                <Ionicons name="chevron-back" size={20} color={themeColor('#5B42D8')} />
               </Pressable>
               <Text style={styles.monthTitle}>
                 {monthNames[calendarMonth.getMonth()]} {calendarMonth.getFullYear()}
               </Text>
               <Pressable style={styles.monthArrow} onPress={() => changeMonth(1)} accessibilityLabel="Next month">
-                <Ionicons name="chevron-forward" size={20} color="#5B42D8" />
+                <Ionicons name="chevron-forward" size={20} color={themeColor('#5B42D8')} />
               </Pressable>
             </View>
             <Pressable
@@ -251,7 +254,7 @@ export default function InsightsScreen() {
               onPress={() => selectDate(new Date())}
               accessibilityRole="button"
             >
-              <Ionicons name="locate-outline" size={15} color="#5B42D8" />
+              <Ionicons name="locate-outline" size={15} color={themeColor('#5B42D8')} />
               <Text style={styles.todayButtonText}>Jump to Today</Text>
             </Pressable>
 
@@ -282,7 +285,7 @@ export default function InsightsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const themedStyles = createThemedStyles({
   screen: {
     flex: 1,
     backgroundColor: '#F5F4F9',

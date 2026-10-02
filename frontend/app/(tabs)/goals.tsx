@@ -2,11 +2,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { generateGoalPlan } from '@/utils/ai-client';
 import { useAppColorScheme, type Goal } from '@/hooks/color-scheme-context';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 type GoalTab = 'Planner' | 'My Goals';
 
@@ -102,6 +103,8 @@ const getProgressFromSteps = (completedSteps: boolean[]) => Math.round((complete
 const getGoalStatus = (progress: number) => progress >= 100 ? 'Completed' : progress >= 67 ? 'On track' : progress > 0 ? 'In progress' : 'Fresh plan';
 
 export default function GoalsScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   const showAlert = useAppDialog();
   const { isDarkMode, getAppStateSnapshot, syncAppState } = useAppColorScheme();
   const { width } = useWindowDimensions();
@@ -266,7 +269,7 @@ export default function GoalsScreen() {
                   <Text style={[styles.heroTitle, compact && styles.compactHeroTitle, isDarkMode && styles.darkText]}>Turn your dream into a plan.</Text>
                 </View>
                 <View style={styles.aiBadge}>
-                  <Ionicons name="sparkles" size={14} color="#FFFFFF" />
+                  <Ionicons name="sparkles" size={14} color={themeColor('#FFFFFF')} />
                 </View>
               </View>
 
@@ -327,11 +330,11 @@ export default function GoalsScreen() {
                     <Text style={[styles.customizeLabel, isDarkMode && styles.darkText]}>Plan settings</Text>
                     <View style={styles.customizeControls}>
                       <Pressable style={styles.settingControl} onPress={() => setFocusTarget(focusTarget === '3 habits' ? '4 habits' : focusTarget === '4 habits' ? '5 habits' : '3 habits')}>
-                        <Ionicons name="locate-outline" size={14} color="#5B42D8" />
+                        <Ionicons name="locate-outline" size={14} color={themeColor('#5B42D8')} />
                         <Text style={styles.settingControlText}>{focusTarget}</Text>
                       </Pressable>
                       <Pressable style={styles.settingControl} onPress={() => setTimelineOption(timelineOption === '7-14 days' ? '30-60 days' : timelineOption === '30-60 days' ? '90 days' : '7-14 days')}>
-                        <Ionicons name="calendar-outline" size={14} color="#5B42D8" />
+                        <Ionicons name="calendar-outline" size={14} color={themeColor('#5B42D8')} />
                         <Text style={styles.settingControlText}>{timelineOption}</Text>
                       </Pressable>
                     </View>
@@ -340,7 +343,7 @@ export default function GoalsScreen() {
                   <View style={styles.quickPromptRow}>
                     {samplePrompts.map((prompt) => (
                       <Pressable key={prompt} style={[styles.quickPromptChip, isDarkMode && styles.darkPromptChip]} onPress={() => setGoalInput(prompt)}>
-                        <Ionicons name="add-circle-outline" size={14} color="#5B42D8" />
+                        <Ionicons name="add-circle-outline" size={14} color={themeColor('#5B42D8')} />
                         <Text style={[styles.quickPromptText, isDarkMode && styles.darkPromptText]}>{prompt}</Text>
                       </Pressable>
                     ))}
@@ -353,7 +356,7 @@ export default function GoalsScreen() {
                       <Text style={styles.secondaryButtonText}>Clear</Text>
                     </Pressable>
                     <Pressable style={styles.primaryButton} onPress={createInsight} disabled={isGenerating}>
-                      {isGenerating ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="sparkles-outline" size={17} color="#FFFFFF" />}
+                      {isGenerating ? <ActivityIndicator size="small" color={themeColor('#FFFFFF')} /> : <Ionicons name="sparkles-outline" size={17} color={themeColor('#FFFFFF')} />}
                       <Text style={styles.primaryButtonText}>{isGenerating ? 'Creating plan...' : 'Generate plan'}</Text>
                     </Pressable>
                   </View>
@@ -362,14 +365,14 @@ export default function GoalsScreen() {
                 {!activeGoal && !savedGoals.length ? (
                   <View style={[styles.emptyStateCard, isDarkMode && styles.darkCard]}>
                     <View style={styles.emptyIconWrap}>
-                      <Ionicons name="flag-outline" size={26} color="#5B42D8" />
+                      <Ionicons name="flag-outline" size={26} color={themeColor('#5B42D8')} />
                     </View>
                     <Text style={[styles.emptyTitle, isDarkMode && styles.darkText]}>No goal plan yet</Text>
                     <Text style={[styles.emptyBody, isDarkMode && styles.darkMutedText]}>
                       Write a personal goal and let the planner turn it into a realistic action plan for you.
                     </Text>
                     <Pressable style={styles.emptyStateButton} onPress={() => setGoalInput(samplePrompts[0])}>
-                      <Ionicons name="create-outline" size={16} color="#FFFFFF" />
+                      <Ionicons name="create-outline" size={16} color={themeColor('#FFFFFF')} />
                       <Text style={styles.emptyStateButtonText}>Use a starter goal</Text>
                     </Pressable>
                   </View>
@@ -391,7 +394,7 @@ export default function GoalsScreen() {
                     </View>
 
                     <View style={styles.summaryBanner}>
-                      <Ionicons name="sparkles" size={15} color="#5B42D8" />
+                      <Ionicons name="sparkles" size={15} color={themeColor('#5B42D8')} />
                       <Text style={[styles.summaryText, isDarkMode && styles.darkMutedText]}>{activeGoal.summary}</Text>
                     </View>
 
@@ -442,7 +445,7 @@ export default function GoalsScreen() {
                       {activeGoal.actionPlan.map((step, index) => (
                         <Pressable key={`${step}-${index}`} style={styles.stepRow} onPress={() => toggleStep(activeGoal.id, index)} accessibilityRole="checkbox" accessibilityState={{ checked: activeGoal.completedSteps[index] }}>
                           <View style={[styles.stepNumber, activeGoal.completedSteps[index] && styles.stepNumberComplete]}>
-                            <Ionicons name={activeGoal.completedSteps[index] ? 'checkmark' : 'ellipse-outline'} size={activeGoal.completedSteps[index] ? 15 : 12} color="#FFFFFF" />
+                            <Ionicons name={activeGoal.completedSteps[index] ? 'checkmark' : 'ellipse-outline'} size={activeGoal.completedSteps[index] ? 15 : 12} color={themeColor('#FFFFFF')} />
                           </View>
                           <View style={styles.stepCopy}>
                             <Text style={[styles.stepText, activeGoal.completedSteps[index] && styles.stepTextComplete, isDarkMode && styles.darkMutedText]} numberOfLines={expandedSteps[`${activeGoal.id}-${index}`] ? undefined : 2}>{step}</Text>
@@ -458,18 +461,18 @@ export default function GoalsScreen() {
                     <View style={styles.analysisPanel}>
                       <View style={styles.panelHeaderRow}>
                         <Text style={[styles.panelTitle, isDarkMode && styles.darkText]}>Next milestone</Text>
-                        <View style={styles.dateChip}><Ionicons name="calendar-outline" size={12} color="#5B42D8" /><Text style={styles.dateChipText}>{activeGoal.nextCheckIn}</Text></View>
+                        <View style={styles.dateChip}><Ionicons name="calendar-outline" size={12} color={themeColor('#5B42D8')} /><Text style={styles.dateChipText}>{activeGoal.nextCheckIn}</Text></View>
                       </View>
                       <Text style={[styles.panelBody, isDarkMode && styles.darkMutedText]}>{activeGoal.nextMilestone}</Text>
                       <Text style={[styles.panelBody, isDarkMode && styles.darkMutedText]}>Risk to watch: {activeGoal.risk}</Text>
-                      <View style={styles.riskAction}><Ionicons name="shield-checkmark-outline" size={15} color="#2E9D5C" /><Text style={[styles.riskActionText, isDarkMode && styles.darkMutedText]}>{activeGoal.riskAction}</Text></View>
+                      <View style={styles.riskAction}><Ionicons name="shield-checkmark-outline" size={15} color={themeColor('#2E9D5C')} /><Text style={[styles.riskActionText, isDarkMode && styles.darkMutedText]}>{activeGoal.riskAction}</Text></View>
                     </View>
 
                     <View style={[styles.progressWrap, isDarkMode && styles.darkProgressWrap]}>
                       <View style={styles.progressHeader}>
                         <View style={styles.progressHeadingGroup}>
                           <View style={styles.progressTitleIcon}>
-                            <Ionicons name="map-outline" size={15} color="#5B42D8" />
+                            <Ionicons name="map-outline" size={15} color={themeColor('#5B42D8')} />
                           </View>
                           <View>
                             <Text style={[styles.panelTitle, styles.progressTitle, isDarkMode && styles.darkText]}>Your growth path</Text>
@@ -489,7 +492,7 @@ export default function GoalsScreen() {
                           return (
                             <View key={stage.label} style={styles.stageItem}>
                               <View style={[styles.stageDot, reached && styles.stageDotActive]}>
-                                <Ionicons name={stage.icon as keyof typeof Ionicons.glyphMap} size={14} color={reached ? '#FFFFFF' : '#A69DB8'} />
+                                <Ionicons name={stage.icon as keyof typeof Ionicons.glyphMap} size={14} color={reached ? themeColor('#FFFFFF') : themeColor('#A69DB8')} />
                               </View>
                               <Text style={[styles.stageLabel, reached && styles.stageLabelActive, isDarkMode && styles.darkMutedText]}>{stage.label}</Text>
                               <Text style={[styles.stageRange, isDarkMode && styles.darkMutedText]}>{stage.range}</Text>
@@ -505,7 +508,7 @@ export default function GoalsScreen() {
 
                       <View style={[styles.progressSummaryCard, isDarkMode && styles.darkProgressSummaryCard]}>
                         <View style={styles.progressSummaryIcon}>
-                          <Ionicons name="arrow-forward-outline" size={15} color="#5B42D8" />
+                          <Ionicons name="arrow-forward-outline" size={15} color={themeColor('#5B42D8')} />
                         </View>
                         <View style={styles.progressSummaryCopy}>
                           <Text style={[styles.progressSummaryLabel, isDarkMode && styles.darkText]}>Next step</Text>
@@ -516,7 +519,7 @@ export default function GoalsScreen() {
                     </View>
 
                     <Pressable style={[styles.primaryButton, styles.saveGoalButton]} onPress={() => void saveGoal()} disabled={isSavingGoal}>
-                      {isSavingGoal ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="bookmark-outline" size={17} color="#FFFFFF" />}
+                      {isSavingGoal ? <ActivityIndicator size="small" color={themeColor('#FFFFFF')} /> : <Ionicons name="bookmark-outline" size={17} color={themeColor('#FFFFFF')} />}
                       <Text style={styles.primaryButtonText}>{isSavingGoal ? 'Saving...' : 'Save goal'}</Text>
                     </Pressable>
                   </View>
@@ -527,7 +530,7 @@ export default function GoalsScreen() {
                 {!savedGoals.length ? (
                   <View style={[styles.emptyStateCard, isDarkMode && styles.darkCard]}>
                     <View style={styles.emptyIconWrap}>
-                      <Ionicons name="bookmark-outline" size={26} color="#5B42D8" />
+                      <Ionicons name="bookmark-outline" size={26} color={themeColor('#5B42D8')} />
                     </View>
                     <Text style={[styles.emptyTitle, isDarkMode && styles.darkText]}>Your saved goals will appear here</Text>
                     <Text style={[styles.emptyBody, isDarkMode && styles.darkMutedText]}>
@@ -547,7 +550,7 @@ export default function GoalsScreen() {
                         <Text style={[styles.statusChipText, goal.progress >= 70 ? styles.statusTextGood : styles.statusTextNeutral]}>{goal.status}</Text>
                       </View>
                       <Pressable style={styles.cardDeleteButton} onPress={() => deleteGoal(goal.id)} accessibilityLabel="Delete goal">
-                        <Ionicons name="trash-outline" size={16} color="#D94E64" />
+                        <Ionicons name="trash-outline" size={16} color={themeColor('#D94E64')} />
                       </Pressable>
                     </View>
 
@@ -560,11 +563,11 @@ export default function GoalsScreen() {
 
                     <View style={styles.goalMetaRow}>
                       <View style={styles.metaItem}>
-                        <Ionicons name="timer-outline" size={14} color="#7A6AE7" />
+                        <Ionicons name="timer-outline" size={14} color={themeColor('#7A6AE7')} />
                         <Text style={[styles.metaText, isDarkMode && styles.darkMutedText]}>{goal.timeline}</Text>
                       </View>
                       <View style={styles.metaItem}>
-                        <Ionicons name="flash-outline" size={14} color="#7A6AE7" />
+                        <Ionicons name="flash-outline" size={14} color={themeColor('#7A6AE7')} />
                         <Text style={[styles.metaText, isDarkMode && styles.darkMutedText]}>{goal.intensity}</Text>
                       </View>
                     </View>
@@ -573,7 +576,7 @@ export default function GoalsScreen() {
                       {goal.actionPlan.map((step, index) => (
                         <Pressable key={`${goal.id}-${index}`} style={styles.savedStepRow} onPress={() => toggleStep(goal.id, index)} accessibilityRole="checkbox" accessibilityState={{ checked: goal.completedSteps[index] }}>
                           <View style={[styles.savedStepCheck, goal.completedSteps[index] && styles.savedStepCheckActive]}>
-                            {goal.completedSteps[index] ? <Ionicons name="checkmark" size={12} color="#FFFFFF" /> : null}
+                            {goal.completedSteps[index] ? <Ionicons name="checkmark" size={12} color={themeColor('#FFFFFF')} /> : null}
                           </View>
                           <View style={styles.stepCopy}>
                             <Text style={[styles.savedStepText, goal.completedSteps[index] && styles.savedStepTextComplete, isDarkMode && styles.darkMutedText]} numberOfLines={expandedSteps[`${goal.id}-${index}`] ? undefined : 2}>{step}</Text>
@@ -590,7 +593,7 @@ export default function GoalsScreen() {
                   <Text style={[styles.panelTitle, isDarkMode && styles.darkText]}>Daily reminders</Text>
                   {quickActions.map((item) => (
                     <View key={item.label} style={styles.tipRow}>
-                      <View style={styles.tipIcon}><Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={15} color="#5B42D8" /></View>
+                      <View style={styles.tipIcon}><Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={15} color={themeColor('#5B42D8')} /></View>
                       <View style={styles.tipCopy}>
                         <Text style={[styles.tipLabel, isDarkMode && styles.darkText]}>{item.label}</Text>
                         <Text style={[styles.tipValue, isDarkMode && styles.darkMutedText]}>{item.value}</Text>
@@ -612,7 +615,7 @@ export default function GoalsScreen() {
         <View style={styles.modalBackdrop}>
           <View style={[styles.saveModal, isDarkMode && styles.darkSaveModal]}>
             <View style={styles.saveIconWrap}>
-              <Ionicons name="checkmark" size={26} color="#FFFFFF" />
+              <Ionicons name="checkmark" size={26} color={themeColor('#FFFFFF')} />
             </View>
             <Text style={[styles.saveModalTitle, isDarkMode && styles.darkText]}>Goal saved</Text>
             <Text style={[styles.saveModalBody, isDarkMode && styles.darkMutedText]}>
@@ -634,7 +637,7 @@ export default function GoalsScreen() {
                 }}
               >
                 <Text style={styles.saveModalPrimaryText}>View goals</Text>
-                <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+                <Ionicons name="arrow-forward" size={16} color={themeColor('#FFFFFF')} />
               </Pressable>
             </View>
           </View>
@@ -649,7 +652,7 @@ export default function GoalsScreen() {
         <View style={styles.modalBackdrop}>
           <View style={[styles.clearModal, isDarkMode && styles.darkSaveModal]}>
             <View style={styles.clearModalIcon}>
-              <Ionicons name="document-text-outline" size={22} color="#5B42D8" />
+              <Ionicons name="document-text-outline" size={22} color={themeColor('#5B42D8')} />
             </View>
             <Text style={[styles.saveModalTitle, isDarkMode && styles.darkText]}>Clear goal text?</Text>
             <Text style={[styles.saveModalBody, isDarkMode && styles.darkMutedText]}>
@@ -668,7 +671,7 @@ export default function GoalsScreen() {
       </Modal>
       {clearUndoText ? (
         <View style={[styles.undoSnackbar, isDarkMode && styles.darkUndoSnackbar]}>
-          <Ionicons name="checkmark-circle-outline" size={18} color="#A9F0C7" />
+          <Ionicons name="checkmark-circle-outline" size={18} color={themeColor('#A9F0C7')} />
           <Text style={styles.undoSnackbarText}>Goal text cleared</Text>
           <Pressable onPress={() => { setGoalInput(clearUndoText); setClearUndoText(null); }}>
             <Text style={styles.undoButtonText}>Undo</Text>
@@ -679,7 +682,7 @@ export default function GoalsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const themedStyles = createThemedStyles({
   screen: { flex: 1, backgroundColor: '#F4F1F9', paddingTop: 20 },
   darkScreen: { backgroundColor: '#0F0D16' },
   darkText: { color: '#F2EEF9' },

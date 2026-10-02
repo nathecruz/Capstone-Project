@@ -32,6 +32,8 @@ export const config = {
   ml: {
     url: env.ML_SERVICE_URL?.trim() || 'http://localhost:8000',
     key: env.ML_SERVICE_API_KEY?.trim() || '',
+    // A sleeping free Render instance needs up to about a minute to start.
+    timeoutMs: Math.max(1000, Number(env.ML_REQUEST_TIMEOUT_MS) || 60000),
   },
   session: {
     lifetimeMs: 7 * 24 * 60 * 60 * 1000,

@@ -2,11 +2,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { submitIssueReport } from '@/authentication/authService';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 const issueTopics = ['App is not working properly', 'A habit is not tracking', 'Sync is not working', 'Other'];
 const timingOptions = ['Just now', 'Today', 'This week', 'More than a week ago'];
@@ -24,18 +25,20 @@ function Dropdown({
   onToggle: () => void;
   onSelect: (option: string) => void;
 }) {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   return (
     <>
       <Pressable style={styles.selectField} onPress={onToggle} accessibilityRole="button">
         <Text style={styles.selectText}>{value}</Text>
-        <Ionicons name={isOpen ? 'chevron-up' : 'chevron-down'} size={15} color="#393440" />
+        <Ionicons name={isOpen ? 'chevron-up' : 'chevron-down'} size={15} color={themeColor('#393440')} />
       </Pressable>
       {isOpen && (
         <View style={styles.optionsMenu}>
           {options.map((option) => (
             <Pressable key={option} style={styles.option} onPress={() => onSelect(option)}>
               <Text style={[styles.optionText, option === value && styles.selectedOptionText]}>{option}</Text>
-              {option === value && <Ionicons name="checkmark" size={15} color="#5B42D8" />}
+              {option === value && <Ionicons name="checkmark" size={15} color={themeColor('#5B42D8')} />}
             </Pressable>
           ))}
         </View>
@@ -45,6 +48,8 @@ function Dropdown({
 }
 
 export default function ReportIssueScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   const showAlert = useAppDialog();
   const { isDarkMode } = useAppColorScheme();
   const [topic, setTopic] = useState(issueTopics[0]);
@@ -100,7 +105,7 @@ export default function ReportIssueScreen() {
         <View style={styles.container}>
           <View style={styles.headerRow}>
             <Pressable style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back">
-              <Ionicons name="arrow-back" size={19} color="#292633" />
+              <Ionicons name="arrow-back" size={19} color={themeColor('#292633')} />
             </Pressable>
             <Text style={styles.headerTitle}>Report an Issue</Text>
             <View style={styles.headerSpacer} />
@@ -108,7 +113,7 @@ export default function ReportIssueScreen() {
 
           <View style={styles.issueBanner}>
             <View style={styles.warningIcon}>
-              <Ionicons name="warning" size={25} color="#FFFFFF" />
+              <Ionicons name="warning" size={25} color={themeColor('#FFFFFF')} />
             </View>
             <View style={styles.bannerCopy}>
               <Text style={styles.bannerTitle}>Report an Issue</Text>
@@ -142,7 +147,7 @@ export default function ReportIssueScreen() {
             value={description}
             onChangeText={(text) => setDescription(text.slice(0, 500))}
             placeholder="Please describe what happened..."
-            placeholderTextColor="#A19CAA"
+            placeholderTextColor={themeColor('#A19CAA')}
             multiline
             textAlignVertical="top"
             style={styles.descriptionInput}
@@ -150,13 +155,13 @@ export default function ReportIssueScreen() {
 
           <Text style={styles.fieldLabel}>Add Screenshots or Videos <Text style={styles.optional}>(optional)</Text></Text>
           <Pressable style={[styles.uploadBox, hasAttachment && styles.uploadBoxSelected]} onPress={() => { if (hasAttachment) { setAttachment(null); setHasAttachment(false); } else { void chooseAttachment(); } }} accessibilityRole="button">
-            <Ionicons name={hasAttachment ? 'checkmark-circle-outline' : 'cloud-upload-outline'} size={24} color="#6742D8" />
+            <Ionicons name={hasAttachment ? 'checkmark-circle-outline' : 'cloud-upload-outline'} size={24} color={themeColor('#6742D8')} />
             <Text style={styles.uploadTitle}>{hasAttachment ? attachment?.name || 'Attachment added' : 'Tap to upload or drag & drop'}</Text>
             <Text style={styles.uploadHint}>{hasAttachment ? 'Tap to remove attachment' : 'PNG, JPG or MP4 up to 10MB'}</Text>
           </Pressable>
 
           <Pressable style={styles.submitButton} onPress={() => void submitReport()} disabled={isSubmitting} accessibilityRole="button">
-            {isSubmitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.submitButtonText}>Submit Report</Text>}
+            {isSubmitting ? <ActivityIndicator color={themeColor('#FFFFFF')} /> : <Text style={styles.submitButtonText}>Submit Report</Text>}
           </Pressable>
         </View>
       </ScrollView>
@@ -164,7 +169,7 @@ export default function ReportIssueScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const themedStyles = createThemedStyles({
   screen: { flex: 1, backgroundColor: '#FAF9FC', paddingTop: 28 }, darkScreen: { backgroundColor: '#111018' },
   content: { paddingBottom: 35 },
   container: { paddingHorizontal: 20 },

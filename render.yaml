@@ -42,10 +42,15 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
-      # Sender for OTP, verification and password emails. Use a project mailbox or a
-      # transactional provider (Brevo, Resend, Mailgun...), not a personal Gmail:
-      # Gmail caps sending at ~500 emails/day and signups now send a verification code.
-      # Set these in the Render dashboard; existing values are kept on Blueprint sync.
+      # Verification, password reset and support emails. Free Render web services block
+      # outbound SMTP (ports 25/465/587), so production sends through Brevo's HTTPS API:
+      # BREVO_API_KEY from brevo.com (SMTP & API -> API keys) and EMAIL_FROM, a sender
+      # verified in Brevo. SMTP_* is only used when BREVO_API_KEY is empty (local dev,
+      # paid plans). Set these in the Render dashboard; values are kept on Blueprint sync.
+      - key: BREVO_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT

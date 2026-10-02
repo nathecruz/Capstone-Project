@@ -2,11 +2,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 export default function SyncCompleteScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   const { habits } = useAppColorScheme();
   const syncDate = new Date();
   const details = [
@@ -22,14 +25,14 @@ export default function SyncCompleteScreen() {
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.container}>
             <View style={styles.headerRow}>
-              <Pressable style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back"><Ionicons name="chevron-back" size={21} color="#292633" /></Pressable>
+              <Pressable style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back"><Ionicons name="chevron-back" size={21} color={themeColor('#292633')} /></Pressable>
               <Text style={styles.headerTitle}>Local Backup Ready</Text>
               <View style={styles.headerSpacer} />
             </View>
 
             <View style={styles.successArea}>
               <View style={styles.confetti}><Text style={[styles.confettiText, styles.confettiOne]}>+</Text><Text style={[styles.confettiText, styles.confettiTwo]}>*</Text><Text style={[styles.confettiText, styles.confettiThree]}>+</Text><Text style={[styles.confettiText, styles.confettiFour]}>*</Text><Text style={[styles.confettiText, styles.confettiFive]}>+</Text></View>
-              <View style={styles.cloud}><Ionicons name="cloud" size={62} color="#48B66E" /><View style={styles.checkBadge}><Ionicons name="checkmark" size={20} color="#FFFFFF" /></View></View>
+              <View style={styles.cloud}><Ionicons name="cloud" size={62} color={themeColor('#48B66E')} /><View style={styles.checkBadge}><Ionicons name="checkmark" size={20} color={themeColor('#FFFFFF')} /></View></View>
               <Text style={styles.successTitle}>All Set!</Text>
               <Text style={styles.successSubtitle}>Your local data snapshot is ready{`\n`}for export or review.</Text>
             </View>
@@ -37,7 +40,7 @@ export default function SyncCompleteScreen() {
             <View style={styles.detailsCard}>
               <Text style={styles.detailsTitle}>Last Sync Details</Text>
               {details.map((detail) => (
-                <View key={detail.label} style={styles.detailRow}><Ionicons name={detail.icon as keyof typeof Ionicons.glyphMap} size={16} color="#6C647A" /><Text style={styles.detailText}>{detail.value}</Text></View>
+                <View key={detail.label} style={styles.detailRow}><Ionicons name={detail.icon as keyof typeof Ionicons.glyphMap} size={16} color={themeColor('#6C647A')} /><Text style={styles.detailText}>{detail.value}</Text></View>
               ))}
             </View>
 
@@ -50,7 +53,7 @@ export default function SyncCompleteScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const themedStyles = createThemedStyles({
   screen: { flex: 1, backgroundColor: '#F5F4F9', paddingTop: 35 },
   content: { flexGrow: 1, paddingBottom: 110 },
   container: { width: '100%', maxWidth: 680, alignSelf: 'center', paddingHorizontal: 20 },

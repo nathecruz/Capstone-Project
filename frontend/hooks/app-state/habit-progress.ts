@@ -36,6 +36,19 @@ export function getHabitCompletionHistory(habits: Habit[], days = 7, weekStartsO
   });
 }
 
+/** Check-ins per day for the `days` days ending today (oldest first), unlike the calendar week above. */
+export function getRecentCompletionHistory(habits: Habit[], days = 7, today = new Date()) {
+  const lastDate = new Date(today);
+  lastDate.setHours(0, 0, 0, 0);
+  return Array.from({ length: days }, (_, index) => {
+    const date = new Date(lastDate);
+    date.setDate(lastDate.getDate() - (days - 1 - index));
+    const dateKey = getLocalDateKey(date);
+    const count = habits.reduce((total, habit) => total + (habit.completionDates.includes(dateKey) ? 1 : 0), 0);
+    return { dateKey, label: date.toLocaleDateString('en-US', { weekday: 'short' }), count };
+  });
+}
+
 export function getLocalDateKey(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');

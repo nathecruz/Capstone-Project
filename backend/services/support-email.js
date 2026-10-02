@@ -3,7 +3,7 @@ import { getEmailConfig, sendEmail } from './mailer.js';
 
 export function getSupportEmailConfig(environment = process.env) {
   const mail = getEmailConfig(environment);
-  const recipient = environment.SUPPORT_EMAIL?.trim() || mail.user;
+  const recipient = environment.SUPPORT_EMAIL?.trim() || mail.user || mail.sender;
   const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient);
   return {
     user: mail.user,

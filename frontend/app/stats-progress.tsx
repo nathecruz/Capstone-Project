@@ -2,22 +2,24 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View, type DimensionValue, useWindowDimensions } from 'react-native';
+import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getHabitCompletionHistory, getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { getHabitProgressSummary, getRecentCompletionHistory, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { getChartGeometry } from '@/utils/line-chart';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 const tabs = ['Overview', 'Habits', 'Activity'] as const;
 export default function StatsProgressScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   const { isDarkMode, habits, preferences } = useAppColorScheme();
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
   const { averageProgress, completed, completionPercent, maxStreak } = getHabitProgressSummary(habits);
-  const completionHistory = getHabitCompletionHistory(habits, 7, preferences.weekStartsOn);
+  const completionHistory = getRecentCompletionHistory(habits, 7);
   const maximumDailyCompletions = Math.max(1, ...completionHistory.map((entry) => entry.count));
-  const chartPoints: { left: DimensionValue; top: DimensionValue }[] = completionHistory.map((entry, index) => ({
-    left: `${5 + (index * 87) / Math.max(1, completionHistory.length - 1)}%`,
-    top: `${82 - (entry.count / maximumDailyCompletions) * 62}%`,
-  }));
+  const [chartSize, setChartSize] = useState({ width: 0, height: 0 });
+  const chart = getChartGeometry(completionHistory.map((entry) => (entry.count / maximumDailyCompletions) * 100), chartSize.width, chartSize.height);
   const reminderCounts = habits.reduce<Record<string, number>>((counts, habit) => {
     if (habit.reminderEnabled) counts[habit.reminderTime] = (counts[habit.reminderTime] ?? 0) + 1;
     return counts;
@@ -53,7 +55,7 @@ export default function StatsProgressScreen() {
 
             {preferences.hideProgress ? (
               <View style={[styles.chartCard, isDarkMode && styles.darkCard]}>
-                <Ionicons name="eye-off-outline" size={28} color="#6844D8" />
+                <Ionicons name="eye-off-outline" size={28} color={themeColor('#6844D8')} />
                 <Text style={[styles.cardTitle, isDarkMode && styles.darkText]}>Progress is hidden</Text>
                 <Text style={[styles.breakdownSubtitle, isDarkMode && styles.darkMutedText]}>Turn off Hide Progress in Settings to view your goals and activity.</Text>
               </View>
@@ -67,18 +69,16 @@ export default function StatsProgressScreen() {
                     <Text style={styles.positive}>{completed} completed today</Text>
                   </View>
                 </View>
-                <Ionicons name="trending-up" size={22} color="#49A866" />
+                <Ionicons name="trending-up" size={22} color={themeColor('#49A866')} />
               </View>
               <View style={styles.chart}>
-                <View style={styles.chartPlot}>
+                <View style={styles.chartPlot} onLayout={(event) => setChartSize({ width: event.nativeEvent.layout.width, height: event.nativeEvent.layout.height })}>
                   {[0, 1, 2, 3].map((line) => <View key={line} style={[styles.guideLine, isDarkMode && styles.darkGuideLine]} />)}
-                  {chartPoints.slice(0, -1).map((point, index) => (
-                    <View key={`segment-${index}`} style={[styles.segment, { left: point.left, top: point.top, width: index === 4 ? '20%' : '19%', transform: [{ rotate: index === 2 ? '28deg' : '-28deg' }] }]} />
-                  ))}
-                  {chartPoints.map((point, index) => <View key={`point-${index}`} style={[styles.point, point]} />)}
+                  {chartSize.width > 0 && chart.segments.map((segment, index) => <View key={`segment-${index}`} style={[styles.segment, segment]} />)}
+                  {chartSize.width > 0 && chart.points.map((point, index) => <View key={`point-${index}`} style={[styles.point, { left: point.x, top: point.y }]} />)}
                 </View>
                 <View style={styles.labels}>
-                  {completionHistory.slice(0, 5).map((entry) => <Text key={entry.dateKey} style={[styles.axisText, isDarkMode && styles.darkMutedText]}>{entry.label}</Text>)}
+                  {completionHistory.map((entry, index) => <Text key={entry.dateKey} style={[styles.axisText, styles.label, isDarkMode && styles.darkMutedText, { left: chart.points[index]?.x ?? 0 }]}>{index === completionHistory.length - 1 ? 'Today' : entry.label}</Text>)}
                 </View>
               </View>
             </View>
@@ -95,12 +95,12 @@ export default function StatsProgressScreen() {
                   <View style={[styles.summaryCard, isDarkMode && styles.darkCard]}>
                     <Text style={[styles.summaryLabel, isDarkMode && styles.darkMutedText]}>Total Habits Completed</Text>
                     <Text style={[styles.summaryValue, isDarkMode && styles.darkText]}>{completed}</Text>
-                    <Ionicons name="checkmark-circle" size={22} color="#49A866" />
+                    <Ionicons name="checkmark-circle" size={22} color={themeColor('#49A866')} />
                   </View>
                 </View>
                 <View style={styles.summaryGrid}>
-                  <View style={[styles.smallCard, isDarkMode && styles.darkCard]}><Ionicons name="flame" size={18} color="#E68D3D" /><Text style={[styles.smallValue, isDarkMode && styles.darkText]}>{maxStreak}</Text><Text style={[styles.smallLabel, isDarkMode && styles.darkMutedText]}>Day Streak</Text></View>
-                  <View style={[styles.smallCard, isDarkMode && styles.darkCard]}><Ionicons name="time-outline" size={18} color="#5B42D8" /><Text style={[styles.smallValue, isDarkMode && styles.darkText]}>{mostActiveTime}</Text><Text style={[styles.smallLabel, isDarkMode && styles.darkMutedText]}>Most Active Time</Text></View>
+                  <View style={[styles.smallCard, isDarkMode && styles.darkCard]}><Ionicons name="flame" size={18} color={themeColor('#E68D3D')} /><Text style={[styles.smallValue, isDarkMode && styles.darkText]}>{maxStreak}</Text><Text style={[styles.smallLabel, isDarkMode && styles.darkMutedText]}>Day Streak</Text></View>
+                  <View style={[styles.smallCard, isDarkMode && styles.darkCard]}><Ionicons name="time-outline" size={18} color={themeColor('#5B42D8')} /><Text style={[styles.smallValue, isDarkMode && styles.darkText]}>{mostActiveTime}</Text><Text style={[styles.smallLabel, isDarkMode && styles.darkMutedText]}>Most Active Time</Text></View>
                 </View>
                 <View style={[styles.consistencyCard, isDarkMode && styles.darkCard]}>
                   <View><Text style={[styles.cardTitle, isDarkMode && styles.darkText]}>Consistency Score</Text><Text style={styles.score}>{averageProgress} <Text style={styles.scoreLabel}>{averageProgress >= 80 ? 'Excellent' : averageProgress >= 50 ? 'Building' : 'Starting'}</Text></Text></View>
@@ -112,7 +112,7 @@ export default function StatsProgressScreen() {
                 <View style={[styles.breakdownCard, isDarkMode && styles.darkCard]}>
                   <View style={styles.breakdownHeader}>
                     <View><Text style={[styles.cardTitle, isDarkMode && styles.darkText]}>Habit breakdown</Text><Text style={[styles.breakdownSubtitle, isDarkMode && styles.darkMutedText]}>Your strongest habits this week</Text></View>
-                    <Ionicons name="bar-chart-outline" size={20} color="#5B42D8" />
+                    <Ionicons name="bar-chart-outline" size={20} color={themeColor('#5B42D8')} />
                   </View>
                   {topHabits.length ? topHabits.map((habit) => (
                     <View key={habit.id} style={styles.breakdownRow}>
@@ -123,7 +123,7 @@ export default function StatsProgressScreen() {
                   )) : <Text style={[styles.emptyBody, isDarkMode && styles.darkMutedText]}>Add a habit to see your progress breakdown.</Text>}
                 </View>
               ) : (
-                <View style={[styles.breakdownCard, isDarkMode && styles.darkCard]}><View style={styles.breakdownHeader}><View><Text style={[styles.cardTitle, isDarkMode && styles.darkText]}>Activity timeline</Text><Text style={[styles.breakdownSubtitle, isDarkMode && styles.darkMutedText]}>Completions from the last 7 days</Text></View><Ionicons name="calendar-outline" size={20} color="#5B42D8" /></View>{completionHistory.map((entry) => <View key={entry.dateKey} style={styles.breakdownRow}><Text style={[styles.breakdownName, isDarkMode && styles.darkText]}>{entry.label}</Text><View style={styles.breakdownCopy}><View style={[styles.breakdownTrack, isDarkMode && styles.darkGuideLine]}><View style={[styles.breakdownFill, { width: `${(entry.count / maximumDailyCompletions) * 100}%`, backgroundColor: '#5B42D8' }]} /></View></View><Text style={styles.breakdownPercent}>{entry.count}</Text></View>)}</View>
+                <View style={[styles.breakdownCard, isDarkMode && styles.darkCard]}><View style={styles.breakdownHeader}><View><Text style={[styles.cardTitle, isDarkMode && styles.darkText]}>Activity timeline</Text><Text style={[styles.breakdownSubtitle, isDarkMode && styles.darkMutedText]}>Completions from the last 7 days</Text></View><Ionicons name="calendar-outline" size={20} color={themeColor('#5B42D8')} /></View>{completionHistory.map((entry) => <View key={entry.dateKey} style={styles.breakdownRow}><Text style={[styles.breakdownName, isDarkMode && styles.darkText]}>{entry.label}</Text><View style={styles.breakdownCopy}><View style={[styles.breakdownTrack, isDarkMode && styles.darkGuideLine]}><View style={[styles.breakdownFill, { width: `${(entry.count / maximumDailyCompletions) * 100}%`, backgroundColor: '#5B42D8' }]} /></View></View><Text style={styles.breakdownPercent}>{entry.count}</Text></View>)}</View>
               )
             )}
           </View>
@@ -133,7 +133,7 @@ export default function StatsProgressScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const themedStyles = createThemedStyles({
   screen: { flex: 1, backgroundColor: '#F5F4F9', paddingTop: 16 }, darkScreen: { backgroundColor: '#111018' },
   darkCard: { backgroundColor: '#1D1A24', borderColor: '#2C2935' },
   darkText: { color: '#F2EFF8' },
@@ -164,7 +164,8 @@ const styles = StyleSheet.create({
   darkGuideLine: { backgroundColor: '#342F3F' },
   segment: { position: 'absolute', height: 2, backgroundColor: '#5B42D8', transformOrigin: 'left center' },
   point: { position: 'absolute', width: 8, height: 8, borderRadius: 4, backgroundColor: '#5B42D8', marginLeft: -4, marginTop: -4 },
-  labels: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', justifyContent: 'space-between' },
+  labels: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 12 },
+  label: { position: 'absolute', width: 32, marginLeft: -16, textAlign: 'center' },
   axisText: { fontSize: 8, color: '#8D8998', fontWeight: '600' },
   summaryGrid: { flexDirection: 'row', gap: 12, marginBottom: 12 },
   summaryCard: { flex: 1, minHeight: 116, backgroundColor: '#FFFFFF', borderRadius: 18, padding: 14, shadowColor: '#000000', shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } },
