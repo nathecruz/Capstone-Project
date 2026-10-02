@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppDialog, type AppDialogVariant } from '@/components/ui/app-dialog';
+import { SLOW_SERVER_HINT, useSlowHint } from '@/hooks/use-slow-hint';
 import {
   getPasswordStrengthStatus,
   getSession,
@@ -33,6 +34,7 @@ export default function LoginScreen() {
   const [rememberMe, setRememberMe] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const slowSignIn = useSlowHint(isSubmitting);
   const [showResetModal, setShowResetModal] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
   const [resetOtp, setResetOtp] = useState('');
@@ -98,6 +100,7 @@ export default function LoginScreen() {
           <Text style={styles.loadingBrand}>HabitAI</Text>
           <ActivityIndicator size="small" color="#5B42D8" style={styles.loadingIndicator} />
           <Text style={styles.loadingText}>{isSubmitting ? 'Signing you in...' : 'Preparing your habits...'}</Text>
+          {slowSignIn && <Text style={[styles.loadingText, styles.slowHint]}>{SLOW_SERVER_HINT}</Text>}
         </View>
       </SafeAreaView>
     );
@@ -530,6 +533,7 @@ const styles = StyleSheet.create({
   loadingIndicator: {
     marginTop: 28,
   },
+  slowHint: { marginTop: 8, maxWidth: 300, textAlign: 'center' },
   loadingText: {
     marginTop: 10,
     color: '#777282',

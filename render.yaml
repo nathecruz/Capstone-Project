@@ -29,7 +29,8 @@ services:
           name: habitai-ml
           envVarKey: ML_SERVICE_API_KEY
       - key: ALLOWED_ORIGINS
-        value: https://project-b3gc.vercel.app,https://capstone-project-b3gc.vercel.app
+        # Every place the web app is served from: the Vercel domains and the Render static site.
+        value: https://project-b3gc.vercel.app,https://capstone-project-b3gc.vercel.app,https://habitai-frontend.onrender.com
       - key: EXTERNAL_REQUEST_TIMEOUT_MS
         value: 15000
       - key: GEMINI_API_KEY

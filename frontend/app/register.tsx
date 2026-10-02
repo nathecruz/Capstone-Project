@@ -19,6 +19,7 @@ import { supportedRegions } from '@/constants/i18n';
 import { joinName } from '@/utils/names';
 
 import { AppDialog, type AppDialogVariant } from '@/components/ui/app-dialog';
+import { SLOW_SERVER_HINT, useSlowHint } from '@/hooks/use-slow-hint';
 import {
   getPasswordStrengthStatus,
   getSession,
@@ -51,6 +52,7 @@ export default function RegisterScreen() {
   const [gender, setGender] = useState('');
   const [region, setRegion] = useState('');
   const [birthDate, setBirthDate] = useState(new Date(1998, 4, 14));
+  const [webDateValue, setWebDateValue] = useState('');
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isGenderPickerOpen, setIsGenderPickerOpen] = useState(false);
   const isWeb = Platform.OS === 'web';
@@ -60,6 +62,7 @@ export default function RegisterScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const slowSubmit = useSlowHint(isSubmitting);
   const [privacyConsent, setPrivacyConsent] = useState(false);
   const [dialog, setDialog] = useState<{ title: string; message: string; variant: AppDialogVariant } | null>(null);
   const passwordStrength = getPasswordStrengthStatus(password, {
@@ -129,8 +132,6 @@ export default function RegisterScreen() {
     });
 
     if (!passwordValidation.ok) {
-      setPassword('');
-      setConfirmPassword('');
       showDialog('Weak password', passwordValidation.message || 'Choose a stronger password.');
       return;
     }
@@ -228,11 +229,28 @@ export default function RegisterScreen() {
               <input
                 type="date"
                 aria-label="Select date of birth"
-                value={dateOfBirth ? formatDateInputValue(birthDate) : ''}
+                // The browser keeps what is being typed; the birthday is only taken once the
+                // year is complete (a partial year like "2" used to reset the field).
+                value={webDateValue}
+                min="1900-01-01"
                 max={formatDateInputValue(new Date())}
+                // The field is invisible, so open the calendar wherever it is clicked.
+                onClick={(event) => {
+                  try {
+                    event.currentTarget.showPicker?.();
+                  } catch {
+                    // Older browsers: the focused field still accepts typing.
+                  }
+                }}
                 onChange={(event) => {
-                  if (!event.currentTarget.value) return;
-                  const selectedDate = new Date(`${event.currentTarget.value}T00:00:00`);
+                  const value = event.currentTarget.value;
+                  setWebDateValue(value);
+                  const selectedDate = value ? new Date(`${value}T00:00:00`) : null;
+                  const valid = selectedDate && !Number.isNaN(selectedDate.getTime()) && selectedDate.getFullYear() >= 1900 && selectedDate <= new Date();
+                  if (!valid) {
+                    setDateOfBirth('');
+                    return;
+                  }
                   setBirthDate(selectedDate);
                   setDateOfBirth(formatDateOfBirth(selectedDate));
                 }}
@@ -366,6 +384,7 @@ export default function RegisterScreen() {
           >
             <Text style={styles.primaryButtonText}>{isSubmitting ? 'Creating account...' : 'Create Account'}</Text>
           </Pressable>
+          {slowSubmit && <Text style={styles.slowHint}>{SLOW_SERVER_HINT}</Text>}
 
           <Text style={styles.footerText}>Already have an account? <Link href="/login" style={styles.linkText}>Log In</Link></Text>
           </View>
@@ -675,6 +694,7 @@ const styles = StyleSheet.create({
   primaryButtonDisabled: {
     opacity: 0.7,
   },
+  slowHint: { marginTop: 10, textAlign: 'center', fontSize: 12, lineHeight: 17, color: '#657089' },
   footerText: {
     textAlign: 'center',
     marginTop: 18,

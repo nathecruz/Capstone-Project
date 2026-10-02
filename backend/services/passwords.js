@@ -13,12 +13,12 @@ export function passwordStrength(value, context = {}) {
   if (pass.length < 8) return 'Password must be at least 8 characters long.';
   const lower = pass.toLowerCase();
   const characterClasses = [/[a-z]/.test(pass), /[A-Z]/.test(pass), /\d/.test(pass), /[^A-Za-z0-9\s]/.test(pass)].filter(Boolean).length;
-  const seeds = [context.fullName, context.username, context.email?.split('@')[0], context.email, 'habitai', 'habit', 'habits', 'tracker', 'goals', 'progress', 'app', 'account', 'password', 'admin', 'qwerty', 'welcome', 'letmein', 'login', '123456']
+  const seeds = [context.fullName, context.username, context.email?.split('@')[0], context.email, 'habitai', 'habit', 'habits', 'tracker', 'goals', 'progress', 'account', 'password', 'admin', 'qwerty', 'welcome', 'letmein', 'login', '123456']
     .filter(Boolean)
     .map((item) => String(item).toLowerCase().replace(/[^a-z0-9]/g, ''))
     .filter((seed) => seed.length >= 3);
   if (seeds.some((seed) => lower.includes(seed))) return 'Choose a stronger password that avoids common words, personal details, dates, and app-specific terms.';
-  if (/(?:19\d{2}|20\d{2})/.test(pass)) return 'Avoid birthdays, dates, or other personal details in your password.';
+  if (/(?:19\d{2}|20\d{2})/.test(pass)) return 'Avoid years such as your birth year in your password.';
   if (characterClasses < 4) return 'Use at least 8 characters with uppercase letters, lowercase letters, numbers, and symbols.';
   if (/(.)\1{2,}/.test(pass) || (/(?:123|456|789)/.test(lower) && pass.length <= 24)) return 'Avoid repeated or predictable patterns such as repeated characters or common numeric sequences.';
   return null;

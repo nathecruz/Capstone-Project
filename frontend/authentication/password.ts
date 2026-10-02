@@ -6,7 +6,8 @@ const COMMON_PASSWORD_WORDS = [
   'password1', 'passphrase', '012345', '123456', '123456789', '12345678', '123123', '111111',
 ];
 
-const SERVICE_WORDS = ['habitai', 'habit', 'habits', 'tracker', 'goals', 'progress', 'app', 'account'];
+// No short words such as "app": they hide inside ordinary words (happy, apple) and reject good passwords.
+const SERVICE_WORDS = ['habitai', 'habit', 'habits', 'tracker', 'goals', 'progress', 'account'];
 
 function normalizePasswordSeed(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -76,9 +77,9 @@ export function validatePasswordStrength(
   const hasNumber = /\d/.test(pass);
   const hasSymbol = /[^A-Za-z0-9\s]/.test(pass);
   const characterClasses = [hasLowercase, hasUppercase, hasNumber, hasSymbol].filter(Boolean).length;
-  const words = lower.split(/[^a-z0-9]+/).filter(Boolean);
-  const maybeBirthday = /(?:0?[1-9]|1[0-2])(?:[/-]?)(?:0?[1-9]|[12]\d|3[01])(?:[/-]?)(?:19\d{2}|20\d{2}|\d{2})/.test(pass)
-    || /(?:19\d{2}|20\d{2})/.test(pass);
+  // The same rules as the server (backend/services/passwords.js), so the form never rejects a
+  // password the server would accept. Years such as a birth year are refused on both sides.
+  const maybeBirthday = /(?:19\d{2}|20\d{2})/.test(pass);
 
   const allSeeds = [
     ...(context.fullName ? [context.fullName] : []),
@@ -115,7 +116,7 @@ export function validatePasswordStrength(
     return {
       ok: false,
       strength: 'weak' as const,
-      message: 'Avoid birthdays, dates, or other personal details in your password.',
+      message: 'Avoid years such as your birth year in your password.',
     };
   }
 
@@ -124,14 +125,6 @@ export function validatePasswordStrength(
       ok: false,
       strength: 'medium' as const,
       message: 'Use at least 8 characters with uppercase letters, lowercase letters, numbers, and symbols.',
-    };
-  }
-
-  if (words.length >= 2 && words.length < 4) {
-    return {
-      ok: false,
-      strength: 'medium' as const,
-      message: 'Passphrases must contain at least four unrelated words.',
     };
   }
 
