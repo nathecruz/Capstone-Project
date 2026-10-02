@@ -5,6 +5,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { Image, Modal, Platform, Pressable, type PressableStateCallbackType, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
+import { WeekStrip } from '@/components/week-strip';
 import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { greetingFor } from '@/utils/greeting';
@@ -55,6 +56,21 @@ export default function HomeScreen() {
     return () => clearInterval(clock);
   }, []);
   const greeting = greetingFor(now);
+  // The habit just checked off: its row leaves the list, so offer a short-lived Undo.
+  const [justChecked, setJustChecked] = React.useState<{ id: string; label: string } | null>(null);
+  React.useEffect(() => {
+    if (!justChecked) return;
+    const timer = setTimeout(() => setJustChecked(null), 6000);
+    return () => clearTimeout(timer);
+  }, [justChecked]);
+  const checkOff = (id: string, label: string) => {
+    toggleHabit(id);
+    setJustChecked({ id, label });
+  };
+  const undoCheck = () => {
+    if (justChecked) toggleHabit(justChecked.id);
+    setJustChecked(null);
+  };
   const [quickStartDatePickerVisible, setQuickStartDatePickerVisible] = React.useState(false);
   const [quickCustomFrequency, setQuickCustomFrequency] = React.useState('Every week');
   const [quickRepeatDays, setQuickRepeatDays] = React.useState(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
@@ -196,11 +212,19 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.habitList}>
-              {activeHabits.length === 0 ? <Text style={styles.emptyHabitText}>{habits.length === 0 ? 'No habits yet. Add your first habit below.' : 'All habits completed today.'}</Text> : activeHabits.map((habit) => (
+              {activeHabits.length === 0 ? (habits.length === 0 ? <Text style={styles.emptyHabitText}>No habits yet. Add your first habit below.</Text> : (
+                <View style={styles.allDone} accessible accessibilityLabel="All habits done for today">
+                  <View style={styles.allDoneIcon}><Ionicons name="trophy" size={22} color="#F2A93B" /></View>
+                  <View style={styles.allDoneCopy}>
+                    <Text style={styles.allDoneTitle}>All done for today!</Text>
+                    <Text style={styles.allDoneText}>Every habit is checked off. Come back tomorrow to keep the streak going.</Text>
+                  </View>
+                </View>
+              )) : activeHabits.map((habit) => (
                 <Pressable
                   key={habit.id}
                   style={({ hovered, pressed }: HoverState) => [styles.habitRow, (hovered || pressed) && styles.habitRowActive]}
-                  onPress={() => toggleHabit(habit.id)}
+                  onPress={() => checkOff(habit.id, habit.label)}
                   accessibilityRole="checkbox"
                   accessibilityState={{ checked: false }}
                   aria-checked={false}
@@ -223,6 +247,16 @@ export default function HomeScreen() {
               ))}
             </View>
 
+            {justChecked && (
+              <View style={styles.undoBar} accessibilityLiveRegion="polite">
+                <Ionicons name="checkmark-circle" size={18} color="#3BAA74" />
+                <Text style={styles.undoText} numberOfLines={1}>{justChecked.label} done</Text>
+                <Pressable onPress={undoCheck} accessibilityRole="button" accessibilityLabel={`Undo ${justChecked.label}`} hitSlop={8}>
+                  <Text style={styles.undoAction}>Undo</Text>
+                </Pressable>
+              </View>
+            )}
+
             <Pressable style={styles.addButton} onPress={() => router.push('/add')}>
               <Text style={styles.addButtonText}>＋ Quick Add Habit</Text>
             </Pressable>
@@ -237,6 +271,8 @@ export default function HomeScreen() {
               </View>
             ))}
           </View>
+
+          {habits.length > 0 && <WeekStrip habits={habits} style={!isDesktop && styles.weekStripPhone} />}
 
           <Pressable style={[styles.progressLink, isDesktop && styles.dashboardLink]} onPress={() => router.push('/progress')} accessibilityRole="button" accessibilityLabel="View habit progress">
             <Text style={styles.progressLinkText}>View Progress</Text>
@@ -567,6 +603,15 @@ const themedStyles = createThemedStyles({
     justifyContent: 'center',
   },
   checkWrapActive: { backgroundColor: '#5b42d8' },
+  undoBar: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 14, backgroundColor: '#ecf8f1' },
+  undoText: { flex: 1, fontSize: 13, fontWeight: '700', color: '#2c6b4c' },
+  undoAction: { fontSize: 13, fontWeight: '800', color: '#4f2ac8' },
+  allDone: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 16, backgroundColor: '#fff7e8' },
+  allDoneIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center' },
+  allDoneCopy: { flex: 1 },
+  allDoneTitle: { fontSize: 15, fontWeight: '800', color: '#2f2d3c' },
+  allDoneText: { marginTop: 2, fontSize: 12, lineHeight: 17, color: '#6a6f7d', fontWeight: '600' },
+  weekStripPhone: { marginHorizontal: 18, marginTop: 14 },
   habitRowActive: { backgroundColor: '#efe9ff' },
   focusHint: { marginTop: 2, fontSize: 12, color: '#777282', fontWeight: '600' },
   // Tablets and laptops: a rounded canvas, so the background shapes end in a curve, not a hard cut.

@@ -6,6 +6,7 @@ import { getCurrentSession, subscribeToAuthChanges, type SessionUser } from '@/a
 import { getRemoteAppState, getRemoteHabitCompletions, saveRemoteAppState, saveRemoteHabitCompletion, type AppStateSyncBase, type AppStateSyncPayload } from '@/authentication/authService';
 import { normalizeHabitFields } from '@/utils/habit-data';
 import { canCompleteHabitForDate } from '@/utils/habit-visibility';
+import type { EditableHabitFields } from '@/utils/habit-edit';
 import { namesOf } from '@/utils/names';
 import { computeStreak } from '@/utils/streaks';
 import { applyRemoteCompletionDates, applyVisibleOrder, getLocalDateKey } from './app-state/habit-progress';
@@ -49,6 +50,7 @@ type ColorSchemeContextValue = {
   toggleHabit: (id: string) => void;
   toggleHabitForDate: (id: string, date: Date) => void;
   deleteHabit: (id: string) => void;
+  updateHabit: (id: string, changes: EditableHabitFields) => void;
   reorderHabits: (habits: Habit[]) => void;
   ringInterval: number;
   snoozeFrequency: string;
@@ -478,6 +480,15 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     setHabits((current) => current.filter((habit) => habit.id !== id));
   };
 
+  /** Renames, recategorizes or reschedules a habit; its check-ins stay and the streak is recounted for the schedule. */
+  const updateHabit = (id: string, changes: EditableHabitFields) => {
+    setHabits((current) => current.map((habit) => {
+      if (habit.id !== id) return habit;
+      const next = { ...habit, ...changes };
+      return { ...next, streak: computeStreak(next, next.completionDates, getLocalDateKey()) };
+    }));
+  };
+
   /** Reorders the habits shown on screen (possibly a filtered subset) without dropping the rest. */
   const reorderHabits = (ordered: Habit[]) => setHabits((current) => applyVisibleOrder(current, ordered));
 
@@ -594,6 +605,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       toggleHabit,
       toggleHabitForDate,
       deleteHabit,
+      updateHabit,
       reorderHabits,
       ringInterval,
       snoozeFrequency,

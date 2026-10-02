@@ -6,14 +6,9 @@ import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, us
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getHabitCategories, type HabitCategory } from '@/authentication';
 import { useAppDialog } from '@/components/ui/app-dialog';
+import { DEFAULT_HABIT_CATEGORIES } from '@/constants/habit-categories';
 import { requestNotificationAccess, useAppColorScheme } from '@/hooks/color-scheme-context';
 
-// Built-in categories, used until (or if) the Admin Panel's managed list loads from the backend.
-const defaultCategories: HabitCategory[] = [
-  { label: 'Health', icon: 'heart-outline', color: '#E58D8D' }, { label: 'Mind', icon: 'bulb-outline', color: '#7A6AED' },
-  { label: 'Productivity', icon: 'locate-outline', color: '#4BA3FF' }, { label: 'Lifestyle', icon: 'leaf-outline', color: '#57B991' },
-  { label: 'Academics', icon: 'school-outline', color: '#57B991' }, { label: 'Other', icon: 'ellipsis-horizontal', color: '#57B991' },
-];
 const frequencies = ['Daily', 'Weekly', 'Monthly', 'Custom'];
 const popularHabits = ['Drink Water', 'Exercise / Workout', 'Read a Book', 'Sleep Early', 'Meditate', 'Eat Healthy'];
 const allPopularHabits = [
@@ -49,7 +44,7 @@ export default function AddScreen() {
   const accent = isDarkMode ? '#B9A9FF' : '#5B42D8';
   const iconInk = isDarkMode ? '#E6E1F0' : '#403A4A';
   const [name, setName] = useState(selectedHabit ?? '');
-  const [categories, setCategories] = useState<HabitCategory[]>(defaultCategories);
+  const [categories, setCategories] = useState<HabitCategory[]>(DEFAULT_HABIT_CATEGORIES);
   const [category, setCategory] = useState('Health');
   const [frequency, setFrequency] = useState('Daily');
   const [startDate, setStartDate] = useState(() => formatDate(new Date()));

@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import { Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAppDialog } from '@/components/ui/app-dialog';
+import { EditHabitSheet } from '@/components/edit-habit-sheet';
 import { isHabitMissedYesterday, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { filterHabitsByStatus } from '@/utils/habit-data';
@@ -15,8 +15,8 @@ const tabs = ['All', 'Daily', 'Weekly', 'Monthly', 'Custom'];
 export default function HabitsScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
-  const showAlert = useAppDialog();
-  const { isDarkMode, habits: habitList, toggleHabit, deleteHabit, reorderHabits } = useAppColorScheme();
+  const { isDarkMode, habits: habitList, toggleHabit, reorderHabits } = useAppColorScheme();
+  const [editingHabit, setEditingHabit] = useState<(typeof habitList)[number] | null>(null);
   // Tablets and laptops have room for the four summary cards in one row.
   const { isCentered } = useResponsiveLayout();
   const [selectedTab, setSelectedTab] = useState('All');
@@ -117,15 +117,14 @@ export default function HabitsScreen() {
                 <View style={[styles.progressPill, isDarkMode && styles.darkProgressPill]}>
                   <Text style={[styles.progressPillText, isDarkMode && styles.darkProgressPillText]}>{item.total}</Text>
                 </View>
+                {/* Rename, recategorize, reschedule or delete: all in the edit sheet. */}
                 <Pressable
-                  style={[styles.deleteButton, isDarkMode && styles.darkDeleteButton]}
-                  onPress={() => showAlert('Delete habit?', `Remove ${item.label} from your habits?`, [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Delete', style: 'destructive', onPress: () => deleteHabit(item.id) },
-                  ])}
-                  accessibilityLabel={`Delete ${item.label}`}
+                  style={[styles.editButton, isDarkMode && styles.darkEditButton]}
+                  onPress={() => setEditingHabit(item)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit ${item.label}`}
                 >
-                  <Ionicons name="trash-outline" size={17} color={themeColor('#D45A68')} />
+                  <Ionicons name="create-outline" size={17} color={themeColor('#5B42D8')} />
                 </Pressable>
               </View>
 
@@ -336,6 +335,7 @@ export default function HabitsScreen() {
           </View>
         }
       />
+      <EditHabitSheet habit={editingHabit} onClose={() => setEditingHabit(null)} />
     </SafeAreaView>
   );
 }
@@ -361,7 +361,7 @@ const themedStyles = createThemedStyles({
   darkIconButton: { backgroundColor: '#221E2B' },
   darkProgressPill: { backgroundColor: '#2A2440' },
   darkProgressPillText: { color: '#C9BCFF' },
-  darkDeleteButton: { backgroundColor: '#3A2229' },
+  darkEditButton: { backgroundColor: '#2A2440' },
   darkProgressTrack: { backgroundColor: '#2C2935' },
   darkCheckButtonEmpty: { backgroundColor: '#1D1A24', borderColor: '#4A4458' },
   darkSegmentButton: {
@@ -747,11 +747,11 @@ const themedStyles = createThemedStyles({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  deleteButton: {
+  editButton: {
     width: 34,
     height: 34,
     borderRadius: 10,
-    backgroundColor: '#FFF0F2',
+    backgroundColor: '#F1EEFF',
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 8,
