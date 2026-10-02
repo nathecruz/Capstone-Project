@@ -8,6 +8,7 @@ import { useAppDialog } from '@/components/ui/app-dialog';
 import { askAi } from '@/utils/ai-client';
 import type { TranslationKey } from '@/constants/i18n';
 import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { CONTENT_MAX_WIDTH } from '@/hooks/use-responsive-layout';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 const settings = [
@@ -559,12 +560,14 @@ const themedStyles = createThemedStyles({
   },
   container: {
     width: '100%',
-    maxWidth: 680,
+    // Same width as the other tabs, so switching tabs does not resize the page.
+    maxWidth: CONTENT_MAX_WIDTH,
     alignSelf: 'center',
   },
   wideContainer: {
     width: '100%',
-    maxWidth: 680,
+    // Same width as the other tabs, so switching tabs does not resize the page.
+    maxWidth: CONTENT_MAX_WIDTH,
     alignSelf: 'center',
   },
   headerRow: {

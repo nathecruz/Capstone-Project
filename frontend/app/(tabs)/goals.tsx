@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { generateGoalPlan } from '@/utils/ai-client';
 import { useAppColorScheme, type Goal } from '@/hooks/color-scheme-context';
+import { CONTENT_MAX_WIDTH } from '@/hooks/use-responsive-layout';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 type GoalTab = 'Planner' | 'My Goals';
@@ -699,7 +700,8 @@ const themedStyles = createThemedStyles({
   darkSaveModalSecondaryButton: { backgroundColor: '#292331' },
   darkSaveModalSecondaryText: { color: '#D7D1E0' },
   content: { paddingBottom: 120 },
-  container: { width: '100%', maxWidth: 700, alignSelf: 'center' },
+  // Same width as the other tabs, so switching tabs does not resize the page.
+  container: { width: '100%', maxWidth: CONTENT_MAX_WIDTH, alignSelf: 'center' },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 },
   backButton: { width: 38, height: 38, justifyContent: 'center', alignItems: 'center' },
   headerSpacer: { width: 38 },

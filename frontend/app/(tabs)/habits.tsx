@@ -6,6 +6,7 @@ import { Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { isHabitMissedYesterday, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { filterHabitsByStatus } from '@/utils/habit-data';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
@@ -16,6 +17,8 @@ export default function HabitsScreen() {
   const themeColor = useThemeColor();
   const showAlert = useAppDialog();
   const { isDarkMode, habits: habitList, toggleHabit, deleteHabit, reorderHabits } = useAppColorScheme();
+  // Tablets and laptops have room for the four summary cards in one row.
+  const { isCentered } = useResponsiveLayout();
   const [selectedTab, setSelectedTab] = useState('All');
   const [filterMode, setFilterMode] = useState<'all' | 'active' | 'done'>('active');
   const [sortMode, setSortMode] = useState<'custom' | 'progress' | 'streak' | 'name'>('progress');
@@ -280,7 +283,7 @@ export default function HabitsScreen() {
 
             <View style={styles.statsRow}>
               {[{ label: 'Completed', value: `${completedCount} / ${habitList.length}`, sub: 'Today', color: '#5EC09A', icon: 'checkmark-circle-outline', bg: '#EAFBF2' }, { label: 'Current Streak', value: String(Math.max(0, ...habitList.map((habit) => habit.streak))), sub: 'days', color: '#4DA3FF', icon: 'flame-outline', bg: '#EAF4FF' }, { label: 'Success Rate', value: `${overallProgress}%`, sub: 'This week', color: '#9B6BF2', icon: 'sparkles-outline', bg: '#F2EBFF' }, { label: 'Total Habits', value: String(habitList.length), sub: 'Active', color: '#F2A95B', icon: 'trophy-outline', bg: '#FFF3E7' }].map((card) => (
-                <View key={card.label} style={[styles.statCard, isDarkMode && styles.darkCard]}>
+                <View key={card.label} style={[styles.statCard, isCentered && styles.statCardWide, isDarkMode && styles.darkCard]}>
                   <View style={[styles.statIconWrap, { backgroundColor: themeColor(card.bg, 'backgroundColor') }]}>
                     <Ionicons name={card.icon as keyof typeof Ionicons.glyphMap} size={18} color={card.color} />
                   </View>
@@ -299,22 +302,22 @@ export default function HabitsScreen() {
               <Text style={styles.dragHintText}>Hold & drag to reorder</Text>
             </View>
 
-            <View style={styles.suggestionCard}>
+            <View style={[styles.suggestionCard, isCentered && styles.suggestionCardWide]}>
               <View style={styles.suggestionArt}>
-                <View style={styles.robotBadge} />
+                <Ionicons name="sparkles" size={28} color={themeColor('#5B42D8')} />
               </View>
 
-              <View style={styles.suggestionTextWrap}>
-                <Text style={styles.suggestionTitle}>Create a new habit in seconds!</Text>
-                <Text style={styles.suggestionText}>Let AI suggest habits personalized just for you.</Text>
+              <View style={[styles.suggestionTextWrap, isCentered && styles.suggestionTextWrapWide]}>
+                <Text style={styles.suggestionTitle}>Need a habit idea?</Text>
+                <Text style={styles.suggestionText}>Get a quick suggestion you can add in one tap.</Text>
               </View>
 
               <Pressable style={styles.primaryButton} onPress={getSuggestion} accessibilityRole="button">
-                <Text style={styles.primaryButtonText}>Get Suggestions</Text>
+                <Text style={styles.primaryButtonText}>{suggestion ? 'Suggest another' : 'Suggest a habit'}</Text>
                 <Ionicons name="sparkles-outline" size={16} color={themeColor('#FFFFFF')} />
               </Pressable>
               {suggestion ? (
-                <View style={[styles.suggestionResult, isDarkMode && styles.darkCard]}>
+                <View style={[styles.suggestionResult, isCentered && styles.suggestionResultWide, isDarkMode && styles.darkCard]}>
                   <View style={styles.suggestionResultCopy}>
                     <Text style={[styles.suggestionResultLabel, isDarkMode && styles.darkMutedText]}>Suggested habit</Text>
                     <Text style={[styles.suggestionResultTitle, isDarkMode && styles.darkText]}>{suggestion}</Text>
@@ -615,6 +618,7 @@ const themedStyles = createThemedStyles({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
   },
+  statCardWide: { width: 'auto', flexGrow: 1, flexBasis: 0, minWidth: 0 },
   statIconWrap: {
     width: 28,
     height: 28,
@@ -845,18 +849,13 @@ const themedStyles = createThemedStyles({
     overflow: 'hidden',
     position: 'relative',
   },
-  robotBadge: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#5B42D8',
-    position: 'absolute',
-    bottom: 8,
-    left: 14,
-  },
   suggestionTextWrap: {
     paddingRight: 0,
   },
+  // Tablets and laptops: icon, text and button on one line; a suggestion opens on the next.
+  suggestionCardWide: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 16 },
+  suggestionTextWrapWide: { flex: 1, minWidth: 220 },
+  suggestionResultWide: { width: '100%' },
   suggestionTitle: {
     fontSize: 18,
     fontWeight: '800',

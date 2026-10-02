@@ -2,13 +2,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React from 'react';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { Image, Modal, Platform, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Image, Modal, Platform, Pressable, type PressableStateCallbackType, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { greetingFor } from '@/utils/greeting';
 import { filterHabitsByStatus } from '@/utils/habit-data';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
+
+type HoverState = PressableStateCallbackType & { hovered?: boolean };
 
 const popularHabits = ['Drink Water', 'Exercise / Workout', 'Read a Book', 'Sleep Early', 'Meditate', 'Eat Healthy'];
 const quickRepeatOptions = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -31,9 +34,12 @@ export default function HomeScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const showAlert = useAppDialog();
-  const { isDarkMode, avatarImage, habits, profile, addHabit: createHabit } = useAppColorScheme();
+  const { isDarkMode, avatarImage, habits, profile, addHabit: createHabit, toggleHabit } = useAppColorScheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+  // Tablets and laptops: the hero image sits beside the title, and on laptops the progress
+  // card and the stats share one row instead of leaving the sides of the page empty.
+  const { isCentered: wide, isDesktop } = useResponsiveLayout();
   const compact = width < 370;
   const contentPadding = Math.max(16, Math.min(28, width * 0.07));
   const characterSize = Math.min(170, Math.max(132, width * 0.42));
@@ -123,8 +129,8 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView edges={['left', 'right']} style={[styles.screen, isDarkMode && styles.darkScreen]}>
-      <View style={[styles.content, { paddingTop: insets.top + 16, paddingBottom: 104 + insets.bottom }]}>
-          <View style={[styles.deviceFrame, isDarkMode && styles.darkDeviceFrame]}>
+      <View style={[styles.content, wide && styles.wideContent, { paddingTop: insets.top + 16, paddingBottom: 104 + insets.bottom }]}>
+          <View style={[styles.deviceFrame, wide && styles.wideFrame, isDarkMode && styles.darkDeviceFrame]}>
           <View style={[styles.backgroundBlobOne, isDarkMode && styles.darkBlob]} />
           <View style={[styles.backgroundBlobTwo, isDarkMode && styles.darkBlob]} />
 
@@ -134,6 +140,12 @@ export default function HomeScreen() {
               <Text style={[styles.titleText, compact && styles.compactTitle, isDarkMode && styles.darkTitleText]}>{'Small Habits,\nBig Progress.'}</Text>
               <Text style={[styles.subtitleText, isDarkMode && styles.darkSubtitleText]}>{'Every habit you build today\nshapes your better tomorrow.'}</Text>
             </View>
+
+            {wide && (
+              <View style={styles.wideCharacterWrap}>
+                <Image source={require('../../assets/images/download.jpg')} style={styles.characterImage} resizeMode="cover" />
+              </View>
+            )}
 
             <View style={styles.topControls}>
               <Pressable
@@ -154,7 +166,7 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          <View style={styles.characterScene}>
+          {!wide && <View style={styles.characterScene}>
             <View style={[styles.characterImageWrap, { width: characterSize, height: characterSize, borderRadius: characterSize / 2, marginLeft: -characterSize / 2 }] }>
               <Image
                 source={require('../../assets/images/download.jpg')}
@@ -167,11 +179,15 @@ export default function HomeScreen() {
               <Text style={styles.sparkleTwo}>✦</Text>
               <Text style={styles.sparkleThree}>✦</Text>
             </View>
-          </View>
+          </View>}
 
-          <View style={styles.focusCard}>
+          <View style={[isDesktop && styles.dashboardRow, isDesktop && { paddingHorizontal: contentPadding }]}>
+          <View style={[styles.focusCard, isDesktop && styles.dashboardMain]}>
             <View style={styles.focusHeader}>
-              <Text style={styles.focusLabel}>Today&apos;s Progress</Text>
+              <View>
+                <Text style={styles.focusLabel}>Today&apos;s Progress</Text>
+                {activeHabits.length > 0 && <Text style={styles.focusHint}>{activeHabits.length} left today · tap one to check it off</Text>}
+              </View>
               <View style={styles.progressRing}>
                 <View style={styles.progressRingTrack} />
                 {progressSegments.map((segment, index) => <View key={index} style={[styles.progressSegment, { left: segment.left, top: segment.top }, segment.active && styles.progressSegmentActive]} />)}
@@ -181,15 +197,28 @@ export default function HomeScreen() {
 
             <View style={styles.habitList}>
               {activeHabits.length === 0 ? <Text style={styles.emptyHabitText}>{habits.length === 0 ? 'No habits yet. Add your first habit below.' : 'All habits completed today.'}</Text> : activeHabits.map((habit) => (
-                <View key={habit.id} style={styles.habitRow}>
-                  <View style={styles.habitMeta}>
-                    <View style={styles.habitIconWrap}>
-                      <Ionicons name={habit.icon as keyof typeof Ionicons.glyphMap} size={18} color={themeColor('#5b42d8')} />
-                    </View>
-                    <Text style={styles.habitLabel}>{habit.label}</Text>
-                  </View>
-                  <View style={styles.checkWrap} />
-                </View>
+                <Pressable
+                  key={habit.id}
+                  style={({ hovered, pressed }: HoverState) => [styles.habitRow, (hovered || pressed) && styles.habitRowActive]}
+                  onPress={() => toggleHabit(habit.id)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: false }}
+                  accessibilityLabel={`${habit.label} done today`}
+                >
+                  {({ hovered, pressed }: HoverState) => (
+                    <>
+                      <View style={styles.habitMeta}>
+                        <View style={styles.habitIconWrap}>
+                          <Ionicons name={habit.icon as keyof typeof Ionicons.glyphMap} size={18} color={themeColor('#5b42d8')} />
+                        </View>
+                        <Text style={styles.habitLabel} numberOfLines={1}>{habit.label}</Text>
+                      </View>
+                      <View style={[styles.checkWrap, (hovered || pressed) && styles.checkWrapActive]}>
+                        {(hovered || pressed) && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
+                      </View>
+                    </>
+                  )}
+                </Pressable>
               ))}
             </View>
 
@@ -198,19 +227,22 @@ export default function HomeScreen() {
             </Pressable>
           </View>
 
-          <View style={styles.statsRow}>
+          <View style={isDesktop && styles.dashboardSide}>
+          <View style={[styles.statsRow, isDesktop && styles.dashboardStats]}>
             {[{ value: String(Math.max(0, ...habits.map((habit) => habit.streak))), label: 'Day Streak' }, { value: String(completedHabits), label: 'Completed' }, { value: String(habits.length), label: 'Total Habits' }].map((item) => (
-              <View key={item.label} style={styles.statCell}>
+              <View key={item.label} style={[styles.statCell, isDesktop && styles.dashboardStatCell]}>
                 <Text style={styles.statValue}>{item.value}</Text>
                 <Text style={styles.statLabel}>{item.label}</Text>
               </View>
             ))}
           </View>
 
-          <Pressable style={styles.progressLink} onPress={() => router.push('/progress')} accessibilityRole="button" accessibilityLabel="View habit progress">
+          <Pressable style={[styles.progressLink, isDesktop && styles.dashboardLink]} onPress={() => router.push('/progress')} accessibilityRole="button" accessibilityLabel="View habit progress">
             <Text style={styles.progressLinkText}>View Progress</Text>
             <Ionicons name="arrow-forward" size={16} color={themeColor('#4f2ac8')} />
           </Pressable>
+          </View>
+          </View>
         </View>
       </View>
       <Modal visible={quickAddVisible} transparent animationType="none" onRequestClose={() => setQuickAddVisible(false)}>
@@ -254,8 +286,10 @@ export default function HomeScreen() {
 const themedStyles = createThemedStyles({
   screen: {
     flex: 1,
-    backgroundColor: '#f3f2f8',
+    // Same as the page behind centered screens, so no seam shows beside the content column.
+    backgroundColor: '#f5f4f9',
   },
+  wideContent: { justifyContent: 'flex-start' },
   darkScreen: { backgroundColor: '#111018' },
   darkDeviceFrame: { backgroundColor: '#111018' },
   // The hero was light-only: dark text over pale blobs was unreadable in dark mode.
@@ -521,14 +555,38 @@ const themedStyles = createThemedStyles({
     textAlign: 'center',
     paddingVertical: 18,
   },
+  // An empty ring that fills on hover or press: the row checks the habit off for today.
   checkWrap: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: '#5b42d8',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#5b42d8',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  checkWrapActive: { backgroundColor: '#5b42d8' },
+  habitRowActive: { backgroundColor: '#efe9ff' },
+  focusHint: { marginTop: 2, fontSize: 12, color: '#777282', fontWeight: '600' },
+  // Tablets and laptops: a rounded canvas, so the background shapes end in a curve, not a hard cut.
+  wideFrame: { borderRadius: 32, borderWidth: 1, borderColor: '#ebe7f6', paddingTop: 28, paddingBottom: 28 },
+  wideCharacterWrap: {
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    overflow: 'hidden',
+    borderWidth: 4,
+    borderColor: '#ffffff',
+    backgroundColor: '#f3e7dd',
+    alignSelf: 'center',
+    zIndex: 2,
+  },
+  dashboardRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 16, marginTop: 22 },
+  dashboardMain: { flex: 3, marginHorizontal: 0, marginTop: 0 },
+  dashboardSide: { flex: 2, gap: 12 },
+  dashboardStats: { marginHorizontal: 0, marginTop: 0, flexDirection: 'column', paddingVertical: 6, paddingHorizontal: 16 },
+  dashboardStatCell: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, width: '100%' },
+  dashboardLink: { marginHorizontal: 0, marginTop: 0, backgroundColor: '#ffffff', borderRadius: 18, paddingVertical: 14 },
   addButton: {
     marginTop: 12,
     backgroundColor: '#5d42d8',

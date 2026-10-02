@@ -104,7 +104,7 @@ export default function StatsProgressScreen() {
                 </View>
                 <View style={[styles.consistencyCard, isDarkMode && styles.darkCard]}>
                   <View><Text style={[styles.cardTitle, isDarkMode && styles.darkText]}>Consistency Score</Text><Text style={styles.score}>{averageProgress} <Text style={styles.scoreLabel}>{averageProgress >= 80 ? 'Excellent' : averageProgress >= 50 ? 'Building' : 'Starting'}</Text></Text></View>
-                  <View style={styles.wave}><View style={styles.waveLine} /><View style={styles.waveLineTwo} /></View>
+                  <View style={styles.meter} accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: averageProgress }}><View style={styles.meterTrack}><View style={[styles.meterFill, { width: `${averageProgress}%` }]} /></View><Text style={[styles.meterCaption, isDarkMode && styles.darkMutedText]}>out of 100</Text></View>
                 </View>
               </>
             ) : (
@@ -179,9 +179,11 @@ const themedStyles = createThemedStyles({
   consistencyCard: { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 15, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   score: { fontSize: 22, fontWeight: '800', color: '#49A866', marginTop: 7 },
   scoreLabel: { fontSize: 10, fontWeight: '700' },
-  wave: { width: 100, height: 40, justifyContent: 'center' },
-  waveLine: { height: 2, backgroundColor: '#49A866', transform: [{ rotate: '-18deg' }] },
-  waveLineTwo: { height: 2, backgroundColor: '#49A866', transform: [{ rotate: '18deg' }] },
+  // A real meter for the score (it used to be two crossed lines that looked like a broken chart).
+  meter: { width: 120, alignItems: 'flex-end', gap: 6 },
+  meterTrack: { width: '100%', height: 8, borderRadius: 999, backgroundColor: '#E4F3E8', overflow: 'hidden' },
+  meterFill: { height: '100%', borderRadius: 999, backgroundColor: '#49A866' },
+  meterCaption: { fontSize: 10, fontWeight: '700', color: '#7A7F8C' },
   breakdownCard: { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 16 },
   breakdownHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   breakdownSubtitle: { fontSize: 10, color: '#777282', fontWeight: '600', marginTop: 3 },
