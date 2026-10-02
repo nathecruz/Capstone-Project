@@ -35,7 +35,8 @@ services:
       - key: EXTERNAL_REQUEST_TIMEOUT_MS
         value: 15000
       # AI Coach, assistants and goal planner. GROQ_API_KEY comes from console.groq.com
-      # (API Keys); set it in the Render dashboard. GROQ_MODEL is any Groq chat model.
+      # (API Keys); set it in the Render dashboard. GROQ_MODEL is any Groq chat model; when
+      # the key may not use it, the backend picks an available one and says so in the log.
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_MODEL
