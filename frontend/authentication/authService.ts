@@ -76,6 +76,23 @@ function isPlaceholderUrl(value: string) {
     || normalized.includes('::1');
 }
 
+let lastWarmUpAt = 0;
+
+/**
+ * Starts waking the free backend as soon as a sign-in screen opens. It sleeps after 15 idle
+ * minutes and then needs up to a minute, so without this the user's first sign-in or
+ * reset-code request carries the whole wake-up. Fire and forget: errors are ignored.
+ */
+export function warmUpServer(now = Date.now()) {
+  if (now - lastWarmUpAt < 60_000) return;
+  lastWarmUpAt = now;
+  try {
+    void fetch(`${getApiBaseUrl()}/healthz`).catch(() => undefined);
+  } catch {
+    // No API configured: there is nothing to wake.
+  }
+}
+
 export function getApiBaseUrl() {
   const envUrl = (process.env.EXPO_PUBLIC_API_URL || process.env.EXPO_PUBLIC_AI_API_URL)?.trim();
   if (envUrl) {

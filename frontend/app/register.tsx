@@ -25,6 +25,7 @@ import {
   getSession,
   signUp,
   validatePasswordStrength,
+  warmUpServer,
 } from '@/authentication';
 
 const genderOptions = ['Female', 'Male', 'Non-binary', 'Prefer not to say'];
@@ -85,6 +86,7 @@ export default function RegisterScreen() {
   };
 
   useEffect(() => {
+    warmUpServer();
     const checkSession = async () => {
       const session = await getSession();
       if (session) {

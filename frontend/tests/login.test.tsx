@@ -16,6 +16,7 @@ jest.mock('@/authentication', () => ({
   signIn: jest.fn(),
   updatePasswordWithOtp: jest.fn(),
   verifyPasswordReset: jest.fn(),
+  warmUpServer: jest.fn(),
 }));
 
 describe('LoginScreen', () => {

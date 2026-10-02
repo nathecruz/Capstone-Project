@@ -26,6 +26,7 @@ import {
   signIn,
   updatePasswordWithOtp,
   verifyPasswordReset,
+  warmUpServer,
 } from '@/authentication';
 
 export default function LoginScreen() {
@@ -45,6 +46,7 @@ export default function LoginScreen() {
   const [resendCountdown, setResendCountdown] = useState(0);
   const [codeLifetimeMinutes, setCodeLifetimeMinutes] = useState(10);
   const [resetBusy, setResetBusy] = useState<'send' | 'verify' | 'save' | null>(null);
+  const slowReset = useSlowHint(resetBusy !== null);
   const [dialog, setDialog] = useState<{ title: string; message: string; variant: AppDialogVariant } | null>(null);
   const resetPasswordStrength = getPasswordStrengthStatus(newResetPassword, {
     email: resetEmail,
@@ -56,6 +58,7 @@ export default function LoginScreen() {
   };
 
   useEffect(() => {
+    warmUpServer();
     const checkSession = async () => {
       try {
         const session = await getSession();
@@ -178,6 +181,7 @@ export default function LoginScreen() {
   };
 
   const handleForgotPassword = () => {
+    warmUpServer();
     resetModalState();
   };
 
@@ -475,6 +479,7 @@ export default function LoginScreen() {
                 </View>
               </>
             )}
+            {slowReset && <Text style={[styles.helpText, styles.resetSlowHint]}>{SLOW_SERVER_HINT}</Text>}
               </View>
             </ScrollView>
           </KeyboardAvoidingView>
@@ -534,6 +539,7 @@ const styles = StyleSheet.create({
     marginTop: 28,
   },
   slowHint: { marginTop: 8, maxWidth: 300, textAlign: 'center' },
+  resetSlowHint: { marginTop: 12, textAlign: 'center' },
   loadingText: {
     marginTop: 10,
     color: '#777282',
