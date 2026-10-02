@@ -10,6 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ColorSchemeProvider, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { AppDialogProvider } from '@/components/ui/app-dialog';
 import { getSession, subscribeToAuthChanges, type SessionUser } from '@/authentication';
+import { PageSidebar } from '@/components/desktop-sidebar';
 import { ServerStatusBanner } from '@/components/server-status-banner';
 import { CONTENT_MAX_WIDTH, pageBackground, useResponsiveLayout } from '@/hooks/use-responsive-layout';
 
@@ -20,6 +21,10 @@ LogBox.ignoreLogs([
 // Screens that fill the window on wide screens: the tabs (they center themselves next to the
 // sidebar) and the sign-in flow, whose decorated backgrounds are designed edge to edge.
 const FULL_WIDTH_ROUTES = new Set(['(tabs)', 'login', 'register', 'logout', 'verify-email', 'privacy-notice', 'snooze-settings', 'modal']);
+// Pages without the laptop sidebar: the tabs draw their own, and the sign-in flow has none.
+const NO_SIDEBAR_ROUTES = new Set(['(tabs)', 'login', 'register', 'logout', 'verify-email', 'privacy-notice']);
+// Overlays open on top of another page, which keeps its sidebar.
+const OVERLAY_ROUTES = new Set(['snooze-settings', 'modal']);
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -41,7 +46,7 @@ export default function RootLayout() {
 
 function RootNavigator() {
   const { colorScheme } = useAppColorScheme();
-  const { isCentered } = useResponsiveLayout();
+  const { isCentered, isDesktop } = useResponsiveLayout();
   const background = pageBackground(colorScheme === 'dark');
   // Navigation containers use the app's page color, so the sides of centered screens match them.
   const baseTheme = colorScheme === 'dark' ? DarkTheme : DefaultTheme;
@@ -51,6 +56,12 @@ function RootNavigator() {
   const [sessionUser, setSessionUser] = useState<SessionUser | null | undefined>(undefined);
   const isAuthenticated = sessionUser === undefined ? null : Boolean(sessionUser);
   const sessionCheckVersion = useRef(0);
+  const currentPage = segments[0] as string | undefined;
+  // Remembers the last real page, so an overlay opened on it keeps that page's sidebar.
+  const [pageBelowOverlay, setPageBelowOverlay] = useState(currentPage);
+  if (currentPage && !OVERLAY_ROUTES.has(currentPage) && currentPage !== pageBelowOverlay) setPageBelowOverlay(currentPage);
+  const sidebarPage = currentPage && OVERLAY_ROUTES.has(currentPage) ? pageBelowOverlay : currentPage;
+  const showPageSidebar = isDesktop && Boolean(sessionUser) && Boolean(sidebarPage) && !NO_SIDEBAR_ROUTES.has(sidebarPage ?? '');
 
   useEffect(() => {
     let isMounted = true;
@@ -105,6 +116,8 @@ function RootNavigator() {
       </Head>
       <ThemeProvider value={navigationTheme}>
       <View style={[styles.stackRoot, { backgroundColor: background }]}>
+      {showPageSidebar && <PageSidebar current={sidebarPage} />}
+      <View style={styles.stackArea}>
       <Stack
         screenOptions={({ route }) => ({
           contentStyle: isCentered && !FULL_WIDTH_ROUTES.has(route.name)
@@ -145,6 +158,7 @@ function RootNavigator() {
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
       </View>
+      </View>
       </ThemeProvider>
       {isAuthenticated === null && (
         <View
@@ -171,6 +185,10 @@ function RootNavigator() {
 
 const styles = StyleSheet.create({
   stackRoot: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  stackArea: {
     flex: 1,
   },
   loadingPage: {

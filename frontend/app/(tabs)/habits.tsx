@@ -20,7 +20,8 @@ export default function HabitsScreen() {
   // Tablets and laptops have room for the four summary cards in one row.
   const { isCentered } = useResponsiveLayout();
   const [selectedTab, setSelectedTab] = useState('All');
-  const [filterMode, setFilterMode] = useState<'all' | 'active' | 'done'>('active');
+  // Completed habits stay visible (checked) so a mistaken check can be undone; to-dos come first.
+  const [filterMode, setFilterMode] = useState<'all' | 'active' | 'done'>('all');
   const [sortMode, setSortMode] = useState<'custom' | 'progress' | 'streak' | 'name'>('progress');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [showSortMenu, setShowSortMenu] = useState(false);
@@ -75,6 +76,11 @@ export default function HabitsScreen() {
       next.sort((a, b) => a.label.localeCompare(b.label));
     }
 
+    // Habits still to do come before the ones done today; "My Order" keeps the dragged order.
+    if (sortMode !== 'custom') {
+      next = [...next.filter((habit) => !habit.done), ...next.filter((habit) => habit.done)];
+    }
+
     return next;
   }, [visibleHabitList, selectedTab, filterMode, sortMode, search]);
 
@@ -99,7 +105,7 @@ export default function HabitsScreen() {
           <ScaleDecorator>
             <Pressable
               onLongPress={Platform.OS === 'web' ? undefined : drag}
-              style={[styles.habitCard, isDarkMode && styles.darkCard, isActive && styles.habitCardDragging]}
+              style={[styles.habitCard, isDarkMode && styles.darkCard, item.done && styles.habitCardDone, isActive && styles.habitCardDragging]}
             >
               <View style={styles.habitCardHeader}>
                 <View style={styles.habitTitleWrap}>
@@ -147,13 +153,11 @@ export default function HabitsScreen() {
                 <Text style={[styles.progressPercent, isDarkMode && styles.darkMutedText]}>{item.progress}%</Text>
                 <Pressable
                   style={[styles.checkButton, item.done ? styles.checkButtonDone : [styles.checkButtonEmpty, isDarkMode && styles.darkCheckButtonEmpty]]}
-                  onPress={() => {
-                    toggleHabit(item.id);
-                    setFilterMode('active');
-                  }}
+                  onPress={() => toggleHabit(item.id)}
                   accessibilityRole="checkbox"
                   accessibilityLabel={`${item.label} done today`}
                   accessibilityState={{ checked: item.done }}
+                  aria-checked={item.done}
                 >
                   {item.done ? <Ionicons name="checkmark" size={18} color={themeColor('#FFFFFF')} /> : null}
                 </Pressable>
@@ -659,6 +663,7 @@ const themedStyles = createThemedStyles({
     shadowOffset: { width: 0, height: 4 },
     marginBottom: 10,
   },
+  habitCardDone: { opacity: 0.72 },
   habitCardDragging: {
     backgroundColor: '#F3EEFF',
     shadowColor: '#5B42D8',

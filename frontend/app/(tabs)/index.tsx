@@ -203,6 +203,7 @@ export default function HomeScreen() {
                   onPress={() => toggleHabit(habit.id)}
                   accessibilityRole="checkbox"
                   accessibilityState={{ checked: false }}
+                  aria-checked={false}
                   accessibilityLabel={`${habit.label} done today`}
                 >
                   {({ hovered, pressed }: HoverState) => (
