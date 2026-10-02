@@ -8,8 +8,9 @@ describe('canCompleteHabitForDate', () => {
     expect(canCompleteHabitForDate('2026-09-26', now)).toBe(true);
   });
 
-  it('keeps past dates completable', () => {
-    expect(canCompleteHabitForDate('2026-09-25', now)).toBe(true);
+  it('closes past dates: a missed day stays missed', () => {
+    expect(canCompleteHabitForDate('2026-09-25', now)).toBe(false);
+    expect(canCompleteHabitForDate('2026-09-25', new Date('2026-09-26T00:00:30'))).toBe(false);
   });
 
   it('does not allow future dates', () => {

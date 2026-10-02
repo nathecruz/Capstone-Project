@@ -18,3 +18,12 @@ export function isValidCompletionDate(date, timeZone = 'UTC', now = new Date()) 
     return false;
   }
 }
+
+/**
+ * Check-ins (and their undo) are only open for today in the student's time zone: once a day
+ * is over, a missed habit stays missed and a done one stays done.
+ */
+export function isOpenCheckInDate(date, timeZone = 'UTC', now = new Date()) {
+  if (!isValidCompletionDate(date, timeZone, now)) return false;
+  return date === getDateKeyInTimeZone(now, timeZone);
+}

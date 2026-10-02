@@ -37,8 +37,14 @@ export function isHabitMissedYesterday(habit: HabitVisibilityCandidate, now = ne
   return isHabitMissedOn(habit, previousDateKey(now), now);
 }
 
-/** Check-ins are allowed for today and earlier days, never for the future (the server rejects those too). */
+/**
+ * Check-ins are open for today only: once a day is over, a missed habit stays missed and a done
+ * one stays done (the server enforces the same rule).
+ */
 export function canCompleteHabitForDate(date: Date | string, now = new Date()) {
   const dateKey = typeof date === 'string' ? date : getLocalDateKey(date);
-  return dateKey <= getLocalDateKey(now);
+  return dateKey === getLocalDateKey(now);
 }
+
+/** How long a check-in can be undone after the tap; then it is locked for the day (the server allows a little more for slow networks). */
+export const CHECK_IN_UNDO_MS = 10_000;

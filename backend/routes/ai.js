@@ -1,7 +1,8 @@
+import { config } from '../config/index.js';
 import { query, withTransaction } from '../db/client.js';
 import { aiLimiter } from '../http/rate-limits.js';
 import { parse } from '../lib/http.js';
-import { assistantSchema, goalGenerationSchema, goalPlanSchema } from '../schemas.js';
+import { assistantSchema, goalGenerationSchema, goalPlanSchema, habitAnalysisRequestSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
 import { buildHabitContext, dateKeyInZone, shiftDay } from '../services/ai-context.js';
 import {
@@ -14,6 +15,7 @@ import {
   systemPromptFor,
 } from '../services/ai-prompts.js';
 import { refreshSnapshot } from '../services/app-state-store.js';
+import { HABIT_ANALYSIS_SYSTEM, habitAnalysisJsonSchema, habitAnalysisPrompt, habitAnalysisSchema, habitStats, mlSignal, mlSummary } from '../services/habit-analysis.js';
 import { generateAiText, isAiConfigured } from '../services/groq.js';
 import { computeStreak, habitFromRow } from '../services/streaks.js';
 import { COACH_TOKEN_COST, getWallet, spendTokens, tokenBalance } from '../services/wallet.js';
@@ -44,6 +46,23 @@ export async function loadAiContext(userId, timeZone = DEFAULT_TIME_ZONE) {
     goals: goals.rows,
     timeZone,
   });
+}
+
+/** The ML service's forecast for one habit, or null when it is not configured or not reachable. */
+async function mlForecast(signal) {
+  if (!config.ml.key) return null;
+  try {
+    const result = await fetch(`${config.ml.url.replace(/\/$/, '')}/api/predict/habit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-ML-Service-Key': config.ml.key },
+      body: JSON.stringify(signal),
+      // A sleeping ML service takes up to a minute; the analysis should not wait that long.
+      signal: AbortSignal.timeout(Math.min(config.ml.timeoutMs, 20_000)),
+    });
+    return result.ok ? mlSummary(await result.json()) : null;
+  } catch {
+    return null;
+  }
 }
 
 function logAiError(feature, error) {
@@ -88,6 +107,59 @@ export default function registerAiRoutes(app) {
       logAiError(mode, error);
       response.status(502).json({ ok: false, error: 'The AI service is temporarily unavailable.' });
     }
+  });
+
+  // One habit, analysed: check-in facts from the database, the ML forecast and the AI's advice.
+  app.post('/api/insights/habit-analysis', aiLimiter, async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const input = parse(habitAnalysisRequestSchema, request, response);
+    if (!input) return;
+    const timeZone = input.timeZone || DEFAULT_TIME_ZONE;
+    const [habitResult, completionResult] = await Promise.all([
+      query('SELECT label, category, meta, frequency, start_date, reminder_days, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime" FROM habits WHERE user_id=$1 AND id=$2', [session.userId, `${session.userId}:habit:${input.habitId}`]),
+      query('SELECT completed_date::text AS date, completed_at AS "completedAt" FROM habit_completions WHERE user_id=$1 AND habit_id=$2', [session.userId, input.habitId]),
+    ]);
+    const row = habitResult.rows[0];
+    if (!row) return response.status(404).json({ ok: false, error: 'Habit not found.' });
+    const habit = { ...habitFromRow(row), label: row.label, category: row.category, reminderEnabled: row.reminderEnabled, reminderTime: row.reminderTime };
+    const stats = habitStats({ habit, completions: completionResult.rows, timeZone });
+    const ml = await mlForecast(mlSignal(stats));
+
+    let ai = null;
+    if (isAiConfigured()) {
+      try {
+        for (let attempt = 0; attempt < 2 && !ai; attempt += 1) {
+          const text = await generateAiText(habitAnalysisPrompt(stats, ml), { system: HABIT_ANALYSIS_SYSTEM, schema: habitAnalysisJsonSchema, maxOutputTokens: 700, temperature: 0.5 });
+          try {
+            const parsed = habitAnalysisSchema.safeParse(JSON.parse(text));
+            if (parsed.success) ai = parsed.data;
+          } catch {
+            // Not JSON: try once more.
+          }
+        }
+      } catch (error) {
+        logAiError('habit analysis', error);
+      }
+    }
+
+    response.json({
+      ok: true,
+      habitId: input.habitId,
+      stats: {
+        completionRate: stats.completionRate,
+        scheduledDays: stats.scheduledDays,
+        completedDays: stats.completedDays,
+        missedDays: stats.missedDays,
+        streak: stats.streak,
+        strongestWeekday: stats.strongestWeekday,
+        weakestWeekday: stats.weakestWeekday,
+        usualCheckInTime: stats.usualCheckInTime,
+        last7Days: stats.last7Days,
+      },
+      ml,
+      ai,
+    });
   });
 
   app.post('/api/goals/generate', aiLimiter, async (request, response) => {

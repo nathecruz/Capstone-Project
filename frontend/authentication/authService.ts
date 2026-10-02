@@ -612,6 +612,43 @@ export async function saveRemoteHabitCompletion(completion: HabitCompletion & { 
   }
 }
 
+export type HabitAnalysis = {
+  habitId: string;
+  stats: {
+    completionRate: number;
+    scheduledDays: number;
+    completedDays: number;
+    missedDays: number;
+    streak: number;
+    strongestWeekday: string | null;
+    weakestWeekday: string | null;
+    usualCheckInTime: string | null;
+    last7Days: number[];
+  };
+  ml: { completionProbability: number; dropoutRisk: number | null; recommendedAction: string; suggestedReminderTime: string; source: 'model' | 'rules' } | null;
+  ai: { headline: string; bestTime: string; steps: string[]; watchOut: string } | null;
+};
+
+/** One habit analysed on the server: check-in facts, the ML forecast and the AI's advice. */
+export async function analyzeHabit(habitId: string): Promise<{ ok: true; analysis: HabitAnalysis } | { ok: false; message: string }> {
+  const token = await getSessionToken();
+  if (!token) return { ok: false, message: 'You are not signed in.' };
+  try {
+    const analysis = await apiRequest<HabitAnalysis>('/api/insights/habit-analysis', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ habitId, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }),
+    });
+    return { ok: true, analysis };
+  } catch (error) {
+    if (isNetworkError(error)) return { ok: false, message: 'Unable to reach the server. Try again in a moment.' };
+    const message = error instanceof Error ? error.message : '';
+    // A habit added a moment ago reaches the server with the next sync.
+    if (/habit not found/i.test(message)) return { ok: false, message: 'This habit is still syncing. Try again in a few seconds.' };
+    return { ok: false, message: message || 'The analysis is unavailable right now.' };
+  }
+}
+
 export async function submitIssueReport(report: {
   topic: string;
   timing: string;

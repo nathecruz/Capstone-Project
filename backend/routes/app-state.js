@@ -1,3 +1,4 @@
+import { config } from '../config/index.js';
 import { query, withTransaction } from '../db/client.js';
 import { parse } from '../lib/http.js';
 import { habitCompletionSchema, stateSchema } from '../schemas.js';
@@ -14,7 +15,7 @@ import {
   saveUserAppState,
   syncNormalizedState,
 } from '../services/app-state-store.js';
-import { isValidCompletionDate } from '../services/completion-date.js';
+import { isOpenCheckInDate } from '../services/completion-date.js';
 import { applyWallet, awardCheckIn, getWallet, revokeCheckIn } from '../services/wallet.js';
 
 export default function registerAppStateRoutes(app) {
@@ -87,7 +88,9 @@ export default function registerAppStateRoutes(app) {
     if (!session) return;
     const input = parse(habitCompletionSchema, request, response);
     if (!input) return;
-    if (!isValidCompletionDate(input.date, input.timeZone)) return response.status(400).json({ ok: false, message: 'Completion date must be a valid date up to today.' });
+    if (!isOpenCheckInDate(input.date, input.timeZone)) {
+      return response.status(409).json({ ok: false, code: 'DAY_CLOSED', message: 'Only today can be checked in. A missed day stays missed.' });
+    }
 
     const result = await withTransaction(async (connection) => {
       await connection.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
@@ -95,6 +98,12 @@ export default function registerAppStateRoutes(app) {
       const habit = saved?.state?.habits?.find((entry) => entry.id === input.habitId);
       if (!habit) return null;
       const now = Date.now();
+
+      if (!input.completed) {
+        const existing = await connection.query('SELECT completed_at AS "completedAt" FROM habit_completions WHERE user_id=$1 AND habit_id=$2 AND completed_date=$3', [session.userId, input.habitId, input.date]);
+        const completedAt = Number(existing.rows[0]?.completedAt);
+        if (existing.rowCount && now - completedAt > config.checkIns.undoWindowMs) return { locked: true };
+      }
 
       if (input.completed) {
         const inserted = await connection.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING habit_id', [session.userId, input.habitId, input.date, now]);
@@ -122,6 +131,7 @@ export default function registerAppStateRoutes(app) {
       return { serverState, updatedAt };
     });
     if (!result) return response.status(404).json({ ok: false, message: 'Habit not found.' });
+    if (result.locked) return response.status(409).json({ ok: false, code: 'CHECK_IN_LOCKED', message: 'This check-in is locked. A check-in can only be undone right after it is made.' });
 
     const { serverState, updatedAt } = result;
     const habit = serverState.habits.find((entry) => entry.id === input.habitId);

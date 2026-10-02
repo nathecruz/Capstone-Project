@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Animated, AppState, Easing, Keyboard, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getApiBaseUrl, getAuthenticatedHeaders } from '@/authentication';
+import { HabitAnalysisPanel } from '@/components/habit-analysis-panel';
 import { getHabitProgressSummary, getRecentCompletionHistory, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { getChartGeometry } from '@/utils/line-chart';
 import { getPredictionPresentation } from '@/utils/ai-presentation';
@@ -439,6 +440,7 @@ export default function InsightsScreen() {
               </>
             ) : (
               <View style={styles.predictionScreen}>
+                <HabitAnalysisPanel habits={habits} />
                 <View style={[styles.predictionHeroCard, isDarkMode && styles.darkHeroCard]}>
                   <View style={styles.heroLabelRow}>
                     <View style={styles.liveDot} />

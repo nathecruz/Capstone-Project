@@ -166,11 +166,13 @@ export function earnedAchievements(habits) {
 }
 
 /** Valid, not-in-the-future check-in dates from a synced habit (offline check-ins). */
+/**
+ * New check-ins a synced state may add: today's only (in the habit's time zone), the same rule
+ * as PUT /api/habit-completions. A missed day cannot be filled in later, even offline.
+ */
 function syncedCompletionDates(habit) {
-  const latestAllowed = todayFor('Pacific/Kiritimati'); // the earliest "today" on Earth
-  return [...new Set((Array.isArray(habit.completionDates) ? habit.completionDates : [])
-    .map(String)
-    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date) && date <= latestAllowed))];
+  const today = todayFor(habit.completionTimeZone);
+  return (Array.isArray(habit.completionDates) ? habit.completionDates : []).map(String).includes(today) ? [today] : [];
 }
 
 /** Mirrors the synced state into the relational tables inside the caller's transaction. */

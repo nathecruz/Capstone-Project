@@ -5,6 +5,7 @@ import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatli
 import { Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { EditHabitSheet } from '@/components/edit-habit-sheet';
+import { useAppDialog } from '@/components/ui/app-dialog';
 import { isHabitMissedYesterday, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { filterHabitsByStatus } from '@/utils/habit-data';
@@ -15,7 +16,8 @@ const tabs = ['All', 'Daily', 'Weekly', 'Monthly', 'Custom'];
 export default function HabitsScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
-  const { isDarkMode, habits: habitList, toggleHabit, reorderHabits } = useAppColorScheme();
+  const { isDarkMode, habits: habitList, toggleHabit, reorderHabits, canUndoCheckIn } = useAppColorScheme();
+  const showAlert = useAppDialog();
   const [editingHabit, setEditingHabit] = useState<(typeof habitList)[number] | null>(null);
   // Tablets and laptops have room for the four summary cards in one row.
   const { isCentered } = useResponsiveLayout();
@@ -149,10 +151,14 @@ export default function HabitsScreen() {
               </View>
 
               <View style={styles.progressPercentRow}>
-                <Text style={[styles.progressPercent, isDarkMode && styles.darkMutedText]}>{item.progress}%</Text>
+                <Text style={[styles.progressPercent, isDarkMode && styles.darkMutedText]}>{item.done ? (canUndoCheckIn(item.id) ? 'Done · tap again to undo' : 'Done for today') : `${item.progress}%`}</Text>
                 <Pressable
                   style={[styles.checkButton, item.done ? styles.checkButtonDone : [styles.checkButtonEmpty, isDarkMode && styles.darkCheckButtonEmpty]]}
-                  onPress={() => toggleHabit(item.id)}
+                  onPress={() => {
+                    // Done and past its Undo: locked for the day, so explain instead of doing nothing.
+                    if (item.done && !canUndoCheckIn(item.id)) showAlert('Already done today', 'A check-in locks a few seconds after you tap it, so streaks and tokens stay fair. This habit opens again tomorrow.');
+                    else toggleHabit(item.id);
+                  }}
                   accessibilityRole="checkbox"
                   accessibilityLabel={`${item.label} done today`}
                   accessibilityState={{ checked: item.done }}

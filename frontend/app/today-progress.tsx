@@ -4,7 +4,9 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAppDialog } from '@/components/ui/app-dialog';
 import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { isHabitMissedOn } from '@/utils/habit-visibility';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 const weekdays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
@@ -41,8 +43,14 @@ function getDateKey(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function getInsightMessages(completedCount: number, habitCount: number) {
+function getInsightMessages(completedCount: number, habitCount: number, isPast = false) {
   const completionPercent = habitCount ? Math.round((completedCount / habitCount) * 100) : 0;
+  // A past day can no longer change, so describe it instead of suggesting what to do on it.
+  if (isPast && habitCount > 0 && completionPercent < 100) {
+    return completedCount > 0
+      ? [`You completed ${completedCount} of ${habitCount} habits on this day. The rest stay missed; today is a fresh start.`, `${completionPercent}% of this day was completed. Focus on today's habits.`]
+      : ['Nothing was checked in on this day. That day is closed, but today is a fresh start.', 'This day stays missed. Pick one habit to finish today.'];
+  }
   if (habitCount === 0) return ['Add your first habit to start building a consistency pattern.', 'Your next small habit can become the start of a stronger routine.'];
   if (completionPercent === 100) return [`Perfect work: all ${habitCount} habits are complete for this day.`, 'You showed up for every habit on this day. Keep the rhythm going.'];
   if (completedCount > 0) return [`You completed ${completedCount} of ${habitCount} habits on this day. One more step keeps the momentum alive.`, `${completionPercent}% complete for this day. Finish one more habit when you are ready.`];
@@ -52,7 +60,8 @@ function getInsightMessages(completedCount: number, habitCount: number) {
 export default function InsightsScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
-  const { isDarkMode, habits, toggleHabitForDate } = useAppColorScheme();
+  const { isDarkMode, habits, toggleHabitForDate, canUndoCheckIn } = useAppColorScheme();
+  const showAlert = useAppDialog();
   const { date: initialDate } = useLocalSearchParams<{ date?: string }>();
   const { maxStreak } = getHabitProgressSummary(habits);
   const [selectedDate, setSelectedDate] = useState(() => initialDate ? new Date(`${initialDate}T12:00:00`) : new Date());
@@ -62,12 +71,27 @@ export default function InsightsScreen() {
   });
   const [calendarVisible, setCalendarVisible] = useState(false);
   const selectedDateKey = getDateKey(selectedDate);
+  // Only today can be checked in; earlier days are a read-only record (a missed day stays missed).
+  const isSelectedToday = selectedDateKey === getDateKey(new Date());
+  const statusFor = (habit: (typeof habits)[number]) => {
+    if (habit.completionDates.includes(selectedDateKey)) return 'Done';
+    if (isSelectedToday) return 'Open';
+    return isHabitMissedOn(habit, selectedDateKey) ? 'Missed' : '—';
+  };
+  const pressHabit = (habit: (typeof habits)[number]) => {
+    if (!isSelectedToday) return;
+    if (habit.completionDates.includes(selectedDateKey) && !canUndoCheckIn(habit.id)) {
+      showAlert('Already done today', 'A check-in locks a few seconds after you tap it, so streaks and tokens stay fair. This habit opens again tomorrow.');
+      return;
+    }
+    toggleHabitForDate(habit.id, selectedDate);
+  };
   // Every habit can be completed all day, so all of them are listed for the selected date.
   const visibleHabits = habits;
   const selectedDateProgress = visibleHabits.filter((habit) => habit.completionDates.includes(selectedDateKey));
   const selectedCompletedCount = selectedDateProgress.length;
   const selectedCompletionPercent = visibleHabits.length ? Math.round((selectedCompletedCount / visibleHabits.length) * 100) : 0;
-  const insightMessages = getInsightMessages(selectedCompletedCount, visibleHabits.length);
+  const insightMessages = getInsightMessages(selectedCompletedCount, visibleHabits.length, !isSelectedToday);
   const [insightIndex, setInsightIndex] = useState(0);
   const insightMessage = insightMessages[insightIndex % insightMessages.length];
   const progressSegments = Array.from({ length: 48 }, (_, index) => {
@@ -136,6 +160,12 @@ export default function InsightsScreen() {
                 <Ionicons name="chevron-forward" size={13} color={themeColor('#6D687A')} />
               </Pressable>
             </View>
+            {!isSelectedToday && (
+              <View style={styles.pastNotice}>
+                <Ionicons name="lock-closed-outline" size={14} color={themeColor('#6D687A')} />
+                <Text style={styles.pastNoticeText}>Past days are a record only: a missed day stays missed.</Text>
+              </View>
+            )}
 
             <View style={[styles.summaryCard, isDarkMode && styles.darkCard]}>
               <View style={styles.progressRing}>
@@ -152,7 +182,7 @@ export default function InsightsScreen() {
 
             <View style={[styles.weeklyCard, isDarkMode && styles.darkCard]}>
               {visibleHabits.length ? visibleHabits.map((habit) => (
-                <Pressable key={habit.id} style={styles.habitProgressRow} onPress={() => toggleHabitForDate(habit.id, selectedDate)} accessibilityRole="button" accessibilityLabel={`Toggle ${habit.label} for ${formatDate(selectedDate)}`}>
+                <Pressable key={habit.id} style={styles.habitProgressRow} onPress={() => pressHabit(habit)} disabled={!isSelectedToday} accessibilityRole="button" accessibilityState={{ disabled: !isSelectedToday }} accessibilityLabel={`${habit.label}, ${statusFor(habit)} on ${formatDate(selectedDate)}`}>
                   <View style={[styles.habitProgressIcon, { backgroundColor: `${habit.color}22` }]}>
                     <Ionicons name={habit.icon} size={17} color={habit.color} />
                   </View>
@@ -161,7 +191,7 @@ export default function InsightsScreen() {
                     <Text style={[styles.habitProgressMeta, isDarkMode && styles.darkMutedText]}>{habit.meta}</Text>
                   </View>
                   <View style={styles.habitProgressStatus}>
-                    <Text style={[styles.habitProgressPercent, isDarkMode && styles.darkText]}>{habit.completionDates.includes(selectedDateKey) ? 'Done' : 'Open'}</Text>
+                    <Text style={[styles.habitProgressPercent, isDarkMode && styles.darkText, statusFor(habit) === 'Missed' && styles.missedText]}>{statusFor(habit)}</Text>
                     <View style={[styles.dayDot, habit.completionDates.includes(selectedDateKey) && styles.dayDotComplete]}>
                       {habit.completionDates.includes(selectedDateKey) && <Ionicons name="checkmark" size={9} color={themeColor('#FFFFFF')} />}
                     </View>
@@ -427,6 +457,9 @@ const themedStyles = createThemedStyles({
   habitProgressMeta: { fontSize: 10, color: '#827C8C', fontWeight: '600', marginTop: 3 },
   habitProgressStatus: { alignItems: 'flex-end', gap: 4 },
   habitProgressPercent: { fontSize: 11, color: '#282631', fontWeight: '800' },
+  missedText: { color: '#C24456' },
+  pastNotice: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 6, marginBottom: 4 },
+  pastNoticeText: { fontSize: 12, fontWeight: '600', color: '#6D687A' },
   dayDot: {
     width: 22,
     height: 22,

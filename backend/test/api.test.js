@@ -84,7 +84,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
   const mockMlService = createServer((request, response) => {
     if (request.url === '/api/predict/habit' && request.method === 'POST') {
       response.writeHead(mlServiceReady ? 200 : 503, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify(mlServiceReady ? { habit_name: 'Workout', prediction_source: 'model', is_fallback: false } : { error: 'Model unavailable.' }));
+      response.end(JSON.stringify(mlServiceReady ? { habit_name: 'Workout', completion_probability: 0.72, dropout_risk: 0.2, recommended_action: 'Keep the same time each day.', suggested_reminder_time: '07:00 AM', prediction_source: 'model', is_fallback: false } : { error: 'Model unavailable.' }));
       return;
     }
     response.writeHead(404);
@@ -100,6 +100,8 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
       DATABASE_URL: urlForSchema(testDatabaseUrl, schema),
       PORT: String(port),
       GROQ_API_KEY: '',
+      // Short, so the test can see a check-in lock without waiting 30 seconds.
+      CHECK_IN_UNDO_WINDOW_MS: '4000',
       ML_SERVICE_API_KEY: 'dev-only-local-key',
       ML_SERVICE_URL: `http://127.0.0.1:${mlPort}`,
       WEB_PUSH_VAPID_PUBLIC_KEY: 'test-vapid-public-key',
@@ -324,6 +326,30 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(normalizeAppState({ habits: [{ id: 'a' }, { id: 'a' }] }).habits.length, 1);
   });
 
+  await t.test('check-ins lock after the undo window, past days stay closed, habits are analysed', async () => {
+    const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+    const late = await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'habit-1', date: yesterday, completed: true, timeZone: 'UTC' }) });
+    assert.equal(late.response.status, 409);
+    assert.equal(late.body.code, 'DAY_CLOSED');
+
+    // habit-1 was checked in by the offline sync above; once the window has passed it is locked.
+    await new Promise((resolve) => setTimeout(resolve, 4500));
+    const locked = await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'habit-1', date: today, completed: false, timeZone: 'UTC' }) });
+    assert.equal(locked.response.status, 409);
+    assert.equal(locked.body.code, 'CHECK_IN_LOCKED');
+    const still = await request('/api/habit-completions', { headers: authHeaders });
+    assert.ok(still.body.completions.some((row) => row.habitId === 'habit-1' && row.date === today), 'the locked check-in is kept');
+
+    const analysis = await request('/api/insights/habit-analysis', { method: 'POST', headers: authHeaders, body: JSON.stringify({ habitId: 'habit-1', timeZone: 'UTC' }) });
+    assert.equal(analysis.response.status, 200, JSON.stringify(analysis.body));
+    assert.equal(analysis.body.stats.completedDays, 1);
+    assert.deepEqual(analysis.body.stats.last7Days, [0, 0, 0, 0, 0, 0, 1]);
+    assert.equal(analysis.body.ml.completionProbability, 0.72);
+    assert.equal(analysis.body.ai, null, 'no AI advice without an API key');
+    const unknown = await request('/api/insights/habit-analysis', { method: 'POST', headers: authHeaders, body: JSON.stringify({ habitId: 'missing' }) });
+    assert.equal(unknown.response.status, 404);
+  });
+
   await t.test('habits and check-ins survive empty, stale and reordering devices', async () => {
     const habit = (id, label) => ({ ...appState.habits[0], id, label, completionDates: [] });
     const latest = async () => (await request('/api/app-state', { headers: authHeaders })).body;
@@ -360,7 +386,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
     const offlineHabits = before.state.habits.map((item) => (item.id === 'h-c' ? { ...item, completionDates: [...item.completionDates, yesterday] } : item));
     const offline = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...before.state, habits: offlineHabits, baseUpdatedAt: before.updatedAt, baseState: before.state }) });
-    assert.deepEqual(offline.body.state.habits.find((item) => item.id === 'h-c').completionDates, [yesterday, today].sort(), "offline check-in merged with the other device's");
+    assert.deepEqual(offline.body.state.habits.find((item) => item.id === 'h-c').completionDates, [today], 'a missed day cannot be filled in later, even by an offline device');
 
     // A check-in undone on another device is not brought back by a device that still shows it.
     await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'h-a', date: today, completed: false, timeZone: 'UTC' }) });

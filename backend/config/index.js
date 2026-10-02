@@ -61,6 +61,11 @@ export const config = {
   session: {
     lifetimeMs: 7 * 24 * 60 * 60 * 1000,
   },
+  checkIns: {
+    // A check-in can be undone this long after it was made (the app offers Undo for 10 s);
+    // after that it is locked, so tokens and streaks cannot be toggled back and forth.
+    undoWindowMs: Math.max(1000, Number(env.CHECK_IN_UNDO_WINDOW_MS) || 30 * 1000),
+  },
   passwordReset: {
     otpLifetimeMs: 10 * 60 * 1000,
     resendCooldownMs: 60 * 1000,

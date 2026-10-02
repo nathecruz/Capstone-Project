@@ -5,7 +5,7 @@ import { translate } from '@/constants/i18n';
 import { getCurrentSession, subscribeToAuthChanges, type SessionUser } from '@/authentication/session';
 import { getRemoteAppState, getRemoteHabitCompletions, saveRemoteAppState, saveRemoteHabitCompletion, type AppStateSyncBase, type AppStateSyncPayload } from '@/authentication/authService';
 import { normalizeHabitFields } from '@/utils/habit-data';
-import { canCompleteHabitForDate } from '@/utils/habit-visibility';
+import { CHECK_IN_UNDO_MS, canCompleteHabitForDate } from '@/utils/habit-visibility';
 import type { EditableHabitFields } from '@/utils/habit-edit';
 import { namesOf } from '@/utils/names';
 import { computeStreak } from '@/utils/streaks';
@@ -49,6 +49,8 @@ type ColorSchemeContextValue = {
   addHabit: (habit: Omit<Habit, 'id' | 'goal' | 'progress' | 'total' | 'streak' | 'done' | 'completionDates'> & { goal: number }) => void;
   toggleHabit: (id: string) => void;
   toggleHabitForDate: (id: string, date: Date) => void;
+  /** True while today's check-in of this habit can still be undone (right after the tap). */
+  canUndoCheckIn: (id: string) => boolean;
   deleteHabit: (id: string) => void;
   updateHabit: (id: string, changes: EditableHabitFields) => void;
   reorderHabits: (habits: Habit[]) => void;
@@ -77,6 +79,31 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   const [profile, setProfile] = useState<Profile>(initialProfile);
   const [preferences, setPreferences] = useState<Preferences>(initialPreferences);
   const [habits, setHabits] = useState<Habit[]>([]);
+  // Check-ins made in this session that can still be undone: habit id -> when the Undo ends.
+  const [undoUntil, setUndoUntil] = useState<Record<string, number>>({});
+  const canUndoCheckIn = (id: string) => (undoUntil[id] ?? 0) > Date.now();
+  useEffect(() => {
+    const ends = Object.values(undoUntil);
+    if (!ends.length) return;
+    // Re-render when the next Undo ends, so the check-in shows as locked right away.
+    const timer = setTimeout(() => {
+      setUndoUntil((current) => Object.fromEntries(Object.entries(current).filter(([, until]) => until > Date.now())));
+    }, Math.max(0, Math.min(...ends) - Date.now()) + 50);
+    return () => clearTimeout(timer);
+  }, [undoUntil]);
+  // At midnight a new day starts: yesterday's check-ins lock and unfinished habits become
+  // missed, without waiting for a reload.
+  const [dayKey, setDayKey] = useState(() => getLocalDateKey());
+  useEffect(() => {
+    const now = new Date();
+    const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1);
+    const timer = setTimeout(() => {
+      setHabits((current) => current.map((habit) => applyRemoteCompletionDates(habit, habit.completionDates)));
+      setUndoUntil({});
+      setDayKey(getLocalDateKey());
+    }, nextMidnight.getTime() - now.getTime());
+    return () => clearTimeout(timer);
+  }, [dayKey]);
   const [points, setPoints] = useState(0);
   const [tokens, setTokens] = useState(0);
   const [tokenHistory, setTokenHistory] = useState<TokenTransaction[]>([]);
@@ -436,16 +463,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     }]);
   };
 
-  const toggleHabitForDate = (id: string, date: Date) => {
-    const dateKey = getLocalDateKey(date);
-    const isToday = dateKey === getLocalDateKey();
+  /** Shows a check-in (or its undo) on screen; the server's answer to the same change follows. */
+  const applyLocalCheckIn = (id: string, dateKey: string, completed: boolean) => {
     const completionTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-    const currentHabit = habits.find((habit) => habit.id === id);
-    // Any time today (a habit only counts as missed once its day is over) or an earlier day.
-    if (!canCompleteHabitForDate(date)) return;
-    if (!currentHabit) return;
-    // The same intent goes to the screen and the server, so a quick double tap cannot leave them disagreeing.
-    const completed = !currentHabit.completionDates.includes(dateKey);
     // Optimistic display only: the server's ledger replaces these values in the response below.
     setPoints((current) => Math.max(0, current + (completed ? 20 : -20)));
     setTokens((current) => Math.max(0, current + (completed ? 5 : -5)));
@@ -457,10 +477,33 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       const done = completionDates.includes(getLocalDateKey());
       // Streaks come from the check-in dates and schedule (a missed day resets them).
       const streak = computeStreak(habit, completionDates, getLocalDateKey());
-      return { ...habit, done, completionDates, streak, completionTimeZone, progress: isToday ? (done ? 100 : 0) : habit.progress, total: isToday ? `${done ? goal : 0}/${goal}` : habit.total };
+      return { ...habit, done, completionDates, streak, completionTimeZone, progress: done ? 100 : 0, total: `${done ? goal : 0}/${goal}` };
     }));
+  };
+
+  const toggleHabitForDate = (id: string, date: Date) => {
+    const dateKey = getLocalDateKey(date);
+    const currentHabit = habits.find((habit) => habit.id === id);
+    // Today only: once a day is over, a missed habit stays missed and a done one stays done.
+    if (!canCompleteHabitForDate(date)) return;
+    if (!currentHabit) return;
+    // The same intent goes to the screen and the server, so a quick double tap cannot leave them disagreeing.
+    const completed = !currentHabit.completionDates.includes(dateKey);
+    // A check-in can be undone only right after the tap; then it is locked for the day.
+    if (!completed && !canUndoCheckIn(id)) return;
+    setUndoUntil((current) => {
+      const next = { ...current };
+      if (completed) next[id] = Date.now() + CHECK_IN_UNDO_MS;
+      else delete next[id];
+      return next;
+    });
+    applyLocalCheckIn(id, dateKey, completed);
     void saveRemoteHabitCompletion({ habitId: id, date: dateKey, completed }).then((result) => {
-      if (!result) return;
+      if (!result) {
+        // The server keeps a check-in it would not undo (locked, or unreachable): show it again.
+        if (!completed) applyLocalCheckIn(id, dateKey, true);
+        return;
+      }
       applyWallet(result);
       // The response carries the new server snapshot: use it as the sync base so the next save
       // is not treated as a conflicting edit (which used to undo a reorder made right after).
@@ -604,6 +647,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       addHabit,
       toggleHabit,
       toggleHabitForDate,
+      canUndoCheckIn,
       deleteHabit,
       updateHabit,
       reorderHabits,
@@ -629,7 +673,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       },
       clearLocalData,
     }),
-    [avatarImage, colorScheme, darkModeOverride, getAppStateSnapshot, goals, habits, points, preferences, profile, ringInterval, snoozeFrequency, syncAppState, tokenHistory, tokens],
+    [avatarImage, colorScheme, darkModeOverride, getAppStateSnapshot, goals, habits, points, preferences, profile, ringInterval, snoozeFrequency, syncAppState, tokenHistory, tokens, undoUntil],
   );
 
   return <ColorSchemeContext.Provider value={value}><DarkModeContext.Provider value={value.isDarkMode}>{children}</DarkModeContext.Provider></ColorSchemeContext.Provider>;

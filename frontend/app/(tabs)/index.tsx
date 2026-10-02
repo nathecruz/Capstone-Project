@@ -10,6 +10,7 @@ import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { greetingFor } from '@/utils/greeting';
 import { filterHabitsByStatus } from '@/utils/habit-data';
+import { CHECK_IN_UNDO_MS } from '@/utils/habit-visibility';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 type HoverState = PressableStateCallbackType & { hovered?: boolean };
@@ -60,7 +61,8 @@ export default function HomeScreen() {
   const [justChecked, setJustChecked] = React.useState<{ id: string; label: string } | null>(null);
   React.useEffect(() => {
     if (!justChecked) return;
-    const timer = setTimeout(() => setJustChecked(null), 6000);
+    // Undo is offered as long as the check-in can still be undone; then it is locked.
+    const timer = setTimeout(() => setJustChecked(null), CHECK_IN_UNDO_MS);
     return () => clearTimeout(timer);
   }, [justChecked]);
   const checkOff = (id: string, label: string) => {
