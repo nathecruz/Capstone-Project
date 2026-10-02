@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { isTemplateValue, loadEnvironment } from '../config/env.js';
+import { originMatcher } from '../config/index.js';
 import { goalPlanSchema } from '../schemas.js';
 import { buildHabitContext, habitFrequency } from '../services/ai-context.js';
 import { buildUserPrompt, cleanAnswer, normalizeGoalPlan, systemPromptFor } from '../services/ai-prompts.js';
@@ -15,6 +16,16 @@ test('recognises template values copied from .env.example', () => {
   }
   for (const value of ['AIzaSyA-real-looking-key-1234567890abcd', 'student.sender@gmail.com', 'postgresql://neondb_owner:secret@ep-plain-flower.aws.neon.tech/db', 'gemini-2.5-flash']) {
     assert.equal(isTemplateValue(value), false, value);
+  }
+});
+
+test('ALLOWED_ORIGINS accepts exact origins and the deployment URLs of one project', () => {
+  const allowed = originMatcher(['https://capstone-project-indol-five.vercel.app', 'https://capstone-project-*-team-c14.vercel.app']);
+  for (const origin of ['https://capstone-project-indol-five.vercel.app', 'https://capstone-project-gbvtscz85-team-c14.vercel.app', 'https://capstone-project-git-main-team-c14.vercel.app']) {
+    assert.equal(allowed(origin), true, origin);
+  }
+  for (const origin of ['https://evil.example.org', 'http://capstone-project-gbvtscz85-team-c14.vercel.app', 'https://capstone-project-x.evil.org-team-c14.vercel.app', 'https://capstone-project-x-team-c14.vercel.app.evil.org', 'https://other-x-team-c14.vercel.app', 'https://capstone-project--team-c14.vercel.app']) {
+    assert.equal(allowed(origin), false, origin);
   }
 });
 

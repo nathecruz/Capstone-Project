@@ -31,7 +31,7 @@ export function createApp() {
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
   // maxAge lets browsers cache the CORS preflight instead of sending OPTIONS before every poll.
-  app.use(cors({ origin: (origin, callback) => callback(null, !origin || config.allowedOrigins.has(origin) || isLocalDevelopmentOrigin(origin)), maxAge: 600 }));
+  app.use(cors({ origin: (origin, callback) => callback(null, !origin || config.isAllowedOrigin(origin) || isLocalDevelopmentOrigin(origin)), maxAge: 600 }));
   app.use(express.json({ limit: '2mb' }));
   app.use('/api', apiLimiter);
 

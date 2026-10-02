@@ -24,11 +24,34 @@ function list(value, fallback) {
   return new Set((value || fallback).split(',').map((item) => item.trim()).filter(Boolean));
 }
 
+/**
+ * Builds the CORS check for ALLOWED_ORIGINS. An entry may hold `*` to accept every deployment
+ * address of one project (Vercel gives each deploy its own URL), e.g.
+ * https://capstone-project-*-team-c14.vercel.app. `*` only stands for letters, digits and
+ * dashes, so it never crosses a dot or a slash into another domain.
+ */
+export function originMatcher(origins) {
+  const exact = new Set();
+  const patterns = [];
+  for (const origin of origins) {
+    if (!origin.includes('*')) {
+      exact.add(origin);
+      continue;
+    }
+    const source = origin.split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[a-z0-9-]+');
+    patterns.push(new RegExp(`^${source}$`));
+  }
+  return (origin) => exact.has(origin) || patterns.some((pattern) => pattern.test(origin));
+}
+
+const allowedOrigins = list(env.ALLOWED_ORIGINS, 'http://localhost:19006,http://localhost:19080,http://localhost:8081');
+
 export const config = {
   isProduction,
   port: Number(env.PORT || 8787),
   timeoutMs: Math.max(1000, Number(env.EXTERNAL_REQUEST_TIMEOUT_MS) || 15000),
-  allowedOrigins: list(env.ALLOWED_ORIGINS, 'http://localhost:19006,http://localhost:19080,http://localhost:8081'),
+  allowedOrigins,
+  isAllowedOrigin: originMatcher(allowedOrigins),
   ml: {
     url: env.ML_SERVICE_URL?.trim() || 'http://localhost:8000',
     key: env.ML_SERVICE_API_KEY?.trim() || '',

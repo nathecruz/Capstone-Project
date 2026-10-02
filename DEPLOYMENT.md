@@ -97,7 +97,7 @@ With `frontend` as the project root, Vercel runs `npm ci` and `npm run export:we
 - Redeploy both the backend and the frontend together: the app now polls `GET /api/app-state?since=` and sends `mode: "support"` for the Help assistant.
 - Full production readiness validation requires at least one of `GEMINI_API_KEY`, `GEMINI_API_KEY_GOALS`, `GEMINI_API_KEY_COACH`, or `GEMINI_API_KEY_ASSISTANT`, plus working email (`BREVO_API_KEY` with `EMAIL_FROM`, or an SMTP username/password pair); without them, AI or verification and password-reset emails are unavailable and the production readiness check fails.
 - The app validates that `ML_SERVICE_API_KEY` is a real secret and not a placeholder.
-- The backend also expects `ALLOWED_ORIGINS` to be defined in production.
+- The backend also expects `ALLOWED_ORIGINS` to be defined in production. An entry may use `*` for the part Vercel changes on every deploy, such as `https://capstone-project-*-team-c14.vercel.app`; `*` only matches letters, digits and dashes.
 - If you want AI features, set the dedicated Gemini keys when possible: `GEMINI_API_KEY_GOALS`, `GEMINI_API_KEY_COACH`, and `GEMINI_API_KEY_ASSISTANT`.
 
 After the first Blueprint sync assigns the Render service URLs, run `npm run check:env:deployment` with the production values set in the process environment or local ignored `.env`. It verifies the required database, auth, origins, and HTTPS URLs while warning if Gemini/email features are unavailable and confirming ML remains disabled. Do not commit the local `.env`. After a real model passes the independent holdout requirements, run `npm run check:env:production` as the stricter ML-release gate.
