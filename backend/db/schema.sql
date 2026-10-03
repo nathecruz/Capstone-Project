@@ -300,3 +300,17 @@ CREATE TABLE IF NOT EXISTS buddy_items (
   bought_at BIGINT NOT NULL,
   PRIMARY KEY (user_id, item_id)
 );
+
+-- Streak Freeze: freezes held (bought with tokens, at most two) and the days they covered. A
+-- frozen day neither counts toward nor breaks a streak.
+CREATE TABLE IF NOT EXISTS user_streak_freezes (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  available INTEGER NOT NULL DEFAULT 0,
+  updated_at BIGINT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS streak_freeze_days (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  freeze_date DATE NOT NULL,
+  used_at BIGINT NOT NULL,
+  PRIMARY KEY (user_id, freeze_date)
+);

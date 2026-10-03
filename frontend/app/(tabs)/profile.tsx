@@ -28,7 +28,7 @@ export default function ProfileScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const showAlert = useAppDialog();
-  const { isDarkMode, avatarImage, setAvatarImage, habits, goals, profile, points, tokens, applyWallet, t, isFaculty } = useAppColorScheme();
+  const { isDarkMode, avatarImage, setAvatarImage, habits, goals, profile, points, tokens, applyWallet, t, isFaculty, streakFreeze } = useAppColorScheme();
   // Faculty mode: no student leaderboards; a shortcut to their class's Class Pulse instead.
   const menuItems = isFaculty ? settings.filter((item) => item.key !== 'leaderboards') : settings;
   // The student's real place on the All Time leaderboard (it used to be a fixed "#24, Top 8%").
@@ -48,7 +48,8 @@ export default function ProfileScreen() {
   const compactLayout = width < 360;
   const { averageProgress, maxStreak, completed } = getHabitProgressSummary(habits);
   // Badges from the whole history: earned first, and the one closest to being earned.
-  const badges = useMemo(() => badgeProgress(habits, goals), [habits, goals]);
+  const frozenDays = streakFreeze?.frozenDays;
+  const badges = useMemo(() => badgeProgress(habits, goals, new Date(), frozenDays), [frozenDays, habits, goals]);
   const earnedBadges = badges.filter((badge) => badge.earned).length;
   const badgeStrip = [...badges].sort((a, b) => Number(b.earned) - Number(a.earned) || b.share - a.share).slice(0, 6);
   const upcomingBadge = nextBadge(badges);

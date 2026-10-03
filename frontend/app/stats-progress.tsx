@@ -13,11 +13,12 @@ const tabs = ['Overview', 'Habits', 'Activity'] as const;
 export default function StatsProgressScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
-  const { isDarkMode, habits, preferences } = useAppColorScheme();
+  const { isDarkMode, habits, preferences, streakFreeze } = useAppColorScheme();
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
   const { completed, completionPercent, maxStreak } = getHabitProgressSummary(habits);
-  const history = useMemo(() => historyStats(habits), [habits]);
+  const frozenDays = streakFreeze?.frozenDays;
+  const history = useMemo(() => historyStats(habits, new Date(), frozenDays), [frozenDays, habits]);
   const consistency = history.last30Rate;
   const completionHistory = getRecentCompletionHistory(habits, 7);
   const maximumDailyCompletions = Math.max(1, ...completionHistory.map((entry) => entry.count));

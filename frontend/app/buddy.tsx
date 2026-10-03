@@ -20,7 +20,7 @@ export default function BuddyScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const showAlert = useAppDialog();
-  const { habits, tokens, applyWallet } = useAppColorScheme();
+  const { habits, tokens, applyWallet, streakFreeze } = useAppColorScheme();
   const { buddy } = useBuddy();
   const [slot, setSlot] = useState<Slot>('head');
   const [editingName, setEditingName] = useState<string | null>(null);
@@ -32,7 +32,7 @@ export default function BuddyScreen() {
   const name = buddy?.name ?? 'Habi';
   const checkIns = buddy?.checkIns ?? habits.reduce((sum, habit) => sum + habit.completionDates.length, 0);
   const growth = buddyGrowth(checkIns, buddy?.stages);
-  const { mood, line, energy } = buddyMood(habits, name);
+  const { mood, line, energy } = buddyMood(habits, name, new Date(), streakFreeze?.frozenDays);
   const stages = buddy?.stages ?? [];
   const stageIndex = (id: string) => stages.findIndex((stage) => stage.id === id);
 

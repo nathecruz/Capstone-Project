@@ -549,6 +549,13 @@ export const openMysteryBox = (date: string) => authedRequest<{ amount: number; 
   body: JSON.stringify({ date, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }),
 });
 
+export type StreakFreezeStatus = { available: number; max: number; cost: number; frozenDays: string[]; used: string[] };
+const deviceTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+/** Uses held streak freezes for days missed before `date` (the device's today) and returns the status. */
+export const syncStreakFreezes = (date: string) => authedRequest<StreakFreezeStatus>('/api/streak-freezes/sync', { method: 'POST', body: JSON.stringify({ date, timeZone: deviceTimeZone() }) });
+/** Buys a streak freeze with tokens; it is used right away if yesterday's streak needs it. */
+export const buyStreakFreeze = (date: string) => authedRequest<StreakFreezeStatus & WalletResponse>('/api/streak-freezes/buy', { method: 'POST', body: JSON.stringify({ date, timeZone: deviceTimeZone() }) });
+
 /** Asks the server to send a test reminder to this device (or all of the account's devices) now. */
 export async function sendTestWebPush(endpoint?: string): Promise<{ ok: boolean; message: string }> {
   const token = await getSessionToken();

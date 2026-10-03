@@ -19,6 +19,7 @@ import { refreshSnapshot } from '../services/app-state-store.js';
 import { HABIT_ANALYSIS_SYSTEM, habitAnalysisJsonSchema, habitAnalysisPrompt, habitAnalysisSchema, habitStats, mlSignal, mlSummary } from '../services/habit-analysis.js';
 import { generateAiText, isAiConfigured } from '../services/groq.js';
 import { computeStreak, habitFromRow } from '../services/streaks.js';
+import { getFrozenDays } from '../services/streak-freeze.js';
 import { COACH_TOKEN_COST, getWallet, spendTokens, tokenBalance } from '../services/wallet.js';
 
 const DEFAULT_TIME_ZONE = 'Asia/Manila';
@@ -31,6 +32,7 @@ export async function loadAiContext(userId, timeZone = DEFAULT_TIME_ZONE) {
     query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1', [userId]),
     query('SELECT title, category, progress, status, details_json AS details FROM goals WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 5', [userId]),
   ]);
+  const frozenDays = await getFrozenDays({ query }, userId);
   const datesByHabit = new Map();
   for (const completion of completions.rows) {
     if (!datesByHabit.has(completion.habitId)) datesByHabit.set(completion.habitId, []);
@@ -41,7 +43,7 @@ export async function loadAiContext(userId, timeZone = DEFAULT_TIME_ZONE) {
     // The stored streak is only as fresh as the last sync; compute it from check-ins instead.
     habits: habits.rows.map((row) => {
       const id = String(row.id).replace(`${userId}:habit:`, '');
-      return { ...row, id, streak: computeStreak(habitFromRow(row), datesByHabit.get(id) || [], today) };
+      return { ...row, id, streak: computeStreak(habitFromRow(row), datesByHabit.get(id) || [], today, frozenDays) };
     }),
     completions: completions.rows.filter((completion) => completion.date >= recentStart),
     goals: goals.rows,

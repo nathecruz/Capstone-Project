@@ -3,6 +3,8 @@ import test from 'node:test';
 import { BUDDY_ITEMS, BUDDY_STAGES, buddyStageIndex } from '../services/buddy.js';
 import { MYSTERY_REWARDS, pickMysteryReward } from '../services/mystery-box.js';
 import { weekStartOf, weeklyQuests } from '../services/quests.js';
+import { daysToFreeze, STREAK_FREEZE_COST, STREAK_FREEZE_MAX } from '../services/streak-freeze.js';
+import { computeStreak } from '../services/streaks.js';
 import { doneActionSecret, getWebPushDoneUrl, localDateIn, makeDoneToken, readDoneToken } from '../services/web-push-actions.js';
 
 const daily = (id) => ({ id, frequency: 'Daily', startDate: '2026-09-01', reminderDays: [], meta: 'Daily • Anytime' });
@@ -51,6 +53,33 @@ test('the mystery box gives small amounts often and 20 rarely', () => {
   const total = MYSTERY_REWARDS.reduce((sum, [, weight]) => sum + weight, 0);
   assert.equal(total, 100);
   assert.deepEqual([0, 39, 40, 69, 70, 87, 88, 96, 97, 99].map(pickMysteryReward), [3, 3, 5, 5, 8, 8, 12, 12, 20, 20]);
+});
+
+test('a frozen day neither counts toward nor breaks a streak', () => {
+  const dates = ['2026-09-29', '2026-09-30', '2026-10-02'];
+  assert.equal(computeStreak(daily('a'), dates, '2026-10-03'), 1, 'October 1 was missed');
+  assert.equal(computeStreak(daily('a'), dates, '2026-10-03', ['2026-10-01']), 3, 'frozen: the three done days stay in a row');
+  assert.equal(computeStreak(daily('a'), [...dates, '2026-10-01'], '2026-10-03', ['2026-10-01']), 4, 'a done day that was also frozen still counts');
+});
+
+test('freezes cover the days missed before today, all of them or none', () => {
+  const habits = [daily('a'), daily('b')];
+  const done = (entries) => new Map(Object.entries(entries).map(([id, dates]) => [id, new Set(dates)]));
+  // Habit a ran from September 28 and missed yesterday (October 2); b never had a streak.
+  const missedYesterday = done({ a: ['2026-09-28', '2026-09-29', '2026-09-30', '2026-10-01'] });
+  assert.deepEqual(daysToFreeze(habits, missedYesterday, new Set(), '2026-10-03', 1), ['2026-10-02']);
+  assert.deepEqual(daysToFreeze(habits, missedYesterday, new Set(), '2026-10-03', 0), []);
+  // Two days missed: one freeze cannot save the streak (none is spent), two can.
+  const missedTwo = done({ a: ['2026-09-28', '2026-09-29', '2026-09-30'] });
+  assert.deepEqual(daysToFreeze(habits, missedTwo, new Set(), '2026-10-03', 1), []);
+  assert.deepEqual(daysToFreeze(habits, missedTwo, new Set(), '2026-10-03', 2), ['2026-10-02', '2026-10-01']);
+  assert.deepEqual(daysToFreeze(habits, missedTwo, new Set(['2026-10-01']), '2026-10-03', 1), ['2026-10-02'], 'a day already frozen is skipped');
+  // Three days missed: more than two freezes could cover.
+  assert.deepEqual(daysToFreeze(habits, done({ a: ['2026-09-28', '2026-09-29'] }), new Set(), '2026-10-03', 2), []);
+  // Nothing missed, or no running streak: nothing to freeze.
+  assert.deepEqual(daysToFreeze(habits, done({ a: ['2026-10-01', '2026-10-02'] }), new Set(), '2026-10-03', 2), []);
+  assert.deepEqual(daysToFreeze([daily('new')], new Map(), new Set(), '2026-10-03', 2), []);
+  assert.deepEqual([STREAK_FREEZE_COST, STREAK_FREEZE_MAX], [30, 2]);
 });
 
 test('the Done button on a reminder carries a signed, expiring token', () => {

@@ -543,6 +543,30 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(done.body.label, 'Read');
     const completions = (await request('/api/habit-completions', { headers })).body.completions;
     assert.ok(completions.some((row) => row.habitId === 'read' && row.date === today), 'the habit is checked in');
+
+    // Streak Freeze: the walk ran for three days, then yesterday was missed.
+    const dayBefore = (days) => new Date(Date.parse(`${today}T00:00:00Z`) - days * 86_400_000).toISOString().slice(0, 10);
+    for (const days of [2, 3, 4]) {
+      await db.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4)', [userId, 'walk', dayBefore(days), Date.now()]);
+    }
+    const walkStreak = async () => (await request('/api/app-state', { headers })).body.state.habits.find((habit) => habit.id === 'walk').streak;
+    assert.equal(await walkStreak(), 1, 'yesterday broke it');
+    await db.query('DELETE FROM token_transactions WHERE user_id=$1', [userId]);
+    const broke = await request('/api/streak-freezes/buy', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+    assert.equal(broke.response.status, 402);
+    await db.query("INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,200,'Test grant',$3,$4)", [`${userId}:token:freeze-grant`, userId, new Date().toISOString(), Date.now()]);
+    const bought = await request('/api/streak-freezes/buy', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+    assert.equal(bought.response.status, 200, JSON.stringify(bought.body));
+    assert.deepEqual({ used: bought.body.used, available: bought.body.available, tokens: bought.body.tokens }, { used: [dayBefore(1)], available: 0, tokens: 170 }, 'bought after the miss, it saves yesterday right away');
+    assert.equal(await walkStreak(), 4, 'today and the three days before the frozen one');
+    for (const expected of [1, 2]) {
+      const another = await request('/api/streak-freezes/buy', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+      assert.deepEqual({ used: another.body.used, available: another.body.available }, { used: [], available: expected });
+    }
+    const tooMany = await request('/api/streak-freezes/buy', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+    assert.equal(tooMany.response.status, 409, 'two is the most you can hold');
+    const synced = await request('/api/streak-freezes/sync', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+    assert.deepEqual({ used: synced.body.used, available: synced.body.available, frozenDays: synced.body.frozenDays }, { used: [], available: 2, frozenDays: [dayBefore(1)] });
   });
 
   await t.test('issue reports store attachments in the database and validate content', async () => {

@@ -16,6 +16,7 @@ import { runAll } from '../db/run-all.js';
 import { sameState } from './app-state-sync.js';
 import { getDateKeyInTimeZone } from './completion-date.js';
 import { computeStreak } from './streaks.js';
+import { getFrozenDays } from './streak-freeze.js';
 import { applyWallet, awardCheckIn, getWallet, POINTS_PER_CHECK_IN } from './wallet.js';
 
 export { sameState, stableStringify } from './app-state-sync.js';
@@ -62,7 +63,7 @@ function completionsByHabit(completions) {
 }
 
 /** Applies the server's check-ins and the derived fields (done, progress, streak) to one habit. */
-export function withServerProgress(habit, completionDates) {
+export function withServerProgress(habit, completionDates, frozenDays = []) {
   const today = todayFor(habit.completionTimeZone);
   const done = completionDates.includes(today);
   const goal = Math.max(1, Number(habit.goal) || 1);
@@ -72,29 +73,30 @@ export function withServerProgress(habit, completionDates) {
     done,
     progress: done ? 100 : 0,
     total: `${done ? goal : 0}/${goal}`,
-    streak: computeStreak(habit, completionDates, today),
+    streak: computeStreak(habit, completionDates, today, frozenDays),
   };
 }
 
 /** Habits rebuilt from the relational tables, used when no synced state exists yet. */
 export async function getCanonicalHabits(userId) {
-  const [habitResult, completions] = await Promise.all([
+  const [habitResult, completions, frozenDays] = await Promise.all([
     query('SELECT id, label, meta, category, icon, color, goal, progress, total, streak, done, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime", sort_order AS "sortOrder", updated_at AS "updatedAt" FROM habits WHERE user_id=$1 ORDER BY sort_order ASC, id ASC', [userId]),
     getServerCompletions(userId),
+    getFrozenDays({ query }, userId),
   ]);
   const byHabit = completionsByHabit(completions);
   return habitResult.rows.map((habit) => {
     const id = String(habit.id).replace(`${userId}:habit:`, '');
     const frequency = String(habit.meta || '').split('•')[0].trim();
-    return withServerProgress({ ...habit, id, frequency: ['Weekly', 'Monthly'].includes(frequency) ? frequency : 'Daily' }, byHabit.get(id) || []);
+    return withServerProgress({ ...habit, id, frequency: ['Weekly', 'Monthly'].includes(frequency) ? frequency : 'Daily' }, byHabit.get(id) || [], frozenDays);
   });
 }
 
 /** The state as the app should see it: server check-ins, streaks, points and tokens applied. */
 export async function buildServerState(userId, state, runner = { query }) {
-  const [completions, wallet] = await runAll(runner, [() => getServerCompletions(userId, runner), () => getWallet(runner, userId)]);
+  const [completions, wallet, frozenDays] = await runAll(runner, [() => getServerCompletions(userId, runner), () => getWallet(runner, userId), () => getFrozenDays(runner, userId)]);
   const byHabit = completionsByHabit(completions);
-  const habits = (Array.isArray(state?.habits) ? state.habits : []).map((habit) => withServerProgress(habit, byHabit.get(String(habit.id)) || []));
+  const habits = (Array.isArray(state?.habits) ? state.habits : []).map((habit) => withServerProgress(habit, byHabit.get(String(habit.id)) || [], frozenDays));
   return applyWallet({ ...state, habits }, wallet);
 }
 

@@ -9,6 +9,7 @@ import { openMysteryBox } from '@/authentication/authService';
 import { Confetti } from '@/components/confetti';
 import { openFocus } from '@/components/today-agenda';
 import type { Goal, Habit, TokenTransaction } from '@/hooks/app-state/types';
+import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { createThemedStyles, useThemedStyles } from '@/hooks/use-themed-styles';
 import { badgeProgress, badgeRemaining, nextBadge } from '@/utils/achievements';
 import { askAi } from '@/utils/ai-client';
@@ -31,18 +32,24 @@ function GrowingBar({ share, trackStyle, fillStyle }: { share: number; trackStyl
 }
 
 /** Level and XP: every check-in is 20 XP, every 100 XP is a level. */
-export function LevelBar({ points, streak = 0, style }: { points: number; streak?: number; style?: object | false }) {
+export function LevelBar({ points, streak = 0, freezes, onPress, style }: { points: number; streak?: number; freezes?: number; onPress?: () => void; style?: object | false }) {
   const styles = useThemedStyles(themedStyles);
   const { level, xp, toNext, share } = levelProgress(points);
   return (
-    <View style={[styles.level, style]} accessible accessibilityLabel={`Level ${level}, ${xp} of ${POINTS_PER_LEVEL} XP, ${toNext} XP to the next level${streak ? `, ${streak}-day streak` : ''}`}>
+    <Pressable
+      style={[styles.level, style]}
+      onPress={onPress}
+      disabled={!onPress}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityLabel={`Level ${level}, ${xp} of ${POINTS_PER_LEVEL} XP, ${toNext} XP to the next level${streak ? `, ${streak}-day streak` : ''}${freezes !== undefined ? `, ${freezes} streak freeze${freezes === 1 ? '' : 's'}` : ''}`}
+    >
       <View style={styles.levelBadge}>
         <Ionicons name="star" size={13} color="#FFD44D" />
         <Text style={styles.levelBadgeText}>Lv {level}</Text>
       </View>
       <View style={styles.levelCopy}>
         <GrowingBar share={share} trackStyle={styles.levelTrack} fillStyle={styles.levelFill} />
-        <Text style={styles.levelText} numberOfLines={1}>{xp}/{POINTS_PER_LEVEL} XP · {toNext} to Lv {level + 1}</Text>
+        <Text style={styles.levelText} numberOfLines={1}>{xp}/{POINTS_PER_LEVEL} XP</Text>
       </View>
       {streak > 0 && (
         <View style={styles.streakChip}>
@@ -50,14 +57,21 @@ export function LevelBar({ points, streak = 0, style }: { points: number; streak
           <Text style={styles.streakChipText}>{streak}</Text>
         </View>
       )}
-    </View>
+      {freezes !== undefined && (
+        <View style={styles.freezeChip}>
+          <Ionicons name="snow" size={12} color="#4BA3FF" />
+          <Text style={styles.freezeChipText}>{freezes}</Text>
+        </View>
+      )}
+    </Pressable>
   );
 }
 
 /** The badge closest to being earned, with what is left; opens Achievements. */
 export function NextBadgeCard({ habits, goals, style }: { habits: Habit[]; goals: Goal[]; style?: object | false }) {
   const styles = useThemedStyles(themedStyles);
-  const progress = useMemo(() => badgeProgress(habits, goals), [habits, goals]);
+  const frozenDays = useAppColorScheme().streakFreeze?.frozenDays;
+  const progress = useMemo(() => badgeProgress(habits, goals, new Date(), frozenDays), [frozenDays, goals, habits]);
   const next = nextBadge(progress);
   if (!habits.length || !next) return null;
   const earned = progress.filter((badge) => badge.earned).length;
@@ -189,13 +203,17 @@ export function MysteryBoxCard({ habits, tokenHistory, onWallet, style }: { habi
 }
 
 /** In the evening: habits still open today whose streak breaks at midnight. */
-export function StreakRiskBanner({ habits, now, style }: { habits: Habit[]; now: Date; style?: object | false }) {
+export function StreakRiskBanner({ habits, now, onFreeze, style }: { habits: Habit[]; now: Date; onFreeze?: () => void; style?: object | false }) {
   const styles = useThemedStyles(themedStyles);
-  const atRisk = habitsAtRisk(habits, now);
+  const { streakFreeze } = useAppColorScheme();
+  const frozenDays = streakFreeze?.frozenDays ?? [];
+  const atRisk = habitsAtRisk(habits, now, 18, frozenDays);
   if (!atRisk.length) return null;
   const today = getLocalDateKey(now);
-  const [first] = [...atRisk].sort((a, b) => computeStreak(b, b.completionDates, today) - computeStreak(a, a.completionDates, today));
-  const days = computeStreak(first, first.completionDates, today);
+  const streakOf = (habit: Habit) => computeStreak(habit, habit.completionDates, today, frozenDays);
+  const [first] = [...atRisk].sort((a, b) => streakOf(b) - streakOf(a));
+  const days = streakOf(first);
+  const held = streakFreeze?.available ?? 0;
   const others = atRisk.length - 1;
   return (
     <View style={[styles.risk, style]} accessibilityRole="alert">
@@ -205,6 +223,13 @@ export function StreakRiskBanner({ habits, now, style }: { habits: Habit[]; now:
         <Text style={styles.riskText}>
           {first.label} ({days} day{days === 1 ? '' : 's'}){others > 0 ? ` and ${others} more` : ''} will reset at midnight if not done.
         </Text>
+        {held > 0 ? (
+          <Text style={styles.riskFreeze}>🧊 Your streak freeze covers you if you miss tonight.</Text>
+        ) : onFreeze ? (
+          <Pressable onPress={onFreeze} accessibilityRole="button" hitSlop={6}>
+            <Text style={styles.riskFreezeLink}>🧊 Or protect it with a streak freeze</Text>
+          </Pressable>
+        ) : null}
       </View>
       <Pressable style={({ pressed }) => [styles.riskButton, pressed && styles.pressed]} onPress={() => openFocus(first.id)} accessibilityRole="button" accessibilityLabel={`Start a focus session for ${first.label}`}>
         <Text style={styles.riskButtonText}>Do it now</Text>
@@ -349,6 +374,10 @@ const themedStyles = createThemedStyles({
   boxOpenText: { fontSize: 13, fontWeight: '900', color: '#FFFFFF' },
   streakChip: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 10, backgroundColor: '#FFF1E6' },
   streakChipText: { fontSize: 12, fontWeight: '900', color: '#C9661F' },
+  freezeChip: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 10, backgroundColor: '#E7F3FF' },
+  freezeChipText: { fontSize: 12, fontWeight: '900', color: '#2F7CC4' },
+  riskFreeze: { marginTop: 4, fontSize: 11, fontWeight: '800', color: '#2F7CC4' },
+  riskFreezeLink: { marginTop: 4, fontSize: 11, fontWeight: '800', color: '#2F7CC4', textDecorationLine: 'underline' },
   badgeTally: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: '#F0E9FF' },
   badgeTallyText: { fontSize: 11, fontWeight: '900', color: '#5B42D8' },
   badgeTrack: { height: 8, borderRadius: 4, backgroundColor: '#EFEBFA', marginTop: 12, overflow: 'hidden' },

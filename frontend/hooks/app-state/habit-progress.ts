@@ -61,7 +61,7 @@ export function getLocalDateKey(date = new Date()) {
  * kept oldest first, as the server stores them: in another order every comparison with the
  * server's copy differed, and the app re-sent its state in an endless loop.
  */
-export function applyRemoteCompletionDates(habit: Habit, remoteDates: string[]) {
+export function applyRemoteCompletionDates(habit: Habit, remoteDates: string[], frozenDays: string[] = []) {
   const completionDates = [...new Set(remoteDates)].sort();
   const today = getLocalDateKey();
   const done = completionDates.includes(today);
@@ -72,7 +72,7 @@ export function applyRemoteCompletionDates(habit: Habit, remoteDates: string[]) 
     done,
     progress: done ? 100 : 0,
     total: `${done ? goal : 0}/${goal}`,
-    streak: computeStreak(habit, completionDates, today),
+    streak: computeStreak(habit, completionDates, today, frozenDays),
   }) as Habit;
 }
 

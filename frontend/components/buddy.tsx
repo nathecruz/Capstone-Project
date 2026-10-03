@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { Animated, Easing, Platform, Pressable, Text, View } from 'react-native';
 import type { Habit } from '@/hooks/app-state/types';
+import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useBuddy } from '@/hooks/use-buddy';
 import { createThemedStyles, useThemedStyles } from '@/hooks/use-themed-styles';
 import { buddyGrowth, buddyMood, MOOD_FACE, type Buddy, type BuddyMood } from '@/utils/buddy';
@@ -62,7 +63,7 @@ export function BuddyCard({ habits, style }: { habits: Habit[]; style?: object |
   const { buddy } = useBuddy();
   const name = buddy?.name ?? 'Habi';
   const checkIns = buddy?.checkIns ?? habits.reduce((sum, habit) => sum + habit.completionDates.length, 0);
-  const { mood, line, energy } = buddyMood(habits, name);
+  const { mood, line, energy } = buddyMood(habits, name, new Date(), useAppColorScheme().streakFreeze?.frozenDays);
   const growth = buddyGrowth(checkIns, buddy?.stages);
   return (
     <Pressable style={({ pressed }) => [styles.card, pressed && styles.pressed, style]} onPress={() => router.push('/buddy')} accessibilityRole="button" accessibilityLabel={`Visit ${name}: ${line}`}>

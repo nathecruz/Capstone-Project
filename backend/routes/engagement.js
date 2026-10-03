@@ -1,11 +1,12 @@
 import { query, withTransaction } from '../db/client.js';
 import { parse } from '../lib/http.js';
-import { buddyItemSchema, buddySaveSchema, mysteryBoxSchema, webPushDoneSchema } from '../schemas.js';
+import { buddyItemSchema, buddySaveSchema, mysteryBoxSchema, streakFreezeSchema, webPushDoneSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
 import { buyBuddyItem, getBuddy, saveBuddy } from '../services/buddy.js';
 import { setCheckIn } from '../services/check-ins.js';
 import { isOpenCheckInDate } from '../services/completion-date.js';
 import { openMysteryBox } from '../services/mystery-box.js';
+import { applyStreakFreezes, buyStreakFreeze, getStreakFreezeStatus } from '../services/streak-freeze.js';
 import { getWallet } from '../services/wallet.js';
 import { doneActionSecret, readDoneToken } from '../services/web-push-actions.js';
 
@@ -58,6 +59,47 @@ export default function registerEngagementRoutes(app) {
     });
     if (result.locked) return response.status(409).json({ ok: false, code: 'BOX_LOCKED', message: 'Check in a habit today to unlock the box.' });
     response.json({ ok: true, amount: result.amount, alreadyOpened: result.alreadyOpened, ...result.wallet });
+  });
+
+  // Streak Freeze: held freezes, buying one, and using them for days missed before today.
+  app.get('/api/streak-freezes', async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    response.json({ ok: true, ...await getStreakFreezeStatus({ query }, session.userId) });
+  });
+
+  // Runs when the app opens and after midnight with the user's today; a freeze bought after a
+  // missed day can still save yesterday's streak.
+  app.post('/api/streak-freezes/sync', async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const input = parse(streakFreezeSchema, request, response);
+    if (!input) return;
+    if (!isOpenCheckInDate(input.date, input.timeZone)) return response.status(409).json({ ok: false, code: 'DAY_CLOSED', message: 'Send the device\'s today.' });
+    const result = await withTransaction(async (db) => {
+      await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
+      const used = await applyStreakFreezes(db, session.userId, input.date);
+      return { used, ...await getStreakFreezeStatus(db, session.userId) };
+    });
+    response.json({ ok: true, ...result });
+  });
+
+  app.post('/api/streak-freezes/buy', async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const input = parse(streakFreezeSchema, request, response);
+    if (!input) return;
+    if (!isOpenCheckInDate(input.date, input.timeZone)) return response.status(409).json({ ok: false, code: 'DAY_CLOSED', message: 'Send the device\'s today.' });
+    const result = await withTransaction(async (db) => {
+      await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
+      const refused = await buyStreakFreeze(db, session.userId);
+      if (refused) return { refused };
+      const used = await applyStreakFreezes(db, session.userId, input.date);
+      return { used, ...await getStreakFreezeStatus(db, session.userId), wallet: await getWallet(db, session.userId) };
+    });
+    if (result.refused) return response.status(result.refused.status).json({ ok: false, message: result.refused.message });
+    const { wallet, ...status } = result;
+    response.json({ ok: true, ...status, ...wallet });
   });
 
   // The Done button on a reminder notification: authorised by the signed token it carries.

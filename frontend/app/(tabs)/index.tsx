@@ -7,6 +7,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { ClassPulseCard } from '@/components/class-pulse-card';
 import { BuddyCard } from '@/components/buddy';
+import { StreakFreezeSheet } from '@/components/streak-freeze-sheet';
 import { DailyChallengeCard, LevelBar, MysteryBoxCard, NextBadgeCard, StreakRiskBanner, WeeklyQuestsCard, WeeklyRecapCard } from '@/components/engagement-cards';
 import { TodayAgenda } from '@/components/today-agenda';
 import { WeekStrip } from '@/components/week-strip';
@@ -37,7 +38,8 @@ export default function HomeScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const showAlert = useAppDialog();
-  const { isDarkMode, avatarImage, habits, profile, addHabit: createHabit, toggleHabit, isFaculty, points, goals, tokenHistory, applyWallet } = useAppColorScheme();
+  const { isDarkMode, avatarImage, habits, profile, addHabit: createHabit, toggleHabit, isFaculty, points, goals, tokenHistory, applyWallet, streakFreeze } = useAppColorScheme();
+  const [freezeSheetVisible, setFreezeSheetVisible] = React.useState(false);
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   // Tablets and laptops: the hero image sits beside the title, and on laptops the progress
@@ -68,7 +70,8 @@ export default function HomeScreen() {
   const [quickTimePeriod, setQuickTimePeriod] = React.useState<'AM' | 'PM'>('AM');
   const { completionPercent } = getHabitProgressSummary(habits);
   const currentStreak = Math.max(0, ...habits.map((habit) => habit.streak));
-  const history = React.useMemo(() => historyStats(habits), [habits]);
+  const frozenDays = streakFreeze?.frozenDays;
+  const history = React.useMemo(() => historyStats(habits, new Date(), frozenDays), [frozenDays, habits]);
   const quickFrequencies = [
     { label: 'Daily', icon: 'sunny-outline' },
     { label: 'Weekly', icon: 'calendar-outline' },
@@ -141,7 +144,6 @@ export default function HomeScreen() {
                   <Text style={styles.facultyModeText}>PSAU Faculty mode</Text>
                 </View>
               )}
-              <LevelBar points={points} streak={currentStreak} style={styles.levelBar} />
             </View>
 
             {wide && (
@@ -180,10 +182,12 @@ export default function HomeScreen() {
               )}
             </View>
           </View>
+          {/* Level, streak and streak freezes, the full width of the page so nothing is cut off. */}
+          <LevelBar points={points} streak={currentStreak} freezes={streakFreeze?.available ?? 0} onPress={() => setFreezeSheetVisible(true)} style={[styles.levelBar, { marginHorizontal: contentPadding }]} />
 
           <View style={[isDesktop && styles.dashboardRow, isDesktop && { paddingHorizontal: contentPadding }]}>
           <View style={isDesktop && styles.dashboardMainColumn}>
-            <StreakRiskBanner habits={habits} now={now} style={!isDesktop && styles.cardPhone} />
+            <StreakRiskBanner habits={habits} now={now} onFreeze={() => setFreezeSheetVisible(true)} style={!isDesktop && styles.cardPhone} />
             <TodayAgenda habits={habits} now={now} onCheck={(habit) => toggleHabit(habit.id)} style={!isDesktop && styles.agendaPhone} />
             {habits.length > 0 && <BuddyCard habits={habits} style={!isDesktop && styles.cardPhone} />}
           </View>
@@ -214,6 +218,7 @@ export default function HomeScreen() {
           </View>
         </View>
       </ScrollView>
+      <StreakFreezeSheet visible={freezeSheetVisible} onClose={() => setFreezeSheetVisible(false)} />
       <Modal visible={quickAddVisible} transparent animationType="none" onRequestClose={() => setQuickAddVisible(false)}>
         <View style={styles.quickModalOverlay}>
           <View style={[styles.quickModalCard, isDarkMode && styles.quickModalDarkCard]}>
@@ -533,7 +538,7 @@ const themedStyles = createThemedStyles({
   dashboardMainColumn: { flex: 3, gap: 12 },
   agendaPhone: { marginHorizontal: 18, marginTop: 18 },
   cardPhone: { marginHorizontal: 18, marginTop: 14 },
-  levelBar: { marginTop: 14, maxWidth: 360 },
+  levelBar: { marginTop: 14, maxWidth: 460, zIndex: 2 },
   dashboardSide: { flex: 2, gap: 12 },
   dashboardStats: { marginHorizontal: 0, marginTop: 0, flexDirection: 'column', paddingVertical: 6, paddingHorizontal: 16 },
   dashboardStatCell: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, width: '100%' },

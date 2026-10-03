@@ -34,6 +34,7 @@ const timeZoneSchema = z.string().trim().min(1).max(80).refine((value) => {
 export const buddyItemSchema = z.object({ itemId: z.string().trim().min(1).max(40) }).strict();
 export const buddySaveSchema = z.object({ name: z.string().trim().min(1).max(20).optional(), head: z.string().max(40).optional(), hand: z.string().max(40).optional() }).strict();
 export const mysteryBoxSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: timeZoneSchema.optional() }).strict();
+export const streakFreezeSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: timeZoneSchema.optional() }).strict();
 export const webPushDoneSchema = z.object({ token: z.string().min(20).max(1000) }).strict();
 export const assistantSchema = z.object({ question: z.string().trim().max(500).optional(), summary: z.record(z.string(), z.unknown()).optional(), mode: z.enum(['assistant', 'coach', 'support']).default('assistant'), timeZone: timeZoneSchema.optional() }).strict();
 export const habitAnalysisRequestSchema = z.object({ habitId: z.string().trim().min(1).max(120), timeZone: timeZoneSchema.optional() }).strict();

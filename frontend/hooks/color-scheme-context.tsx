@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Appearance, Platform, useColorScheme as useRNColorScheme } from 'react-native';
 import { translate } from '@/constants/i18n';
 import { getCurrentSession, subscribeToAuthChanges, type SessionUser } from '@/authentication/session';
-import { getRemoteAppState, getRemoteHabitCompletions, saveRemoteAppState, saveRemoteHabitCompletion, type AppStateSyncBase, type AppStateSyncPayload } from '@/authentication/authService';
+import { buyStreakFreeze as requestStreakFreeze, getRemoteAppState, getRemoteHabitCompletions, saveRemoteAppState, saveRemoteHabitCompletion, syncStreakFreezes, type AppStateSyncBase, type AppStateSyncPayload } from '@/authentication/authService';
 import { normalizeHabitFields } from '@/utils/habit-data';
 import { CHECK_IN_UNDO_MS, canCompleteHabitForDate } from '@/utils/habit-visibility';
 import type { EditableHabitFields } from '@/utils/habit-edit';
@@ -80,6 +80,9 @@ type ColorSchemeContextValue = {
   canUndoCheckIn: (id: string) => boolean;
   /** A moment worth celebrating after a check-in (streak milestone, level up, challenge, all done). */
   celebration: Celebration | null;
+  /** Streak freezes held and the days they covered (null until the server answered). */
+  streakFreeze: StreakFreeze | null;
+  buyStreakFreeze: () => Promise<{ ok: boolean; message: string }>;
   dismissCelebration: () => void;
   deleteHabit: (id: string) => void;
   updateHabit: (id: string, changes: EditableHabitFields) => void;
@@ -102,7 +105,9 @@ type ColorSchemeContextValue = {
   isFaculty: boolean;
 };
 
-export type Celebration = { id: string; kind: 'streak' | 'badge' | 'quest' | 'level' | 'challenge' | 'allDone'; icon: string; title: string; message: string; color?: string };
+export type StreakFreeze = { available: number; max: number; cost: number; frozenDays: string[] };
+
+export type Celebration = { id: string; kind: 'streak' | 'freeze' | 'badge' | 'quest' | 'level' | 'challenge' | 'allDone'; icon: string; title: string; message: string; color?: string };
 
 const ColorSchemeContext = createContext<ColorSchemeContextValue | undefined>(undefined);
 
@@ -125,16 +130,41 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     }, Math.max(0, Math.min(...ends) - Date.now()) + 50);
     return () => clearTimeout(timer);
   }, [undoUntil]);
+  // Celebrations: each moment shows once per session, so an undo and a new tap do not repeat it.
+  const [celebration, setCelebration] = useState<Celebration | null>(null);
+  const celebrated = useRef(new Set<string>());
+  const celebrate = (next: Celebration) => {
+    if (celebrated.current.has(next.id)) return;
+    celebrated.current.add(next.id);
+    setCelebration(next);
+  };
+
+  // Streak freezes: days they covered count as neither done nor missed in every streak.
+  const [streakFreeze, setStreakFreeze] = useState<StreakFreeze | null>(null);
+  const frozenDaysRef = useRef<string[]>([]);
+  /** Shows what the server said about freezes, and celebrates the days a freeze just saved. */
+  const takeFreezeStatus = (status: { available: number; max: number; cost: number; frozenDays: string[]; used?: string[] }) => {
+    frozenDaysRef.current = status.frozenDays;
+    setStreakFreeze({ available: status.available, max: status.max, cost: status.cost, frozenDays: status.frozenDays });
+    if (!status.used?.length) return;
+    const days = status.used.map((day) => new Date(`${day}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long' })).join(' and ');
+    celebrate({ id: `freeze:${status.used.join(',')}`, kind: 'freeze', icon: 'snow', color: '#4BA3FF', title: 'Streak saved!', message: `A streak freeze covered ${days}, so your streak lives on.` });
+  };
   // At midnight a new day starts: yesterday's check-ins lock and unfinished habits become
-  // missed, without waiting for a reload.
+  // missed, without waiting for a reload. A held freeze may now cover yesterday.
   const [dayKey, setDayKey] = useState(() => getLocalDateKey());
   useEffect(() => {
     const now = new Date();
     const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1);
     const timer = setTimeout(() => {
-      setHabits((current) => current.map((habit) => applyRemoteCompletionDates(habit, habit.completionDates)));
+      setHabits((current) => current.map((habit) => applyRemoteCompletionDates(habit, habit.completionDates, frozenDaysRef.current)));
       setUndoUntil({});
       setDayKey(getLocalDateKey());
+      void syncStreakFreezes(getLocalDateKey()).then((result) => {
+        if (!result.ok) return;
+        takeFreezeStatus(result);
+        setHabits((current) => current.map((habit) => applyRemoteCompletionDates(habit, habit.completionDates, result.frozenDays)));
+      });
     }, nextMidnight.getTime() - now.getTime());
     return () => clearTimeout(timer);
   }, [dayKey]);
@@ -254,8 +284,13 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         remoteReadyRef.current = Boolean(syncMeta.base);
       }
 
-      const remoteCompletions = keepLocalChanges ? null : await getRemoteHabitCompletions();
+      // Check-ins and streak freezes together; a held freeze may cover a day missed since the last visit.
+      const [remoteCompletions, freezes] = await Promise.all([
+        keepLocalChanges ? null : getRemoteHabitCompletions(),
+        remoteState ? syncStreakFreezes(getLocalDateKey()) : null,
+      ]);
       if (cancelled || version !== sessionLoadVersion) return;
+      if (freezes?.ok) takeFreezeStatus(freezes);
       setActiveUserEmail(email);
       setAccountRole(session.role ?? 'user');
       setAvatarImage(savedState.avatarImage ?? null);
@@ -281,7 +316,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       }
       setHabits((remoteCompletions === null
         ? savedHabits
-        : savedHabits.map((habit) => applyRemoteCompletionDates(habit, completionsByHabit.get(habit.id) ?? [])))
+        : savedHabits.map((habit) => applyRemoteCompletionDates(habit, completionsByHabit.get(habit.id) ?? [], frozenDaysRef.current)))
         .map((habit) => normalizeHabitFields({ ...habit, startDate: habit.startDate || getLocalDateKey() })) as Habit[]);
       setPoints(typeof savedState.points === 'number' ? savedState.points : 0);
       setTokens(typeof savedState.tokens === 'number' ? savedState.tokens : 0);
@@ -412,7 +447,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         setPreferences(nextState.preferences as Preferences);
         setHabits((remoteCompletions === null
           ? savedHabits
-          : savedHabits.map((habit) => applyRemoteCompletionDates(habit, completionsByHabit.get(habit.id) ?? [])))
+          : savedHabits.map((habit) => applyRemoteCompletionDates(habit, completionsByHabit.get(habit.id) ?? [], frozenDaysRef.current)))
           .map((habit) => normalizeHabitFields(habit)) as Habit[]);
         setPoints(nextState.points);
         setTokens(nextState.tokens);
@@ -509,26 +544,19 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     }]);
   };
 
-  // Celebrations: each moment shows once per session, so an undo and a new tap do not repeat it.
-  const [celebration, setCelebration] = useState<Celebration | null>(null);
-  const celebrated = useRef(new Set<string>());
-  const celebrate = (next: Celebration) => {
-    if (celebrated.current.has(next.id)) return;
-    celebrated.current.add(next.id);
-    setCelebration(next);
-  };
   /** Picks the best thing to celebrate about a check-in: streak milestone, level, challenge, all done. */
   const celebrateCheckIn = (habit: Habit, dateKey: string) => {
     const now = new Date();
     const datesAfter = [...habit.completionDates.filter((date) => date !== dateKey), dateKey];
     const habitsAfter = habits.map((item) => (item.id === habit.id ? { ...item, completionDates: datesAfter } : item));
-    const milestone = streakMilestone(computeStreak(habit, habit.completionDates, dateKey), computeStreak(habit, datesAfter, dateKey));
+    const frozen = frozenDaysRef.current;
+    const milestone = streakMilestone(computeStreak(habit, habit.completionDates, dateKey, frozen), computeStreak(habit, datesAfter, dateKey, frozen));
     const levelBefore = levelProgress(points).level;
     const levelAfter = levelProgress(points + 20).level;
     const challengeAfter = dailyChallenge(habitsAfter, now);
     const agendaAfter = todayAgenda(habitsAfter, now);
-    const earnedBefore = new Set(badgeProgress(habits, goals, now).filter((badge) => badge.earned).map((badge) => badge.id));
-    const newBadge = badgeProgress(habitsAfter, goals, now).find((badge) => badge.earned && !earnedBefore.has(badge.id));
+    const earnedBefore = new Set(badgeProgress(habits, goals, now, frozen).filter((badge) => badge.earned).map((badge) => badge.id));
+    const newBadge = badgeProgress(habitsAfter, goals, now, frozen).find((badge) => badge.earned && !earnedBefore.has(badge.id));
     const questsBefore = new Set(weeklyQuests(habits, now).filter((quest) => quest.complete).map((quest) => quest.id));
     const newQuest = weeklyQuests(habitsAfter, now).find((quest) => quest.complete && !questsBefore.has(quest.id));
     if (milestone) {
@@ -559,7 +587,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       const goal = habit.goal || 1;
       const done = completionDates.includes(getLocalDateKey());
       // Streaks come from the check-in dates and schedule (a missed day resets them).
-      const streak = computeStreak(habit, completionDates, getLocalDateKey());
+      const streak = computeStreak(habit, completionDates, getLocalDateKey(), frozenDaysRef.current);
       return { ...habit, done, completionDates, streak, completionTimeZone, progress: done ? 100 : 0, total: `${done ? goal : 0}/${goal}` };
     }));
   };
@@ -612,7 +640,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     setHabits((current) => current.map((habit) => {
       if (habit.id !== id) return habit;
       const next = { ...habit, ...changes };
-      return { ...next, streak: computeStreak(next, next.completionDates, getLocalDateKey()) };
+      return { ...next, streak: computeStreak(next, next.completionDates, getLocalDateKey(), frozenDaysRef.current) };
     }));
   };
 
@@ -734,6 +762,15 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       toggleHabitForDate,
       canUndoCheckIn,
       celebration,
+      streakFreeze,
+      buyStreakFreeze: async () => {
+        const result = await requestStreakFreeze(getLocalDateKey());
+        if (!result.ok) return { ok: false, message: result.message };
+        takeFreezeStatus(result);
+        applyWallet(result);
+        setHabits((current) => current.map((habit) => applyRemoteCompletionDates(habit, habit.completionDates, result.frozenDays)));
+        return { ok: true, message: result.used.length ? 'It saved your streak right away.' : 'It will protect your streaks on a day you miss.' };
+      },
       dismissCelebration: () => setCelebration(null),
       deleteHabit,
       updateHabit,
@@ -761,7 +798,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       clearLocalData,
       isFaculty: accountRole === 'faculty',
     }),
-    [avatarImage, colorScheme, darkModeOverride, getAppStateSnapshot, goals, habits, points, preferences, profile, ringInterval, snoozeFrequency, syncAppState, tokenHistory, tokens, undoUntil, accountRole, celebration],
+    [avatarImage, colorScheme, darkModeOverride, getAppStateSnapshot, goals, habits, points, preferences, profile, ringInterval, snoozeFrequency, syncAppState, tokenHistory, tokens, undoUntil, accountRole, celebration, streakFreeze],
   );
 
   return <ColorSchemeContext.Provider value={value}><DarkModeContext.Provider value={value.isDarkMode}>{children}</DarkModeContext.Provider></ColorSchemeContext.Provider>;

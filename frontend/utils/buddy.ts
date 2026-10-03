@@ -2,7 +2,7 @@
 // mood follows today's habits, so it reacts to what the student does.
 import type { Habit } from '@/hooks/app-state/types';
 import { todayAgenda } from '@/utils/engagement';
-import { isHabitMissedYesterday } from '@/utils/habit-visibility';
+import { getLocalDateKey, isHabitMissedYesterday } from '@/utils/habit-visibility';
 
 export type BuddyItem = { id: string; slot: 'head' | 'hand'; name: string; emoji: string; cost: number; stage: string };
 export type BuddyStage = { id: string; name: string; min: number };
@@ -30,7 +30,7 @@ export type BuddyMood = 'ecstatic' | 'happy' | 'sleepy' | 'hungry' | 'sad';
 export const MOOD_FACE: Record<BuddyMood, string> = { ecstatic: '🤩', happy: '😊', sleepy: '😴', hungry: '🍪', sad: '🥺' };
 
 /** How the buddy feels about today, what it says, and its energy (share of today's habits done). */
-export function buddyMood(habits: Habit[], name: string, now = new Date()): { mood: BuddyMood; line: string; energy: number } {
+export function buddyMood(habits: Habit[], name: string, now = new Date(), frozenDays: string[] = []): { mood: BuddyMood; line: string; energy: number } {
   const agenda = todayAgenda(habits, now);
   const total = agenda.scheduled.length;
   const done = agenda.done.length;
@@ -38,7 +38,12 @@ export function buddyMood(habits: Habit[], name: string, now = new Date()): { mo
   if (!habits.length) return { mood: 'sleepy', line: `Add a habit and ${name} will grow with you.`, energy };
   if (total && done === total) return { mood: 'ecstatic', line: 'We did everything today! I feel amazing.', energy };
   if (done > 0) return { mood: 'happy', line: `Yum, thanks! ${total - done} more and I'm full of energy.`, energy };
-  if (habits.some((habit) => isHabitMissedYesterday(habit, now))) return { mood: 'sad', line: 'We missed one yesterday... let\'s bounce back today.', energy };
+  if (habits.some((habit) => isHabitMissedYesterday(habit, now))) {
+    const yesterday = getLocalDateKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+    return frozenDays.includes(yesterday)
+      ? { mood: 'happy', line: 'Phew! A streak freeze kept our streak safe yesterday.', energy }
+      : { mood: 'sad', line: 'We missed one yesterday... let\'s bounce back today.', energy };
+  }
   if (now.getHours() < 11) return { mood: 'sleepy', line: 'Good morning! A check-in will wake me up.', energy };
   if (!total) return { mood: 'happy', line: 'Rest day! Nothing is due today.', energy };
   return { mood: 'hungry', line: 'I\'m hungry for a check-in!', energy };
