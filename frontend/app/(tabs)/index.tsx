@@ -124,7 +124,8 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView edges={['left', 'right']} style={[styles.screen, isDarkMode && styles.darkScreen]}>
-      <View style={[styles.content, wide && styles.wideContent, { paddingTop: insets.top + 16, paddingBottom: 104 + insets.bottom }]}>
+      {/* The page itself does not scroll on the web (overflow hidden), so Home scrolls here. */}
+      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, wide && styles.wideContent, { paddingTop: insets.top + 16, paddingBottom: 104 + insets.bottom }]} showsVerticalScrollIndicator={false}>
           <View style={[styles.deviceFrame, wide && styles.wideFrame, isDarkMode && styles.darkDeviceFrame]}>
           <View style={[styles.backgroundBlobOne, isDarkMode && styles.darkBlob]} />
           <View style={[styles.backgroundBlobTwo, isDarkMode && styles.darkBlob]} />
@@ -212,7 +213,7 @@ export default function HomeScreen() {
           </View>
           </View>
         </View>
-      </View>
+      </ScrollView>
       <Modal visible={quickAddVisible} transparent animationType="none" onRequestClose={() => setQuickAddVisible(false)}>
         <View style={styles.quickModalOverlay}>
           <View style={[styles.quickModalCard, isDarkMode && styles.quickModalDarkCard]}>
@@ -257,6 +258,7 @@ const themedStyles = createThemedStyles({
     // Same as the page behind centered screens, so no seam shows beside the content column.
     backgroundColor: '#f5f4f9',
   },
+  scroll: { flex: 1 },
   wideContent: { justifyContent: 'flex-start' },
   darkScreen: { backgroundColor: '#111018' },
   darkDeviceFrame: { backgroundColor: '#111018' },
