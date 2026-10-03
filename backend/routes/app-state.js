@@ -16,7 +16,11 @@ import {
   syncNormalizedState,
 } from '../services/app-state-store.js';
 import { isOpenCheckInDate } from '../services/completion-date.js';
-import { applyWallet, awardCheckIn, getWallet, revokeCheckIn } from '../services/wallet.js';
+import { applyWallet, awardCheckIn, getWallet, revokeCheckIn, syncDailyChallenge } from '../services/wallet.js';
+
+/** The app's blank startup state: sent before an account's state loaded, it has no email and no habits. */
+const isBlankStartupState = (state, storedState) =>
+  Boolean(state?.profile) && !String(state.profile.email ?? '').trim() && Boolean(String(storedState?.profile?.email ?? '').trim());
 
 export default function registerAppStateRoutes(app) {
   // `?since=<updatedAt>` lets clients poll cheaply: when nothing is newer the
@@ -55,6 +59,8 @@ export default function registerAppStateRoutes(app) {
       const existing = await getLatestAppState(session.userId, connection);
       const existingUpdatedAt = existing?.updatedAt ?? null;
       const currentState = existing?.state ?? null;
+      // Saving it would replace the account's habits with none and delete every check-in.
+      if (isBlankStartupState(incomingState, currentState)) return { rejected: true };
       // A save without a base (a device that never loaded the server state, e.g. offline or during
       // a cold start) must not replace it: an empty or stale habit list would delete other
       // devices' habits and their check-ins. Merge it instead, with the server winning conflicts.
@@ -73,6 +79,7 @@ export default function registerAppStateRoutes(app) {
       await saveUserAppState(session.userId, serverState, savedUpdatedAt, connection);
       return { state: serverState, updatedAt: savedUpdatedAt, merged, unchanged: false };
     });
+    if (result.rejected) return response.status(409).json({ ok: false, code: 'STATE_NOT_LOADED', error: 'This device has not loaded your data yet. Nothing was changed.' });
     response.json({ ok: true, ...result });
   });
 
@@ -126,6 +133,7 @@ export default function registerAppStateRoutes(app) {
       };
       const updatedAt = Math.max(now, Number(saved.updatedAt) + 1);
       await syncNormalizedState(session.userId, state, updatedAt, connection);
+      await syncDailyChallenge(connection, session.userId, input.date, now);
       const serverState = await buildServerState(session.userId, state, connection);
       await saveUserAppState(session.userId, serverState, updatedAt, connection);
       return { serverState, updatedAt };

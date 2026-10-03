@@ -2,19 +2,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React from 'react';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { Image, Modal, Platform, Pressable, type PressableStateCallbackType, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Image, Modal, Platform, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { ClassPulseCard } from '@/components/class-pulse-card';
+import { DailyChallengeCard, LevelBar, StreakRiskBanner, WeeklyRecapCard } from '@/components/engagement-cards';
+import { TodayAgenda } from '@/components/today-agenda';
 import { WeekStrip } from '@/components/week-strip';
 import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { greetingFor } from '@/utils/greeting';
-import { filterHabitsByStatus } from '@/utils/habit-data';
-import { CHECK_IN_UNDO_MS } from '@/utils/habit-visibility';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
-
-type HoverState = PressableStateCallbackType & { hovered?: boolean };
 
 const popularHabits = ['Drink Water', 'Exercise / Workout', 'Read a Book', 'Sleep Early', 'Meditate', 'Eat Healthy'];
 const quickRepeatOptions = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -37,7 +35,7 @@ export default function HomeScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const showAlert = useAppDialog();
-  const { isDarkMode, avatarImage, habits, profile, addHabit: createHabit, toggleHabit, isFaculty } = useAppColorScheme();
+  const { isDarkMode, avatarImage, habits, profile, addHabit: createHabit, toggleHabit, isFaculty, points } = useAppColorScheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   // Tablets and laptops: the hero image sits beside the title, and on laptops the progress
@@ -58,22 +56,6 @@ export default function HomeScreen() {
     return () => clearInterval(clock);
   }, []);
   const greeting = greetingFor(now);
-  // The habit just checked off: its row leaves the list, so offer a short-lived Undo.
-  const [justChecked, setJustChecked] = React.useState<{ id: string; label: string } | null>(null);
-  React.useEffect(() => {
-    if (!justChecked) return;
-    // Undo is offered as long as the check-in can still be undone; then it is locked.
-    const timer = setTimeout(() => setJustChecked(null), CHECK_IN_UNDO_MS);
-    return () => clearTimeout(timer);
-  }, [justChecked]);
-  const checkOff = (id: string, label: string) => {
-    toggleHabit(id);
-    setJustChecked({ id, label });
-  };
-  const undoCheck = () => {
-    if (justChecked) toggleHabit(justChecked.id);
-    setJustChecked(null);
-  };
   const [quickStartDatePickerVisible, setQuickStartDatePickerVisible] = React.useState(false);
   const [quickCustomFrequency, setQuickCustomFrequency] = React.useState('Every week');
   const [quickRepeatDays, setQuickRepeatDays] = React.useState(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
@@ -84,15 +66,6 @@ export default function HomeScreen() {
   const [quickTimeMinute, setQuickTimeMinute] = React.useState('00');
   const [quickTimePeriod, setQuickTimePeriod] = React.useState<'AM' | 'PM'>('AM');
   const { completed: completedHabits, completionPercent } = getHabitProgressSummary(habits);
-  const activeHabits = filterHabitsByStatus(habits, 'active');
-  const progressSegments = Array.from({ length: 36 }, (_, index) => {
-    const angle = (index / 36) * Math.PI * 2;
-    return {
-      left: 28 + Math.sin(angle) * 22 - 2.5,
-      top: 28 - Math.cos(angle) * 22 - 2.5,
-      active: index < Math.round((completionPercent / 100) * 36),
-    };
-  });
   const quickFrequencies = [
     { label: 'Daily', icon: 'sunny-outline' },
     { label: 'Weekly', icon: 'calendar-outline' },
@@ -164,6 +137,7 @@ export default function HomeScreen() {
                   <Text style={styles.facultyModeText}>PSAU Faculty mode</Text>
                 </View>
               )}
+              <LevelBar points={points} style={styles.levelBar} />
             </View>
 
             {wide && (
@@ -207,71 +181,14 @@ export default function HomeScreen() {
           </View>}
 
           <View style={[isDesktop && styles.dashboardRow, isDesktop && { paddingHorizontal: contentPadding }]}>
-          <View style={[styles.focusCard, isDesktop && styles.dashboardMain]}>
-            <View style={styles.focusHeader}>
-              <View>
-                <Text style={styles.focusLabel}>Today&apos;s Progress</Text>
-                {activeHabits.length > 0 && <Text style={styles.focusHint}>{activeHabits.length} left today · tap one to check it off</Text>}
-              </View>
-              <View style={styles.progressRing}>
-                <View style={styles.progressRingTrack} />
-                {progressSegments.map((segment, index) => <View key={index} style={[styles.progressSegment, { left: segment.left, top: segment.top }, segment.active && styles.progressSegmentActive]} />)}
-                <Text style={styles.progressText}>{completionPercent}%</Text>
-              </View>
-            </View>
-
-            <View style={styles.habitList}>
-              {activeHabits.length === 0 ? (habits.length === 0 ? <Text style={styles.emptyHabitText}>No habits yet. Add your first habit below.</Text> : (
-                <View style={styles.allDone} accessible accessibilityLabel="All habits done for today">
-                  <View style={styles.allDoneIcon}><Ionicons name="trophy" size={22} color="#F2A93B" /></View>
-                  <View style={styles.allDoneCopy}>
-                    <Text style={styles.allDoneTitle}>All done for today!</Text>
-                    <Text style={styles.allDoneText}>Every habit is checked off. Come back tomorrow to keep the streak going.</Text>
-                  </View>
-                </View>
-              )) : activeHabits.map((habit) => (
-                <Pressable
-                  key={habit.id}
-                  style={({ hovered, pressed }: HoverState) => [styles.habitRow, (hovered || pressed) && styles.habitRowActive]}
-                  onPress={() => checkOff(habit.id, habit.label)}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: false }}
-                  aria-checked={false}
-                  accessibilityLabel={`${habit.label} done today`}
-                >
-                  {({ hovered, pressed }: HoverState) => (
-                    <>
-                      <View style={styles.habitMeta}>
-                        <View style={styles.habitIconWrap}>
-                          <Ionicons name={habit.icon as keyof typeof Ionicons.glyphMap} size={18} color={themeColor('#5b42d8')} />
-                        </View>
-                        <Text style={styles.habitLabel} numberOfLines={1}>{habit.label}</Text>
-                      </View>
-                      <View style={[styles.checkWrap, (hovered || pressed) && styles.checkWrapActive]}>
-                        {(hovered || pressed) && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
-                      </View>
-                    </>
-                  )}
-                </Pressable>
-              ))}
-            </View>
-
-            {justChecked && (
-              <View style={styles.undoBar} accessibilityLiveRegion="polite">
-                <Ionicons name="checkmark-circle" size={18} color="#3BAA74" />
-                <Text style={styles.undoText} numberOfLines={1}>{justChecked.label} done</Text>
-                <Pressable onPress={undoCheck} accessibilityRole="button" accessibilityLabel={`Undo ${justChecked.label}`} hitSlop={8}>
-                  <Text style={styles.undoAction}>Undo</Text>
-                </Pressable>
-              </View>
-            )}
-
-            <Pressable style={styles.addButton} onPress={() => router.push('/add')}>
-              <Text style={styles.addButtonText}>＋ Quick Add Habit</Text>
-            </Pressable>
+          <View style={isDesktop && styles.dashboardMainColumn}>
+            <StreakRiskBanner habits={habits} now={now} style={!isDesktop && styles.cardPhone} />
+            <TodayAgenda habits={habits} now={now} onCheck={(habit) => toggleHabit(habit.id)} style={!isDesktop && styles.agendaPhone} />
           </View>
 
           <View style={isDesktop && styles.dashboardSide}>
+          <DailyChallengeCard habits={habits} now={now} style={!isDesktop && styles.cardPhone} />
+          <WeeklyRecapCard habits={habits} now={now} style={!isDesktop && styles.cardPhone} />
           <View style={[styles.statsRow, isDesktop && styles.dashboardStats]}>
             {[{ value: String(Math.max(0, ...habits.map((habit) => habit.streak))), label: 'Day Streak' }, { value: String(completedHabits), label: 'Completed' }, { value: String(habits.length), label: 'Total Habits' }].map((item) => (
               <View key={item.label} style={[styles.statCell, isDesktop && styles.dashboardStatCell]}>
@@ -641,7 +558,10 @@ const themedStyles = createThemedStyles({
     zIndex: 2,
   },
   dashboardRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 16, marginTop: 22 },
-  dashboardMain: { flex: 3, marginHorizontal: 0, marginTop: 0 },
+  dashboardMainColumn: { flex: 3, gap: 12 },
+  agendaPhone: { marginHorizontal: 18, marginTop: 18 },
+  cardPhone: { marginHorizontal: 18, marginTop: 14 },
+  levelBar: { marginTop: 14, maxWidth: 360 },
   dashboardSide: { flex: 2, gap: 12 },
   dashboardStats: { marginHorizontal: 0, marginTop: 0, flexDirection: 'column', paddingVertical: 6, paddingHorizontal: 16 },
   dashboardStatCell: { flexDirection: 'row-reverse', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, width: '100%' },

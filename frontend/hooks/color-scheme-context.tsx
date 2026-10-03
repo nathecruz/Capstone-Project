@@ -8,6 +8,7 @@ import { normalizeHabitFields } from '@/utils/habit-data';
 import { CHECK_IN_UNDO_MS, canCompleteHabitForDate } from '@/utils/habit-visibility';
 import type { EditableHabitFields } from '@/utils/habit-edit';
 import { namesOf } from '@/utils/names';
+import { dailyChallenge, levelProgress, streakMilestone, todayAgenda } from '@/utils/engagement';
 import { computeStreak } from '@/utils/streaks';
 import { applyRemoteCompletionDates, applyVisibleOrder, getLocalDateKey } from './app-state/habit-progress';
 import { DarkModeContext } from './dark-mode-context';
@@ -34,6 +35,30 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
+const SERVER_OWNED_FIELDS = ['points', 'tokens', 'tokenHistory'];
+const SERVER_OWNED_HABIT_FIELDS = ['done', 'progress', 'total', 'streak'];
+
+/**
+ * The part of a state the app owns, for "did anything change?" checks: points, tokens and streaks
+ * are the server's, and check-in dates are compared as a set. (Comparing everything made the app
+ * re-send an unchanged state again and again.)
+ */
+function clientOwnedKey(state: object | null | undefined) {
+  if (!state) return '';
+  const copy: Record<string, unknown> = { ...state };
+  for (const key of SERVER_OWNED_FIELDS) delete copy[key];
+  copy.habits = (Array.isArray(copy.habits) ? copy.habits : []).map((habit: Record<string, unknown>) => {
+    const habitCopy: Record<string, unknown> = { ...habit };
+    for (const key of SERVER_OWNED_HABIT_FIELDS) delete habitCopy[key];
+    habitCopy.completionDates = [...new Set(Array.isArray(habit.completionDates) ? habit.completionDates as string[] : [])].sort();
+    return habitCopy;
+  });
+  return stableStringify(copy);
+}
+
+/** A state loaded for a signed-in account always has its email; the blank startup state does not. */
+const isLoadedState = (state: { profile?: { email?: string } } | null | undefined) => Boolean(state?.profile?.email?.trim());
+
 type ColorSchemeContextValue = {
   colorScheme: ColorScheme;
   isDarkMode: boolean;
@@ -51,6 +76,9 @@ type ColorSchemeContextValue = {
   toggleHabitForDate: (id: string, date: Date) => void;
   /** True while today's check-in of this habit can still be undone (right after the tap). */
   canUndoCheckIn: (id: string) => boolean;
+  /** A moment worth celebrating after a check-in (streak milestone, level up, challenge, all done). */
+  celebration: Celebration | null;
+  dismissCelebration: () => void;
   deleteHabit: (id: string) => void;
   updateHabit: (id: string, changes: EditableHabitFields) => void;
   reorderHabits: (habits: Habit[]) => void;
@@ -71,6 +99,8 @@ type ColorSchemeContextValue = {
   /** Faculty accounts track their own habits in Faculty mode (faculty ideas, no student leaderboards). */
   isFaculty: boolean;
 };
+
+export type Celebration = { id: string; kind: 'streak' | 'level' | 'challenge' | 'allDone'; icon: string; title: string; message: string };
 
 const ColorSchemeContext = createContext<ColorSchemeContextValue | undefined>(undefined);
 
@@ -280,7 +310,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   }, []);
 
   useEffect(() => {
-    if (!stateHydrated || !activeUserEmail) return;
+    if (!stateHydrated || !activeUserEmail || !isLoadedState({ profile })) return;
     const state: PersistedAppState = {
       avatarImage,
       profile,
@@ -296,7 +326,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     };
     void AsyncStorage.setItem(`${APP_STATE_KEY_PREFIX}${activeUserEmail}`, JSON.stringify(state));
     // State just received from the server (or unchanged) does not need to be sent back.
-    if (syncBaseRef.current && stableStringify(syncBaseRef.current.state) === stableStringify(state)) return;
+    if (syncBaseRef.current && clientOwnedKey(syncBaseRef.current.state) === clientOwnedKey(state)) return;
     setUnsaved(true);
     // Until the server's state is known it stays on the device; the poll sends it once it is.
     if (!remoteReadyRef.current) return;
@@ -422,15 +452,18 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     // Other devices' changes arrive within this interval; returning to the app refreshes immediately.
     // (It used to poll every second, which exhausted the API rate limit within minutes.)
     const refreshTimer = setInterval(() => void refreshRemoteState(), REMOTE_REFRESH_INTERVAL_MS);
+    // The first refresh waits until this render's effects have run: syncAppStateRef still held the
+    // blank startup state here, and sending it replaced the account's habits and check-ins.
+    const firstRefresh = setTimeout(() => void refreshRemoteState(), 0);
     const appStateSubscription = AppState.addEventListener('change', (nextState) => {
       appIsActive = nextState === 'active';
       if (appIsActive) void syncThenRefresh();
     });
-    void refreshRemoteState();
 
     return () => {
       cancelled = true;
       clearInterval(refreshTimer);
+      clearTimeout(firstRefresh);
       appStateSubscription.remove();
       if (Platform.OS === 'web' && typeof document !== 'undefined') {
         document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -468,6 +501,35 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     }]);
   };
 
+  // Celebrations: each moment shows once per session, so an undo and a new tap do not repeat it.
+  const [celebration, setCelebration] = useState<Celebration | null>(null);
+  const celebrated = useRef(new Set<string>());
+  const celebrate = (next: Celebration) => {
+    if (celebrated.current.has(next.id)) return;
+    celebrated.current.add(next.id);
+    setCelebration(next);
+  };
+  /** Picks the best thing to celebrate about a check-in: streak milestone, level, challenge, all done. */
+  const celebrateCheckIn = (habit: Habit, dateKey: string) => {
+    const now = new Date();
+    const datesAfter = [...habit.completionDates.filter((date) => date !== dateKey), dateKey];
+    const habitsAfter = habits.map((item) => (item.id === habit.id ? { ...item, completionDates: datesAfter } : item));
+    const milestone = streakMilestone(computeStreak(habit, habit.completionDates, dateKey), computeStreak(habit, datesAfter, dateKey));
+    const levelBefore = levelProgress(points).level;
+    const levelAfter = levelProgress(points + 20).level;
+    const challengeAfter = dailyChallenge(habitsAfter, now);
+    const agendaAfter = todayAgenda(habitsAfter, now);
+    if (milestone) {
+      celebrate({ id: `streak:${habit.id}:${milestone}:${dateKey}`, kind: 'streak', icon: 'flame', title: `${milestone}-day streak!`, message: `${habit.label}: ${milestone} days in a row. Keep the flame going!` });
+    } else if (levelAfter > levelBefore) {
+      celebrate({ id: `level:${levelAfter}`, kind: 'level', icon: 'star', title: `Level ${levelAfter}!`, message: `You reached level ${levelAfter}. Every check-in moves you up.` });
+    } else if (challengeAfter.complete && !dailyChallenge(habits, now).complete) {
+      celebrate({ id: `challenge:${dateKey}`, kind: 'challenge', icon: 'trophy', title: 'Daily challenge done!', message: `+${challengeAfter.bonus} bonus tokens for finishing ${challengeAfter.target} habit${challengeAfter.target === 1 ? '' : 's'} today.` });
+    } else if (agendaAfter.scheduled.length > 0 && agendaAfter.open.length === 0) {
+      celebrate({ id: `all:${dateKey}`, kind: 'allDone', icon: 'sparkles', title: 'All done for today!', message: 'Every habit is checked off. See you tomorrow.' });
+    }
+  };
+
   /** Shows a check-in (or its undo) on screen; the server's answer to the same change follows. */
   const applyLocalCheckIn = (id: string, dateKey: string, completed: boolean) => {
     const completionTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -503,6 +565,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       return next;
     });
     applyLocalCheckIn(id, dateKey, completed);
+    if (completed) celebrateCheckIn(currentHabit, dateKey);
     void saveRemoteHabitCompletion({ habitId: id, date: dateKey, completed }).then((result) => {
       if (!result) {
         // The server keeps a check-in it would not undo (locked, or unreachable): show it again.
@@ -606,15 +669,16 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   }), [avatarImage, darkModeOverride, goals, habits, points, preferences, profile, ringInterval, snoozeFrequency, tokenHistory, tokens]);
 
   const syncAppState = useCallback(async (state = getAppStateSnapshot()) => {
-    // Never send before the server's state is known: it would replace the server copy.
-    if (!remoteReadyRef.current) return { state, ok: false, merged: false };
+    // Never send before the server's state is known, or a state that is not loaded yet (the blank
+    // startup state): either would replace the account's habits and check-ins on the server.
+    if (!remoteReadyRef.current || !isLoadedState(state)) return { state, ok: false, merged: false };
     const result = await saveRemoteAppState(state as AppStateSyncPayload, syncBaseRef.current);
     const savedState = result?.state as PersistedAppState | undefined;
     if (savedState && result?.updatedAt && result.state) {
       setSyncBase({ updatedAt: result.updatedAt, state: result.state });
       setUnsaved(false);
       applyWallet(result.state);
-    } else if (!syncBaseRef.current || stableStringify(syncBaseRef.current.state) !== stableStringify(state)) {
+    } else if (!syncBaseRef.current || clientOwnedKey(syncBaseRef.current.state) !== clientOwnedKey(state)) {
       setUnsaved(true);
     }
     if (savedState && result?.merged) {
@@ -653,6 +717,8 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       toggleHabit,
       toggleHabitForDate,
       canUndoCheckIn,
+      celebration,
+      dismissCelebration: () => setCelebration(null),
       deleteHabit,
       updateHabit,
       reorderHabits,
@@ -679,7 +745,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       clearLocalData,
       isFaculty: accountRole === 'faculty',
     }),
-    [avatarImage, colorScheme, darkModeOverride, getAppStateSnapshot, goals, habits, points, preferences, profile, ringInterval, snoozeFrequency, syncAppState, tokenHistory, tokens, undoUntil, accountRole],
+    [avatarImage, colorScheme, darkModeOverride, getAppStateSnapshot, goals, habits, points, preferences, profile, ringInterval, snoozeFrequency, syncAppState, tokenHistory, tokens, undoUntil, accountRole, celebration],
   );
 
   return <ColorSchemeContext.Provider value={value}><DarkModeContext.Provider value={value.isDarkMode}>{children}</DarkModeContext.Provider></ColorSchemeContext.Provider>;

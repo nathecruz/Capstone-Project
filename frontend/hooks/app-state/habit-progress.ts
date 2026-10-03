@@ -56,8 +56,13 @@ export function getLocalDateKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-/** Applies the server's check-ins to a habit and recomputes the fields derived from them. */
-export function applyRemoteCompletionDates(habit: Habit, completionDates: string[]) {
+/**
+ * Applies the server's check-ins to a habit and recomputes the fields derived from them. Dates are
+ * kept oldest first, as the server stores them: in another order every comparison with the
+ * server's copy differed, and the app re-sent its state in an endless loop.
+ */
+export function applyRemoteCompletionDates(habit: Habit, remoteDates: string[]) {
+  const completionDates = [...new Set(remoteDates)].sort();
   const today = getLocalDateKey();
   const done = completionDates.includes(today);
   const goal = Math.max(1, Number(habit.goal) || 1);

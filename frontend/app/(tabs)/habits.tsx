@@ -5,6 +5,7 @@ import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatli
 import { Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { EditHabitSheet } from '@/components/edit-habit-sheet';
+import { openFocus } from '@/components/today-agenda';
 import { FACULTY_HABIT_IDEAS } from '@/constants/faculty';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { isHabitMissedYesterday, useAppColorScheme } from '@/hooks/color-scheme-context';
@@ -120,6 +121,17 @@ export default function HabitsScreen() {
                 <View style={[styles.progressPill, isDarkMode && styles.darkProgressPill]}>
                   <Text style={[styles.progressPillText, isDarkMode && styles.darkProgressPillText]}>{item.total}</Text>
                 </View>
+                {/* Not done yet: start a focus session that checks it off at the end. */}
+                {!item.done && (
+                  <Pressable
+                    style={[styles.editButton, isDarkMode && styles.darkEditButton]}
+                    onPress={() => openFocus(item.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Start a focus session for ${item.label}`}
+                  >
+                    <Ionicons name="timer-outline" size={17} color={themeColor('#5B42D8')} />
+                  </Pressable>
+                )}
                 {/* Rename, recategorize, reschedule or delete: all in the edit sheet. */}
                 <Pressable
                   style={[styles.editButton, isDarkMode && styles.darkEditButton]}

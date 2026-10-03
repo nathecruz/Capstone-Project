@@ -299,7 +299,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const done = await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'habit-1', date: today, completed: true, timeZone: 'UTC' }) });
     assert.equal(done.response.status, 200, JSON.stringify(done.body));
     assert.equal(done.body.points, 20);
-    assert.equal(done.body.tokens, 5);
+    assert.equal(done.body.tokens, 5, 'the daily challenge is not done yet: 1 of the 2 habits due today');
     assert.equal(done.body.tokenHistory[0].label, 'Completed Read');
     assert.equal(done.body.habit.streak, 1);
 
@@ -398,6 +398,23 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.ok(Array.isArray(columns.reminderDays), 'the schedule is stored for live streaks');
   });
 
+  await t.test('the blank startup state never replaces a loaded account', async () => {
+    const loaded = (await request('/api/app-state', { headers: authHeaders })).body;
+    const named = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...loaded.state, profile: { ...loaded.state.profile, email: 'reader@example.test' }, baseUpdatedAt: loaded.updatedAt, baseState: loaded.state }) });
+    assert.equal(named.response.status, 200);
+    const habitIds = named.body.state.habits.map((item) => item.id);
+    const checkIns = (await request('/api/habit-completions', { headers: authHeaders })).body.completions.length;
+    assert.ok(habitIds.length > 0 && checkIns > 0);
+
+    // Same base as the server, so it would replace the state: the server refuses instead.
+    const blank = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...named.body.state, profile: { fullName: '', email: '' }, habits: [], baseUpdatedAt: named.body.updatedAt, baseState: named.body.state }) });
+    assert.equal(blank.response.status, 409);
+    assert.equal(blank.body.code, 'STATE_NOT_LOADED');
+    const after = (await request('/api/app-state', { headers: authHeaders })).body;
+    assert.deepEqual(after.state.habits.map((item) => item.id), habitIds, 'habits are kept');
+    assert.equal(after.completions.length, checkIns, 'and so are their check-ins');
+  });
+
   await t.test('achievement notifications keep their read state', async () => {
     const notes = await request('/api/notifications', { headers: authHeaders });
     const firstHabit = notes.body.notifications.find((note) => note.title === 'First Habit');
@@ -443,6 +460,12 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     await request('/api/app-state', { method: 'PUT', headers: facultyHeaders, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], id: 'prep', label: 'Prepare tomorrow\'s lesson' }] }) });
     const checkIn = await request('/api/habit-completions', { method: 'PUT', headers: facultyHeaders, body: JSON.stringify({ habitId: 'prep', date: today, completed: true, timeZone: 'UTC' }) });
     assert.equal(checkIn.response.status, 200, 'faculty can track their own habits');
+    assert.equal(checkIn.body.tokens, 15, '+5 for the check-in and +10 for the daily challenge (1 of 1 habit due today)');
+    assert.deepEqual(checkIn.body.tokenHistory.slice(0, 2).map((item) => item.label), ['Daily challenge', "Completed Prepare tomorrow's lesson"]);
+    const undone = await request('/api/habit-completions', { method: 'PUT', headers: facultyHeaders, body: JSON.stringify({ habitId: 'prep', date: today, completed: false, timeZone: 'UTC' }) });
+    assert.equal(undone.body.tokens, 0, 'an undo also takes the challenge bonus back');
+    const again = await request('/api/habit-completions', { method: 'PUT', headers: facultyHeaders, body: JSON.stringify({ habitId: 'prep', date: today, completed: true, timeZone: 'UTC' }) });
+    assert.equal(again.body.tokens, 15, 'and pays it again, once, when the challenge is done again');
     const board = await request('/api/leaderboard?period=All%20Time', { headers: facultyHeaders });
     assert.ok(!JSON.stringify(board.body).includes('Santos'), 'faculty are not on the student leaderboard');
   });

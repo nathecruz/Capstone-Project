@@ -10,6 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ColorSchemeProvider, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { AppDialogProvider } from '@/components/ui/app-dialog';
 import { getSession, subscribeToAuthChanges, type SessionUser } from '@/authentication';
+import { CelebrationOverlay } from '@/components/celebration-overlay';
 import { PageSidebar } from '@/components/desktop-sidebar';
 import { ServerStatusBanner } from '@/components/server-status-banner';
 import { CONTENT_MAX_WIDTH, pageBackground, useResponsiveLayout } from '@/hooks/use-responsive-layout';
@@ -162,6 +163,7 @@ function RootNavigator() {
           }}
         />
         <Stack.Screen name="notifications" options={{ headerShown: false }} />
+        <Stack.Screen name="focus" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
       </View>
@@ -183,6 +185,7 @@ function RootNavigator() {
         </View>
       )}
       <ServerStatusBanner />
+      <CelebrationOverlay />
       <StatusBar
         style={colorScheme === 'dark' ? 'light' : 'dark'}
       />
