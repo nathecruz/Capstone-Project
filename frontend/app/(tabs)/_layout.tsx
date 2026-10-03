@@ -6,10 +6,15 @@ import { StatusBar, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DesktopSidebar } from '@/components/desktop-sidebar';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
+import { useAppTheme } from '@/hooks/dark-mode-context';
+import { themedColor, useAppThemeSheet } from '@/hooks/use-themed-styles';
 import { CONTENT_MAX_WIDTH, pageBackground, useResponsiveLayout } from '@/hooks/use-responsive-layout';
 
 export default function TabLayout() {
   const { isDarkMode, t } = useAppColorScheme();
+  const styles = useAppThemeSheet(baseStyles);
+  // Light on the dark tab bar, so the selected tab stands out there too.
+  const accent = themedColor(isDarkMode ? '#B9A9FF' : '#4F2AC8', useAppTheme());
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const { isDesktop, isCentered } = useResponsiveLayout();
@@ -46,7 +51,7 @@ export default function TabLayout() {
             },
             centered,
           ],
-          tabBarActiveTintColor: '#4F2AC8',
+          tabBarActiveTintColor: accent,
           tabBarInactiveTintColor: isDarkMode ? '#B6B0C3' : '#7A7D8A',
           tabBarItemStyle: styles.item,
         }}>
@@ -86,7 +91,7 @@ export default function TabLayout() {
               <Ionicons name="add" size={28} color="#FFFFFF" />
             </View>
           ),
-          tabBarLabelStyle: { fontSize: 10, color: '#4F2AC8', marginTop: 2 },
+          tabBarLabelStyle: { fontSize: 10, color: accent, marginTop: 2 },
         }}
       />
       <Tabs.Screen
@@ -113,7 +118,7 @@ export default function TabLayout() {
   );
 }
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
   root: {
     flex: 1,
   },

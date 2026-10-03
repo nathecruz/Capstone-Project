@@ -15,6 +15,7 @@ import { goalPlanSchema } from '../schemas.js';
 import { normalizeAppState } from '../services/app-state-sync.js';
 import { isValidCompletionDate } from '../services/completion-date.js';
 import { weeklyQuests } from '../services/quests.js';
+import { retireRewards } from '../services/rewards.js';
 import { doneActionSecret, makeDoneToken } from '../services/web-push-actions.js';
 import { getSupportEmailConfig } from '../services/support-email.js';
 
@@ -298,8 +299,8 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const coach = await request('/api/insights/assistant', { method: 'POST', headers: authHeaders, body: JSON.stringify({ question: 'Help', mode: 'coach' }) });
     assert.equal(coach.response.status, 503, 'AI unavailable without a key; no tokens are spent');
 
-    const redeem = await request('/api/rewards/redeem', { method: 'POST', headers: authHeaders, body: JSON.stringify({ rewardId: 'plant-buddy', rewardName: 'Plant Buddy', tokenCost: 200 }) });
-    assert.equal(redeem.response.status, 409);
+    const redeem = await request('/api/rewards/redeem', { method: 'POST', headers: authHeaders, body: JSON.stringify({ rewardId: 'premium-theme', rewardName: 'Premium Themes', tokenCost: 200 }) });
+    assert.equal(redeem.response.status, 409, 'not enough tokens');
   });
 
   await t.test('check-ins award tokens, compute streaks and survive stale devices', async () => {
@@ -567,6 +568,43 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(tooMany.response.status, 409, 'two is the most you can hold');
     const synced = await request('/api/streak-freezes/sync', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
     assert.deepEqual({ used: synced.body.used, available: synced.body.available, frozenDays: synced.body.frozenDays }, { used: [], available: 2, frozenDays: [dayBefore(1)] });
+  });
+
+  await t.test('token rewards: real ones on sale, retired ones refunded, and the custom title', async () => {
+    const password = 'Velvet!Canyon4!Birch9!Moon';
+    await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, firstName: 'Rhea', lastName: 'Ward', username: 'rhea_ward', email: 'rhea@example.com', password, privacyConsent: true }) });
+    await db.query('UPDATE users SET email_verified_at = 1 WHERE email = $1', ['rhea@example.com']);
+    const login = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'rhea@example.com', password }) });
+    const headers = { Authorization: `Bearer ${login.body.token}` };
+    const userId = (await db.query('SELECT id FROM users WHERE email=$1', ['rhea@example.com'])).rows[0].id;
+
+    const catalog = await request('/api/rewards', { headers });
+    assert.equal(catalog.response.status, 200, JSON.stringify(catalog.body));
+    assert.deepEqual(catalog.body.rewards.map((reward) => [reward.id, reward.cost, reward.permanent]), [['premium-theme', 200, true], ['custom-title', 250, true]], 'only rewards that do something are on sale');
+    assert.deepEqual({ owned: catalog.body.owned, title: catalog.body.title }, { owned: [], title: '' });
+    assert.equal((await request('/api/rewards/redeem', { method: 'POST', headers, body: JSON.stringify({ rewardId: 'grace-day', rewardName: 'Grace Day', tokenCost: 620 }) })).response.status, 400, 'retired rewards cannot be bought');
+
+    // Someone who bought a retired reward before gets the tokens back, once.
+    await db.query("INSERT INTO reward_redemptions(id,user_id,reward_id,token_cost,redeemed_at) VALUES('old-grace-day',$1,'grace-day',620,$2)", [userId, Date.now()]);
+    await retireRewards(db);
+    await retireRewards(db);
+    const refunds = (await db.query("SELECT amount, label FROM token_transactions WHERE user_id=$1 AND id LIKE '%:refund:%'", [userId])).rows;
+    assert.deepEqual(refunds, [{ amount: 620, label: 'Refund: Grace Day was retired' }]);
+
+    // The custom title: only after buying it, and only safe text.
+    assert.equal((await request('/api/rewards/title', { method: 'PUT', headers, body: JSON.stringify({ title: 'Early Riser' }) })).response.status, 403);
+    const bought = await request('/api/rewards/redeem', { method: 'POST', headers, body: JSON.stringify({ rewardId: 'custom-title', rewardName: 'Custom Title', tokenCost: 250 }) });
+    assert.equal(bought.response.status, 200, JSON.stringify(bought.body));
+    assert.equal(bought.body.tokens, 370, 'the refund paid for it');
+    assert.equal((await request('/api/rewards/redeem', { method: 'POST', headers, body: JSON.stringify({ rewardId: 'custom-title', rewardName: 'Custom Title', tokenCost: 250 }) })).response.status, 409, 'bought once');
+    for (const bad of ['A', '<b>Boss</b>', 'x'.repeat(25)]) {
+      assert.equal((await request('/api/rewards/title', { method: 'PUT', headers, body: JSON.stringify({ title: bad }) })).response.status, 400, bad);
+    }
+    const titled = await request('/api/rewards/title', { method: 'PUT', headers, body: JSON.stringify({ title: '  Early   Riser ' }) });
+    assert.deepEqual(titled.body, { ok: true, title: 'Early Riser' });
+    assert.deepEqual((await request('/api/rewards', { headers })).body.owned, ['custom-title']);
+    const board = await request('/api/leaderboard?period=All%20Time', { headers });
+    assert.equal(board.body.leaders.find((leader) => leader.isYou).title, 'Early Riser', 'shown on the leaderboard');
   });
 
   await t.test('issue reports store attachments in the database and validate content', async () => {

@@ -3,7 +3,7 @@
 // light surfaces become dark ones (keeping their hue), dark text becomes light, coloured text
 // is lightened and light borders are darkened. Explicit per-screen overrides win.
 import { StyleSheet } from 'react-native';
-import { useIsDarkMode } from '@/hooks/dark-mode-context';
+import { useAppTheme, useIsDarkMode } from '@/hooks/dark-mode-context';
 
 export const DARK_PALETTE = {
   card: '#1D1A24',
@@ -79,26 +79,158 @@ type StyleOverrides<T> = { [K in keyof T]?: T[K] };
 /** Switch knobs and slider thumbs stay white on their coloured or grey tracks. */
 const KEEP_LIGHT = /knob|thumb/i;
 
-/** Light and dark versions of a style sheet; read them with useThemedStyles. */
-export function createThemedStyles<T extends StyleSheet.NamedStyles<T>>(styles: T & StyleSheet.NamedStyles<T>, overrides: StyleOverrides<T> = {}) {
-  const dark = {} as Record<keyof T, object>;
-  for (const name of Object.keys(styles) as (keyof T)[]) {
-    const style = { ...(styles[name] as Record<string, unknown>) };
-    for (const property of KEEP_LIGHT.test(String(name)) ? [] : COLOR_PROPERTIES) {
-      if (typeof style[property] === 'string') style[property] = darkColor(style[property] as string, property);
+/**
+ * App colour themes (the Premium Themes reward). A theme moves the brand purple, and its tints and
+ * shades, to another hue; neutrals and the colours that mean something (orange streaks, green
+ * "done", blue freezes) stay as they are.
+ */
+export const APP_THEMES = [
+  { id: 'classic', name: 'Classic' },
+  { id: 'ocean', name: 'Ocean', hue: 199, lift: 1.3 },
+  { id: 'sunset', name: 'Sunset', hue: 16, lift: 1.3 },
+  { id: 'forest', name: 'Forest', hue: 150, lift: 1.3 },
+  { id: 'midnight', name: 'Midnight', hue: 228, lift: 0.62 },
+] as const;
+export type AppTheme = (typeof APP_THEMES)[number]['id'];
+
+export function isAppTheme(value: unknown): value is AppTheme {
+  return APP_THEMES.some((theme) => theme.id === value);
+}
+
+function hslToRgb(h: number, s: number, l: number) {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  const [r, g, b] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  return [r + m, g + m, b + m];
+}
+
+const channel = (value: number) => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+const luminance = ([r, g, b]: number[]) => 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+
+const themedColors = new Map<string, string>();
+
+/**
+ * The colour in `theme`: brand purples (hue 228-292, not grey) take the theme's hue at the
+ * same brightness, so white text on a themed button stays readable. Mid and dark tones are
+ * lifted a little (never below 4.5:1 against white); Midnight makes them deeper instead.
+ */
+export function themedColor(value: string, theme: AppTheme): string {
+  if (theme === 'classic') return value;
+  const key = `${theme}|${value}`;
+  const cached = themedColors.get(key);
+  if (cached) return cached;
+  const rgb = parseColor(value);
+  let result = value;
+  if (rgb) {
+    const { h, s, l, chroma } = toHsl(rgb);
+    // Light tints are themed even when faint; grey-purple text and dark surfaces stay neutral.
+    if (h >= 228 && h <= 292 && chroma >= (l > 0.85 ? 0.03 : 0.09)) {
+      const target = APP_THEMES.find((item) => item.id === theme) as { hue: number; lift: number };
+      const saturation = l > 0.85 ? Math.min(s, 0.6) : s;
+      const original = luminance([rgb.r / 255, rgb.g / 255, rgb.b / 255]);
+      const goal = l >= 0.7 ? original : target.lift > 1 ? Math.min(original * target.lift, Math.max(original, 0.17)) : original * target.lift;
+      let low = 0;
+      let high = 1;
+      for (let step = 0; step < 24; step += 1) {
+        const middle = (low + high) / 2;
+        if (luminance(hslToRgb(target.hue, saturation, middle)) < goal) low = middle;
+        else high = middle;
+      }
+      // Hex (or rgba), not hsl(): darkColor reads it again for dark mode.
+      const [red, green, blue] = hslToRgb(target.hue, saturation, (low + high) / 2).map((part) => Math.round(part * 255));
+      result = rgb.a < 1 ? `rgba(${red}, ${green}, ${blue}, ${rgb.a})` : `#${[red, green, blue].map((part) => part.toString(16).padStart(2, '0')).join('').toUpperCase()}`;
     }
-    dark[name] = { ...style, ...(overrides[name] as object | undefined) };
   }
-  return { light: StyleSheet.create(styles), dark: StyleSheet.create(dark as unknown as T) };
+  themedColors.set(key, result);
+  return result;
+}
+
+const THEME_PROPERTIES = [...COLOR_PROPERTIES, 'shadowColor'];
+
+function withTheme(style: Record<string, unknown>, theme: AppTheme) {
+  if (theme === 'classic') return style;
+  const themed = { ...style };
+  for (const property of THEME_PROPERTIES) {
+    if (typeof themed[property] === 'string') themed[property] = themedColor(themed[property] as string, theme);
+  }
+  return themed;
+}
+
+/**
+ * Light and dark versions of a style sheet; read them with useThemedStyles. The other app themes
+ * are built the first time they are used: the theme's colours first, then the dark derivation.
+ */
+export function createThemedStyles<T extends StyleSheet.NamedStyles<T>>(styles: T & StyleSheet.NamedStyles<T>, overrides: StyleOverrides<T> = {}) {
+  const build = (theme: AppTheme) => {
+    const light = {} as Record<keyof T, object>;
+    const dark = {} as Record<keyof T, object>;
+    for (const name of Object.keys(styles) as (keyof T)[]) {
+      const style = withTheme(styles[name] as Record<string, unknown>, theme);
+      light[name] = style;
+      const darkStyle = { ...style };
+      for (const property of KEEP_LIGHT.test(String(name)) ? [] : COLOR_PROPERTIES) {
+        if (typeof darkStyle[property] === 'string') darkStyle[property] = darkColor(darkStyle[property] as string, property);
+      }
+      const override = overrides[name] as Record<string, unknown> | undefined;
+      dark[name] = { ...darkStyle, ...(override ? withTheme(override, theme) : {}) };
+    }
+    return { light: StyleSheet.create(light as unknown as T), dark: StyleSheet.create(dark as unknown as T) };
+  };
+  const classic = build('classic');
+  const variants = new Map<AppTheme, { light: T; dark: T }>([['classic', classic]]);
+  return {
+    light: classic.light,
+    dark: classic.dark,
+    variant(theme: AppTheme) {
+      if (!variants.has(theme)) variants.set(theme, build(theme));
+      return variants.get(theme) as { light: T; dark: T };
+    },
+  };
+}
+
+const sheetVariants = new WeakMap<object, Map<AppTheme, unknown>>();
+
+/**
+ * A plain style sheet, or a map of colours, in an app theme. For screens that handle dark mode
+ * themselves instead of with createThemedStyles.
+ */
+export function themeSheet<T extends object>(sheet: T, theme: AppTheme): T {
+  if (theme === 'classic') return sheet;
+  let variants = sheetVariants.get(sheet);
+  if (!variants) {
+    variants = new Map();
+    sheetVariants.set(sheet, variants);
+  }
+  if (!variants.has(theme)) {
+    const themed: Record<string, unknown> = {};
+    for (const [name, value] of Object.entries(sheet)) {
+      themed[name] = typeof value === 'string' ? themedColor(value, theme) : value && typeof value === 'object' && !Array.isArray(value) ? withTheme(value as Record<string, unknown>, theme) : value;
+    }
+    variants.set(theme, themed);
+  }
+  return variants.get(theme) as T;
+}
+
+/** themeSheet for the current app theme. */
+export function useAppThemeSheet<T extends object>(sheet: T): T {
+  return themeSheet(sheet, useAppTheme());
 }
 
 /** Maps a colour used inline (icon colours, data-driven backgrounds) for the current theme. */
 export function useThemeColor() {
   const isDarkMode = useIsDarkMode();
-  return (value: string, property = 'color') => (isDarkMode ? darkColor(value, property) : value);
+  const theme = useAppTheme();
+  return (value: string, property = 'color') => {
+    const themed = themedColor(value, theme);
+    return isDarkMode ? darkColor(themed, property) : themed;
+  };
 }
 
 /** The style sheet for the current theme. */
-export function useThemedStyles<T>(themed: { light: T; dark: T }): T {
-  return useIsDarkMode() ? themed.dark : themed.light;
+export function useThemedStyles<T>(themed: { light: T; dark: T; variant?: (theme: AppTheme) => { light: T; dark: T } }): T {
+  const isDarkMode = useIsDarkMode();
+  const theme = useAppTheme();
+  const sheet = theme !== 'classic' && themed.variant ? themed.variant(theme) : themed;
+  return isDarkMode ? sheet.dark : sheet.light;
 }

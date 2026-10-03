@@ -6,6 +6,8 @@ import { type Href, router, type Tabs } from 'expo-router';
 import React from 'react';
 import { Pressable, type PressableStateCallbackType, StyleSheet, Text, View } from 'react-native';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
+import { useAppTheme } from '@/hooks/dark-mode-context';
+import { themeSheet } from '@/hooks/use-themed-styles';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 /** Pressable state on the web also carries `hovered` (react-native-web); native leaves it out. */
@@ -39,7 +41,9 @@ type NavItem = { key: string; name: string; label: string; focused: boolean; onP
 
 function SidebarView({ items, onAdd, current, asTabs }: { items: NavItem[]; onAdd?: () => void; current?: string; asTabs: boolean }) {
   const { isDarkMode, profile } = useAppColorScheme();
-  const colors = isDarkMode ? darkColors : lightColors;
+  const appTheme = useAppTheme();
+  const colors = themeSheet(isDarkMode ? darkColors : lightColors, appTheme);
+  const styles = themeSheet(baseStyles, appTheme);
   const firstName = profile.firstName || profile.fullName.split(' ')[0] || '';
   const footerLinks = [
     { label: 'Settings', icon: 'options-outline' as IconName, href: '/settings-preferences' as Href, focused: Boolean(current && SETTINGS_PAGES.has(current)) },
@@ -161,7 +165,7 @@ export function PageSidebar({ current }: { current?: string }) {
 const lightColors = { surface: '#FFFFFF', border: '#ECE9F3', text: '#24212D', muted: '#7A7D8A', active: '#4F2AC8', activeBackground: '#EFEBFF', hoverBackground: '#F6F4FB' };
 const darkColors = { surface: '#17151F', border: '#2A2635', text: '#F2EFF8', muted: '#A7A0B5', active: '#B9A9FF', activeBackground: '#2A2440', hoverBackground: '#211E2B' };
 
-const styles = StyleSheet.create({
+const baseStyles = StyleSheet.create({
   sidebar: {
     width: DESKTOP_SIDEBAR_WIDTH,
     height: '100%',

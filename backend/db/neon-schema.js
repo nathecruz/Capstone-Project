@@ -2,6 +2,7 @@
 import { readFile } from 'node:fs/promises';
 import { query, withTransaction } from './client.js';
 import { seedCatalog } from './seed-data.js';
+import { retireRewards } from '../services/rewards.js';
 import { splitFullName } from '../lib/names.js';
 import { backfillActivityFromSnapshots } from '../services/activity.js';
 
@@ -32,6 +33,9 @@ export async function ensureNeonSchema({ log = () => {} } = {}) {
   // First and last name are stored separately; full_name stays as "First Last".
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT NOT NULL DEFAULT ''");
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT NOT NULL DEFAULT ''");
+  // The Custom Title reward; rewards can be retired (kept for old redemptions, no longer sold).
+  await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_title TEXT NOT NULL DEFAULT ''");
+  await query('ALTER TABLE rewards ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE');
 
   const appStateId = await query(`
     SELECT 1 FROM information_schema.columns
@@ -63,6 +67,8 @@ export async function ensureNeonSchema({ log = () => {} } = {}) {
   await withTransaction(seedCatalog);
 
   // Accounts created before email verification existed are treated as verified (once only).
+  // Token rewards that did nothing are retired and refunded; Premium Themes and Custom Title now work.
+  await runOnce('token-rewards-real-2026-10', () => withTransaction((connection) => retireRewards(connection)));
   await runOnce('email-verification-backfill', () => query('UPDATE users SET email_verified_at = created_at WHERE email_verified_at IS NULL'));
 
   // Accounts created with a single full name get a first and last name once; students can correct them in the app.

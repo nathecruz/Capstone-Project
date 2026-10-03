@@ -10,3 +10,10 @@ export const DarkModeContext = createContext(false);
 export function useIsDarkMode() {
   return useContext(DarkModeContext);
 }
+
+/** The app colour theme the student picked (the Premium Themes reward); 'classic' outside the provider. */
+export const AppThemeContext = createContext<string>('classic');
+
+export function useAppTheme() {
+  return useContext(AppThemeContext) as 'classic' | 'ocean' | 'sunset' | 'forest' | 'midnight';
+}

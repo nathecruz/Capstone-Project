@@ -4,40 +4,33 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StatusBar, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
+import { ThemeSheet, TitleSheet } from '@/components/reward-sheets';
+import { StreakFreezeSheet } from '@/components/streak-freeze-sheet';
 import { getApiBaseUrl, getAuthenticatedHeaders, redeemReward } from '@/authentication';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
+import { loadRewards, markRewardOwned, useRewards } from '@/hooks/use-rewards';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
-type RewardKind = 'permanent' | 'consumable';
+// Every reward here does something. 'permanent' ones (from the server's catalog) are bought once
+// and then opened from their card; Streak Freeze and Buddy Outfits have their own screens.
 type Reward = {
   id: string;
   title: string;
   detail: string;
+  description?: string;
   cost: number;
   icon: keyof typeof Ionicons.glyphMap;
   color: string;
-  kind: RewardKind;
+  kind: 'permanent' | 'freeze' | 'shop';
 };
 
-// `kind` drives the flow: 'permanent' can only be redeemed once (it locks to
-// "Owned" afterwards), 'consumable' can be redeemed again each time.
-// Costs are kept unique across the list so the "cheapest reachable next" sort
-// in orderedRewards never has to break a tie.
-const REWARDS: Reward[] = [
-  { id: 'plant-buddy', title: 'Plant Buddy', detail: 'Profile decoration', cost: 200, icon: 'leaf-outline', color: '#E2F7DA', kind: 'permanent' },
-  { id: 'kindness-boost', title: 'Kindness Boost', detail: 'Send encouragement to a friend', cost: 250, icon: 'heart-outline', color: '#FFE7D1', kind: 'consumable' },
-  { id: 'premium-theme', title: 'Premium Theme', detail: 'Unlock the premium app theme', cost: 320, icon: 'phone-portrait-outline', color: '#EEE5FF', kind: 'permanent' },
-  { id: 'habit-swap', title: 'Habit Swap Token', detail: 'Swap one habit, keep your streak history', cost: 380, icon: 'swap-horizontal-outline', color: '#DFF7F3', kind: 'consumable' },
-  { id: 'mystery-box', title: 'Mystery Box', detail: 'Open for a random reward', cost: 420, icon: 'gift-outline', color: '#FFF0C9', kind: 'consumable' },
-  { id: 'xp-booster', title: 'XP Booster', detail: '+20% points for 3 days', cost: 500, icon: 'rocket-outline', color: '#FFE3E8', kind: 'consumable' },
-  { id: 'grace-day', title: 'Grace Day', detail: 'Skip logging for a day, streak stays safe', cost: 620, icon: 'moon-outline', color: '#DDF4FF', kind: 'consumable' },
-  { id: 'custom-title', title: 'Custom Title', detail: 'Set your own title under your name', cost: 750, icon: 'ribbon-outline', color: '#F6E3FF', kind: 'permanent' },
-];
+const REWARD_LOOKS: Record<string, { detail: string; icon: keyof typeof Ionicons.glyphMap; color: string; action: string }> = {
+  'premium-theme': { detail: 'Ocean, Sunset, Forest and Midnight colours', icon: 'color-palette-outline', color: '#EEE5FF', action: 'Choose theme' },
+  'custom-title': { detail: 'Your title on your profile and the leaderboard', icon: 'ribbon-outline', color: '#FBE3F1', action: 'Edit title' },
+};
+const BUDDY_SHOP_FROM = 40;
 
-// Keep this format stable — ownership is read back out of token history.
-const redeemLabel = (reward: Reward) => `Redeemed ${reward.title}`;
-
-type Leader = { rank: number; name: string; points: number; avatar: string; isYou?: boolean };
+type Leader = { rank: number; name: string; points: number; avatar: string; title?: string; isYou?: boolean };
 type Spotlight = Leader & { tone: 'gold' | 'silver' | 'bronze' };
 type LeaderboardPeriod = 'This Week' | 'This Month' | 'All Time';
 type LeaderboardSort = 'points-desc' | 'points-asc' | 'rank';
@@ -53,7 +46,7 @@ export default function LeaderboardsScreen() {
   const [sortDropdownOpen, setSortDropdownOpen] = useState(false);
   const [showAllRankings, setShowAllRankings] = useState(false);
   const [deviceDate, setDeviceDate] = useState(() => new Date());
-  const [showAllRewards, setShowAllRewards] = useState(false);
+  const [openSheet, setOpenSheet] = useState<'freeze' | 'theme' | 'title' | null>(null);
   const [showTokenHistory, setShowTokenHistory] = useState(false);
   const [pendingReward, setPendingReward] = useState<Reward | null>(null);
   const [redeeming, setRedeeming] = useState(false);
@@ -61,7 +54,8 @@ export default function LeaderboardsScreen() {
   const [leaderboardStatus, setLeaderboardStatus] = useState<'idle' | 'loading' | 'connected' | 'unavailable'>('idle');
   const [refreshKey, setRefreshKey] = useState(0);
   const [leaderboard, setLeaderboard] = useState<LeaderboardResponse>({ date: '', leaders: [] });
-  const { tokens, applyWallet, points, profile, tokenHistory, isFaculty } = useAppColorScheme();
+  const { tokens, applyWallet, points, profile, tokenHistory, isFaculty, streakFreeze } = useAppColorScheme();
+  const catalog = useRewards();
   const insets = useSafeAreaInsets();
   const compact = useWindowDimensions().width < 375;
 
@@ -154,30 +148,34 @@ export default function LeaderboardsScreen() {
   const formatTransactionDate = (date: string) => new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
   // --- Token rewards -------------------------------------------------------
-  // Ownership is derived from token history so no context change is needed.
-  const ownedTitles = useMemo(
-    () => new Set(tokenHistory.filter((entry) => entry.amount < 0).map((entry) => entry.label)),
-    [tokenHistory],
-  );
-  const isOwned = (reward: Reward) => reward.kind === 'permanent' && ownedTitles.has(redeemLabel(reward));
+  // Names and prices come from the server's catalog, so a redeem always matches what it charges.
+  const freezeCost = streakFreeze?.cost ?? 30;
+  const freezesHeld = streakFreeze?.available ?? 0;
+  const freezeMax = streakFreeze?.max ?? 2;
+  const rewards = useMemo<Reward[]>(() => {
+    const permanent = catalog.rewards.filter((reward) => reward.permanent && REWARD_LOOKS[reward.id]).map((reward) => ({
+      id: reward.id,
+      title: reward.name,
+      description: reward.description,
+      cost: reward.cost,
+      kind: 'permanent' as const,
+      ...REWARD_LOOKS[reward.id],
+    }));
+    return [
+      { id: 'streak-freeze', title: 'Streak Freeze', detail: 'Saves your streaks on a day you miss', cost: freezeCost, icon: 'snow-outline', color: '#DDF0FF', kind: 'freeze' },
+      { id: 'buddy-shop', title: 'Buddy Outfits', detail: 'Hats and items for your Habit Buddy', cost: BUDDY_SHOP_FROM, icon: 'shirt-outline', color: '#FFF0C9', kind: 'shop' },
+      ...permanent,
+    ];
+  }, [catalog.rewards, freezeCost]);
+  const isOwned = (reward: Reward) => reward.kind === 'permanent' && catalog.owns(reward.id);
+  const nextGoal = rewards.find((reward) => reward.kind === 'permanent' && !isOwned(reward) && tokens < reward.cost);
 
-  // Cheapest still-redeemable rewards first, so the next reachable goal is
-  // always the first card the user sees.
-  const orderedRewards = useMemo(() => {
-    return [...REWARDS].sort((left, right) => {
-      const leftOwned = isOwned(left) ? 1 : 0;
-      const rightOwned = isOwned(right) ? 1 : 0;
-      if (leftOwned !== rightOwned) return leftOwned - rightOwned;
-      const leftAffordable = tokens >= left.cost ? 0 : 1;
-      const rightAffordable = tokens >= right.cost ? 0 : 1;
-      if (leftAffordable !== rightAffordable) return leftAffordable - rightAffordable;
-      return left.cost - right.cost;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokens, ownedTitles]);
-
-  const visibleRewards = showAllRewards ? orderedRewards : orderedRewards.slice(0, 4);
-  const nextGoal = orderedRewards.find((reward) => !isOwned(reward) && tokens < reward.cost);
+  const openReward = (reward: Reward) => {
+    if (reward.kind === 'freeze') setOpenSheet('freeze');
+    else if (reward.kind === 'shop') router.push('/buddy');
+    else if (isOwned(reward)) setOpenSheet(reward.id === 'premium-theme' ? 'theme' : 'title');
+    else setPendingReward(reward);
+  };
 
   const confirmRedeem = async () => {
     const reward = pendingReward;
@@ -191,15 +189,17 @@ export default function LeaderboardsScreen() {
     }
     setRedeeming(true);
     const result = await redeemReward(reward);
+    setRedeeming(false);
+    setPendingReward(null);
     if (result.ok) {
-      // The server deducted the tokens; show its balance and history.
+      // The server deducted the tokens; show its balance and history, then let them use it.
       if ('tokens' in result) applyWallet(result as { tokens?: number; tokenHistory?: object[]; points?: number });
-      setToast(`${reward.title} redeemed.`);
+      markRewardOwned(reward.id);
+      setToast(`${reward.title} unlocked!`);
+      setOpenSheet(reward.id === 'premium-theme' ? 'theme' : 'title');
     } else {
       setToast(result.message || 'Redeem failed. Your tokens were not spent.');
     }
-    setRedeeming(false);
-    setPendingReward(null);
   };
 
   // Faculty mode: leaderboards and rewards are the students' own competition.
@@ -243,18 +243,8 @@ export default function LeaderboardsScreen() {
               <View style={styles.sectionHeadingCopy}>
                 <Text style={styles.sectionKicker}>REDEEM YOUR TOKENS</Text>
                 <Text style={styles.sectionTitle}>Token Rewards</Text>
-                <Text style={styles.sectionSubtitle}>Small wins that keep your momentum going.</Text>
+                <Text style={styles.sectionSubtitle}>Spend them on things you will actually use.</Text>
               </View>
-              <Pressable
-                style={styles.viewAllButton}
-                accessibilityRole="button"
-                onPress={() => setShowAllRewards((visible) => !visible)}
-                accessibilityLabel={showAllRewards ? 'Show fewer token rewards' : 'View all token rewards'}
-                accessibilityState={{ expanded: showAllRewards }}
-              >
-                <Text style={styles.viewAll}>{showAllRewards ? 'View less' : 'View all'}</Text>
-                <Ionicons name={showAllRewards ? 'chevron-up' : 'chevron-down'} size={13} color={themeColor('#6249C9')} />
-              </Pressable>
             </View>
 
             {nextGoal && (
@@ -272,59 +262,69 @@ export default function LeaderboardsScreen() {
               contentContainerStyle={styles.rewardRow}
               accessibilityLabel="Token rewards, scroll sideways for more"
             >
-              {visibleRewards.map((reward) => {
+              {rewards.map((reward) => {
                 const owned = isOwned(reward);
-                const canRedeem = !owned && tokens >= reward.cost;
+                const freezesFull = reward.kind === 'freeze' && freezesHeld >= freezeMax;
+                const affordable = tokens >= reward.cost;
+                // Owned rewards, the freeze sheet and the buddy shop always open; the rest need the tokens.
+                const enabled = owned || reward.kind !== 'permanent' || affordable;
                 const progress = Math.min(100, Math.round((tokens / reward.cost) * 100));
+                const status = owned
+                  ? 'Yours to keep'
+                  : reward.kind === 'freeze'
+                    ? `${freezesHeld} of ${freezeMax} held`
+                    : affordable ? (reward.kind === 'shop' ? 'Ready to shop' : 'Ready to redeem') : `${tokens} / ${reward.cost}`;
+                const action = owned
+                  ? REWARD_LOOKS[reward.id]?.action ?? 'Open'
+                  : reward.kind === 'freeze'
+                    ? freezesFull ? 'View' : 'Get one'
+                    : reward.kind === 'shop' ? 'Open shop' : affordable ? 'Redeem' : `${reward.cost - tokens} more`;
                 return (
-                  <View key={reward.id} style={[styles.rewardCard, { backgroundColor: themeColor(reward.color, 'backgroundColor') }, owned && styles.rewardCardOwned]}>
+                  <View key={reward.id} style={[styles.rewardCard, { backgroundColor: themeColor(reward.color, 'backgroundColor') }]}>
+                    {owned && <View style={styles.ownedTag}><Ionicons name="checkmark-circle" size={11} color={themeColor('#2E9D5C')} /><Text style={styles.ownedTagText}>Owned</Text></View>}
                     <View style={styles.rewardIcon}>
-                      <Ionicons name={reward.icon} size={29} color={owned ? themeColor('#8E8AA6') : themeColor('#7048D9')} />
+                      <Ionicons name={reward.icon} size={29} color={themeColor(reward.kind === 'freeze' ? '#2F86D8' : '#7048D9')} />
                     </View>
                     <Text style={styles.rewardTitle}>{reward.title}</Text>
                     <Text style={styles.rewardDetail}>{reward.detail}</Text>
                     <View style={styles.rewardCostPill}>
                       <Ionicons name="star" size={12} color={themeColor('#E6A617')} />
-                      <Text style={styles.rewardCost}>{reward.cost} tokens</Text>
+                      <Text style={styles.rewardCost}>{reward.kind === 'shop' ? `from ${reward.cost}` : reward.cost} tokens{reward.kind === 'freeze' ? ' each' : ''}</Text>
                     </View>
 
                     {/* Track always renders so the card height never jumps. */}
                     <View style={styles.rewardProgressTrack}>
-                      {!owned && !canRedeem && <View style={[styles.rewardProgressFill, { width: `${progress}%` }]} />}
+                      {reward.kind === 'permanent' && !owned && !affordable && <View style={[styles.rewardProgressFill, { width: `${progress}%` }]} />}
                     </View>
-                    <Text style={styles.rewardProgressLabel}>
-                      {owned ? 'Already yours' : canRedeem ? 'Ready to redeem' : `${tokens} / ${reward.cost}`}
-                    </Text>
+                    <Text style={styles.rewardProgressLabel}>{status}</Text>
 
                     <Pressable
-                      disabled={!canRedeem}
-                      style={[styles.claimButton, !canRedeem && styles.claimButtonDisabled]}
+                      disabled={!enabled}
+                      style={({ pressed }) => [styles.claimButton, owned && styles.claimButtonOwned, !enabled && styles.claimButtonDisabled, pressed && styles.claimButtonPressed]}
                       accessibilityRole="button"
-                      accessibilityState={{ disabled: !canRedeem }}
-                      accessibilityLabel={owned ? `${reward.title}, already owned` : canRedeem ? `Redeem ${reward.title} for ${reward.cost} tokens` : `${reward.title} locked, needs ${reward.cost - tokens} more tokens`}
-                      onPress={() => setPendingReward(reward)}
+                      accessibilityState={{ disabled: !enabled }}
+                      accessibilityLabel={owned ? `${reward.title}: ${action}` : reward.kind === 'permanent' ? (affordable ? `Redeem ${reward.title} for ${reward.cost} tokens` : `${reward.title} locked, needs ${reward.cost - tokens} more tokens`) : `${reward.title}: ${action}`}
+                      onPress={() => openReward(reward)}
                     >
-                      <Text style={[styles.claimText, !canRedeem && styles.claimTextDisabled]}>
-                        {owned ? 'Owned' : canRedeem ? 'Redeem' : `${reward.cost - tokens} more`}
-                      </Text>
-                      {owned && <Ionicons name="checkmark-circle" size={14} color={themeColor('#756D8B')} />}
-                      {canRedeem && <Ionicons name="arrow-forward" size={14} color={themeColor('#FFFFFF')} />}
+                      <Text style={[styles.claimText, owned && styles.claimTextOwned, !enabled && styles.claimTextDisabled]}>{action}</Text>
+                      {enabled && <Ionicons name="arrow-forward" size={14} color={themeColor(owned ? '#5B42D8' : '#FFFFFF')} />}
                     </Pressable>
                   </View>
                 );
               })}
             </ScrollView>
 
-            {!showAllRewards && orderedRewards.length > visibleRewards.length && (
-              <Text style={styles.rewardsFootnote}>
-                {orderedRewards.length - visibleRewards.length} more rewards available
-              </Text>
+            {catalog.status === 'error' && (
+              <Pressable style={styles.rewardsRetry} onPress={() => void loadRewards()} accessibilityRole="button">
+                <Ionicons name="refresh" size={13} color={themeColor('#6249C9')} />
+                <Text style={styles.rewardsFootnote}>Could not load Premium Themes and Custom Title. Tap to retry.</Text>
+              </Pressable>
             )}
           </View>
 
           <View style={styles.podiumHeader}><View><Text style={styles.sectionKicker}>LEADERBOARD SPOTLIGHT</Text><Text style={styles.sectionTitle}>Top 3 {period}</Text><Text style={styles.sectionSubtitle}>Consistency gets rewarded. Keep climbing!</Text></View><Pressable style={styles.datePill} onPress={() => setDateDropdownOpen((open) => !open)} accessibilityRole="button" accessibilityLabel="Choose leaderboard date" accessibilityState={{ expanded: dateDropdownOpen }}><Ionicons name="calendar-outline" size={12} color={themeColor('#6B60B8')} /><Text style={styles.datePillText}>{liveDate}</Text><Ionicons name={dateDropdownOpen ? 'chevron-up' : 'chevron-down'} size={12} color={themeColor('#6B60B8')} /></Pressable></View>
           {dateDropdownOpen && <View style={styles.dateDropdown}>{(['This Week', 'This Month', 'All Time'] as LeaderboardPeriod[]).map((option) => <Pressable key={option} style={[styles.dateOption, period === option && styles.dateOptionActive]} onPress={() => { setPeriod(option); setDateDropdownOpen(false); }} accessibilityRole="button" accessibilityState={{ selected: period === option }}><View><Text style={[styles.dateOptionTitle, period === option && styles.dateOptionTextActive]}>{option}</Text><Text style={[styles.dateOptionSubtitle, period === option && styles.dateOptionTextActive]}>{getDateLabel(option)}</Text></View>{period === option && <Ionicons name="checkmark-circle" size={16} color={themeColor('#FFFFFF')} />}</Pressable>)}</View>}
-          {podium.length && hasLeaderboard ? <View style={[styles.podiumRow, compact && styles.compactPodium]}>{podium.map((player) => <View key={player.name} style={[styles.podiumPlayer, styles[player.tone]]}><Text style={styles.podiumRank}>{player.rank === 1 ? '1ST' : player.rank === 2 ? '2ND' : '3RD'}</Text><Text style={styles.medal}>{player.tone === 'gold' ? '♛' : '◆'}</Text><View style={styles.podiumAvatar}><Text style={styles.avatarText}>{player.avatar}</Text></View><Text style={styles.podiumName}>{player.name}</Text><Text style={styles.podiumPoints}>✦ {player.points} pts</Text></View>)}</View> : <View style={styles.noCommunityCard}><Ionicons name={effectiveLeaderboardStatus === 'loading' ? 'sync-outline' : 'people-outline'} size={25} color={themeColor('#6249C9')} /><Text style={styles.noCommunityTitle}>{effectiveLeaderboardStatus === 'loading' ? 'Connecting to the community...' : 'Community rankings are unavailable'}</Text><Text style={styles.noCommunityText}>{effectiveLeaderboardStatus === 'loading' ? 'We are checking the leaderboard service.' : 'Start a daily habit to earn your first points, then connect to compare with other members.'}</Text><Pressable style={styles.connectButton} onPress={() => { if (!apiUrl) showAlert('Connect Leaderboard Service', 'Set EXPO_PUBLIC_AI_API_URL and start the backend service to enable community rankings.'); else setRefreshKey((key) => key + 1); } }><Ionicons name="link-outline" size={15} color={themeColor('#FFFFFF')} /><Text style={styles.connectButtonText}>{apiUrl ? 'Retry connection' : 'Connect Leaderboard Service'}</Text></Pressable></View>}
+          {podium.length && hasLeaderboard ? <View style={[styles.podiumRow, compact && styles.compactPodium]}>{podium.map((player) => <View key={player.name} style={[styles.podiumPlayer, styles[player.tone]]}><Text style={styles.podiumRank}>{player.rank === 1 ? '1ST' : player.rank === 2 ? '2ND' : '3RD'}</Text><Text style={styles.medal}>{player.tone === 'gold' ? '♛' : '◆'}</Text><View style={styles.podiumAvatar}><Text style={styles.avatarText}>{player.avatar}</Text></View><Text style={styles.podiumName}>{player.name}</Text>{player.title ? <Text style={styles.podiumTitle} numberOfLines={1}>{player.title}</Text> : null}<Text style={styles.podiumPoints}>✦ {player.points} pts</Text></View>)}</View> : <View style={styles.noCommunityCard}><Ionicons name={effectiveLeaderboardStatus === 'loading' ? 'sync-outline' : 'people-outline'} size={25} color={themeColor('#6249C9')} /><Text style={styles.noCommunityTitle}>{effectiveLeaderboardStatus === 'loading' ? 'Connecting to the community...' : 'Community rankings are unavailable'}</Text><Text style={styles.noCommunityText}>{effectiveLeaderboardStatus === 'loading' ? 'We are checking the leaderboard service.' : 'Start a daily habit to earn your first points, then connect to compare with other members.'}</Text><Pressable style={styles.connectButton} onPress={() => { if (!apiUrl) showAlert('Connect Leaderboard Service', 'Set EXPO_PUBLIC_AI_API_URL and start the backend service to enable community rankings.'); else setRefreshKey((key) => key + 1); } }><Ionicons name="link-outline" size={15} color={themeColor('#FFFFFF')} /><Text style={styles.connectButtonText}>{apiUrl ? 'Retry connection' : 'Connect Leaderboard Service'}</Text></Pressable></View>}
 
           {hasUserPosition ? <View style={styles.positionCard}><View style={styles.positionAvatar}><Text style={styles.avatarText}>{userStanding.avatar}</Text></View><View style={styles.positionCopy}><Text style={styles.positionLabel}>Your Position</Text><Text style={styles.positionRank}>#{userStanding.rank}</Text><View style={styles.risingPill}><Ionicons name="star" size={12} color={themeColor('#FFFFFF')} /><Text style={styles.risingText}>Keep climbing</Text></View><View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${rankProgress}%` }]} /></View><Text style={styles.progressNote}>{nextLeader ? `${pointsToNextRank} points to reach #${nextLeader.rank}` : 'You are at the top of this community.'}</Text></View><View style={styles.positionScore}><Text style={styles.scoreValue}>{points}</Text><Text style={styles.scoreLabel}>points</Text><Text style={styles.weekMuted}>Live total</Text></View></View> : null}
 
@@ -332,7 +332,7 @@ export default function LeaderboardsScreen() {
           <View style={styles.rankingHeader}><View style={styles.rankingTitleBlock}><Text style={styles.sectionKicker}>FULL STANDINGS</Text><Text style={styles.sectionTitle}>Rankings</Text><Text style={styles.sectionSubtitle}>Your place among the most consistent.</Text><View style={styles.risingSmall}><Ionicons name="swap-vertical" size={11} color={themeColor('#6249C9')} /><Text style={styles.risingSmallText}>Showing: {sortLabel}</Text></View></View><View style={styles.rankingActions}><Pressable style={[styles.sortButton, styles.sortButtonTouch]} onPress={() => setSortDropdownOpen((open) => !open)} accessibilityRole="button" accessibilityLabel="Sort full standings" accessibilityState={{ expanded: sortDropdownOpen }}><Ionicons name="swap-vertical" size={15} color={themeColor('#5F55B4')} /><Text style={styles.sortText}>{sortLabel}</Text><Ionicons name={sortDropdownOpen ? 'chevron-up' : 'chevron-down'} size={13} color={themeColor('#5F55B4')} /></Pressable><Pressable style={[styles.sortButton, styles.sortButtonTouch]} onPress={() => setShowAllRankings((visible) => !visible)} accessibilityRole="button" accessibilityLabel={showAllRankings ? 'Show fewer rankings' : 'View all rankings'} accessibilityState={{ expanded: showAllRankings }}><Text style={styles.sortText}>{showAllRankings ? 'View less' : 'View all'}</Text><Ionicons name={showAllRankings ? 'chevron-up' : 'chevron-down'} size={13} color={themeColor('#6249C9')} /></Pressable></View></View>
           {sortDropdownOpen && <View style={styles.dateDropdown}>{([{ value: 'points-desc', label: 'Points: high to low' }, { value: 'points-asc', label: 'Points: low to high' }, { value: 'rank', label: 'Sort by rank' }] as const).map((option) => <Pressable key={option.value} style={[styles.dateOption, sortMode === option.value && styles.dateOptionActive]} onPress={() => { setSortMode(option.value); setSortDropdownOpen(false); }} accessibilityRole="button" accessibilityState={{ selected: sortMode === option.value }}><Text style={[styles.dateOptionTitle, sortMode === option.value && styles.dateOptionTextActive]}>{option.label}</Text>{sortMode === option.value && <Ionicons name="checkmark-circle" size={16} color={themeColor('#FFFFFF')} />}</Pressable>)}</View>}
           <View style={styles.rankingMetaRow}><View style={styles.rankingCount}><Ionicons name="people-outline" size={14} color={themeColor('#6249C9')} /><Text style={styles.rankingMetaText}>{visibleRankingCount} of {sortedLeaders.length} members</Text></View><Text style={styles.rankingMetaHint}>{showAllRankings ? 'Complete leaderboard' : 'Top results'}</Text></View>
-          <View style={styles.rankingTable}><View style={styles.rankingColumns}><Text style={styles.columnRank}>RANK</Text><Text style={styles.columnMember}>MEMBER</Text><Text style={styles.columnPoints}>POINTS{pointsSortIndicator}</Text></View><View style={styles.rankingList}>{sortedLeaders.slice(0, visibleRankingCount).map((leader, index) => <View key={leader.name} style={[styles.rankingRow, index % 2 === 1 && styles.alternateRow, leader.name === profile.fullName && styles.currentRow]}><Text style={[styles.rankCircle, leader.name === profile.fullName && styles.currentRank]}>{leader.rank}</Text><View style={styles.memberCell}><View style={[styles.listAvatarWrap, leader.name === profile.fullName && styles.currentAvatarWrap]}><Text style={styles.listAvatar}>{leader.avatar}</Text></View><View style={styles.memberCopy}><Text style={[styles.playerName, leader.name === profile.fullName && styles.currentPlayerName]}>{leader.name}</Text>{leader.name === profile.fullName && <View style={styles.risingSmall}><Ionicons name="star" size={10} color={themeColor('#6248D7')} /><Text style={styles.risingSmallText}>You</Text></View>}</View></View><View style={styles.pointsCell}><Text style={styles.playerPoints}>{leader.points}</Text><Ionicons name="chevron-forward" size={16} color={themeColor('#7E74BF')} /></View></View>)}</View></View></>}
+          <View style={styles.rankingTable}><View style={styles.rankingColumns}><Text style={styles.columnRank}>RANK</Text><Text style={styles.columnMember}>MEMBER</Text><Text style={styles.columnPoints}>POINTS{pointsSortIndicator}</Text></View><View style={styles.rankingList}>{sortedLeaders.slice(0, visibleRankingCount).map((leader, index) => <View key={leader.name} style={[styles.rankingRow, index % 2 === 1 && styles.alternateRow, leader.name === profile.fullName && styles.currentRow]}><Text style={[styles.rankCircle, leader.name === profile.fullName && styles.currentRank]}>{leader.rank}</Text><View style={styles.memberCell}><View style={[styles.listAvatarWrap, leader.name === profile.fullName && styles.currentAvatarWrap]}><Text style={styles.listAvatar}>{leader.avatar}</Text></View><View style={styles.memberCopy}><Text style={[styles.playerName, leader.name === profile.fullName && styles.currentPlayerName]}>{leader.name}</Text>{leader.title ? <Text style={styles.playerTitle} numberOfLines={1}>{leader.title}</Text> : null}{leader.name === profile.fullName && <View style={styles.risingSmall}><Ionicons name="star" size={10} color={themeColor('#6248D7')} /><Text style={styles.risingSmallText}>You</Text></View>}</View></View><View style={styles.pointsCell}><Text style={styles.playerPoints}>{leader.points}</Text><Ionicons name="chevron-forward" size={16} color={themeColor('#7E74BF')} /></View></View>)}</View></View></>}
         </View>
       </ScrollView>
 
@@ -354,7 +354,7 @@ export default function LeaderboardsScreen() {
                 <Ionicons name={pendingReward.icon} size={30} color={themeColor('#7048D9')} />
               </View>
               <Text style={styles.confirmTitle}>Redeem {pendingReward.title}?</Text>
-              <Text style={styles.confirmDetail}>{pendingReward.detail}</Text>
+              <Text style={styles.confirmDetail}>{pendingReward.description ?? pendingReward.detail}</Text>
               <View style={styles.confirmMath}>
                 <View style={styles.confirmMathRow}><Text style={styles.confirmMathLabel}>Balance</Text><Text style={styles.confirmMathValue}>{tokens}</Text></View>
                 <View style={styles.confirmMathRow}><Text style={styles.confirmMathLabel}>Cost</Text><Text style={[styles.confirmMathValue, styles.confirmMathCost]}>-{pendingReward.cost}</Text></View>
@@ -362,7 +362,7 @@ export default function LeaderboardsScreen() {
                 <View style={styles.confirmMathRow}><Text style={styles.confirmMathLabelStrong}>Remaining</Text><Text style={styles.confirmMathValueStrong}>{tokens - pendingReward.cost}</Text></View>
               </View>
               <Text style={styles.confirmNote}>
-                {pendingReward.kind === 'permanent' ? 'One-time purchase. Kept on your profile.' : 'Can be redeemed again later.'}
+                One-time purchase. Yours to keep.
               </Text>
               <Pressable style={[styles.confirmButton, redeeming && styles.confirmButtonBusy]} disabled={redeeming} onPress={confirmRedeem} accessibilityRole="button">
                 <Text style={styles.confirmButtonText}>{redeeming ? 'Redeeming...' : `Redeem for ${pendingReward.cost}`}</Text>
@@ -374,6 +374,10 @@ export default function LeaderboardsScreen() {
           )}
         </View>
       </Modal>
+
+      <StreakFreezeSheet visible={openSheet === 'freeze'} onClose={() => setOpenSheet(null)} />
+      <ThemeSheet visible={openSheet === 'theme'} onClose={() => setOpenSheet(null)} />
+      {openSheet === 'title' && <TitleSheet current={catalog.title} onClose={() => setOpenSheet(null)} onSaved={(title) => { setToast(title ? `Your title is now "${title}".` : 'Title removed.'); setRefreshKey((key) => key + 1); }} />}
 
       <Modal visible={showTokenHistory} transparent animationType="slide" onRequestClose={() => setShowTokenHistory(false)}>
         <View style={styles.historyOverlay}>
@@ -418,7 +422,8 @@ const themedStyles = createThemedStyles({
   // trailing padding gives the last card a peek edge so the row reads as scrollable
   rewardRow: { gap: 10, paddingBottom: 6, paddingRight: 16 },
   rewardCard: { width: 150, minHeight: 236, borderRadius: 17, padding: 11, alignItems: 'center', elevation: 2, shadowColor: '#4A3B9A', shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } },
-  rewardCardOwned: { opacity: 0.66 },
+  ownedTag: { position: 'absolute', top: 8, right: 8, flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(255,255,255,0.85)', borderRadius: 9, paddingHorizontal: 6, paddingVertical: 3 },
+  ownedTagText: { color: '#2E7D50', fontSize: 9, fontWeight: '900' },
   rewardIcon: { width: 64, height: 52, alignItems: 'center', justifyContent: 'center' },
   rewardTitle: { color: '#242951', fontSize: 12, fontWeight: '900', textAlign: 'center' },
   rewardDetail: { color: '#69708A', fontSize: 10, lineHeight: 13, textAlign: 'center', minHeight: 26, marginTop: 3 },
@@ -429,9 +434,15 @@ const themedStyles = createThemedStyles({
   rewardProgressLabel: { color: '#5D6480', fontSize: 10, fontWeight: '700', marginTop: 5, marginBottom: 7 },
   claimButton: { width: '100%', minHeight: 44, flexDirection: 'row', justifyContent: 'center', gap: 5, backgroundColor: '#6747DD', borderRadius: 13, paddingVertical: 8, alignItems: 'center', marginTop: 'auto' },
   claimButtonDisabled: { backgroundColor: 'rgba(255,255,255,0.6)' },
+  claimButtonOwned: { backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: '#6747DD' },
+  claimButtonPressed: { opacity: 0.85 },
+  claimTextOwned: { color: '#5B42D8' },
   claimText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800', textAlign: 'center' },
   claimTextDisabled: { color: '#756D8B' },
-  rewardsFootnote: { color: '#8B83AE', fontSize: 10, fontWeight: '700', textAlign: 'center', marginTop: 4 },
+  rewardsFootnote: { color: '#8B83AE', fontSize: 10, fontWeight: '700', textAlign: 'center', flexShrink: 1 },
+  rewardsRetry: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, minHeight: 36, marginTop: 4 },
+  podiumTitle: { color: '#7A4FB0', fontSize: 9, fontWeight: '800', textAlign: 'center', marginTop: 2, maxWidth: '92%' },
+  playerTitle: { color: '#7A4FB0', fontSize: 10, fontWeight: '800', marginTop: 1 },
 
   toast: { position: 'absolute', left: 18, right: 18, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#2C2564', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, elevation: 8, shadowColor: '#000000', shadowOpacity: 0.2, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
   toastText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700', flex: 1 },

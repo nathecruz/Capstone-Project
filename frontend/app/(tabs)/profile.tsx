@@ -6,6 +6,7 @@ import { Image, Modal, Pressable, ScrollView, Text, TextInput, useWindowDimensio
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getMyLeaderboardRank } from '@/authentication';
 import { ClassPulseCard } from '@/components/class-pulse-card';
+import { TitleBadge, TitleSheet } from '@/components/reward-sheets';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { badgeProgress, badgeRemaining, nextBadge } from '@/utils/achievements';
 import { askAi } from '@/utils/ai-client';
@@ -13,6 +14,7 @@ import { rankSummary } from '@/utils/rank';
 import type { TranslationKey } from '@/constants/i18n';
 import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { CONTENT_MAX_WIDTH } from '@/hooks/use-responsive-layout';
+import { useRewards } from '@/hooks/use-rewards';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 const settings = [
@@ -28,6 +30,9 @@ export default function ProfileScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const showAlert = useAppDialog();
+  // The Custom Title reward: shown under the name once bought.
+  const rewards = useRewards();
+  const [titleOpen, setTitleOpen] = useState(false);
   const { isDarkMode, avatarImage, setAvatarImage, habits, goals, profile, points, tokens, applyWallet, t, isFaculty, streakFreeze } = useAppColorScheme();
   // Faculty mode: no student leaderboards; a shortcut to their class's Class Pulse instead.
   const menuItems = isFaculty ? settings.filter((item) => item.key !== 'leaderboards') : settings;
@@ -153,6 +158,7 @@ export default function ProfileScreen() {
             </Pressable>
             <Text style={[styles.name, isDarkMode && styles.darkText]}>{displayName}</Text>
             <Text style={styles.username}>{displayUsername}</Text>
+            {rewards.owns('custom-title') && <TitleBadge title={rewards.title} onPress={() => setTitleOpen(true)} style={styles.titleBadge} />}
             <View style={styles.levelPill}>
               <Text style={styles.levelText}>Level {level}</Text>
               <Ionicons name="star" size={11} color={themeColor('#F2B94B')} />
@@ -490,6 +496,7 @@ export default function ProfileScreen() {
           </View>
         </View>
       </Modal>
+      {titleOpen && <TitleSheet current={rewards.title} onClose={() => setTitleOpen(false)} />}
     </SafeAreaView>
   );
 }
@@ -700,6 +707,7 @@ const themedStyles = createThemedStyles({
     fontWeight: '600',
     marginTop: 3,
   },
+  titleBadge: { alignSelf: 'center', marginTop: 7 },
   facultyPill: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: '#5B42D8' },
   facultyPillText: { fontSize: 10, fontWeight: '800', color: '#FFFFFF' },
   facultyClassCard: { marginTop: 16 },

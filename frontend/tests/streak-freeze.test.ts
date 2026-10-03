@@ -16,6 +16,8 @@ function habit(id: string, completionDates: string[] = []): Habit {
 const dates = ['2026-09-29', '2026-09-30', '2026-10-02'];
 
 describe('streak freeze', () => {
+  afterEach(() => jest.useRealTimers());
+
   it('keeps a streak alive over a frozen day without counting it', () => {
     expect(computeStreak(habit('a'), dates, '2026-10-03')).toBe(1);
     expect(computeStreak(habit('a'), dates, '2026-10-03', ['2026-10-01'])).toBe(3);
@@ -25,6 +27,8 @@ describe('streak freeze', () => {
 
   it('flows into the habit, the evening alert and the buddy', () => {
     const now = new Date(2026, 9, 3, 20);
+    // The habit's streak is counted up to the device's today.
+    jest.useFakeTimers({ now });
     expect(applyRemoteCompletionDates(habit('a'), dates, ['2026-10-01']).streak).toBe(3);
     // Yesterday (October 2) missed: no running streak without the freeze, one with it.
     const missedYesterday = habit('a', ['2026-09-30', '2026-10-01']);

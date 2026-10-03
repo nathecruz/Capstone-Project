@@ -13,7 +13,8 @@ import { dailyChallenge, levelProgress, streakMilestone, todayAgenda } from '@/u
 import { weeklyQuests } from '@/utils/quests';
 import { computeStreak } from '@/utils/streaks';
 import { applyRemoteCompletionDates, applyVisibleOrder, getLocalDateKey } from './app-state/habit-progress';
-import { DarkModeContext } from './dark-mode-context';
+import { AppThemeContext, DarkModeContext } from './dark-mode-context';
+import { isAppTheme } from './use-themed-styles';
 import { clearSyncMeta, loadSyncMeta, persistSyncBase, persistUnsaved } from './app-state/sync-storage';
 import { useHabitReminders } from './app-state/use-habit-reminders';
 import { initialPreferences, initialProfile, type Goal, type Habit, type PersistedAppState, type Preferences, type Profile, type TokenTransaction } from './app-state/types';
@@ -801,7 +802,14 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     [avatarImage, colorScheme, darkModeOverride, getAppStateSnapshot, goals, habits, points, preferences, profile, ringInterval, snoozeFrequency, syncAppState, tokenHistory, tokens, undoUntil, accountRole, celebration, streakFreeze],
   );
 
-  return <ColorSchemeContext.Provider value={value}><DarkModeContext.Provider value={value.isDarkMode}>{children}</DarkModeContext.Provider></ColorSchemeContext.Provider>;
+  const appTheme = isAppTheme(preferences.appTheme) ? preferences.appTheme : 'classic';
+  return (
+    <ColorSchemeContext.Provider value={value}>
+      <DarkModeContext.Provider value={value.isDarkMode}>
+        <AppThemeContext.Provider value={appTheme}>{children}</AppThemeContext.Provider>
+      </DarkModeContext.Provider>
+    </ColorSchemeContext.Provider>
+  );
 }
 
 export function useAppColorScheme() {

@@ -10,7 +10,7 @@ import { Confetti } from '@/components/confetti';
 import { openFocus } from '@/components/today-agenda';
 import type { Goal, Habit, TokenTransaction } from '@/hooks/app-state/types';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
-import { createThemedStyles, useThemedStyles } from '@/hooks/use-themed-styles';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 import { badgeProgress, badgeRemaining, nextBadge } from '@/utils/achievements';
 import { askAi } from '@/utils/ai-client';
 import { computeStreak } from '@/utils/streaks';
@@ -270,6 +270,7 @@ const dayName = (dateKey: string) => new Date(`${dateKey}T00:00:00`).toLocaleDat
 /** Last week in numbers, with one AI tip on request; hidden for the rest of the week once closed. */
 export function WeeklyRecapCard({ habits, now, style }: { habits: Habit[]; now: Date; style?: object | false }) {
   const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   const recap = weeklyRecap(habits, now);
   const [dismissedWeek, setDismissedWeek] = useState<string | null | undefined>(undefined);
   const [tip, setTip] = useState<{ loading: boolean; text?: string; error?: string }>({ loading: false });
@@ -326,10 +327,10 @@ export function WeeklyRecapCard({ habits, now, style }: { habits: Habit[]; now: 
         </View>
       </View>
       {tip.text ? (
-        <View style={styles.tip}><Ionicons name="sparkles" size={14} color="#5B42D8" /><Text style={styles.tipText}>{tip.text}</Text></View>
+        <View style={styles.tip}><Ionicons name="sparkles" size={14} color={themeColor('#5B42D8')} /><Text style={styles.tipText}>{tip.text}</Text></View>
       ) : (
         <Pressable style={({ pressed }) => [styles.tipButton, pressed && styles.pressed]} onPress={getTip} disabled={tip.loading} accessibilityRole="button">
-          {tip.loading ? <ActivityIndicator size="small" color="#5B42D8" /> : <Ionicons name="sparkles" size={15} color="#5B42D8" />}
+          {tip.loading ? <ActivityIndicator size="small" color={themeColor('#5B42D8')} /> : <Ionicons name="sparkles" size={15} color={themeColor('#5B42D8')} />}
           <Text style={styles.tipButtonText}>{tip.loading ? 'Thinking…' : 'Get an AI tip for this week'}</Text>
         </Pressable>
       )}

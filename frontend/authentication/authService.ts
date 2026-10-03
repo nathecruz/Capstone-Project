@@ -549,6 +549,12 @@ export const openMysteryBox = (date: string) => authedRequest<{ amount: number; 
   body: JSON.stringify({ date, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }),
 });
 
+export type ServerReward = { id: string; name: string; cost: number; description: string; permanent: boolean };
+/** Token rewards on sale, the ones this student owns (Premium Themes, Custom Title) and their title. */
+export const getRewards = () => authedRequest<{ rewards: ServerReward[]; owned: string[]; title: string }>('/api/rewards');
+/** Sets the title under the student's name ('' removes it); needs the Custom Title reward. */
+export const saveRewardTitle = (title: string) => authedRequest<{ title: string }>('/api/rewards/title', { method: 'PUT', body: JSON.stringify({ title }) });
+
 export type StreakFreezeStatus = { available: number; max: number; cost: number; frozenDays: string[]; used: string[] };
 const deviceTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 /** Uses held streak freezes for days missed before `date` (the device's today) and returns the status. */

@@ -9,7 +9,8 @@ import { getHabitProgressSummary, getRecentCompletionHistory, useAppColorScheme 
 import { getChartGeometry } from '@/utils/line-chart';
 import { getPredictionPresentation } from '@/utils/ai-presentation';
 import { askAi } from '@/utils/ai-client';
-import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
+import { useAppTheme } from '@/hooks/dark-mode-context';
+import { createThemedStyles, themedColor, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 type HeatmapView = 'Days' | 'Weeks' | 'Months';
 type HeatmapRow = { label: string; average: string; values: number[]; isToday?: boolean };
@@ -128,6 +129,8 @@ function useDeviceDate() {
 export default function InsightsScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
+  const appTheme = useAppTheme();
+  const heatmapColors = ['#F0ECFF', '#DCD2FF', '#A998F2', '#5B42D8'].map((color) => themedColor(color, appTheme));
   const { isDarkMode, habits } = useAppColorScheme();
   const deviceDate = useDeviceDate();
   const [activeTab, setActiveTab] = useState<'Insights' | 'Predictions'>('Insights');
@@ -651,7 +654,7 @@ export default function InsightsScreen() {
                     <View key={week.label} style={[styles.heatmapRow, selectedHeatmap.isDaily && styles.dailyHeatmapRow, week.isToday && styles.todayHeatmapRow, week.isToday && isDarkMode && styles.darkTodayHeatmapRow]}>
                       <Text style={[styles.heatmapWeekLabel, selectedHeatmap.isDaily && styles.heatmapDailyLabel]}>{week.label}</Text>
                       <View style={styles.heatmapCells}>
-                        {week.values.map((level, index) => <View key={`${week.label}-${index}`} style={[styles.heatmapCell, selectedHeatmap.isDaily && styles.dailyHeatmapCell, { backgroundColor: ['#F0ECFF', '#DCD2FF', '#A998F2', '#5B42D8'][level - 1] }]} accessibilityLabel={`${week.label}, habit ${index + 1}, ${level} of 4 completion intensity`} />)}
+                        {week.values.map((level, index) => <View key={`${week.label}-${index}`} style={[styles.heatmapCell, selectedHeatmap.isDaily && styles.dailyHeatmapCell, { backgroundColor: heatmapColors[level - 1] }]} accessibilityLabel={`${week.label}, habit ${index + 1}, ${level} of 4 completion intensity`} />)}
                       </View>
                       <View style={[styles.heatmapAverageBadge, week.isToday && styles.todayAverageBadge]}><Text style={styles.heatmapAverage}>{week.average}</Text></View>
                     </View>
@@ -659,7 +662,7 @@ export default function InsightsScreen() {
 
                   <View style={styles.heatmapFooter}>
                     <Text style={styles.heatmapGuide}>{selectedHeatmap.isDaily ? 'Live view based on your current habit status' : 'Each square represents one day'}</Text>
-                    <View style={styles.heatmapLegend}><Text style={styles.legendText}>Less</Text>{['#F0ECFF', '#DCD2FF', '#A998F2', '#5B42D8'].map((color) => <View key={color} style={[styles.heatmapLegendCell, { backgroundColor: color }]} />)}<Text style={styles.legendText}>More</Text></View>
+                    <View style={styles.heatmapLegend}><Text style={styles.legendText}>Less</Text>{heatmapColors.map((color) => <View key={color} style={[styles.heatmapLegendCell, { backgroundColor: color }]} />)}<Text style={styles.legendText}>More</Text></View>
                     <View style={styles.heatmapNote}><Ionicons name="trending-up" size={14} color={themeColor('#2E9D5C')} /><Text style={styles.heatmapNoteText}>{completed ? `${completed} habit${completed === 1 ? '' : 's'} completed today` : 'Complete a habit to build your activity history'}</Text></View>
                   </View>
                 </View>
@@ -733,7 +736,7 @@ export default function InsightsScreen() {
               multiline
               autoCapitalize="sentences"
               autoFocus
-              selectionColor="#5B42D8"
+              selectionColor={themedColor('#5B42D8', appTheme)}
               textAlignVertical="top"
               onFocus={() => setTimeout(() => assistantScrollRef.current?.scrollToEnd({ animated: true }), 100)}
             />

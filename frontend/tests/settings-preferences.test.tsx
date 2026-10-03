@@ -116,6 +116,14 @@ jest.mock('@/authentication', () => ({
     color: '#2DAA76',
   })),
   validatePasswordStrength: jest.fn(() => ({ ok: true, message: '' })),
+  getRewards: jest.fn().mockResolvedValue({
+    ok: true,
+    rewards: [{ id: 'premium-theme', name: 'Premium Themes', cost: 200, description: 'Four app colour themes', permanent: true }],
+    owned: ['premium-theme'],
+    title: '',
+  }),
+  saveRewardTitle: jest.fn(),
+  subscribeToAuthChanges: jest.fn(() => () => undefined),
 }));
 
 describe('SettingsPreferencesScreen', () => {
@@ -147,5 +155,17 @@ describe('SettingsPreferencesScreen', () => {
     await fireEvent(getByPlaceholderText('Repeat your password'), 'focus');
 
     expect(mockScrollTo).toHaveBeenCalled();
+  });
+
+  it('lets a student who bought Premium Themes pick an app theme', async () => {
+    const screen = await render(<SettingsPreferencesScreen />);
+    // Owned (from the server): the row shows the current theme and opens the picker.
+    const row = await screen.findByLabelText('App theme');
+    expect(screen.getByText('Classic')).toBeTruthy();
+
+    await fireEvent.press(row);
+    await fireEvent.press(screen.getByLabelText('Ocean theme'));
+
+    expect(mockUpdatePreferences).toHaveBeenCalledWith({ appTheme: 'ocean' });
   });
 });

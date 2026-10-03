@@ -43,6 +43,7 @@ export const goalPlanSchema = z.object({ category: z.enum(['Career', 'Health', '
 export const issueSchema = z.object({ topic: z.string().trim().min(1).max(100), timing: z.string().trim().min(1).max(50), description: z.string().trim().min(1).max(500) }).strict();
 export const issueReportSchema = issueSchema;
 export const suggestionSchema = z.object({ suggestion: z.string().trim().min(3).max(500) }).strict();
+export const rewardTitleSchema = z.object({ title: z.string().max(60) }).strict();
 export const rewardRedemptionSchema = z.object({ rewardId: z.string().trim().min(1).max(80), rewardName: z.string().trim().min(1).max(120), tokenCost: z.number().int().positive().max(100000) }).strict();
 export const notificationReadSchema = z.object({ read: z.boolean() }).strict();
 export const webPushSubscriptionSchema = z.object({

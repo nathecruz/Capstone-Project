@@ -3,13 +3,11 @@ import { query, withTransaction } from '../db/client.js';
 import { leaderboardName } from '../lib/display.js';
 import { namesFromRow } from '../lib/names.js';
 import { getPeriodStart, parse } from '../lib/http.js';
-import { leaderboardSchema, rewardRedemptionSchema } from '../schemas.js';
+import { leaderboardSchema, rewardRedemptionSchema, rewardTitleSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
 import { refreshSnapshot, serverCompletionPoints } from '../services/app-state-store.js';
+import { cleanTitle, getRewards, PERMANENT_REWARDS } from '../services/rewards.js';
 import { getWallet, POINTS_PER_CHECK_IN, spendTokens } from '../services/wallet.js';
-
-// Rewards that can only be redeemed once per account.
-const PERMANENT_REWARDS = new Set(['plant-buddy', 'premium-theme', 'custom-title']);
 
 /** First name and last initial; accounts from before the name split fall back to splitting full_name. */
 function displayName(row) {
@@ -18,12 +16,33 @@ function displayName(row) {
 }
 
 export default function registerGamificationRoutes(app) {
+  // What is on sale, what this student owns (Premium Themes, Custom Title) and their title.
+  app.get('/api/rewards', async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    response.json({ ok: true, ...await getRewards({ query }, session.userId) });
+  });
+
+  // Sets (or clears, with '') the title shown under the student's name; needs the Custom Title reward.
+  app.put('/api/rewards/title', async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const input = parse(rewardTitleSchema, request, response);
+    if (!input) return;
+    const owned = (await query("SELECT 1 FROM reward_redemptions WHERE user_id=$1 AND reward_id='custom-title' LIMIT 1", [session.userId])).rowCount;
+    if (!owned) return response.status(403).json({ ok: false, message: 'Redeem the Custom Title reward first.' });
+    const title = cleanTitle(input.title);
+    if (title === null) return response.status(400).json({ ok: false, message: 'Use 2 to 24 letters, numbers, spaces or simple punctuation.' });
+    await query('UPDATE users SET custom_title=$2 WHERE id=$1', [session.userId, title]);
+    response.json({ ok: true, title });
+  });
+
   app.post('/api/rewards/redeem', async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
     const input = parse(rewardRedemptionSchema, request, response);
     if (!input) return;
-    const reward = (await query('SELECT id,name,token_cost AS "tokenCost" FROM rewards WHERE id=$1', [input.rewardId])).rows[0];
+    const reward = (await query('SELECT id,name,token_cost AS "tokenCost" FROM rewards WHERE id=$1 AND active', [input.rewardId])).rows[0];
     if (!reward || reward.name !== input.rewardName || Number(reward.tokenCost) !== input.tokenCost) return response.status(400).json({ ok: false, message: 'This reward is not available.' });
 
     const result = await withTransaction(async (db) => {
@@ -51,14 +70,14 @@ export default function registerGamificationRoutes(app) {
     if (!['This Week', 'This Month', 'All Time'].includes(period)) return response.status(400).json({ ok: false, message: 'Unsupported leaderboard period.' });
     const start = period === 'All Time' ? null : getPeriodStart(period);
     const result = await query(
-      `SELECT u.id, u.full_name AS "fullName", u.first_name AS "firstName", u.last_name AS "lastName", (COUNT(c.completed_date)::integer * $3) AS points, COALESCE(l.avatar, LEFT(u.full_name, 1)) AS avatar
+      `SELECT u.id, u.full_name AS "fullName", u.first_name AS "firstName", u.last_name AS "lastName", u.custom_title AS "title", (COUNT(c.completed_date)::integer * $3) AS points, COALESCE(l.avatar, LEFT(u.full_name, 1)) AS avatar
          FROM users u
          LEFT JOIN habit_completions c ON c.user_id=u.id AND ($1::date IS NULL OR c.completed_date >= $1::date)
          LEFT JOIN leaderboard_users l ON l.user_id=u.id
          LEFT JOIN user_preferences p ON p.user_id=u.id
         WHERE u.role = 'user' AND u.status = 'active'
           AND (u.id = $2 OR (p.preferences_json->'showOnLeaderboard') IS DISTINCT FROM 'false'::jsonb)
-        GROUP BY u.id,u.full_name,u.first_name,u.last_name,l.avatar
+        GROUP BY u.id,u.full_name,u.first_name,u.last_name,u.custom_title,l.avatar
         ORDER BY points DESC,u.full_name ASC`,
       [start, session.userId, POINTS_PER_CHECK_IN],
     );
@@ -70,6 +89,7 @@ export default function registerGamificationRoutes(app) {
         name: `${displayName(row)}${row.id === session.userId ? ' (You)' : ''}`,
         points: row.points,
         avatar: row.avatar,
+        title: row.title || '',
         isYou: row.id === session.userId,
       })),
     });

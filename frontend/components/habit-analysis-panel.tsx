@@ -82,7 +82,7 @@ export function HabitAnalysisPanel({ habits }: { habits: Habit[] }) {
 
       {loading ? (
         <View style={styles.loading}>
-          <ActivityIndicator color="#5B42D8" />
+          <ActivityIndicator color={themeColor('#5B42D8')} />
           <Text style={styles.muted}>Analysing your check-ins for {selected.label}…</Text>
         </View>
       ) : failed ? (

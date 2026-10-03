@@ -183,7 +183,7 @@ export function TodayAgenda({ habits, now, onCheck, style }: { habits: Habit[]; 
           </View>
           <View style={styles.nextActions}>
             <Pressable style={({ pressed }) => [styles.nextDone, pressed && styles.pressed]} onPress={() => check(nextUp)} accessibilityRole="button" accessibilityLabel={`Mark ${nextUp.label} done`}>
-              <Ionicons name="checkmark" size={17} color="#5B42D8" />
+              <Ionicons name="checkmark" size={17} color={themeColor('#5B42D8')} />
               <Text style={styles.nextDoneText}>Mark done</Text>
             </Pressable>
             <Pressable style={({ pressed }) => [styles.nextFocus, pressed && styles.pressed]} onPress={() => openFocus(nextUp.id)} accessibilityRole="button" accessibilityLabel={`Start a focus session for ${nextUp.label}`}>
