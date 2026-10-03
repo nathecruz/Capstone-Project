@@ -1,12 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, Modal, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { getMyLeaderboardRank } from '@/authentication';
 import { ClassPulseCard } from '@/components/class-pulse-card';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { askAi } from '@/utils/ai-client';
+import { rankSummary } from '@/utils/rank';
 import type { TranslationKey } from '@/constants/i18n';
 import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { CONTENT_MAX_WIDTH } from '@/hooks/use-responsive-layout';
@@ -28,6 +30,19 @@ export default function ProfileScreen() {
   const { isDarkMode, avatarImage, setAvatarImage, habits, goals, profile, points, tokens, applyWallet, t, isFaculty } = useAppColorScheme();
   // Faculty mode: no student leaderboards; a shortcut to their class's Class Pulse instead.
   const menuItems = isFaculty ? settings.filter((item) => item.key !== 'leaderboards') : settings;
+  // The student's real place on the All Time leaderboard (it used to be a fixed "#24, Top 8%").
+  const [rankInfo, setRankInfo] = useState<{ rank: number; total: number } | null>(null);
+  useEffect(() => {
+    if (isFaculty || points === 0) return;
+    let active = true;
+    void getMyLeaderboardRank().then((result) => {
+      if (active) setRankInfo(result);
+    });
+    return () => {
+      active = false;
+    };
+  }, [isFaculty, points]);
+  const rankText = rankInfo ? rankSummary(rankInfo.rank, rankInfo.total) : null;
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
   const { averageProgress, maxStreak, completed } = getHabitProgressSummary(habits);
@@ -261,7 +276,7 @@ export default function ProfileScreen() {
               <View style={styles.leaderboardColumn}>
                 <Text style={styles.leaderboardLabel}>Your Rank</Text>
                 <View style={styles.rankRow}>
-                  <Text style={styles.rankValue}>#24</Text>
+                  <Text style={styles.rankValue}>{rankInfo ? `#${rankInfo.rank}` : '#—'}</Text>
                   <View style={styles.badgeCircle}>
                     <Image
                       source={require('../../assets/images/trophy.jpg')}
@@ -270,9 +285,9 @@ export default function ProfileScreen() {
                     />
                   </View>
                 </View>
-                <Text style={styles.risingStarText}>Rising Star</Text>
-                <Text style={styles.leagueText}>League</Text>
-                <Text style={styles.rankMeta}>Top 8%</Text>
+                <Text style={styles.risingStarText}>{rankText ? rankText.title : 'Ranking…'}</Text>
+                <Text style={styles.leagueText}>{rankText ? rankText.of : 'All time'}</Text>
+                <Text style={styles.rankMeta}>{rankText ? rankText.standing : ' '}</Text>
               </View>
 
               <View style={styles.leaderboardDivider} />

@@ -1,7 +1,7 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider, router, useSegments } from 'expo-router';
 import Head from 'expo-router/head';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, LogBox, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, LogBox, Platform, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -13,6 +13,13 @@ import { getSession, subscribeToAuthChanges, type SessionUser } from '@/authenti
 import { PageSidebar } from '@/components/desktop-sidebar';
 import { ServerStatusBanner } from '@/components/server-status-banner';
 import { CONTENT_MAX_WIDTH, pageBackground, useResponsiveLayout } from '@/hooks/use-responsive-layout';
+import { canonicalRedirect } from '@/utils/canonical-host';
+
+// A per-deploy Vercel address keeps an old version of the app forever: go to the main address.
+if (Platform.OS === 'web' && typeof window !== 'undefined') {
+  const target = canonicalRedirect(window.location);
+  if (target) window.location.replace(target);
+}
 
 LogBox.ignoreLogs([
   "InteractionManager has been deprecated and will be removed in a future release. Please refactor long tasks into smaller ones, and  use 'requestIdleCallback' instead.",

@@ -615,6 +615,22 @@ export async function saveRemoteHabitCompletion(completion: HabitCompletion & { 
   }
 }
 
+/** The signed-in student's place on the All Time leaderboard, or null when it cannot be read. */
+export async function getMyLeaderboardRank(): Promise<{ rank: number; total: number } | null> {
+  const token = await getSessionToken();
+  if (!token) return null;
+  try {
+    const payload = await apiRequest<{ leaders?: { rank: number; isYou?: boolean }[] }>('/api/leaderboard?period=All%20Time', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const leaders = Array.isArray(payload.leaders) ? payload.leaders : [];
+    const you = leaders.find((leader) => leader.isYou);
+    return you ? { rank: you.rank, total: leaders.length } : null;
+  } catch {
+    return null;
+  }
+}
+
 export type HabitAnalysis = {
   habitId: string;
   stats: {
