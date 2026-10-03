@@ -32,10 +32,12 @@ export function minutesOfDay(value: string): number | null {
   return hour * 60 + minute;
 }
 
-/** The time a habit is planned for: its reminder time when it shows in the habit's details. */
+/** The time a habit is planned for: its (earliest) reminder time when it shows in the habit's details. */
 export function plannedMinutes(habit: Pick<Habit, 'meta'>): number | null {
   const [, when = ''] = habit.meta.split(' • ');
-  return /anytime/i.test(when) ? null : minutesOfDay(when);
+  if (/anytime/i.test(when)) return null;
+  const times = when.split(',').map((part) => minutesOfDay(part)).filter((minutes): minutes is number => minutes !== null);
+  return times.length ? Math.min(...times) : null;
 }
 
 const KEYWORDS: [TimeOfDay, RegExp][] = [
@@ -52,25 +54,45 @@ export function timeOfDayFor(habit: Pick<Habit, 'meta' | 'label'>): TimeOfDay {
 }
 
 const scheduledOn = (habit: Habit, dateKey: string) => (!habit.startDate || habit.startDate <= dateKey) && isHabitScheduledOn(habit, dateKey);
+const minutesNow = (now: Date) => now.getHours() * 60 + now.getMinutes();
 
-/** Today's habits: the ones still to do grouped by time of day, the next one up, and the done ones. */
+/**
+ * Late: due today, not done, and its planned time has passed (no grace period). It can still be
+ * checked off until midnight and keeps the streak; only then does it count as missed.
+ */
+export function isHabitLate(habit: Habit, now = new Date()) {
+  const planned = plannedMinutes(habit);
+  if (planned === null) return false;
+  const today = getLocalDateKey(now);
+  return scheduledOn(habit, today) && !habit.completionDates.includes(today) && minutesNow(now) > planned;
+}
+
+export const LATE_SECTION = { label: 'Late', icon: 'alarm-outline' };
+
+/**
+ * Today's habits: the late ones first (oldest planned time first), the rest still to do grouped by
+ * time of day, the next one up, and the done ones.
+ */
 export function todayAgenda(habits: Habit[], now = new Date()) {
   const today = getLocalDateKey(now);
   const scheduled = habits.filter((habit) => scheduledOn(habit, today));
   const done = scheduled.filter((habit) => habit.completionDates.includes(today));
   const open = scheduled.filter((habit) => !habit.completionDates.includes(today));
-  const sections = ORDER
-    .map((key) => ({ key, ...TIME_OF_DAY[key], habits: open.filter((habit) => timeOfDayFor(habit) === key) }))
-    .filter((section) => section.habits.length > 0);
-  const nowMinutes = now.getHours() * 60 + now.getMinutes();
-  // Next up: the planned habit closest to now (overdue ones first), else the first one left.
-  const planned = open
+  const late = open.filter((habit) => isHabitLate(habit, now)).sort((a, b) => (plannedMinutes(a) ?? 0) - (plannedMinutes(b) ?? 0));
+  const onTime = open.filter((habit) => !late.includes(habit));
+  const sections: { key: TimeOfDay | 'late'; label: string; icon: string; habits: Habit[] }[] = [
+    { key: 'late' as const, ...LATE_SECTION, habits: late },
+    ...ORDER.map((key) => ({ key, ...TIME_OF_DAY[key], habits: onTime.filter((habit) => timeOfDayFor(habit) === key) })),
+  ].filter((section) => section.habits.length > 0);
+  const nowMinutes = minutesNow(now);
+  // Next up: the most overdue late habit, else the next planned one, else one for this part of the day.
+  const upcoming = onTime
     .map((habit) => ({ habit, minutes: plannedMinutes(habit) }))
     .filter((item): item is { habit: Habit; minutes: number } => item.minutes !== null)
-    .sort((a, b) => Math.abs(a.minutes - nowMinutes) - Math.abs(b.minutes - nowMinutes));
+    .sort((a, b) => a.minutes - b.minutes);
   const currentPart: TimeOfDay = nowMinutes < 12 * 60 ? 'morning' : nowMinutes < 18 * 60 ? 'afternoon' : 'evening';
-  const nextUp = planned[0]?.habit ?? open.find((habit) => timeOfDayFor(habit) === currentPart) ?? open[0] ?? null;
-  return { scheduled, done, open, sections, nextUp, notToday: habits.length - scheduled.length };
+  const nextUp = late[0] ?? upcoming[0]?.habit ?? onTime.find((habit) => timeOfDayFor(habit) === currentPart) ?? open[0] ?? null;
+  return { scheduled, done, open, late, sections, nextUp, notToday: habits.length - scheduled.length };
 }
 
 export const POINTS_PER_LEVEL = 100;

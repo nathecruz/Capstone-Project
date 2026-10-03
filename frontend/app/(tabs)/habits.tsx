@@ -6,6 +6,7 @@ import { Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { EditHabitSheet } from '@/components/edit-habit-sheet';
 import { openFocus } from '@/components/today-agenda';
+import { isHabitLate } from '@/utils/engagement';
 import { FACULTY_HABIT_IDEAS } from '@/constants/faculty';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { isHabitMissedYesterday, useAppColorScheme } from '@/hooks/color-scheme-context';
@@ -34,7 +35,7 @@ export default function HabitsScreen() {
   const [suggestion, setSuggestion] = useState('');
   const [currentTime, setCurrentTime] = useState(() => new Date());
   useEffect(() => {
-    // Keeps "missed yesterday" correct after midnight while the screen stays open.
+    // Keeps "late" and "missed yesterday" current while the screen stays open.
     const timer = setInterval(() => setCurrentTime(new Date()), 60_000);
     return () => clearInterval(timer);
   }, []);
@@ -144,7 +145,7 @@ export default function HabitsScreen() {
               </View>
 
               <View style={styles.metaRow}>
-                <Text style={[styles.metaText, isDarkMode && styles.darkMutedText]}>{isHabitMissedYesterday(item, currentTime) ? 'MISSED YESTERDAY · ' : ''}{item.meta}</Text>
+                <Text style={[styles.metaText, isDarkMode && styles.darkMutedText]}>{isHabitMissedYesterday(item, currentTime) ? 'MISSED YESTERDAY · ' : ''}{isHabitLate(item, currentTime) && <Text style={styles.lateText}>LATE · </Text>}{item.meta}</Text>
                 <View style={styles.streakRow}>
                   <Ionicons name="flame-outline" size={12} color={themeColor('#F29A3D')} />
                   <Text style={[styles.streakText, isDarkMode && styles.darkText]}>{item.streak}</Text>
@@ -786,6 +787,8 @@ const themedStyles = createThemedStyles({
     alignItems: 'center',
     marginBottom: 10,
   },
+  // Its time has passed today; it can still be done until midnight.
+  lateText: { color: '#D9662B', fontWeight: '800' },
   metaText: {
     fontSize: 12,
     color: '#555E70',

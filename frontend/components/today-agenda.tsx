@@ -6,7 +6,7 @@ import React, { useEffect, useState } from 'react';
 import { Animated, Platform, Pressable, type PressableStateCallbackType, Text, View } from 'react-native';
 import type { Habit } from '@/hooks/app-state/types';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
-import { TIME_OF_DAY, plannedMinutes, timeOfDayFor, todayAgenda } from '@/utils/engagement';
+import { TIME_OF_DAY, isHabitLate, plannedMinutes, timeOfDayFor, todayAgenda } from '@/utils/engagement';
 import { CHECK_IN_UNDO_MS } from '@/utils/habit-visibility';
 
 type HoverState = PressableStateCallbackType & { hovered?: boolean };
@@ -53,14 +53,14 @@ function DoneChip({ habit }: { habit: Habit }) {
   );
 }
 
-function HabitRow({ habit, onCheck }: { habit: Habit; onCheck: () => void }) {
+function HabitRow({ habit, late, onCheck }: { habit: Habit; late: boolean; onCheck: () => void }) {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const planned = plannedMinutes(habit);
   return (
     <View style={styles.row}>
       <Pressable
-        style={({ hovered, pressed }: HoverState) => [styles.rowMain, (hovered || pressed) && styles.rowMainActive]}
+        style={({ hovered, pressed }: HoverState) => [styles.rowMain, late && styles.rowMainLate, (hovered || pressed) && styles.rowMainActive]}
         onPress={onCheck}
         accessibilityRole="checkbox"
         accessibilityState={{ checked: false }}
@@ -76,7 +76,9 @@ function HabitRow({ habit, onCheck }: { habit: Habit; onCheck: () => void }) {
               <Text style={styles.rowLabel} numberOfLines={1}>{habit.label}</Text>
               {(planned !== null || habit.streak > 0) && (
                 <Text style={styles.rowMeta} numberOfLines={1}>
-                  {[planned !== null ? formatMinutes(planned) : '', habit.streak > 0 ? `🔥 ${habit.streak}-day streak` : ''].filter(Boolean).join('  ·  ')}
+                  {planned !== null && <Text style={late && styles.lateText}>{late ? `Late · ${formatMinutes(planned)}` : formatMinutes(planned)}</Text>}
+                  {planned !== null && habit.streak > 0 ? '  ·  ' : ''}
+                  {habit.streak > 0 ? `🔥 ${habit.streak}-day streak` : ''}
                 </Text>
               )}
             </View>
@@ -101,11 +103,13 @@ function HabitRow({ habit, onCheck }: { habit: Habit; onCheck: () => void }) {
 
 export function TodayAgenda({ habits, now, onCheck, style }: { habits: Habit[]; now: Date; onCheck: (habit: Habit) => void; style?: object | false }) {
   const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
   const agenda = todayAgenda(habits, now);
   const total = agenda.scheduled.length;
   const share = total ? agenda.done.length / total : 0;
   const { nextUp } = agenda;
   const nextPlanned = nextUp ? plannedMinutes(nextUp) : null;
+  const nextLate = Boolean(nextUp && isHabitLate(nextUp, now));
   const dateLabel = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
 
   // The habit just checked off: its row leaves the list, so offer a short-lived Undo.
@@ -133,6 +137,7 @@ export function TodayAgenda({ habits, now, onCheck, style }: { habits: Habit[]; 
           {total > 0 && (
             <Text style={styles.hint}>
               {agenda.open.length ? `${agenda.done.length} of ${total} done · ${agenda.open.length} to go` : `All ${total} done`}
+              {agenda.late.length > 0 && <Text style={styles.lateText}>{` · ${agenda.late.length} late`}</Text>}
             </Text>
           )}
         </View>
@@ -154,8 +159,8 @@ export function TodayAgenda({ habits, now, onCheck, style }: { habits: Habit[]; 
       {nextUp && (
         <View style={styles.nextCard}>
           <View style={styles.nextTop}>
-            <View style={styles.nextBadge}><Text style={styles.nextBadgeText}>NEXT UP</Text></View>
-            <Text style={styles.nextWhen}>{nextPlanned !== null ? formatMinutes(nextPlanned) : TIME_OF_DAY[timeOfDayFor(nextUp)].label}</Text>
+            <View style={[styles.nextBadge, nextLate && styles.nextBadgeLate]}><Text style={styles.nextBadgeText}>{nextLate ? 'LATE' : 'NEXT UP'}</Text></View>
+            <Text style={styles.nextWhen}>{nextPlanned !== null ? `${nextLate ? 'Was due ' : ''}${formatMinutes(nextPlanned)}` : TIME_OF_DAY[timeOfDayFor(nextUp)].label}</Text>
           </View>
           <View style={styles.nextBody}>
             <View style={styles.nextIcon}><Ionicons name={nextUp.icon} size={22} color="#FFFFFF" /></View>
@@ -183,12 +188,12 @@ export function TodayAgenda({ habits, now, onCheck, style }: { habits: Habit[]; 
         return (
           <View key={section.key} style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Ionicons name={section.icon as keyof typeof Ionicons.glyphMap} size={14} color="#8A8492" />
-              <Text style={styles.sectionTitle}>{section.label}</Text>
+              <Ionicons name={section.icon as keyof typeof Ionicons.glyphMap} size={14} color={section.key === 'late' ? themeColor('#D9662B') : '#8A8492'} />
+              <Text style={[styles.sectionTitle, section.key === 'late' && styles.lateText]}>{section.label}</Text>
               <Text style={styles.sectionCount}>{rows.length}</Text>
             </View>
             <View style={styles.rows}>
-              {rows.map((habit) => <HabitRow key={habit.id} habit={habit} onCheck={() => check(habit)} />)}
+              {rows.map((habit) => <HabitRow key={habit.id} habit={habit} late={section.key === 'late'} onCheck={() => check(habit)} />)}
             </View>
           </View>
         );
@@ -269,6 +274,10 @@ const themedStyles = createThemedStyles({
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#F7F4FF', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 9 },
   rowMainActive: { backgroundColor: '#EFE9FF' },
+  // Late: its time has passed; it can still be done until midnight.
+  rowMainLate: { backgroundColor: '#FFF3EA' },
+  lateText: { color: '#D9662B', fontWeight: '800' },
+  nextBadgeLate: { backgroundColor: '#F08A3C' },
   rowIcon: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   rowCopy: { flex: 1 },
   rowLabel: { fontSize: 14, fontWeight: '700', color: '#2B2B35' },

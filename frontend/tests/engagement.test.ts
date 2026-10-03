@@ -1,5 +1,5 @@
 import type { Habit } from '@/hooks/app-state/types';
-import { dailyChallenge, focusMinutesFor, habitsAtRisk, levelProgress, streakMilestone, timeOfDayFor, todayAgenda, weeklyRecap } from '@/utils/engagement';
+import { dailyChallenge, focusMinutesFor, habitsAtRisk, isHabitLate, levelProgress, plannedMinutes, streakMilestone, timeOfDayFor, todayAgenda, weeklyRecap } from '@/utils/engagement';
 
 function habit(id: string, overrides: Partial<Habit> = {}): Habit {
   return {
@@ -31,13 +31,38 @@ describe('todayAgenda', () => {
       habit('Gym', { frequency: 'Weekly', reminderDays: ['Mon'] }),
       habit('Read'),
     ];
-    const agenda = todayAgenda(habits, at(18, 30));
-    expect(agenda.sections.map((section) => [section.key, section.habits.map((item) => item.id)])).toEqual([
+    const morning = todayAgenda(habits, at(5, 30));
+    expect(morning.sections.map((section) => [section.key, section.habits.map((item) => item.id)])).toEqual([
       ['morning', ['Morning walk']], ['evening', ['Review notes']], ['anytime', ['Read']],
     ]);
-    expect(agenda.done.map((item) => item.id)).toEqual(['Drink water']);
-    expect(agenda.notToday).toBe(1);
-    expect(agenda.nextUp?.id).toBe('Review notes');
+    expect(morning.done.map((item) => item.id)).toEqual(['Drink water']);
+    expect(morning.notToday).toBe(1);
+    expect(morning.nextUp?.id).toBe('Morning walk');
+
+    // 6:30 PM: the 6:00 AM walk is late and comes first; it is the next one up.
+    const evening = todayAgenda(habits, at(18, 30));
+    expect(evening.sections.map((section) => [section.key, section.habits.map((item) => item.id)])).toEqual([
+      ['late', ['Morning walk']], ['evening', ['Review notes']], ['anytime', ['Read']],
+    ]);
+    expect(evening.nextUp?.id).toBe('Morning walk');
+    expect(todayAgenda(habits.slice(1), at(18, 30)).nextUp?.id).toBe('Review notes');
+  });
+});
+
+describe('late habits', () => {
+  it('are late right after their planned time, until they are done', () => {
+    const walk = habit('walk', { meta: 'Daily • 07:00 AM' });
+    expect(isHabitLate(walk, at(7, 0))).toBe(false);
+    expect(isHabitLate(walk, at(7, 1))).toBe(true);
+    expect(isHabitLate({ ...walk, completionDates: ['2026-10-03'] }, at(9))).toBe(false);
+    expect(isHabitLate(habit('anytime'), at(23))).toBe(false);
+    // Not due on a Saturday, so not late either.
+    expect(isHabitLate({ ...walk, frequency: 'Weekly', reminderDays: ['Mon'] }, at(9))).toBe(false);
+  });
+
+  it('use the earliest of two reminder times', () => {
+    expect(plannedMinutes(habit('a', { meta: 'Daily • 08:00 PM, 07:00 AM' }))).toBe(7 * 60);
+    expect(plannedMinutes(habit('b', { meta: 'Every week • 09:30 AM • Mon, Wed' }))).toBe(9 * 60 + 30);
   });
 });
 
