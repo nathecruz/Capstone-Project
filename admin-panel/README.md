@@ -8,6 +8,7 @@ HabitAI habit-tracking system. It lives in `admin-panel/` of the HabitAI reposit
 
 | Area | What it does |
 | --- | --- |
+| **Class Pulse** (faculty home) | How the students are doing as a group, styled like the student app: class consistency ring (share of scheduled habit days completed in the last 28 days), active students this week, check-ins today, busiest check-in time, how many students are *at risk / to watch / on track* from the ML service's dropout risk (counts only; the last-7-days rule when the ML service is unreachable), daily consistency for the last 14 full days, the hardest weekday, habit categories hardest first, and an **AI class summary** (Groq) with three suggestions for faculty. No student is named or listed; categories below the k threshold are merged. |
 | **Overview** | Active students, check-ins, completion rate, new students (with change vs. the previous period), DAU/WAU/MAU and stickiness, daily trend, engagement funnel, habits by category, sign-in heatmap, recent admin activity, support queue. |
 | **Analytics** (anonymized) | Impact over time (weekly completion rate, check-ins per active student, active students), completion rate by category, check-ins by weekday, streak distribution, reminder times, habit frequency, demographic breakdowns (gender, age group, region), weekly retention cohorts, tokens, rewards and achievements. No names or emails are shown; groups smaller than the configurable **k-anonymity** threshold are combined or withheld. CSV export of every aggregated dataset. |
 | **Users** | Search, filter and sort all accounts; create accounts (with generated temporary passwords); edit details; **assign roles**; **deactivate / reactivate**; reset passwords; sign out of all devices; permanent delete (with typed confirmation). A detail page shows habits, check-ins, sign-ins and achievements. |
@@ -22,7 +23,7 @@ HabitAI habit-tracking system. It lives in `admin-panel/` of the HabitAI reposit
 | Role | Access |
 | --- | --- |
 | Student (`user`) | Mobile app only. |
-| PSAU Faculty (`faculty`) | Overview, anonymized Analytics, and read-only Categories and Notifications. No personal data. |
+| PSAU Faculty (`faculty`) | Class Pulse (their home page), Overview, anonymized Analytics, and read-only Categories and Notifications. No personal data. |
 | System Administrator (`admin`) | Everything, including user management, support, audit log and settings. |
 
 At least one active administrator must always remain; you cannot change your own role or deactivate yourself.
@@ -116,3 +117,10 @@ Analytics pages only receive aggregated numbers from the server. Staff accounts 
 student statistics. Demographic groups and cohorts below the k threshold (default 3, adjustable
 2–20 in Settings) are merged into “Other groups” or hidden. Personal data (names, emails) is only
 visible to administrators in account management and support, and every such action is audited.
+
+Class Pulse sends each student's numbers (completion rate, misses, streak, last 7 days; no name)
+to the ML service and shows only the count per risk bucket. The AI class summary receives only
+class totals and percentages, never per-student data, and each generated summary is audited.
+On Render the Admin Panel takes `ML_SERVICE_URL`, `ML_SERVICE_API_KEY` and `GROQ_API_KEY` from the
+ML and backend services (see `render.yaml`); without them Class Pulse still works with the rule
+and without the AI summary.

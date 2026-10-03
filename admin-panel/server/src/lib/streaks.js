@@ -37,7 +37,7 @@ export function habitSchedule(row) {
   return { type: 'daily', startDate };
 }
 
-function isScheduledDay(schedule, dateKey) {
+export function isScheduledDay(schedule, dateKey) {
   if (schedule.type === 'weekly') return schedule.days.includes(weekdayOf(dateKey));
   if (schedule.type === 'monthly') return Number(dateKey.slice(8, 10)) === schedule.day;
   return true;

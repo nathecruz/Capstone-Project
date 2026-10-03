@@ -12,6 +12,7 @@ export const ROLE_LABELS = {
 export const ROLE_PERMISSIONS = {
   admin: [
     'dashboard:view',
+    'class:view',
     'analytics:view',
     'users:view',
     'users:manage',
@@ -24,7 +25,7 @@ export const ROLE_PERMISSIONS = {
     'audit:view',
     'settings:manage',
   ],
-  faculty: ['dashboard:view', 'analytics:view', 'categories:view', 'notifications:view'],
+  faculty: ['dashboard:view', 'class:view', 'analytics:view', 'categories:view', 'notifications:view'],
   user: [],
 };
 

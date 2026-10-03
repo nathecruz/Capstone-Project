@@ -15,6 +15,7 @@ import auditRoutes from './routes/audit.js';
 import authRoutes from './routes/auth.js';
 import categoryRoutes from './routes/categories.js';
 import notificationRoutes from './routes/notifications.js';
+import classPulseRoutes from './routes/class-pulse.js';
 import overviewRoutes from './routes/overview.js';
 import settingsRoutes from './routes/settings.js';
 import supportRoutes from './routes/support.js';
@@ -63,6 +64,7 @@ export function createApp() {
   api.use('/auth', authRoutes);
   api.use(requireAuth);
   api.use('/overview', overviewRoutes);
+  api.use('/class-pulse', classPulseRoutes);
   api.use('/users', userRoutes);
   api.use('/access-requests', accessRequestRoutes);
   api.use('/categories', categoryRoutes);

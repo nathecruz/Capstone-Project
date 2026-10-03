@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { Bell, ChartColumn, LayoutDashboard, LifeBuoy, LogOut, Menu, Monitor, Moon, ScrollText, Settings, Sun, Tags, Users, X, type LucideIcon } from 'lucide-react';
+import { Bell, ChartColumn, HeartPulse, LayoutDashboard, LifeBuoy, LogOut, Menu, Monitor, Moon, ScrollText, Settings, Sun, Tags, Users, X, type LucideIcon } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { useTheme } from '../lib/theme';
 import { usePendingAccessRequests } from './AccessRequests';
@@ -8,6 +8,7 @@ import type { Permission } from '../lib/types';
 import { Avatar, cx, IconButton } from './ui';
 
 export const NAV: { to: string; label: string; icon: LucideIcon; permission?: Permission }[] = [
+  { to: '/class-pulse', label: 'Class Pulse', icon: HeartPulse, permission: 'class:view' },
   { to: '/', label: 'Overview', icon: LayoutDashboard, permission: 'dashboard:view' },
   { to: '/analytics', label: 'Analytics', icon: ChartColumn, permission: 'analytics:view' },
   { to: '/users', label: 'Users', icon: Users, permission: 'users:view' },

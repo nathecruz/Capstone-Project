@@ -7,6 +7,7 @@ import type { Permission } from './lib/types';
 import { AnalyticsPage } from './pages/Analytics';
 import { AuditLogPage } from './pages/AuditLog';
 import { CategoriesPage } from './pages/Categories';
+import { ClassPulsePage } from './pages/ClassPulse';
 import { LoginPage } from './pages/Login';
 import { NotificationsPage } from './pages/Notifications';
 import { OverviewPage } from './pages/Overview';
@@ -40,7 +41,9 @@ function AppRoutes() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route index element={<Guard permission="dashboard:view"><OverviewPage /></Guard>} />
+        {/* Faculty start on their Class Pulse; administrators on the system Overview. */}
+        <Route index element={admin.role === 'faculty' ? <Navigate to="/class-pulse" replace /> : <Guard permission="dashboard:view"><OverviewPage /></Guard>} />
+        <Route path="class-pulse" element={<Guard permission="class:view"><ClassPulsePage /></Guard>} />
         <Route path="analytics" element={<Guard permission="analytics:view"><AnalyticsPage /></Guard>} />
         <Route path="users" element={<Guard permission="users:view"><UsersPage /></Guard>} />
         <Route path="users/:id" element={<Guard permission="users:view"><UserDetailPage /></Guard>} />

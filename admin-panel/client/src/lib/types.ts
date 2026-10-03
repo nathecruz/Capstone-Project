@@ -1,6 +1,7 @@
 export type Role = 'user' | 'faculty' | 'admin';
 export type Permission =
   | 'dashboard:view'
+  | 'class:view'
   | 'analytics:view'
   | 'users:view'
   | 'users:manage'

@@ -163,6 +163,25 @@ services:
           type: web
           name: habitai-backend
           envVarKey: DATABASE_URL
+      # Class Pulse (faculty): ML dropout risk per student, counted per bucket, and the AI class
+      # summary. Taken from the other services, so nothing has to be entered twice.
+      - key: ML_SERVICE_URL
+        fromService:
+          type: web
+          name: habitai-ml
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: ML_SERVICE_API_KEY
+        fromService:
+          type: web
+          name: habitai-ml
+          envVarKey: ML_SERVICE_API_KEY
+      - key: GROQ_API_KEY
+        fromService:
+          type: web
+          name: habitai-backend
+          envVarKey: GROQ_API_KEY
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
 
   - type: web
     name: habitai-frontend
