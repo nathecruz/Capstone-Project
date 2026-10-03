@@ -24,7 +24,7 @@ export function userFromRow(row) {
 
 export async function findUser(emailAddress) {
   const result = await query(
-    `SELECT u.id, ${USER_COLUMNS}, u.password_hash AS "passwordHash", u.status FROM users u WHERE u.email = $1`,
+    `SELECT u.id, ${USER_COLUMNS}, u.password_hash AS "passwordHash", u.status, u.role FROM users u WHERE u.email = $1`,
     [normalizeEmail(emailAddress)],
   );
   return result.rows[0] || null;
@@ -36,7 +36,10 @@ export async function createSession(userId) {
   return token;
 }
 
-/** The signed-in user for a Bearer token, or null. Deactivated accounts have no valid sessions. */
+/**
+ * The signed-in user for a Bearer token, or null. Deactivated accounts have no valid sessions,
+ * and neither do faculty accounts: faculty use the Admin Panel, not the student app.
+ */
 export async function currentSession(request) {
   const token = authToken(request);
   if (!token) return null;
@@ -45,7 +48,7 @@ export async function currentSession(request) {
   const result = await query(
     `SELECT s.user_id AS "userId", ${USER_COLUMNS}
        FROM sessions s JOIN users u ON u.id = s.user_id
-      WHERE s.token_hash = $1 AND s.expires_at > $2 AND u.status <> 'deactivated'`,
+      WHERE s.token_hash = $1 AND s.expires_at > $2 AND u.status <> 'deactivated' AND u.role <> 'faculty'`,
     [tokenHash, now],
   );
   if (!result.rows[0]) await query('DELETE FROM sessions WHERE token_hash = $1 OR expires_at <= $2', [tokenHash, now]);

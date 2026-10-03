@@ -430,6 +430,20 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.ok(self.body.leaders.some((leader) => leader.isYou), 'but still see themselves');
   });
 
+  await t.test('faculty accounts cannot use the student app', async () => {
+    const password = 'Amber!Harbor7!Quiet2!Fern';
+    const created = await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, firstName: 'Prof', lastName: 'Santos', username: 'prof_santos', email: 'prof@example.com', password, privacyConsent: true }) });
+    await db.query("UPDATE users SET email_verified_at = 1, role = 'faculty' WHERE email = $1", ['prof@example.com']);
+    const me = await request('/api/auth/me', { headers: { Authorization: `Bearer ${created.body.token}` } });
+    assert.equal(me.response.status, 401, 'a session made before the role change no longer works');
+    const login = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'prof@example.com', password }) });
+    assert.equal(login.response.status, 403);
+    assert.equal(login.body.code, 'FACULTY_ACCOUNT');
+    assert.equal(login.body.token, undefined);
+    const wrong = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'prof@example.com', password: 'Wrong!Password9x' }) });
+    assert.equal(wrong.response.status, 401, 'a wrong password does not reveal that the account is faculty');
+  });
+
   await t.test('issue reports store attachments in the database and validate content', async () => {
     const report = await request('/api/support/reports', { method: 'POST', headers: authHeaders, body: JSON.stringify({ topic: 'Other', timing: 'Today', description: 'The report flow works.' }) });
     assert.equal(report.response.status, 201, JSON.stringify(report.body));

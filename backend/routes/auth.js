@@ -98,6 +98,8 @@ export default function registerAuthRoutes(app) {
     const passwordOk = await verifyPassword(input.password, user?.passwordHash || timingDummyHash);
     if (!user || !passwordOk) return response.status(401).json({ ok: false, message: 'Incorrect email or password.' });
     if (user.status === 'deactivated') return response.status(403).json({ ok: false, message: 'This account has been deactivated. Please contact the HabitAI administrator.' });
+    // Checked after the password, so a wrong password never reveals that an account is faculty.
+    if (user.role === 'faculty') return response.status(403).json({ ok: false, code: 'FACULTY_ACCOUNT', message: 'This is a faculty account. Faculty sign in to the HabitAI Admin Panel, not the student app.' });
     await query('INSERT INTO login_activity (id,user_id,device,created_at) VALUES ($1,$2,$3,$4)', [crypto.randomUUID(), user.id, deviceLabel(input, request), Date.now()]);
     response.json({ ok: true, message: 'Login successful.', token: await createSession(user.id), user: userFromRow(user) });
   });
