@@ -430,18 +430,21 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.ok(self.body.leaders.some((leader) => leader.isYou), 'but still see themselves');
   });
 
-  await t.test('faculty accounts cannot use the student app', async () => {
+  await t.test('faculty use the app in Faculty mode and stay off student leaderboards', async () => {
     const password = 'Amber!Harbor7!Quiet2!Fern';
-    const created = await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, firstName: 'Prof', lastName: 'Santos', username: 'prof_santos', email: 'prof@example.com', password, privacyConsent: true }) });
+    await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, firstName: 'Prof', lastName: 'Santos', username: 'prof_santos', email: 'prof@example.com', password, privacyConsent: true }) });
     await db.query("UPDATE users SET email_verified_at = 1, role = 'faculty' WHERE email = $1", ['prof@example.com']);
-    const me = await request('/api/auth/me', { headers: { Authorization: `Bearer ${created.body.token}` } });
-    assert.equal(me.response.status, 401, 'a session made before the role change no longer works');
     const login = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'prof@example.com', password }) });
-    assert.equal(login.response.status, 403);
-    assert.equal(login.body.code, 'FACULTY_ACCOUNT');
-    assert.equal(login.body.token, undefined);
-    const wrong = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'prof@example.com', password: 'Wrong!Password9x' }) });
-    assert.equal(wrong.response.status, 401, 'a wrong password does not reveal that the account is faculty');
+    assert.equal(login.response.status, 200, JSON.stringify(login.body));
+    assert.equal(login.body.user.role, 'faculty', 'the app switches to Faculty mode');
+    const facultyHeaders = { Authorization: `Bearer ${login.body.token}` };
+    const me = await request('/api/auth/me', { headers: facultyHeaders });
+    assert.equal(me.body.user.role, 'faculty');
+    await request('/api/app-state', { method: 'PUT', headers: facultyHeaders, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], id: 'prep', label: 'Prepare tomorrow\'s lesson' }] }) });
+    const checkIn = await request('/api/habit-completions', { method: 'PUT', headers: facultyHeaders, body: JSON.stringify({ habitId: 'prep', date: today, completed: true, timeZone: 'UTC' }) });
+    assert.equal(checkIn.response.status, 200, 'faculty can track their own habits');
+    const board = await request('/api/leaderboard?period=All%20Time', { headers: facultyHeaders });
+    assert.ok(!JSON.stringify(board.body).includes('Santos'), 'faculty are not on the student leaderboard');
   });
 
   await t.test('issue reports store attachments in the database and validate content', async () => {

@@ -5,6 +5,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { Image, Modal, Platform, Pressable, type PressableStateCallbackType, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
+import { ClassPulseCard } from '@/components/class-pulse-card';
 import { WeekStrip } from '@/components/week-strip';
 import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
@@ -36,7 +37,7 @@ export default function HomeScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const showAlert = useAppDialog();
-  const { isDarkMode, avatarImage, habits, profile, addHabit: createHabit, toggleHabit } = useAppColorScheme();
+  const { isDarkMode, avatarImage, habits, profile, addHabit: createHabit, toggleHabit, isFaculty } = useAppColorScheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   // Tablets and laptops: the hero image sits beside the title, and on laptops the progress
@@ -275,6 +276,7 @@ export default function HomeScreen() {
           </View>
 
           {habits.length > 0 && <WeekStrip habits={habits} style={!isDesktop && styles.weekStripPhone} />}
+          {isFaculty && <ClassPulseCard style={!isDesktop && styles.weekStripPhone} />}
 
           <Pressable style={[styles.progressLink, isDesktop && styles.dashboardLink]} onPress={() => router.push('/progress')} accessibilityRole="button" accessibilityLabel="View habit progress">
             <Text style={styles.progressLinkText}>View Progress</Text>

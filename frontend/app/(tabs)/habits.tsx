@@ -5,6 +5,7 @@ import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatli
 import { Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { EditHabitSheet } from '@/components/edit-habit-sheet';
+import { FACULTY_HABIT_IDEAS } from '@/constants/faculty';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { isHabitMissedYesterday, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
@@ -16,7 +17,7 @@ const tabs = ['All', 'Daily', 'Weekly', 'Monthly', 'Custom'];
 export default function HabitsScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
-  const { isDarkMode, habits: habitList, toggleHabit, reorderHabits, canUndoCheckIn } = useAppColorScheme();
+  const { isDarkMode, habits: habitList, toggleHabit, reorderHabits, canUndoCheckIn, isFaculty } = useAppColorScheme();
   const showAlert = useAppDialog();
   const [editingHabit, setEditingHabit] = useState<(typeof habitList)[number] | null>(null);
   // Tablets and laptops have room for the four summary cards in one row.
@@ -44,7 +45,7 @@ export default function HabitsScreen() {
     ? Math.round(visibleHabitList.reduce((sum, habit) => sum + habit.progress, 0) / visibleHabitList.length)
     : 0;
   const getSuggestion = () => {
-    const candidates = ['Drink Water', 'Read for 10 Minutes', 'Take a Short Walk', 'Write in a Journal', 'Practice Gratitude', 'Plan Tomorrow', 'Stretch for 5 Minutes', 'Organize One Small Space', 'Learn Something New', 'Sleep 30 Minutes Earlier', 'Take a Screen Break'];
+    const candidates = isFaculty ? FACULTY_HABIT_IDEAS : ['Drink Water', 'Read for 10 Minutes', 'Take a Short Walk', 'Write in a Journal', 'Practice Gratitude', 'Plan Tomorrow', 'Stretch for 5 Minutes', 'Organize One Small Space', 'Learn Something New', 'Sleep 30 Minutes Earlier', 'Take a Screen Break'];
     setSuggestion(candidates[Math.floor(Math.random() * candidates.length)]);
   };
 

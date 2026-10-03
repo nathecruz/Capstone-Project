@@ -68,6 +68,8 @@ type ColorSchemeContextValue = {
   syncAppState: (state?: PersistedAppState) => Promise<{ state: PersistedAppState; ok: boolean; merged: boolean }>;
   refreshAppState: () => Promise<boolean>;
   clearLocalData: () => void;
+  /** Faculty accounts track their own habits in Faculty mode (faculty ideas, no student leaderboards). */
+  isFaculty: boolean;
 };
 
 const ColorSchemeContext = createContext<ColorSchemeContextValue | undefined>(undefined);
@@ -111,6 +113,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   const [snoozeFrequency, setSnoozeFrequency] = useState('Once');
   const [goals, setGoals] = useState<Goal[]>([]);
   const [activeUserEmail, setActiveUserEmail] = useState('');
+  const [accountRole, setAccountRole] = useState<'user' | 'faculty' | 'admin'>('user');
   const [stateHydrated, setStateHydrated] = useState(false);
   const syncBaseRef = useRef<AppStateSyncBase | null>(null);
   const refreshAppStateRef = useRef<(() => Promise<void>) | null>(null);
@@ -160,6 +163,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       remoteReadyRef.current = false;
       unsavedRef.current = false;
       setActiveUserEmail('');
+      setAccountRole('user');
       setAvatarImage(null);
       setProfile(initialProfile);
       setPreferences(initialPreferences);
@@ -221,6 +225,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       const remoteCompletions = keepLocalChanges ? null : await getRemoteHabitCompletions();
       if (cancelled || version !== sessionLoadVersion) return;
       setActiveUserEmail(email);
+      setAccountRole(session.role ?? 'user');
       setAvatarImage(savedState.avatarImage ?? null);
       // Names come from the account (the server's copy); older sessions fall back to the saved full name.
       const names = namesOf(session.firstName || session.lastName ? session : { fullName: session.fullName || savedState.profile?.fullName });
@@ -672,8 +677,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         return remoteReadyRef.current;
       },
       clearLocalData,
+      isFaculty: accountRole === 'faculty',
     }),
-    [avatarImage, colorScheme, darkModeOverride, getAppStateSnapshot, goals, habits, points, preferences, profile, ringInterval, snoozeFrequency, syncAppState, tokenHistory, tokens, undoUntil],
+    [avatarImage, colorScheme, darkModeOverride, getAppStateSnapshot, goals, habits, points, preferences, profile, ringInterval, snoozeFrequency, syncAppState, tokenHistory, tokens, undoUntil, accountRole],
   );
 
   return <ColorSchemeContext.Provider value={value}><DarkModeContext.Provider value={value.isDarkMode}>{children}</DarkModeContext.Provider></ColorSchemeContext.Provider>;

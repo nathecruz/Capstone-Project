@@ -8,6 +8,7 @@ import { buildHabitContext, dateKeyInZone, shiftDay } from '../services/ai-conte
 import {
   GOAL_PLANNER_SYSTEM,
   buildUserPrompt,
+  forAudience,
   cleanAnswer,
   goalPlanJsonSchema,
   goalPlannerPrompt,
@@ -88,7 +89,7 @@ export default function registerAiRoutes(app) {
         ? { app: 'HabitAI' } // no personal data is needed to explain the app
         : await loadAiContext(session.userId, input.timeZone || DEFAULT_TIME_ZONE);
       const text = await generateAiText(buildUserPrompt({ question: input.question, context }), {
-        system: systemPromptFor(mode),
+        system: systemPromptFor(mode, session.role),
         maxOutputTokens: 400,
         temperature: 0.6,
       });
@@ -130,7 +131,7 @@ export default function registerAiRoutes(app) {
     if (isAiConfigured()) {
       try {
         for (let attempt = 0; attempt < 2 && !ai; attempt += 1) {
-          const text = await generateAiText(habitAnalysisPrompt(stats, ml), { system: HABIT_ANALYSIS_SYSTEM, schema: habitAnalysisJsonSchema, maxOutputTokens: 700, temperature: 0.5 });
+          const text = await generateAiText(habitAnalysisPrompt(stats, ml), { system: forAudience(HABIT_ANALYSIS_SYSTEM, session.role), schema: habitAnalysisJsonSchema, maxOutputTokens: 700, temperature: 0.5 });
           try {
             const parsed = habitAnalysisSchema.safeParse(JSON.parse(text));
             if (parsed.success) ai = parsed.data;
@@ -174,7 +175,7 @@ export default function registerAiRoutes(app) {
     try {
       // JSON mode plus the schema makes invalid plans rare; one retry covers the rest.
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        const text = await generateAiText(prompt, { system: GOAL_PLANNER_SYSTEM, schema: goalPlanJsonSchema, maxOutputTokens: 1200, temperature: 0.7 });
+        const text = await generateAiText(prompt, { system: forAudience(GOAL_PLANNER_SYSTEM, session.role), schema: goalPlanJsonSchema, maxOutputTokens: 1200, temperature: 0.7 });
         let raw;
         try {
           raw = JSON.parse(text);

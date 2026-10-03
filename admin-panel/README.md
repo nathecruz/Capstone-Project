@@ -23,7 +23,7 @@ HabitAI habit-tracking system. It lives in `admin-panel/` of the HabitAI reposit
 | Role | Access |
 | --- | --- |
 | Student (`user`) | Mobile app only. |
-| PSAU Faculty (`faculty`) | Class Pulse (their home page), Overview, anonymized Analytics, and read-only Categories and Notifications. No personal data. Faculty accounts cannot sign in to the student app; changing a student's role to Faculty signs them out of it. |
+| PSAU Faculty (`faculty`) | Class Pulse (their home page), Overview, anonymized Analytics, and read-only Categories and Notifications. No personal data. In the HabitAI app they use **Faculty mode** for their own habits: faculty habit ideas, AI advice for a teacher's day, a shortcut to Class Pulse, and no student leaderboards or rewards. They are never counted in student statistics or Class Pulse. |
 | System Administrator (`admin`) | Everything, including user management, support, audit log and settings. |
 
 At least one active administrator must always remain; you cannot change your own role or deactivate yourself.

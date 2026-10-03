@@ -4,7 +4,7 @@ import { isTemplateValue, loadEnvironment } from '../config/env.js';
 import { originMatcher } from '../config/index.js';
 import { goalPlanSchema } from '../schemas.js';
 import { buildHabitContext, habitFrequency } from '../services/ai-context.js';
-import { buildUserPrompt, cleanAnswer, normalizeGoalPlan, systemPromptFor } from '../services/ai-prompts.js';
+import { FACULTY_CONTEXT, buildUserPrompt, cleanAnswer, forAudience, normalizeGoalPlan, systemPromptFor } from '../services/ai-prompts.js';
 import { sameState, stableStringify } from '../services/app-state-sync.js';
 import { escapeHtml, passwordChangedEmail, passwordResetCodeEmail } from '../services/email-templates.js';
 import { getEmailConfig, sendEmail } from '../services/mailer.js';
@@ -257,4 +257,12 @@ test('names are split and joined consistently', async () => {
   assert.equal(joinName(' Ana ', 'Reyes '), 'Ana Reyes');
   assert.deepEqual(namesFromInput({ firstName: 'Ana', lastName: 'Reyes', fullName: 'Ignored Name' }), { firstName: 'Ana', lastName: 'Reyes', fullName: 'Ana Reyes' });
   assert.deepEqual(namesFromInput({ fullName: 'Juan Dela Cruz' }), { firstName: 'Juan', lastName: 'Dela Cruz', fullName: 'Juan Dela Cruz' });
+});
+
+test('faculty accounts get AI advice for a teacher, students keep theirs', () => {
+  assert.ok(systemPromptFor('coach', 'faculty').endsWith(FACULTY_CONTEXT));
+  assert.ok(!systemPromptFor('coach').includes(FACULTY_CONTEXT));
+  assert.equal(systemPromptFor('coach', 'user'), systemPromptFor('coach'));
+  assert.equal(forAudience('Plan goals.', 'admin'), 'Plan goals.');
+  assert.equal(forAudience('Plan goals.', 'faculty'), `Plan goals.\n${FACULTY_CONTEXT}`);
 });

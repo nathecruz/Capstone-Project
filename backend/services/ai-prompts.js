@@ -28,7 +28,8 @@ HabitAI app guide (the only features that exist):
 - Forgot password: on the sign-in screen tap Forgot password; a 6-digit code is emailed and is valid for 10 minutes.
 - Profile > Personal Information: edit name, username, email, birthday and bio.
 - Help & Support: FAQ, Report an Issue (screenshots or video up to 10 MB) and Suggest a Feature.
-- Data syncs to the student's account automatically when signed in.`.trim();
+- Data syncs to the student's account automatically when signed in.
+- Faculty accounts use the same app in Faculty mode for their own habits. They are not shown on student leaderboards, and their class's progress is in Class Pulse in the HabitAI Admin Panel.`.trim();
 
 const SYSTEM_PROMPTS = {
   coach: `You are HabitAI Coach, the personal habit coach inside HabitAI, a habit tracker used by PSAU students.
@@ -42,8 +43,20 @@ ${SHARED_RULES}
 ${APP_GUIDE}`,
 };
 
-export function systemPromptFor(mode) {
-  return SYSTEM_PROMPTS[mode] ?? SYSTEM_PROMPTS.assistant;
+/**
+ * Added to every AI instruction for faculty accounts, who use the app in Faculty mode to build
+ * their own habits: the advice must fit a teacher's day, not a student's.
+ */
+export const FACULTY_CONTEXT = `This user is a PSAU faculty member (a teacher who may also do research, advising and administrative work), not a student.
+Tailor everything to a faculty member's day: lesson preparation, grading and feedback, consultations with students, research and writing, meetings, and their own rest, health and family time. Do not talk about studying for exams, attending classes as a student, or student leaderboards.`;
+
+/** The instruction for an AI feature, adjusted for faculty accounts. */
+export function forAudience(system, role) {
+  return role === 'faculty' ? `${system}\n${FACULTY_CONTEXT}` : system;
+}
+
+export function systemPromptFor(mode, role = 'user') {
+  return forAudience(SYSTEM_PROMPTS[mode] ?? SYSTEM_PROMPTS.assistant, role);
 }
 
 export function buildUserPrompt({ question, context }) {

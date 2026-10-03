@@ -5,7 +5,7 @@ import { authToken, hashToken, normalizeEmail } from '../lib/http.js';
 import { namesFromRow } from '../lib/names.js';
 
 const USER_COLUMNS = `u.full_name AS "fullName", u.first_name AS "firstName", u.last_name AS "lastName", u.username, u.email, u.date_of_birth AS "dateOfBirth", u.gender, u.region, u.about,
-  u.email_verified_at AS "emailVerifiedAt", u.privacy_consent_at AS "privacyConsentAt"`;
+  u.email_verified_at AS "emailVerifiedAt", u.privacy_consent_at AS "privacyConsentAt", u.role`;
 
 export function userFromRow(row) {
   return {
@@ -19,12 +19,14 @@ export function userFromRow(row) {
     about: row.about || '',
     emailVerified: Boolean(row.emailVerifiedAt),
     privacyConsentAt: row.privacyConsentAt ? Number(row.privacyConsentAt) : null,
+    // 'faculty' turns on the app's Faculty mode (their own habits, faculty AI advice, no student leaderboards).
+    role: row.role || 'user',
   };
 }
 
 export async function findUser(emailAddress) {
   const result = await query(
-    `SELECT u.id, ${USER_COLUMNS}, u.password_hash AS "passwordHash", u.status, u.role FROM users u WHERE u.email = $1`,
+    `SELECT u.id, ${USER_COLUMNS}, u.password_hash AS "passwordHash", u.status FROM users u WHERE u.email = $1`,
     [normalizeEmail(emailAddress)],
   );
   return result.rows[0] || null;
@@ -36,10 +38,7 @@ export async function createSession(userId) {
   return token;
 }
 
-/**
- * The signed-in user for a Bearer token, or null. Deactivated accounts have no valid sessions,
- * and neither do faculty accounts: faculty use the Admin Panel, not the student app.
- */
+/** The signed-in user for a Bearer token, or null. Deactivated accounts have no valid sessions. */
 export async function currentSession(request) {
   const token = authToken(request);
   if (!token) return null;
@@ -48,7 +47,7 @@ export async function currentSession(request) {
   const result = await query(
     `SELECT s.user_id AS "userId", ${USER_COLUMNS}
        FROM sessions s JOIN users u ON u.id = s.user_id
-      WHERE s.token_hash = $1 AND s.expires_at > $2 AND u.status <> 'deactivated' AND u.role <> 'faculty'`,
+      WHERE s.token_hash = $1 AND s.expires_at > $2 AND u.status <> 'deactivated'`,
     [tokenHash, now],
   );
   if (!result.rows[0]) await query('DELETE FROM sessions WHERE token_hash = $1 OR expires_at <= $2', [tokenHash, now]);

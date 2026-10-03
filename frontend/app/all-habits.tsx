@@ -3,11 +3,12 @@ import { router } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { FACULTY_HABIT_IDEAS } from '@/constants/faculty';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { getLocalDateKey, isHabitMissedYesterday } from '@/utils/habit-visibility';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
-const groups = [
+const HABIT_GROUPS = [
   { name: 'Health', description: 'Build habits for a stronger body and healthier life.', icon: 'heart', color: '#4B9FE8', items: ['Drink Water', 'Exercise / Workout', 'Eat Healthy', 'Sleep Early', 'Walk 10,000 Steps', 'No Sugar / Junk Food', 'Meditate', 'Stretch'] },
   { name: 'Mind', description: 'Strengthen your mental wellness and mindfulness.', icon: 'bulb', color: '#7865D8', items: ['Read a Book', 'Gratitude', 'Journal', 'Meditate', 'Mindful Breathing', 'Digital Detox', 'Positive Thinking', 'Affirmations'] },
   { name: 'Productivity', description: 'Get more done and build productive routines.', icon: 'locate', color: '#4B82D8', items: ['Plan Your Day', 'Do Homework', 'Take Notes', 'Focus Time', 'Manage Time', 'Track Habits', 'Prepare Materials', 'Give Feedback'] },
@@ -15,6 +16,9 @@ const groups = [
   { name: 'Academics', description: 'Build habits that support your learning journey.', icon: 'school', color: '#5B42D8', items: ['Study / Revise', 'Attend Classes', 'Plan Lessons', 'Grade Assignments'] },
   { name: 'Other', description: 'More habits to fit your unique goals.', icon: 'ellipsis-horizontal', color: '#E59B35', items: ['Learn Something New', 'Be Positive', 'More Habits'] },
 ];
+
+// Faculty mode shows habits for a teacher's day first.
+const FACULTY_GROUP = { name: 'For Faculty', description: 'Teaching, research, students and your own well-being.', icon: 'briefcase', color: '#5B42D8', items: FACULTY_HABIT_IDEAS };
 
 const icons = ['water-outline', 'fitness-outline', 'nutrition-outline', 'moon-outline', 'footsteps-outline', 'ban-outline', 'flower-outline', 'body-outline'];
 
@@ -25,7 +29,8 @@ function formatDateLabel(dateKey: string) {
 export default function AllHabitsScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
-  const { isDarkMode, habits } = useAppColorScheme();
+  const { isDarkMode, habits, isFaculty } = useAppColorScheme();
+  const groups = useMemo(() => (isFaculty ? [FACULTY_GROUP, ...HABIT_GROUPS] : HABIT_GROUPS), [isFaculty]);
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');
   const [currentTime, setCurrentTime] = useState(() => Date.now());
@@ -38,7 +43,7 @@ export default function AllHabitsScreen() {
   // A habit only counts as missed once its day is over, so this panel lists yesterday's.
   const missedHabits = useMemo(() => habits.filter((habit) => isHabitMissedYesterday(habit, new Date(currentTime))), [currentTime, habits]);
   const completedHabits = useMemo(() => habits.filter((habit) => habit.completionDates.includes(todayKey)), [todayKey, habits]);
-  const filteredGroups = useMemo(() => groups.filter((group) => category === 'All' || group.name === category).map((group) => ({ ...group, items: group.items.filter((item) => item.toLowerCase().includes(search.toLowerCase())) })).filter((group) => group.items.length > 0), [category, search]);
+  const filteredGroups = useMemo(() => groups.filter((group) => category === 'All' || group.name === category).map((group) => ({ ...group, items: group.items.filter((item) => item.toLowerCase().includes(search.toLowerCase())) })).filter((group) => group.items.length > 0), [category, search, groups]);
   const accent = isDarkMode ? '#B9A9FF' : '#5B42D8';
   const chooseHabit = (habit: string) => router.replace({ pathname: '/(tabs)/add', params: { habit } });
 

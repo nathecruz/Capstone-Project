@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { Image, Modal, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ClassPulseCard } from '@/components/class-pulse-card';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { askAi } from '@/utils/ai-client';
 import type { TranslationKey } from '@/constants/i18n';
@@ -24,7 +25,9 @@ export default function ProfileScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const showAlert = useAppDialog();
-  const { isDarkMode, avatarImage, setAvatarImage, habits, goals, profile, points, tokens, applyWallet, t } = useAppColorScheme();
+  const { isDarkMode, avatarImage, setAvatarImage, habits, goals, profile, points, tokens, applyWallet, t, isFaculty } = useAppColorScheme();
+  // Faculty mode: no student leaderboards; a shortcut to their class's Class Pulse instead.
+  const menuItems = isFaculty ? settings.filter((item) => item.key !== 'leaderboards') : settings;
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
   const { averageProgress, maxStreak, completed } = getHabitProgressSummary(habits);
@@ -133,6 +136,12 @@ export default function ProfileScreen() {
               <Ionicons name="star" size={11} color={themeColor('#F2B94B')} />
               <Text style={styles.levelText}>{points ? 'Active' : 'Getting started'}</Text>
             </View>
+            {isFaculty && (
+              <View style={styles.facultyPill}>
+                <Ionicons name="briefcase" size={11} color={themeColor('#FFFFFF')} />
+                <Text style={styles.facultyPillText}>PSAU Faculty</Text>
+              </View>
+            )}
           </View>
 
           <View style={[styles.firstActionCard, isDarkMode && styles.darkCard]}>
@@ -234,6 +243,7 @@ export default function ProfileScreen() {
             </View>
           ) : null}
 
+          {isFaculty ? <ClassPulseCard style={styles.facultyClassCard} /> : (
           <View style={styles.leaderboardSection}>
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionTitle}>{t('leaderboards')}</Text>
@@ -284,6 +294,7 @@ export default function ProfileScreen() {
               <Ionicons name="chevron-forward" size={16} color={themeColor('#FFFFFF')} />
             </Pressable>
           </View>
+          )}
 
           <View style={[styles.tokenCard, isDarkMode && styles.darkCard]}>
             <View style={styles.tokenLeft}>
@@ -324,10 +335,10 @@ export default function ProfileScreen() {
 
           <Text style={styles.sectionLabel}>{t('account')} &amp; {t('preferences')}</Text>
           <View style={[styles.settingsCard, isDarkMode && styles.darkCard]}>
-            {settings.map((item, index) => (
+            {menuItems.map((item, index) => (
               <Pressable
                 key={item.key}
-                style={[styles.settingRow, index < settings.length - 1 && styles.settingBorder]}
+                style={[styles.settingRow, index < menuItems.length - 1 && styles.settingBorder]}
                 onPress={() => router.push(item.route)}
               >
                 <View style={styles.settingIcon}>
@@ -649,6 +660,9 @@ const themedStyles = createThemedStyles({
     fontWeight: '600',
     marginTop: 3,
   },
+  facultyPill: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: '#5B42D8' },
+  facultyPillText: { fontSize: 10, fontWeight: '800', color: '#FFFFFF' },
+  facultyClassCard: { marginTop: 16 },
   levelPill: {
     flexDirection: 'row',
     alignItems: 'center',

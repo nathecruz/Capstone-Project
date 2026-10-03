@@ -61,7 +61,7 @@ export default function LeaderboardsScreen() {
   const [leaderboardStatus, setLeaderboardStatus] = useState<'idle' | 'loading' | 'connected' | 'unavailable'>('idle');
   const [refreshKey, setRefreshKey] = useState(0);
   const [leaderboard, setLeaderboard] = useState<LeaderboardResponse>({ date: '', leaders: [] });
-  const { tokens, applyWallet, points, profile, tokenHistory } = useAppColorScheme();
+  const { tokens, applyWallet, points, profile, tokenHistory, isFaculty } = useAppColorScheme();
   const insets = useSafeAreaInsets();
   const compact = useWindowDimensions().width < 375;
 
@@ -201,6 +201,22 @@ export default function LeaderboardsScreen() {
     setRedeeming(false);
     setPendingReward(null);
   };
+
+  // Faculty mode: leaderboards and rewards are the students' own competition.
+  if (isFaculty) {
+    return (
+      <SafeAreaView style={styles.screen}>
+        <View style={styles.facultyNotice}>
+          <Ionicons name="trophy-outline" size={28} color={themeColor('#5B42D8')} />
+          <Text style={styles.facultyNoticeTitle}>Leaderboards are for students</Text>
+          <Text style={styles.facultyNoticeText}>Your habits stay private to you. See how your students are doing in Class Pulse.</Text>
+          <Pressable style={styles.facultyNoticeButton} onPress={() => router.back()} accessibilityRole="button">
+            <Text style={styles.facultyNoticeButtonText}>Go back</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -378,7 +394,12 @@ export default function LeaderboardsScreen() {
 }
 
 const themedStyles = createThemedStyles({
-  screen: { flex: 1, backgroundColor: '#F7F8FF' }, content: { paddingTop: 8 }, container: { width: '100%', maxWidth: 920, alignSelf: 'center', paddingHorizontal: 14 }, compactContainer: { paddingHorizontal: 10 },
+  screen: { flex: 1, backgroundColor: '#F7F8FF' },
+  facultyNotice: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 32 },
+  facultyNoticeTitle: { fontSize: 18, fontWeight: '800', color: '#2D2A3D', textAlign: 'center' },
+  facultyNoticeText: { fontSize: 13, lineHeight: 19, color: '#6B6377', textAlign: 'center', maxWidth: 320 },
+  facultyNoticeButton: { marginTop: 8, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 14, backgroundColor: '#5B42D8' },
+  facultyNoticeButtonText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13 }, content: { paddingTop: 8 }, container: { width: '100%', maxWidth: 920, alignSelf: 'center', paddingHorizontal: 14 }, compactContainer: { paddingHorizontal: 10 },
   headerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 8 }, backButton: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', elevation: 3 }, headerCopy: { flex: 1 }, eyebrow: { color: '#7967D6', fontSize: 9, fontWeight: '900', letterSpacing: 1.2, marginBottom: 2 }, headerTitle: { fontSize: 24, color: '#131B47', fontWeight: '900' }, headerSubtitle: { fontSize: 11, color: '#69708B', marginTop: 2 }, headerActions: { alignItems: 'center', gap: 8 }, trophyBadge: { width: 42, height: 42, borderRadius: 14, backgroundColor: '#FFF4CF', alignItems: 'center', justifyContent: 'center' }, infoButton: { width: 30, height: 26, alignItems: 'center', justifyContent: 'center' },
   // elevation lowered from 5 -> 2 so the banner stops drawing over the rewards card on Android
   tokenBanner: { minHeight: 158, flexDirection: 'row', alignItems: 'center', backgroundColor: '#6044DD', borderRadius: 20, padding: 14, overflow: 'hidden', elevation: 2, zIndex: 1, shadowColor: '#4C37B8', shadowOpacity: 0.2, shadowRadius: 10, shadowOffset: { width: 0, height: 5 } }, compactTokenBanner: { minHeight: 145 }, tokenGlow: { position: 'absolute', width: 160, height: 160, borderRadius: 80, backgroundColor: '#8069F0', opacity: 0.38, right: 82, top: -56 }, tokenCoin: { width: 62, height: 62, borderRadius: 31, backgroundColor: '#F5A91B', alignItems: 'center', justifyContent: 'center', borderWidth: 4, borderColor: '#FFD95B', shadowColor: '#F5A91B', shadowOpacity: 0.35, shadowRadius: 9, shadowOffset: { width: 0, height: 3 } }, tokenCopy: { marginLeft: 10, flex: 1 }, tokenTopline: { flexDirection: 'row', alignItems: 'center', gap: 7 }, tokenLabel: { color: '#DCD5FF', fontSize: 9, fontWeight: '900', letterSpacing: 1.1 }, activeBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(255,255,255,0.13)', borderRadius: 8, paddingHorizontal: 5, paddingVertical: 3 }, activeDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#7FF0B0' }, activeText: { color: '#D9FFE7', fontSize: 7, fontWeight: '900', letterSpacing: 0.5 }, tokenValue: { color: '#FFFFFF', fontSize: 34, lineHeight: 38, fontWeight: '900' }, tokenHint: { color: '#CFC7FF', fontSize: 10, marginTop: 1 }, historyButton: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', borderWidth: 1, borderColor: '#CFC4FF', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6, marginTop: 7 }, historyText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' }, giftWrap: { width: 62, height: 62, borderRadius: 31, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center', marginRight: 8 }, giftGlow: { position: 'absolute', width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFD75A', opacity: 0.16 }, tokenRules: { width: 137, borderLeftWidth: 1, borderLeftColor: '#8D78ED', paddingLeft: 12 }, rulesTitle: { color: '#FFFFFF', fontSize: 11, fontWeight: '900', marginBottom: 8 }, rule: { color: '#F3EFFF', fontSize: 10, marginBottom: 7 }, ruleIcon: { color: '#FFE27A', fontWeight: '900' },

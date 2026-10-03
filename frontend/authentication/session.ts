@@ -38,6 +38,8 @@ export type SessionUser = {
   emailVerified?: boolean;
   /** null when the account has not accepted the Privacy Notice yet. */
   privacyConsentAt?: number | null;
+  /** 'faculty' turns on Faculty mode; older sessions have no role and count as students. */
+  role?: 'user' | 'faculty' | 'admin';
 };
 
 export type SessionRecord = {
@@ -116,6 +118,7 @@ export async function getCurrentSession(): Promise<SessionUser | null> {
       about: parsed.about ? String(parsed.about) : '',
       emailVerified: typeof parsed.emailVerified === 'boolean' ? parsed.emailVerified : undefined,
       privacyConsentAt: typeof parsed.privacyConsentAt === 'number' || parsed.privacyConsentAt === null ? parsed.privacyConsentAt : undefined,
+      role: parsed.role === 'faculty' || parsed.role === 'admin' ? parsed.role : 'user',
     };
   } catch {
     return null;
