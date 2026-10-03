@@ -18,7 +18,8 @@ export function passwordProblem(password, context = {}) {
   if (value.length < 8) return 'Password must be at least 8 characters long.';
   if (value.length > 128) return 'Password must be at most 128 characters long.';
   const classes = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9\s]/].filter((pattern) => pattern.test(value)).length;
-  if (classes < 4) return 'Use uppercase and lowercase letters, a number, and a symbol.';
+  // Every message names the password, so it is not mistaken for a problem with another field.
+  if (classes < 4) return 'Password needs uppercase and lowercase letters, a number, and a symbol.';
   const lower = value.toLowerCase();
   const personal = [context.fullName, context.username, context.email?.split('@')[0]]
     .filter(Boolean)

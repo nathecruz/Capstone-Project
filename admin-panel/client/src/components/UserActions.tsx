@@ -7,7 +7,7 @@ import { Alert, Button, ConfirmDialog, cx, Field, Input, Modal, Select, Textarea
 
 export const ROLE_OPTIONS: { value: Role; label: string; description: string }[] = [
   { value: 'user', label: 'Student', description: 'Uses the HabitAI mobile app. No Admin Panel access.' },
-  { value: 'faculty', label: 'PSAU Faculty', description: 'Admin Panel: overview and anonymized analytics (read-only).' },
+  { value: 'faculty', label: 'PSAU Faculty', description: 'Admin Panel: Class Pulse and anonymized analytics (read-only). Cannot sign in to the student app.' },
   { value: 'admin', label: 'System Administrator', description: 'Full Admin Panel access, including user management.' },
 ];
 /** The roles that can sign in to the Admin Panel. */
