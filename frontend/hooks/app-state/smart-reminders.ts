@@ -1,7 +1,8 @@
 // Smart reminders: pick a reminder time and message from recent check-ins and the ML risk estimate.
 import { getApiBaseUrl, getAuthenticatedHeaders } from '@/authentication/authService';
+import { computeStreak, isHabitScheduledOn } from '@/utils/streaks';
 import { getLocalDateKey } from './habit-progress';
-import { parseReminderTime } from './reminders';
+import { getHabitReminderTimes } from './reminders';
 import type { Habit } from './types';
 
 export function getSmartReminderMessage(habit: Habit, riskLevel: 'low' | 'medium' | 'high') {
@@ -40,20 +41,37 @@ function getRiskLevel(dropoutRisk: number, completionProbability: number): 'low'
   return risk >= 0.65 ? 'high' : risk >= 0.35 ? 'medium' : 'low';
 }
 
+/**
+ * Risk without the ML model, with the same rule as the server's Web Push smart reminders
+ * (backend/services/smart-reminders.js): the 7 scheduled days before today and the streak up to
+ * yesterday. (Today's progress was used before; it is 0 until the habit is done, so every habit
+ * looked at risk.)
+ */
+export function heuristicRisk(habit: Habit, now = new Date()): 'low' | 'medium' | 'high' {
+  const dayKey = (back: number) => getLocalDateKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - back));
+  let scheduled = 0;
+  let completed = 0;
+  for (let back = 1; back <= 7; back += 1) {
+    const day = dayKey(back);
+    if ((habit.startDate && day < habit.startDate) || !isHabitScheduledOn(habit, day)) continue;
+    scheduled += 1;
+    if (habit.completionDates.includes(day)) completed += 1;
+  }
+  const rate = scheduled ? completed / scheduled : 0;
+  const streak = computeStreak(habit, habit.completionDates, dayKey(1));
+  return rate < 0.4 || streak <= 1 ? 'high' : rate < 0.7 ? 'medium' : 'low';
+}
+
 export function computeSmartReminderTime(habit: Habit, now = new Date(), modelRisk?: { dropoutRisk: number; completionProbability: number }) {
-  const fallbackTime = parseReminderTime(habit.reminderTime) ?? { hour: 9, minute: 0 };
-  const recentSignals = getRecentHabitSignals(habit, now);
+  // The earliest set time (9:00 AM without one), as on the server.
+  const fallbackTime = getHabitReminderTimes(habit).sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute))[0] ?? { hour: 9, minute: 0 };
   const riskLevel = modelRisk
     ? getRiskLevel(modelRisk.dropoutRisk, modelRisk.completionProbability)
-    : habit.progress < 35 || habit.streak <= 1 || recentSignals.completion_rate < 0.4
-      ? 'high'
-      : habit.progress < 70 || recentSignals.completion_rate < 0.7
-        ? 'medium'
-        : 'low';
+    : heuristicRisk(habit, now);
 
   const target = new Date(now);
   const minuteOffset = riskLevel === 'high' ? -30 : riskLevel === 'medium' ? 15 : 45;
-  const baseMinutes = fallbackTime.hour * 60 + fallbackTime.minute + minuteOffset;
+  const baseMinutes = Math.min(23 * 60 + 59, Math.max(0, fallbackTime.hour * 60 + fallbackTime.minute + minuteOffset));
 
   target.setHours(Math.floor(baseMinutes / 60), baseMinutes % 60, 0, 0);
   if (target <= now) {

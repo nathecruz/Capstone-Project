@@ -187,15 +187,27 @@ export default function AddScreen() {
     setTimeModalVisible(true);
   };
 
-  const toggleSmartReminder = () => {
+  const toggleSmartReminder = async () => {
     if (smartReminder) {
       setSmartReminder(false);
       setSmartInfoVisible(false);
       return;
     }
     if (Platform.OS === 'web') {
-      showAlert('Smart reminders need the mobile app', 'Device notifications are available in native iOS and Android builds.');
-      return;
+      if (reminderPermissionPending) return;
+      setReminderPermissionPending(true);
+      let hasAccess = false;
+      try {
+        hasAccess = await requestNotificationAccess();
+      } catch {
+        hasAccess = false;
+      } finally {
+        setReminderPermissionPending(false);
+      }
+      if (!hasAccess) {
+        showAlert('Browser notifications unavailable', 'Use HTTPS and allow notifications. On iPhone, add HabitAI to your Home Screen first.');
+        return;
+      }
     }
     setSmartReminder(true);
     setSmartInfoVisible(true);
@@ -250,7 +262,7 @@ export default function AddScreen() {
         {(frequency === 'Weekly' || frequency === 'Custom') && <><Text style={[styles.reminderSubheaderText, dark.reminderSubheaderText]}>Repeat</Text><View style={styles.daysRow}>{repeatOptions.map((day) => <Pressable key={day} style={[styles.dayButton, dark.dayButton, repeatDays.includes(day) && styles.dayButtonActive, { width: compactDayButton, height: compactDayButton }]} onPress={() => toggleRepeatDay(day)}><Text style={[styles.dayText, dark.dayText, repeatDays.includes(day) && styles.dayTextActive]}>{day}</Text></Pressable>)}</View></>}
         <View style={[styles.reminderOptionRow, dark.reminderOptionRow]}><View style={[styles.optionIcon, dark.optionIcon]}><Ionicons name="musical-notes-outline" size={21} color={accent} /></View><View style={styles.optionCopy}><Text style={[styles.optionTitle, dark.optionTitle]}>Reminder Sound</Text><Text style={[styles.optionSubtitle, dark.optionSubtitle]}>{reminderSoundEnabled ? 'Sound enabled' : 'Sound off'}</Text></View><Pressable style={[styles.soundToggle, dark.soundToggle, reminderSoundEnabled && styles.soundToggleOn]} onPress={() => setReminderSoundEnabled((enabled) => !enabled)} accessibilityRole="switch" accessibilityState={{ checked: reminderSoundEnabled }} accessibilityLabel="Toggle reminder sound"><View style={[styles.soundKnob, reminderSoundEnabled && styles.soundKnobOn]} /></Pressable></View>
         <Pressable style={[styles.reminderOptionRow, dark.reminderOptionRow]} onPress={() => router.push('/snooze-settings')}><View style={[styles.optionIcon, dark.optionIcon]}><Ionicons name="alarm-outline" size={21} color={accent} /></View><View style={styles.optionCopy}><Text style={[styles.optionTitle, dark.optionTitle]}>Snooze</Text><Text style={[styles.optionSubtitle, dark.optionSubtitle]}>Ring Interval: {ringInterval}</Text><Text style={[styles.optionSubtitle, dark.optionSubtitle]}>Frequency: {snoozeFrequency}</Text></View><Ionicons name="chevron-forward" size={19} color="#777282" /></Pressable>
-        <View style={[styles.smartRow, dark.smartRow]}><View style={styles.optionCopy}><Text style={[styles.optionTitle, dark.optionTitle]}>Smart Reminder <Text style={styles.optional}>(Optional)</Text></Text><Text style={[styles.optionSubtitle, dark.optionSubtitle]}>Uses recent completion patterns to choose a reminder time on supported devices.</Text>{smartReminder && <Text style={styles.smartActiveText}>Starts after you save this habit.</Text>}</View><Pressable style={[styles.toggle, dark.toggle, smartReminder && styles.toggleOn]} onPress={toggleSmartReminder} accessibilityRole="switch" accessibilityState={{ checked: smartReminder }} accessibilityLabel="Toggle smart reminder"><View style={[styles.knob, smartReminder && styles.knobOn]} /></Pressable></View>
+        <View style={[styles.smartRow, dark.smartRow]}><View style={styles.optionCopy}><Text style={[styles.optionTitle, dark.optionTitle]}>Smart Reminder <Text style={styles.optional}>(Optional)</Text></Text><Text style={[styles.optionSubtitle, dark.optionSubtitle]}>Uses your recent check-ins to pick the reminder time: earlier when the habit is at risk, a little later when it is going well.</Text>{smartReminder && <Text style={styles.smartActiveText}>Starts after you save this habit.</Text>}</View><Pressable style={[styles.toggle, dark.toggle, smartReminder && styles.toggleOn]} onPress={toggleSmartReminder} accessibilityRole="switch" accessibilityState={{ checked: smartReminder }} accessibilityLabel="Toggle smart reminder"><View style={[styles.knob, smartReminder && styles.knobOn]} /></Pressable></View>
       </>}
     </View>
     <Modal visible={smartInfoVisible} transparent animationType="fade" onRequestClose={() => setSmartInfoVisible(false)}><View style={styles.smartModalBackdrop}><View style={[styles.smartModalCard, dark.smartModalCard]}><View style={[styles.smartModalIcon, dark.smartModalIcon]}><Ionicons name="sparkles" size={26} color={accent} /></View><Text style={[styles.smartModalTitle, dark.smartModalTitle]}>Smart Reminder enabled</Text><Text style={[styles.smartModalBody, dark.smartModalBody]}>After you save this habit, recent activity and available prediction guidance will be used to choose a reminder time.</Text><View style={[styles.smartModalStatus, dark.smartModalStatus]}><Ionicons name="notifications-outline" size={17} color="#3C9A63" /><Text style={[styles.smartModalStatusText, dark.smartModalStatusText]}>Reminder starts after saving</Text></View><Pressable style={styles.smartModalButton} onPress={() => setSmartInfoVisible(false)} accessibilityRole="button"><Text style={styles.smartModalButtonText}>Done</Text></Pressable></View></View></Modal>

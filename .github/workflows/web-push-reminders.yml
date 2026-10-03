@@ -1,8 +1,10 @@
 name: Web Push reminders
 
-# Free replacement for the paid Render cron job. Runs every 5 minutes, but only connects to
-# Neon when a reminder or snooze is due or once an hour to refresh the reminder plan, so the
-# free database can still scale to zero in between (see backend/services/web-push-schedule.js).
+# Free replacement for the paid Render cron job. Scheduled every 5 minutes (GitHub actually starts
+# runs every 15-25), it only connects to Neon when a reminder or snooze is due or every 30 minutes
+# to refresh the reminder plan, so the free database can still scale to zero in between (see
+# backend/services/web-push-schedule.js). A run stays up to 28 minutes and sends each reminder in
+# that window at its minute; the next run, queued meanwhile, takes over after it.
 #
 # Setup: add the repository secrets DATABASE_URL, WEB_PUSH_VAPID_PUBLIC_KEY,
 # WEB_PUSH_VAPID_PRIVATE_KEY and WEB_PUSH_VAPID_SUBJECT (the same values as the Render backend).
@@ -27,7 +29,7 @@ permissions:
 jobs:
   dispatch:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       WEB_PUSH_VAPID_PUBLIC_KEY: ${{ secrets.WEB_PUSH_VAPID_PUBLIC_KEY }}
@@ -37,6 +39,8 @@ jobs:
       WEB_PUSH_API_URL: ${{ vars.WEB_PUSH_API_URL || 'https://habitai-backend.onrender.com' }}
       WEB_PUSH_PLAN_FILE: ${{ github.workspace }}/.web-push/plan.json
       WEB_PUSH_FORCE_REFRESH: ${{ inputs.refresh || 'false' }}
+      WEB_PUSH_REFRESH_MINUTES: ${{ vars.WEB_PUSH_REFRESH_MINUTES || '30' }}
+      WEB_PUSH_WINDOW_MINUTES: ${{ vars.WEB_PUSH_WINDOW_MINUTES || '28' }}
       NODE_ENV: production
     steps:
       - name: Check configuration

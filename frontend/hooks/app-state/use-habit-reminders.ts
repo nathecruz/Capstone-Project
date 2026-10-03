@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import { getLocalDateKey } from './habit-progress';
-import { getBrowserNotificationRegistration, getHabitReminderSchedule, getHabitReminderTimes, getNotificationsModule, getSnoozeLimit, isHabitReminderDay, reminderDayNumbers, type NotificationsModule } from './reminders';
+import { enableWebReminders, getBrowserNotificationRegistration, getHabitReminderSchedule, getHabitReminderTimes, getNotificationsModule, getSnoozeLimit, isHabitReminderDay, playReminderSound, reminderDayNumbers, type NotificationsModule } from './reminders';
 import { computeSmartReminderTime, getSmartReminderMessage, requestHabitPrediction } from './smart-reminders';
 import type { Habit, Preferences } from './types';
 
@@ -36,6 +36,24 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
     };
   }, []);
 
+  // Web: keep this browser's push subscription (and time zone) current on the server, so habits
+  // made on another device still remind this one. Only refreshes a permission already given.
+  const hasHabits = habits.length > 0;
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !preferences.notificationsEnabled || !hasHabits) return;
+    void enableWebReminders({ prompt: false });
+  }, [hasHabits, preferences.notificationsEnabled]);
+
+  // Web: a reminder arriving while HabitAI is open also plays the HabitAI reminder sound.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'habitai-reminder' && event.data.soundEnabled !== false) playReminderSound();
+    };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     let browserReminderTimer: ReturnType<typeof setInterval> | undefined;
@@ -46,11 +64,11 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
         const registration = await getBrowserNotificationRegistration();
         if (!registration) return;
         if (await registration.pushManager.getSubscription()) return;
-        const reminders = habits
-          .map((habit) => ({ habit, times: getHabitReminderTimes(habit) }))
-          .filter((entry) => entry.habit.reminderEnabled && entry.times.length > 0);
+        const reminders = habits.filter((habit) => habit.smartReminderEnabled || (habit.reminderEnabled && getHabitReminderTimes(habit).length > 0));
         if (!reminders.length) return;
 
+        // Without Web Push (e.g. a browser that does not support it) reminders come from this tab
+        // while it is open, with the same timing and Smart Reminder rules as the server.
         const notifyDueReminders = () => {
           if (cancelled) return;
           const now = new Date();
@@ -58,18 +76,25 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
           for (const key of sentBrowserRemindersRef.current) {
             if (key.split('|')[1] !== today) sentBrowserRemindersRef.current.delete(key);
           }
-          for (const { habit, times } of reminders) {
-            if ((habit.startDate && habit.startDate > today) || !isHabitReminderDay(habit, now)) continue;
+          for (const habit of reminders) {
+            if ((habit.startDate && habit.startDate > today) || !isHabitReminderDay(habit, now) || habit.completionDates.includes(today)) continue;
+            const smart = habit.smartReminderEnabled ? computeSmartReminderTime(habit, now) : null;
+            const times = smart ? [{ hour: smart.target.getHours(), minute: smart.target.getMinutes() }] : getHabitReminderTimes(habit);
             for (const time of times) {
               if (now.getHours() !== time.hour || now.getMinutes() !== time.minute) continue;
               const key = `${habit.id}|${today}|${time.hour}:${time.minute}`;
               if (sentBrowserRemindersRef.current.has(key)) continue;
               sentBrowserRemindersRef.current.add(key);
-              void registration.showNotification(`${habit.label} reminder`, {
-                body: 'A small step today keeps your streak moving.',
+              const soundEnabled = habit.reminderSoundEnabled !== false;
+              void registration.showNotification(smart ? `Smart reminder: ${habit.label}` : `${habit.label} reminder`, {
+                body: smart ? getSmartReminderMessage(habit, smart.riskLevel) : 'A small step today keeps your streak moving.',
                 tag: key,
-                silent: habit.reminderSoundEnabled === false,
+                icon: '/icons/icon-192.png',
+                badge: '/icons/badge-96.png',
+                silent: !soundEnabled,
+                requireInteraction: true,
               }).catch(() => undefined);
+              if (soundEnabled) playReminderSound();
             }
           }
         };

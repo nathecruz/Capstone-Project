@@ -34,18 +34,25 @@ export function parsePlan(text) {
 export function decideWake(plan, now, { refreshMinutes = 60, sleepWindowMs = 5.5 * 60_000, force = false } = {}) {
   if (force) return { wake: true, at: now, reason: 'manual refresh' };
   if (!plan) {
-    // First run or lost cache: build a plan at most once an hour so a broken cache cannot
+    // First run or lost cache: build a plan at most twice an hour so a broken cache cannot
     // turn into a database connection every 5 minutes.
-    return new Date(now).getUTCMinutes() < 10
+    return new Date(now).getUTCMinutes() % 30 < 10
       ? { wake: true, at: now, reason: 'no plan yet' }
-      : { wake: false, reason: 'no plan yet; building one at the top of the hour' };
+      : { wake: false, reason: 'no plan yet; building one at :00 or :30' };
   }
-  if (now - plan.refreshedAt >= refreshMinutes * 60_000) return { wake: true, at: now, reason: 'hourly refresh' };
+  if (now - plan.refreshedAt >= refreshMinutes * 60_000) return { wake: true, at: now, reason: 'plan refresh' };
   const next = plan.wakeTimes.filter((time) => time > plan.lastWakeAt).sort((a, b) => a - b)[0];
   if (next === undefined) return { wake: false, reason: 'nothing due before the next refresh' };
   if (next <= now) return { wake: true, at: now, reason: 'reminder due' };
   if (next - now <= sleepWindowMs) return { wake: true, at: next, reason: 'reminder due in the next few minutes' };
   return { wake: false, reason: `next reminder at ${new Date(next).toISOString()}` };
+}
+
+/** The next planned wake-up after the last one, if it is no later than `until` (an overdue one counts). */
+export function nextWakeWithin(plan, until) {
+  if (!plan) return null;
+  const next = plan.wakeTimes.filter((time) => time > plan.lastWakeAt).sort((a, b) => a - b)[0];
+  return next !== undefined && next <= until ? next : null;
 }
 
 /** Minutes of reminders to look back on a wake: covers the gap since the last one, at most 30. */

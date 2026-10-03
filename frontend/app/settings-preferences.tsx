@@ -5,7 +5,7 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, Tex
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { supportedLanguages, supportedRegions, type TranslationKey } from '@/constants/i18n';
-import { useAppColorScheme } from '@/hooks/color-scheme-context';
+import { enableWebReminders, getWebReminderStatus, sendTestReminder, useAppColorScheme, type WebReminderStatus } from '@/hooks/color-scheme-context';
 import { exportMyData, changePassword, deleteAccount, getLoginActivity, getPasswordStrengthStatus, validatePasswordStrength, type LoginActivity } from '@/authentication';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
@@ -23,6 +23,15 @@ function SettingRow({ icon, iconColor, title, subtitle, value, onPress, trailing
     {trailing || (onPress && <Ionicons name="chevron-forward" size={19} color={isDarkMode ? '#AAA4B7' : '#778099'} />)}
   </Pressable>;
 }
+
+/** What the "Reminders on this device" row says for each state of the browser. */
+const WEB_REMINDER_TEXT: Record<WebReminderStatus, string> = {
+  on: 'On. Reminders arrive with your phone\'s notification sound.',
+  off: 'Not set up on this device yet. Turn on to get habit reminders here.',
+  blocked: 'Blocked by the browser. Allow notifications for this site in its settings, then reopen HabitAI.',
+  'needs-home-screen': 'On iPhone: tap Share, then Add to Home Screen, and open HabitAI from the Home Screen.',
+  unsupported: 'This browser cannot show reminders. Use Chrome, or HabitAI from the Home Screen.',
+};
 
 function SectionHeader({ icon, title, subtitle, isDarkMode }: { icon: keyof typeof Ionicons.glyphMap; title: string; subtitle: string; isDarkMode: boolean }) {
   const styles: Record<string, any> = useThemedStyles(themedStyles);
@@ -67,6 +76,40 @@ export default function SettingsPreferencesScreen() {
   const compactLayout = width < 360;
   const { isDarkMode, setDarkMode, clearLocalData, profile, preferences, updatePreferences, t } = useAppColorScheme();
   const [option, setOption] = useState<'language' | 'region' | null>(null);
+  // Web: whether this browser gets reminders (Web Push), with Turn on and Send test.
+  const [webReminders, setWebReminders] = useState<WebReminderStatus | null>(null);
+  const [webReminderBusy, setWebReminderBusy] = useState(false);
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    let active = true;
+    void getWebReminderStatus().then((status) => { if (active) setWebReminders(status); });
+    return () => { active = false; };
+  }, []);
+  const turnOnWebReminders = async () => {
+    setWebReminderBusy(true);
+    const enabled = await enableWebReminders({ prompt: true });
+    const status = await getWebReminderStatus();
+    setWebReminders(status);
+    setWebReminderBusy(false);
+    if (enabled) {
+      if (!preferences.notificationsEnabled) updatePreferences({ notificationsEnabled: true });
+      showAlert('Reminders are on', 'This device will get your habit reminders. Tap Send test to check the sound.');
+    } else {
+      showAlert('Reminders are not on', status === 'off' ? 'Allow notifications when your browser asks, then try again.' : WEB_REMINDER_TEXT[status]);
+    }
+  };
+  const testWebReminder = async () => {
+    setWebReminderBusy(true);
+    const result = await sendTestReminder();
+    setWebReminderBusy(false);
+    showAlert(result.ok ? 'Test reminder sent' : 'Test reminder failed', result.message);
+  };
+  const toggleNotifications = () => {
+    const enabled = !preferences.notificationsEnabled;
+    updatePreferences({ notificationsEnabled: enabled });
+    // Turning notifications on from a tap is when the browser may ask for permission.
+    if (enabled && Platform.OS === 'web') void enableWebReminders({ prompt: true }).then(() => getWebReminderStatus()).then(setWebReminders);
+  };
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [infoPage, setInfoPage] = useState<'login' | 'privacy' | 'terms' | 'about' | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -208,7 +251,8 @@ export default function SettingsPreferencesScreen() {
     <View style={[styles.hero, { paddingHorizontal: compactLayout ? 18 : 50 }]}><Text style={[styles.heroTitle, isDarkMode && styles.darkText]}>{t('settingsPreferences')}</Text><Text style={[styles.heroSubtitle, isDarkMode && styles.darkMutedText]}>Customize your experience and{`\n`}manage your app settings.</Text></View>
     <Pressable style={[styles.progressBanner, isDarkMode && styles.darkBanner]} onPress={() => router.push('/progress')} accessibilityRole="button"><View style={styles.bannerIcon}><Ionicons name="trending-up" size={23} color={themeColor('#6844D8')} /></View><View style={styles.bannerCopy}><Text style={[styles.bannerTitle, isDarkMode && styles.darkText]}>Your Progress &amp; Goals</Text><Text style={[styles.bannerSubtitle, isDarkMode && styles.darkMutedText]}>Stay consistent. Build a better you.</Text></View><Ionicons name="chevron-forward" size={20} color={themeColor('#5E6178')} /></Pressable>
     <SectionHeader icon="options-outline" title={t('preferences')} subtitle={t('setHowAppWorks')} isDarkMode={isDarkMode} /><View style={[styles.card, isDarkMode && styles.darkCard]}>
-      <SettingRow icon="notifications" iconColor="#6C51DC" title={t('notifications')} subtitle={t('receiveUpdates')} trailing={<Toggle enabled={preferences.notificationsEnabled} onPress={() => updatePreferences({ notificationsEnabled: !preferences.notificationsEnabled })} label={t('notifications')} isDarkMode={isDarkMode} />} isDarkMode={isDarkMode} />
+      <SettingRow icon="notifications" iconColor="#6C51DC" title={t('notifications')} subtitle={t('receiveUpdates')} trailing={<Toggle enabled={preferences.notificationsEnabled} onPress={toggleNotifications} label={t('notifications')} isDarkMode={isDarkMode} />} isDarkMode={isDarkMode} />
+      {Platform.OS === 'web' && <SettingRow icon="phone-portrait" iconColor="#2F9E6E" title="Reminders on this device" subtitle={webReminders ? WEB_REMINDER_TEXT[webReminders] : 'Checking this device...'} trailing={webReminders === 'on' || webReminders === 'off' ? <Pressable style={[styles.smallButton, webReminderBusy && styles.disabledButton]} onPress={webReminders === 'on' ? testWebReminder : turnOnWebReminders} disabled={webReminderBusy} accessibilityRole="button" accessibilityLabel={webReminders === 'on' ? 'Send a test reminder' : 'Turn on reminders on this device'}><Text style={styles.smallButtonText}>{webReminderBusy ? '...' : webReminders === 'on' ? 'Send test' : 'Turn on'}</Text></Pressable> : undefined} isDarkMode={isDarkMode} />}
       <SettingRow icon="trophy" iconColor="#E0A21B" title="Show me on leaderboards" subtitle="Others see only your first name and last initial" trailing={<Toggle enabled={preferences.showOnLeaderboard !== false} onPress={() => updatePreferences({ showOnLeaderboard: preferences.showOnLeaderboard === false })} label="Show me on leaderboards" isDarkMode={isDarkMode} />} isDarkMode={isDarkMode} />
       <SettingRow icon="moon" iconColor="#3564D8" title={t('darkMode')} subtitle={t('switchTheme')} trailing={<Toggle enabled={isDarkMode} onPress={() => setDarkMode(!isDarkMode)} label={t('darkMode')} isDarkMode={isDarkMode} />} last isDarkMode={isDarkMode} />
     </View>
@@ -236,6 +280,7 @@ export default function SettingsPreferencesScreen() {
 }
 
 const themedStyles = createThemedStyles({
+  smallButton: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, backgroundColor: '#5B42D8', marginLeft: 8 }, smallButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
   screen: { flex: 1, backgroundColor: '#F7F8FC' }, darkScreen: { backgroundColor: '#111018' }, content: { paddingBottom: 110 }, container: { width: '100%', maxWidth: 680, alignSelf: 'center' },
   topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4, marginBottom: 10 }, backButton: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#EEF0FA', alignItems: 'center', justifyContent: 'center' }, topIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#EDE7FF', alignItems: 'center', justifyContent: 'center' },
   hero: { paddingHorizontal: 50, marginBottom: 20 }, heroTitle: { fontSize: 25, lineHeight: 30, fontWeight: '900', color: '#172043' }, heroSubtitle: { fontSize: 14, lineHeight: 19, color: '#7A8298', marginTop: 5, fontWeight: '600' }, darkText: { color: '#F5F2FA' }, darkMutedText: { color: '#AAA4B7' },

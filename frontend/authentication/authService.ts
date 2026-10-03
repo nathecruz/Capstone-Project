@@ -522,6 +522,22 @@ export async function saveWebPushSubscription(
   }
 }
 
+/** Asks the server to send a test reminder to this device (or all of the account's devices) now. */
+export async function sendTestWebPush(endpoint?: string): Promise<{ ok: boolean; message: string }> {
+  const token = await getSessionToken();
+  if (!token) return { ok: false, message: 'Please sign in again.' };
+  try {
+    await apiRequest('/api/web-push/test', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify(endpoint ? { endpoint } : {}),
+    });
+    return { ok: true, message: 'A test reminder is on its way. It should appear within a few seconds.' };
+  } catch (error) {
+    return { ok: false, message: error instanceof ApiRequestError ? error.message : 'Could not send a test reminder. Check your connection.' };
+  }
+}
+
 export type RemoteAppState = {
   ok: boolean;
   /** True when nothing changed since `since`; state and completions are then omitted. */

@@ -18,7 +18,7 @@ import { initialPreferences, initialProfile, type Goal, type Habit, type Persist
 
 export * from './app-state/types';
 export { getHabitCompletionHistory, getHabitProgressSummary, getRecentCompletionHistory } from './app-state/habit-progress';
-export { getHabitReminderDays, getHabitReminderSchedule, getHabitReminderTimes, getNotificationsModule, getSnoozeLimit, isHabitMissedYesterday, isHabitReminderDay, requestNotificationAccess } from './app-state/reminders';
+export { enableWebReminders, getHabitReminderDays, getHabitReminderSchedule, getHabitReminderTimes, getNotificationsModule, getSnoozeLimit, getWebReminderStatus, isHabitMissedYesterday, isHabitReminderDay, requestNotificationAccess, sendTestReminder, type WebReminderStatus } from './app-state/reminders';
 
 type ColorScheme = 'light' | 'dark';
 let nextHabitId = 0;

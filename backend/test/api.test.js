@@ -236,6 +236,11 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal((await db.query('SELECT COUNT(*)::int AS count FROM web_push_snooze_queue')).rows[0].count, 1);
     assert.equal((await request('/api/web-push/subscriptions', { method: 'POST', headers: authHeaders, body: JSON.stringify({ subscription: { ...pushSubscription, endpoint: 'https://attacker.example/push' }, timeZone: 'UTC' }) })).response.status, 400);
     assert.equal((await request('/api/web-push/subscriptions', { method: 'DELETE', headers: authHeaders, body: JSON.stringify({ endpoint: pushSubscription.endpoint }) })).response.status, 200);
+    // The test notification needs a signed-in account with this device subscribed.
+    assert.equal((await request('/api/web-push/test', { method: 'POST', body: JSON.stringify({}) })).response.status, 401);
+    const noDevice = await request('/api/web-push/test', { method: 'POST', headers: authHeaders, body: JSON.stringify({ endpoint: pushSubscription.endpoint }) });
+    assert.equal(noDevice.response.status, 404);
+    assert.match(noDevice.body.message, /Turn on reminders/);
   });
 
   await t.test('ML proxy, AI without keys, and password reset protections', async () => {

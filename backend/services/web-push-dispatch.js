@@ -2,6 +2,7 @@
 // (scripts/send-web-push-reminders.js) and by the GitHub Actions scheduler
 // (scripts/web-push-scheduler.js). `db` is anything with pg's `query(text, values)`.
 import crypto from 'node:crypto';
+import { getSmartReminderText } from './smart-reminders.js';
 import { getDueHabitReminders, getReminderText, getSnoozeLimit, getWebPushSnoozeSettings, hashWebPushSnoozeToken } from './web-push-reminders.js';
 
 /** The Admin Panel manages the reminder wording; without its table or when disabled, the built-in text is used. */
@@ -100,7 +101,7 @@ export async function dispatchDueSnoozes(db, { webpush, template = null, snoozeU
         tag: `snooze-${row.id}`,
         soundEnabled: habit.reminderSoundEnabled !== false,
         actions: action ? [{ action: action.action, title: action.title }] : [],
-        data: action ? { habitId: row.habitId, type: 'habit-reminder', snoozeCount: Number(row.snoozeCount), snoozeToken: action.token, snoozeUrl: action.url } : { habitId: row.habitId, type: 'habit-reminder' },
+        data: action ? { habitId: row.habitId, type: 'habit-reminder', url: '/', snoozeCount: Number(row.snoozeCount), snoozeToken: action.token, snoozeUrl: action.url } : { habitId: row.habitId, type: 'habit-reminder', url: '/' },
       }), { TTL: 86400 });
       await db.query('UPDATE web_push_snooze_queue SET sent_at=$2,attempted_at=0 WHERE id=$1', [row.id, Date.now()]);
       result.sent += 1;
@@ -144,7 +145,8 @@ export async function dispatchDueReminders(db, { webpush, template = null, snooz
         `, [row.subscriptionId, String(habit.id), due.date, due.time, Date.now()]);
         if (!claim.rowCount) continue;
 
-        const { title, body } = getReminderText(habit, template);
+        const { title, body } = due.smart ? getSmartReminderText(habit, due.smart.riskLevel) : getReminderText(habit, template);
+        const type = due.smart ? 'smart-reminder' : 'habit-reminder';
         const notificationId = makeNotificationId(row.userId, String(habit.id), due.date, due.time);
         try {
           const action = await makeSnoozeAction(db, snoozeUrl, row.subscriptionId, String(habit.id), 0, state);
@@ -155,8 +157,8 @@ export async function dispatchDueReminders(db, { webpush, template = null, snooz
             soundEnabled: habit.reminderSoundEnabled !== false,
             actions: action ? [{ action: action.action, title: action.title }] : [],
             data: action
-              ? { habitId: habit.id, type: 'habit-reminder', snoozeCount: 0, snoozeToken: action.token, snoozeUrl: action.url }
-              : { habitId: habit.id, type: 'habit-reminder' },
+              ? { habitId: habit.id, type, url: '/', snoozeCount: 0, snoozeToken: action.token, snoozeUrl: action.url }
+              : { habitId: habit.id, type, url: '/' },
           }), { TTL: 86400 });
           const sentAt = Date.now();
           await db.query(`UPDATE web_push_deliveries
@@ -164,9 +166,9 @@ export async function dispatchDueReminders(db, { webpush, template = null, snooz
             WHERE subscription_id=$1 AND habit_id=$2 AND reminder_date=$3 AND reminder_time=$4`,
           [row.subscriptionId, String(habit.id), due.date, due.time, sentAt]);
           await db.query(`INSERT INTO notifications(id,user_id,type,title,body,created_at)
-            VALUES($1,$2,'habit-reminder',$3,$4,$5)
+            VALUES($1,$2,$3,$4,$5,$6)
             ON CONFLICT(id) DO NOTHING`,
-          [notificationId, row.userId, title, body, sentAt]);
+          [notificationId, row.userId, type, title, body, sentAt]);
           result.sent += 1;
           if (action) result.followUps.push(action.followUpAt);
         } catch (error) {

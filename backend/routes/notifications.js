@@ -1,11 +1,15 @@
 import crypto from 'node:crypto';
+import webpush from 'web-push';
 import { query, withTransaction } from '../db/client.js';
 import { parse } from '../lib/http.js';
-import { notificationReadSchema, webPushSnoozeRequestSchema, webPushSubscriptionRequestSchema, webPushUnsubscribeSchema } from '../schemas.js';
+import { notificationReadSchema, webPushSnoozeRequestSchema, webPushSubscriptionRequestSchema, webPushTestSchema, webPushUnsubscribeSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
-import { getConfiguredVapidPublicKey, getWebPushSnoozeSettings, hashWebPushSnoozeToken, isAllowedWebPushEndpoint } from '../services/web-push-reminders.js';
+import { getConfiguredVapidDetails, getConfiguredVapidPublicKey, getWebPushSnoozeSettings, hashWebPushSnoozeToken, isAllowedWebPushEndpoint } from '../services/web-push-reminders.js';
+
+const TEST_PUSH_COOLDOWN_MS = 15_000;
 
 export default function registerNotificationRoutes(app) {
+  const lastTestPush = new Map();
   // In-app notifications: achievements, reminders, and Admin Panel broadcasts/announcements.
   app.get('/api/notifications', async (request, response) => {
     const session = await requireAuth(request, response);
@@ -49,6 +53,51 @@ export default function registerNotificationRoutes(app) {
       [crypto.randomUUID(), session.userId, input.subscription.endpoint, input.subscription, input.timeZone, now],
     );
     response.json({ ok: true });
+  });
+
+  // Sends a test reminder right away (to this device, or to all of the account's devices), so
+  // people can check that notifications and their sound work without waiting for a reminder.
+  app.post('/api/web-push/test', async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const input = parse(webPushTestSchema, request, response);
+    if (!input) return;
+    const vapidDetails = getConfiguredVapidDetails();
+    if (!vapidDetails) return response.status(503).json({ ok: false, message: 'Web Push is not configured on the server.' });
+    const now = Date.now();
+    if (now - (lastTestPush.get(session.userId) || 0) < TEST_PUSH_COOLDOWN_MS) {
+      return response.status(429).json({ ok: false, message: 'Wait a few seconds before sending another test.' });
+    }
+    const rows = (await query(
+      `SELECT id, subscription_json AS "subscriptionJson" FROM web_push_subscriptions WHERE user_id=$1${input.endpoint ? ' AND endpoint=$2' : ''}`,
+      input.endpoint ? [session.userId, input.endpoint] : [session.userId],
+    )).rows;
+    if (!rows.length) return response.status(404).json({ ok: false, message: 'Turn on reminders on this device first.' });
+    lastTestPush.set(session.userId, now);
+
+    const payload = JSON.stringify({
+      title: 'HabitAI test reminder',
+      body: 'Notifications work on this device. Your habit reminders will look and sound like this.',
+      tag: `habitai-test-${now}`,
+      soundEnabled: true,
+      data: { type: 'test', url: '/' },
+    });
+    let sent = 0;
+    let expired = 0;
+    for (const row of rows) {
+      try {
+        await webpush.sendNotification(row.subscriptionJson, payload, { TTL: 300, vapidDetails });
+        sent += 1;
+      } catch (error) {
+        if (error?.statusCode === 404 || error?.statusCode === 410) {
+          await query('DELETE FROM web_push_subscriptions WHERE id=$1', [row.id]);
+          expired += 1;
+        }
+      }
+    }
+    if (sent) return response.json({ ok: true, sent, expired });
+    if (expired) return response.status(410).json({ ok: false, message: 'This device stopped accepting notifications. Turn reminders on again.' });
+    response.status(502).json({ ok: false, message: 'Could not reach the notification service. Please try again.' });
   });
 
   app.delete('/api/web-push/subscriptions', async (request, response) => {
