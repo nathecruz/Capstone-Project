@@ -158,6 +158,12 @@ export default function HomeScreen() {
               <Text style={[styles.greeting, isDarkMode && styles.darkGreeting]}>{profile.firstName || profile.fullName ? `${greeting}, ${profile.firstName || profile.fullName.split(' ')[0]}!` : `${greeting}!`}</Text>
               <Text style={[styles.titleText, compact && styles.compactTitle, isDarkMode && styles.darkTitleText]}>{'Small Habits,\nBig Progress.'}</Text>
               <Text style={[styles.subtitleText, isDarkMode && styles.darkSubtitleText]}>{'Every habit you build today\nshapes your better tomorrow.'}</Text>
+              {isFaculty && (
+                <View style={styles.facultyModePill} accessible accessibilityLabel="PSAU Faculty mode">
+                  <Ionicons name="briefcase" size={12} color="#FFFFFF" />
+                  <Text style={styles.facultyModeText}>PSAU Faculty mode</Text>
+                </View>
+              )}
             </View>
 
             {wide && (
@@ -421,6 +427,9 @@ const themedStyles = createThemedStyles({
     paddingRight: 6,
     zIndex: 2,
   },
+  // Faculty mode is on: shown under the greeting so it is easy to spot.
+  facultyModePill: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 6, marginTop: 10, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, backgroundColor: '#5b42d8' },
+  facultyModeText: { fontSize: 11, fontWeight: '800', color: '#ffffff' },
   greeting: {
     fontSize: 15,
     color: '#3b3b40',

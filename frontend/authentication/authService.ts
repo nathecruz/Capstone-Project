@@ -354,6 +354,9 @@ export async function getSession() {
       await logoutUser();
       return null;
     }
+    // A role set or changed on the server (e.g. a sign-in saved before Faculty mode existed) is
+    // stored, so the app switches mode without signing out. Only on a change, to avoid a reload loop.
+    if ((payload.user.role ?? 'user') !== (session.role ?? 'user')) await refreshStoredUser(payload.user);
     return payload.user;
   } catch (error) {
     if (error instanceof ApiRequestError && error.status === 401) {

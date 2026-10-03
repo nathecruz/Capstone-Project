@@ -77,6 +77,23 @@ describe('auth service offline behavior', () => {
     expect(logoutUser).toHaveBeenCalledTimes(1);
   });
 
+  it('stores a role the server changed, so Faculty mode turns on without signing out', async () => {
+    const stored = { id: 'u1', fullName: 'Jose Reyes', email: 'jose@example.com' };
+    const fromServer = { ...stored, role: 'faculty' as const };
+    jest.mocked(getCurrentSession).mockResolvedValue(stored);
+    jest.mocked(getSessionToken).mockResolvedValue('session-token');
+    fetchMock.mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true, user: fromServer }) });
+
+    await expect(getSession()).resolves.toEqual(fromServer);
+    expect(saveSessionToken).toHaveBeenCalledWith('session-token', fromServer);
+
+    // Same role as stored: nothing is saved (saving notifies listeners, which would loop).
+    jest.mocked(saveSessionToken).mockClear();
+    jest.mocked(getCurrentSession).mockResolvedValue(fromServer);
+    await getSession();
+    expect(saveSessionToken).not.toHaveBeenCalled();
+  });
+
   it('sends the device time zone with habit completions', async () => {
     jest.mocked(getSessionToken).mockResolvedValue('session-token');
     fetchMock.mockResolvedValue({
