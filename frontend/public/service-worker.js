@@ -56,6 +56,37 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   event.waitUntil((async () => {
+    // Done: check the habit off from the notification, without opening the app.
+    if (event.action === 'DONE') {
+      const { doneToken, doneUrl, label, habitId } = event.notification.data || {};
+      if (!doneToken || !doneUrl) return;
+      try {
+        const response = await fetch(doneUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: doneToken }),
+          cache: 'no-store',
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.message || 'Open HabitAI to check in.');
+        await self.registration.showNotification(`✓ ${body.label || label || 'Habit'} done!`, {
+          body: 'Checked off for today: +5 tokens. Keep the streak going!',
+          tag: event.notification.tag,
+          icon: ICON,
+          badge: BADGE,
+          silent: true,
+        });
+        await tellOpenWindows({ type: 'habitai-checked-in', habitId });
+      } catch (error) {
+        await self.registration.showNotification('Could not check it off', {
+          body: (error && error.message) || 'Open HabitAI to check in.',
+          tag: 'done-failed',
+          icon: ICON,
+          badge: BADGE,
+        });
+      }
+      return;
+    }
     if (event.action === 'SNOOZE') {
       const { snoozeToken, snoozeUrl } = event.notification.data || {};
       if (!snoozeToken || !snoozeUrl) return;

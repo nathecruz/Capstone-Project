@@ -14,6 +14,8 @@ import pg from 'pg';
 import { goalPlanSchema } from '../schemas.js';
 import { normalizeAppState } from '../services/app-state-sync.js';
 import { isValidCompletionDate } from '../services/completion-date.js';
+import { weeklyQuests } from '../services/quests.js';
+import { doneActionSecret, makeDoneToken } from '../services/web-push-actions.js';
 import { getSupportEmailConfig } from '../services/support-email.js';
 
 test('habit completion dates use the client time zone', () => {
@@ -465,14 +467,82 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     await request('/api/app-state', { method: 'PUT', headers: facultyHeaders, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], id: 'prep', label: 'Prepare tomorrow\'s lesson' }] }) });
     const checkIn = await request('/api/habit-completions', { method: 'PUT', headers: facultyHeaders, body: JSON.stringify({ habitId: 'prep', date: today, completed: true, timeZone: 'UTC' }) });
     assert.equal(checkIn.response.status, 200, 'faculty can track their own habits');
-    assert.equal(checkIn.body.tokens, 15, '+5 for the check-in and +10 for the daily challenge (1 of 1 habit due today)');
-    assert.deepEqual(checkIn.body.tokenHistory.slice(0, 2).map((item) => item.label), ['Daily challenge', "Completed Prepare tomorrow's lesson"]);
+    const questBonus = weeklyQuests([{ id: 'prep', frequency: 'Daily', startDate: '2026-01-01', reminderDays: [], meta: '' }], new Map([[today, new Set(['prep'])]]), today)
+      .filter((quest) => quest.complete).reduce((sum, quest) => sum + quest.reward, 0);
+    assert.equal(checkIn.body.tokens, 15 + questBonus, '+5 for the check-in, +10 for the daily challenge (1 of 1 habit due today), and any weekly quest it completes');
+    assert.deepEqual(checkIn.body.tokenHistory.filter((item) => !item.label.startsWith('Weekly quest')).slice(0, 2).map((item) => item.label), ['Daily challenge', "Completed Prepare tomorrow's lesson"]);
     const undone = await request('/api/habit-completions', { method: 'PUT', headers: facultyHeaders, body: JSON.stringify({ habitId: 'prep', date: today, completed: false, timeZone: 'UTC' }) });
     assert.equal(undone.body.tokens, 0, 'an undo also takes the challenge bonus back');
     const again = await request('/api/habit-completions', { method: 'PUT', headers: facultyHeaders, body: JSON.stringify({ habitId: 'prep', date: today, completed: true, timeZone: 'UTC' }) });
-    assert.equal(again.body.tokens, 15, 'and pays it again, once, when the challenge is done again');
+    assert.equal(again.body.tokens, 15 + questBonus, 'and pays it again, once, when the challenge is done again');
     const board = await request('/api/leaderboard?period=All%20Time', { headers: facultyHeaders });
     assert.ok(!JSON.stringify(board.body).includes('Santos'), 'faculty are not on the student leaderboard');
+  });
+
+  await t.test('weekly quests, the mystery box, the habit buddy and the Done button on reminders', async () => {
+    const password = 'Cobalt!River8!Maple3!Stone';
+    await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, firstName: 'Quest', lastName: 'Runner', username: 'quest_runner', email: 'quest@example.com', password, privacyConsent: true }) });
+    await db.query('UPDATE users SET email_verified_at = 1 WHERE email = $1', ['quest@example.com']);
+    const login = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'quest@example.com', password }) });
+    const headers = { Authorization: `Bearer ${login.body.token}` };
+    const userId = (await db.query('SELECT id FROM users WHERE email=$1', ['quest@example.com'])).rows[0].id;
+    await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [
+      { ...appState.habits[0], id: 'walk', label: 'Morning walk' },
+      { ...appState.habits[0], id: 'read', label: 'Read' },
+    ] }) });
+
+    // A fresh buddy, and a box that only opens after the day's first check-in.
+    const fresh = await request('/api/buddy', { headers });
+    assert.equal(fresh.response.status, 200, JSON.stringify(fresh.body));
+    assert.deepEqual({ name: fresh.body.buddy.name, owned: fresh.body.buddy.owned, checkIns: fresh.body.buddy.checkIns }, { name: 'Habi', owned: [], checkIns: 0 });
+    const locked = await request('/api/mystery-box/open', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+    assert.equal(locked.response.status, 409);
+    assert.equal(locked.body.code, 'BOX_LOCKED');
+
+    // Checking both habits in completes "check in on every habit" in the weeks it is the third quest.
+    for (const habitId of ['walk', 'read']) {
+      await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId, date: today, completed: true, timeZone: 'UTC' }) });
+    }
+    const quests = weeklyQuests(['walk', 'read'].map((id) => ({ id, frequency: 'Daily', startDate: '2026-01-01', reminderDays: [], meta: '' })), new Map([[today, new Set(['walk', 'read'])]]), today);
+    const ledger = async () => (await db.query('SELECT id, amount FROM token_transactions WHERE user_id=$1', [userId])).rows;
+    const paidQuests = (await ledger()).filter((row) => row.id.includes(':quest:')).map((row) => row.id.split(':').at(-1)).sort();
+    assert.deepEqual(paidQuests, quests.filter((quest) => quest.complete).map((quest) => quest.id).sort(), 'the server pays exactly the completed quests');
+
+    // The box opens once a day for 3 to 20 tokens.
+    const before = (await request('/api/buddy', { headers })).body;
+    const box = await request('/api/mystery-box/open', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+    assert.equal(box.response.status, 200, JSON.stringify(box.body));
+    assert.ok([3, 5, 8, 12, 20].includes(box.body.amount));
+    assert.equal(box.body.alreadyOpened, false);
+    const reopened = await request('/api/mystery-box/open', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+    assert.deepEqual({ amount: reopened.body.amount, alreadyOpened: reopened.body.alreadyOpened, tokens: reopened.body.tokens }, { amount: box.body.amount, alreadyOpened: true, tokens: box.body.tokens });
+    assert.equal(before.buddy.checkIns, 2);
+
+    // The shop: stage-locked items, the price, owning and wearing.
+    const crown = await request('/api/buddy/items', { method: 'POST', headers, body: JSON.stringify({ itemId: 'crown' }) });
+    assert.equal(crown.response.status, 403, 'the crown waits for the Champ stage');
+    await db.query('DELETE FROM token_transactions WHERE user_id=$1', [userId]);
+    const poor = await request('/api/buddy/items', { method: 'POST', headers, body: JSON.stringify({ itemId: 'cap' }) });
+    assert.equal(poor.response.status, 402);
+    await db.query("INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,100,'Test grant',$3,$4)", [`${userId}:token:test-grant`, userId, new Date().toISOString(), Date.now()]);
+    const cap = await request('/api/buddy/items', { method: 'POST', headers, body: JSON.stringify({ itemId: 'cap' }) });
+    assert.equal(cap.response.status, 200, JSON.stringify(cap.body));
+    assert.deepEqual({ head: cap.body.buddy.head, owned: cap.body.buddy.owned, tokens: cap.body.tokens }, { head: 'cap', owned: ['cap'], tokens: 60 });
+    assert.equal((await request('/api/buddy/items', { method: 'POST', headers, body: JSON.stringify({ itemId: 'cap' }) })).response.status, 409);
+    const renamed = await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ name: 'Bolt', head: '' }) });
+    assert.deepEqual({ name: renamed.body.buddy.name, head: renamed.body.buddy.head }, { name: 'Bolt', head: '' });
+    assert.equal((await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ hand: 'books' }) })).response.status, 400, 'only bought items can be worn');
+
+    // Done on a reminder notification checks the habit in, with no session; a forged token cannot.
+    await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'read', date: today, completed: false, timeZone: 'UTC' }) });
+    const secret = doneActionSecret({ WEB_PUSH_VAPID_PUBLIC_KEY: 'test-vapid-public-key', WEB_PUSH_VAPID_PRIVATE_KEY: 'test-vapid-private-key', WEB_PUSH_VAPID_SUBJECT: 'mailto:test@example.com' });
+    const doneToken = makeDoneToken({ userId, habitId: 'read', date: today, timeZone: 'UTC' }, secret);
+    assert.equal((await request('/api/web-push/done', { method: 'POST', body: JSON.stringify({ token: `${doneToken.split('.')[0]}.forged-signature-forged-signature` }) })).response.status, 410);
+    const done = await request('/api/web-push/done', { method: 'POST', body: JSON.stringify({ token: doneToken }) });
+    assert.equal(done.response.status, 200, JSON.stringify(done.body));
+    assert.equal(done.body.label, 'Read');
+    const completions = (await request('/api/habit-completions', { headers })).body.completions;
+    assert.ok(completions.some((row) => row.habitId === 'read' && row.date === today), 'the habit is checked in');
   });
 
   await t.test('issue reports store attachments in the database and validate content', async () => {

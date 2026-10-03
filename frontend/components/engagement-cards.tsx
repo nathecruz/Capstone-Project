@@ -5,14 +5,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Animated, Pressable, Text, View } from 'react-native';
+import { openMysteryBox } from '@/authentication/authService';
+import { Confetti } from '@/components/confetti';
 import { openFocus } from '@/components/today-agenda';
-import type { Goal, Habit } from '@/hooks/app-state/types';
+import type { Goal, Habit, TokenTransaction } from '@/hooks/app-state/types';
 import { createThemedStyles, useThemedStyles } from '@/hooks/use-themed-styles';
 import { badgeProgress, badgeRemaining, nextBadge } from '@/utils/achievements';
 import { askAi } from '@/utils/ai-client';
 import { computeStreak } from '@/utils/streaks';
 import { dailyChallenge, habitsAtRisk, levelProgress, POINTS_PER_LEVEL, weeklyRecap } from '@/utils/engagement';
 import { getLocalDateKey } from '@/utils/habit-visibility';
+import { daysLeftInWeek, weeklyQuests } from '@/utils/quests';
 
 /** A bar that grows to `share` (0 to 1) whenever it changes. */
 function GrowingBar({ share, trackStyle, fillStyle }: { share: number; trackStyle: object; fillStyle: object | object[] }) {
@@ -78,6 +81,109 @@ export function NextBadgeCard({ habits, goals, style }: { habits: Habit[]; goals
       </View>
       <GrowingBar share={next.share} trackStyle={styles.badgeTrack} fillStyle={[styles.badgeFill, { backgroundColor: next.color }]} />
       <Text style={styles.badgeLeft}>{badgeRemaining(next)} · {Math.min(next.current, next.target)} / {next.target}{next.unit === '%' ? '%' : ''}</Text>
+    </Pressable>
+  );
+}
+
+/** This week's three quests, their progress and the tokens they pay (the server pays them). */
+export function WeeklyQuestsCard({ habits, now, style }: { habits: Habit[]; now: Date; style?: object | false }) {
+  const styles = useThemedStyles(themedStyles);
+  const quests = weeklyQuests(habits, now);
+  if (!quests.length) return null;
+  const left = daysLeftInWeek(now);
+  const earned = quests.filter((quest) => quest.complete).reduce((sum, quest) => sum + quest.reward, 0);
+  const total = quests.reduce((sum, quest) => sum + quest.reward, 0);
+  return (
+    <View style={[styles.card, style]}>
+      <View style={styles.cardHeader}>
+        <View style={[styles.cardIcon, styles.questIcon]}><Ionicons name="flag" size={16} color="#FFFFFF" /></View>
+        <View style={styles.cardCopy}>
+          <Text style={styles.cardTitle}>Weekly quests</Text>
+          <Text style={styles.cardText}>{left} day{left === 1 ? '' : 's'} left · {earned}/{total} tokens earned</Text>
+        </View>
+      </View>
+      <View style={styles.questList}>
+        {quests.map((quest) => (
+          <View key={quest.id} style={styles.questRow} accessible accessibilityLabel={`${quest.title}: ${quest.progress} of ${quest.target}${quest.complete ? ', done' : ''}, ${quest.reward} tokens`}>
+            <View style={[styles.questBadge, quest.complete && styles.questBadgeDone]}>
+              <Ionicons name={(quest.complete ? 'checkmark' : quest.icon) as keyof typeof Ionicons.glyphMap} size={14} color={quest.complete ? '#FFFFFF' : '#4BA3FF'} />
+            </View>
+            <View style={styles.questCopy}>
+              <Text style={[styles.questTitle, quest.complete && styles.questTitleDone]} numberOfLines={1}>{quest.title}</Text>
+              <View style={styles.questTrack}><View style={[styles.questFill, quest.complete && styles.questFillDone, { width: `${Math.round((quest.progress / quest.target) * 100)}%` }]} /></View>
+            </View>
+            <Text style={styles.questCount}>{quest.progress}/{quest.target}</Text>
+            <View style={[styles.rewardChip, quest.complete && styles.rewardChipDone]}><Text style={[styles.rewardText, quest.complete && styles.rewardTextDone]}>+{quest.reward}</Text></View>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+/** The daily mystery box: unlocked by the day's first check-in, opened once for 3 to 20 tokens. */
+export function MysteryBoxCard({ habits, tokenHistory, onWallet, style }: { habits: Habit[]; tokenHistory: TokenTransaction[]; onWallet: (wallet: { tokens?: number; points?: number; tokenHistory?: object[] }) => void; style?: object | false }) {
+  const styles = useThemedStyles(themedStyles);
+  const today = getLocalDateKey();
+  const [opening, setOpening] = useState(false);
+  const [revealed, setRevealed] = useState<number | null>(null);
+  const [error, setError] = useState('');
+  const [shake] = useState(() => new Animated.Value(0));
+  const [pop] = useState(() => new Animated.Value(1));
+  const opened = tokenHistory.find((entry) => entry.id === `mystery:${today}`);
+  const amount = revealed ?? (opened ? Number(opened.amount) : null);
+  const ready = habits.some((habit) => habit.completionDates.includes(today));
+  // A ready box wiggles now and then to ask to be opened.
+  useEffect(() => {
+    if (!ready || amount !== null) return;
+    const wiggle = Animated.loop(Animated.sequence([
+      Animated.delay(1600),
+      ...[1, -1, 1, -1, 0].map((toValue) => Animated.timing(shake, { toValue, duration: 90, useNativeDriver: false })),
+    ]));
+    wiggle.start();
+    return () => wiggle.stop();
+  }, [amount, ready, shake]);
+  if (!habits.length) return null;
+
+  const open = async () => {
+    if (opening || amount !== null || !ready) return;
+    setOpening(true);
+    setError('');
+    const rattle = Animated.loop(Animated.sequence([1, -1].map((toValue) => Animated.timing(shake, { toValue, duration: 70, useNativeDriver: false }))));
+    rattle.start();
+    const [result] = await Promise.all([openMysteryBox(today), new Promise((resolve) => setTimeout(resolve, 900))]);
+    rattle.stop();
+    shake.setValue(0);
+    setOpening(false);
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    onWallet(result);
+    setRevealed(result.amount);
+    pop.setValue(0.3);
+    Animated.spring(pop, { toValue: 1, friction: 4, tension: 140, useNativeDriver: false }).start();
+  };
+
+  const title = amount !== null ? `You got +${amount} tokens!` : ready ? 'Your mystery box is ready' : 'Daily mystery box';
+  const text = amount !== null ? 'A new box waits after tomorrow\'s first check-in.' : ready ? (opening ? 'Opening...' : 'Tap to open it. Up to 20 tokens inside!') : 'Check in one habit today to unlock it.';
+  return (
+    <Pressable style={({ pressed }) => [styles.card, styles.boxCard, ready && amount === null && styles.boxReady, pressed && ready && styles.pressed, style]} onPress={open} disabled={!ready || amount !== null || opening} accessibilityRole="button" accessibilityLabel={`${title}. ${text}`}>
+      {revealed !== null && <Confetti burstKey={`box-${today}`} />}
+      <View style={styles.cardHeader}>
+        <Animated.View style={[styles.boxIcon, !ready && styles.boxIconLocked, { transform: [{ rotate: shake.interpolate({ inputRange: [-1, 1], outputRange: ['-12deg', '12deg'] }) }] }]}>
+          <Text style={styles.boxEmoji}>{amount !== null ? '🎉' : ready ? '🎁' : '🔒'}</Text>
+        </Animated.View>
+        <View style={styles.cardCopy}>
+          <Text style={styles.cardTitle}>{title}</Text>
+          <Text style={styles.cardText}>{error || text}</Text>
+        </View>
+        {amount !== null ? (
+          <Animated.View style={[styles.boxAmount, { transform: [{ scale: pop }] }]}><Text style={styles.boxAmountText}>+{amount}</Text></Animated.View>
+        ) : ready ? (
+          <View style={styles.boxOpen}><Text style={styles.boxOpenText}>Open</Text></View>
+        ) : null}
+      </View>
     </Pressable>
   );
 }
@@ -216,6 +322,31 @@ const themedStyles = createThemedStyles({
   levelTrack: { height: 8, borderRadius: 4, backgroundColor: '#E6DFFA', overflow: 'hidden' },
   levelFill: { height: '100%', borderRadius: 4, backgroundColor: '#7B5CF0' },
   levelText: { fontSize: 11, fontWeight: '700', color: '#6A6573' },
+  questIcon: { backgroundColor: '#4BA3FF' },
+  questList: { gap: 10, marginTop: 12 },
+  questRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  questBadge: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E7F3FF' },
+  questBadgeDone: { backgroundColor: '#3BAA74' },
+  questCopy: { flex: 1, gap: 5 },
+  questTitle: { fontSize: 12, fontWeight: '800', color: '#2F2D3C' },
+  questTitleDone: { color: '#2C6B4C' },
+  questTrack: { height: 6, borderRadius: 3, backgroundColor: '#EEF3FA', overflow: 'hidden' },
+  questFill: { height: '100%', borderRadius: 3, backgroundColor: '#4BA3FF' },
+  questFillDone: { backgroundColor: '#3BAA74' },
+  questCount: { width: 34, textAlign: 'right', fontSize: 11, fontWeight: '800', color: '#6A6573' },
+  rewardChip: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 999, backgroundColor: '#FFF4D9' },
+  rewardChipDone: { backgroundColor: '#ECF8F1' },
+  rewardText: { fontSize: 11, fontWeight: '900', color: '#9A6A12' },
+  rewardTextDone: { color: '#2C6B4C' },
+  boxCard: { overflow: 'visible' },
+  boxReady: { borderWidth: 1.5, borderColor: '#F2C94C' },
+  boxIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF4D9' },
+  boxIconLocked: { backgroundColor: '#F1EEF8' },
+  boxEmoji: { fontSize: 24 },
+  boxAmount: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: '#F2A93B' },
+  boxAmountText: { fontSize: 15, fontWeight: '900', color: '#FFFFFF' },
+  boxOpen: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: '#5B42D8' },
+  boxOpenText: { fontSize: 13, fontWeight: '900', color: '#FFFFFF' },
   streakChip: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 10, backgroundColor: '#FFF1E6' },
   streakChipText: { fontSize: 12, fontWeight: '900', color: '#C9661F' },
   badgeTally: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: '#F0E9FF' },

@@ -3,6 +3,7 @@
 // (scripts/web-push-scheduler.js). `db` is anything with pg's `query(text, values)`.
 import crypto from 'node:crypto';
 import { getSmartReminderText } from './smart-reminders.js';
+import { doneActionSecret, getWebPushDoneUrl, localDateIn, makeDoneToken } from './web-push-actions.js';
 import { getDueHabitReminders, getReminderText, getSnoozeLimit, getWebPushSnoozeSettings, hashWebPushSnoozeToken } from './web-push-reminders.js';
 
 /** The Admin Panel manages the reminder wording; without its table or when disabled, the built-in text is used. */
@@ -43,6 +44,21 @@ export async function pendingSnoozeTimes(db, until) {
   return result.rows.map((row) => Number(row.scheduledAt));
 }
 
+/** Done (check in from the notification) and Snooze buttons, and the data the service worker needs for them. */
+function reminderActions({ userId, habitId, label, type, date, timeZone, snooze, snoozeCount }) {
+  const secret = doneActionSecret();
+  const doneUrl = getWebPushDoneUrl();
+  const done = secret && doneUrl ? makeDoneToken({ userId, habitId, date, timeZone }, secret) : null;
+  return {
+    actions: [...(done ? [{ action: 'DONE', title: '✓ Done' }] : []), ...(snooze ? [{ action: snooze.action, title: snooze.title }] : [])],
+    data: {
+      habitId, type, url: '/', label,
+      ...(done ? { doneToken: done, doneUrl } : {}),
+      ...(snooze ? { snoozeCount, snoozeToken: snooze.token, snoozeUrl: snooze.url } : {}),
+    },
+  };
+}
+
 function makeNotificationId(userId, habitId, date, time) {
   const value = `${userId}\0${habitId}\0${date}\0${time}`;
   return `web-push:${crypto.createHash('sha256').update(value).digest('hex')}`;
@@ -80,7 +96,7 @@ export async function dispatchDueSnoozes(db, { webpush, template = null, snoozeU
   const result = { sent: 0, expired: 0, failed: 0, followUps: [] };
 
   for (const row of claimed.rows) {
-    const subscription = (await db.query(`SELECT s.subscription_json AS "subscriptionJson" FROM web_push_subscriptions s
+    const subscription = (await db.query(`SELECT s.subscription_json AS "subscriptionJson", s.time_zone AS "timeZone" FROM web_push_subscriptions s
       JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND u.status <> 'deactivated'`, [row.subscriptionId])).rows[0];
     const appState = (await db.query('SELECT state_json AS "stateJson" FROM user_app_state WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 1', [row.userId])).rows[0]?.stateJson;
     if (!subscription || !appState) {
@@ -100,8 +116,7 @@ export async function dispatchDueSnoozes(db, { webpush, template = null, snoozeU
         ...getReminderText(habit, template),
         tag: `snooze-${row.id}`,
         soundEnabled: habit.reminderSoundEnabled !== false,
-        actions: action ? [{ action: action.action, title: action.title }] : [],
-        data: action ? { habitId: row.habitId, type: 'habit-reminder', url: '/', snoozeCount: Number(row.snoozeCount), snoozeToken: action.token, snoozeUrl: action.url } : { habitId: row.habitId, type: 'habit-reminder', url: '/' },
+        ...reminderActions({ userId: row.userId, habitId: row.habitId, label: habit.label, type: 'habit-reminder', date: localDateIn(subscription.timeZone), timeZone: subscription.timeZone, snooze: action, snoozeCount: Number(row.snoozeCount) }),
       }), { TTL: 86400 });
       await db.query('UPDATE web_push_snooze_queue SET sent_at=$2,attempted_at=0 WHERE id=$1', [row.id, Date.now()]);
       result.sent += 1;
@@ -155,10 +170,7 @@ export async function dispatchDueReminders(db, { webpush, template = null, snooz
             body,
             tag: `${habit.id}-${due.date}-${due.time}`,
             soundEnabled: habit.reminderSoundEnabled !== false,
-            actions: action ? [{ action: action.action, title: action.title }] : [],
-            data: action
-              ? { habitId: habit.id, type, url: '/', snoozeCount: 0, snoozeToken: action.token, snoozeUrl: action.url }
-              : { habitId: habit.id, type, url: '/' },
+            ...reminderActions({ userId: row.userId, habitId: String(habit.id), label: habit.label, type, date: due.date, timeZone: row.timeZone, snooze: action, snoozeCount: 0 }),
           }), { TTL: 86400 });
           const sentAt = Date.now();
           await db.query(`UPDATE web_push_deliveries

@@ -12,8 +12,8 @@
     "smoke:ai": "node scripts/smoke-ai.js",
     "backup": "node scripts/backup-db.js",
     "ml:export": "node scripts/export-ml-training-data.js",
-    "test": "node --test test/services.test.js test/groq.test.js test/habit-analysis.test.js test/web-push-reminders.test.js test/api.test.js",
-    "test:unit": "node --test test/services.test.js test/groq.test.js test/habit-analysis.test.js test/web-push-reminders.test.js"
+    "test": "node --test test/services.test.js test/groq.test.js test/habit-analysis.test.js test/web-push-reminders.test.js test/engagement.test.js test/api.test.js",
+    "test:unit": "node --test test/services.test.js test/groq.test.js test/habit-analysis.test.js test/web-push-reminders.test.js test/engagement.test.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

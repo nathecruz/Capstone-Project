@@ -1,4 +1,3 @@
-import { config } from '../config/index.js';
 import { query, withTransaction } from '../db/client.js';
 import { parse } from '../lib/http.js';
 import { habitCompletionSchema, stateSchema } from '../schemas.js';
@@ -15,8 +14,9 @@ import {
   saveUserAppState,
   syncNormalizedState,
 } from '../services/app-state-store.js';
+import { setCheckIn } from '../services/check-ins.js';
 import { isOpenCheckInDate } from '../services/completion-date.js';
-import { applyWallet, awardCheckIn, getWallet, revokeCheckIn, syncDailyChallenge } from '../services/wallet.js';
+import { applyWallet, getWallet } from '../services/wallet.js';
 
 /** The app's blank startup state: sent before an account's state loaded, it has no email and no habits. */
 const isBlankStartupState = (state, storedState) =>
@@ -99,45 +99,9 @@ export default function registerAppStateRoutes(app) {
       return response.status(409).json({ ok: false, code: 'DAY_CLOSED', message: 'Only today can be checked in. A missed day stays missed.' });
     }
 
-    const result = await withTransaction(async (connection) => {
-      await connection.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
-      const saved = await getLatestAppState(session.userId, connection);
-      const habit = saved?.state?.habits?.find((entry) => entry.id === input.habitId);
-      if (!habit) return null;
-      const now = Date.now();
-
-      if (!input.completed) {
-        const existing = await connection.query('SELECT completed_at AS "completedAt" FROM habit_completions WHERE user_id=$1 AND habit_id=$2 AND completed_date=$3', [session.userId, input.habitId, input.date]);
-        const completedAt = Number(existing.rows[0]?.completedAt);
-        if (existing.rowCount && now - completedAt > config.checkIns.undoWindowMs) return { locked: true };
-      }
-
-      if (input.completed) {
-        const inserted = await connection.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING habit_id', [session.userId, input.habitId, input.date, now]);
-        if (inserted.rowCount) await awardCheckIn(connection, session.userId, input.habitId, input.date, habit.label, now);
-      } else {
-        const removed = await connection.query('DELETE FROM habit_completions WHERE user_id=$1 AND habit_id=$2 AND completed_date=$3', [session.userId, input.habitId, input.date]);
-        if (removed.rowCount) await revokeCheckIn(connection, session.userId, input.habitId, input.date, habit.label, now);
-      }
-
-      // Reflect the change in the snapshot too, so the sync below cannot re-add an undone check-in.
-      const state = {
-        ...saved.state,
-        habits: saved.state.habits.map((entry) => {
-          if (entry.id !== input.habitId) return entry;
-          const dates = new Set(Array.isArray(entry.completionDates) ? entry.completionDates : []);
-          if (input.completed) dates.add(input.date);
-          else dates.delete(input.date);
-          return { ...entry, completionDates: [...dates].sort(), completionTimeZone: input.timeZone || entry.completionTimeZone || 'UTC' };
-        }),
-      };
-      const updatedAt = Math.max(now, Number(saved.updatedAt) + 1);
-      await syncNormalizedState(session.userId, state, updatedAt, connection);
-      await syncDailyChallenge(connection, session.userId, input.date, now);
-      const serverState = await buildServerState(session.userId, state, connection);
-      await saveUserAppState(session.userId, serverState, updatedAt, connection);
-      return { serverState, updatedAt };
-    });
+    const result = await withTransaction((connection) => setCheckIn(connection, {
+      userId: session.userId, habitId: input.habitId, date: input.date, timeZone: input.timeZone, completed: input.completed,
+    }));
     if (!result) return response.status(404).json({ ok: false, message: 'Habit not found.' });
     if (result.locked) return response.status(409).json({ ok: false, code: 'CHECK_IN_LOCKED', message: 'This check-in is locked. A check-in can only be undone right after it is made.' });
 

@@ -4,6 +4,7 @@ import { config } from '../config/index.js';
 import registerAiRoutes from '../routes/ai.js';
 import registerAppStateRoutes from '../routes/app-state.js';
 import registerAuthRoutes from '../routes/auth.js';
+import registerEngagementRoutes from '../routes/engagement.js';
 import registerGamificationRoutes from '../routes/gamification.js';
 import registerHabitRoutes from '../routes/habits.js';
 import registerHealthRoutes from '../routes/health.js';
@@ -43,6 +44,7 @@ export function createApp() {
   registerNotificationRoutes(app);
   registerSupportRoutes(app);
   registerGamificationRoutes(app);
+  registerEngagementRoutes(app);
   registerAiRoutes(app);
 
   app.use('/api', (_request, response) => response.status(404).json({ ok: false, message: 'API route not found.' }));

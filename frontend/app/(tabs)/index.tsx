@@ -6,7 +6,8 @@ import { Image, Modal, Platform, Pressable, ScrollView, Text, TextInput, useWind
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { ClassPulseCard } from '@/components/class-pulse-card';
-import { DailyChallengeCard, LevelBar, NextBadgeCard, StreakRiskBanner, WeeklyRecapCard } from '@/components/engagement-cards';
+import { BuddyCard } from '@/components/buddy';
+import { DailyChallengeCard, LevelBar, MysteryBoxCard, NextBadgeCard, StreakRiskBanner, WeeklyQuestsCard, WeeklyRecapCard } from '@/components/engagement-cards';
 import { TodayAgenda } from '@/components/today-agenda';
 import { WeekStrip } from '@/components/week-strip';
 import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
@@ -36,7 +37,7 @@ export default function HomeScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const showAlert = useAppDialog();
-  const { isDarkMode, avatarImage, habits, profile, addHabit: createHabit, toggleHabit, isFaculty, points, goals } = useAppColorScheme();
+  const { isDarkMode, avatarImage, habits, profile, addHabit: createHabit, toggleHabit, isFaculty, points, goals, tokenHistory, applyWallet } = useAppColorScheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   // Tablets and laptops: the hero image sits beside the title, and on laptops the progress
@@ -183,10 +184,13 @@ export default function HomeScreen() {
           <View style={isDesktop && styles.dashboardMainColumn}>
             <StreakRiskBanner habits={habits} now={now} style={!isDesktop && styles.cardPhone} />
             <TodayAgenda habits={habits} now={now} onCheck={(habit) => toggleHabit(habit.id)} style={!isDesktop && styles.agendaPhone} />
+            {habits.length > 0 && <BuddyCard habits={habits} style={!isDesktop && styles.cardPhone} />}
           </View>
 
           <View style={isDesktop && styles.dashboardSide}>
+          <MysteryBoxCard habits={habits} tokenHistory={tokenHistory} onWallet={applyWallet} style={!isDesktop && styles.cardPhone} />
           <DailyChallengeCard habits={habits} now={now} style={!isDesktop && styles.cardPhone} />
+          <WeeklyQuestsCard habits={habits} now={now} style={!isDesktop && styles.cardPhone} />
           <NextBadgeCard habits={habits} goals={goals} style={!isDesktop && styles.cardPhone} />
           <WeeklyRecapCard habits={habits} now={now} style={!isDesktop && styles.cardPhone} />
           <View style={[styles.statsRow, isDesktop && styles.dashboardStats]}>

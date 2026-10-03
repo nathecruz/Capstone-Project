@@ -522,6 +522,33 @@ export async function saveWebPushSubscription(
   }
 }
 
+type BuddyResponse = import('@/utils/buddy').Buddy;
+type WalletResponse = { tokens?: number; points?: number; tokenHistory?: object[] };
+type Result<T> = ({ ok: true } & T) | { ok: false; message: string };
+
+async function authedRequest<T>(path: string, init: RequestInit = {}): Promise<Result<T>> {
+  const token = await getSessionToken();
+  if (!token) return { ok: false, message: 'Please sign in again.' };
+  try {
+    const body = await apiRequest<T>(path, { ...init, headers: { ...(init.headers ?? {}), Authorization: `Bearer ${token}` } });
+    return { ok: true, ...body };
+  } catch (error) {
+    return { ok: false, message: error instanceof ApiRequestError ? error.message : 'Could not reach HabitAI. Check your connection.' };
+  }
+}
+
+/** Habit Buddy: name, what it wears, what was bought, and the shop. */
+export const getBuddy = () => authedRequest<{ buddy: BuddyResponse }>('/api/buddy');
+/** Buys an item with tokens (the server checks the price, stage and balance) and puts it on. */
+export const buyBuddyItem = (itemId: string) => authedRequest<{ buddy: BuddyResponse } & WalletResponse>('/api/buddy/items', { method: 'POST', body: JSON.stringify({ itemId }) });
+/** Renames the buddy or changes what it wears ('' takes an item off). */
+export const saveBuddy = (changes: { name?: string; head?: string; hand?: string }) => authedRequest<{ buddy: BuddyResponse }>('/api/buddy', { method: 'PUT', body: JSON.stringify(changes) });
+/** Opens today's mystery box (after the day's first check-in); the server picks the tokens. */
+export const openMysteryBox = (date: string) => authedRequest<{ amount: number; alreadyOpened: boolean } & WalletResponse>('/api/mystery-box/open', {
+  method: 'POST',
+  body: JSON.stringify({ date, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }),
+});
+
 /** Asks the server to send a test reminder to this device (or all of the account's devices) now. */
 export async function sendTestWebPush(endpoint?: string): Promise<{ ok: boolean; message: string }> {
   const token = await getSessionToken();

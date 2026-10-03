@@ -183,7 +183,7 @@ export default function registerAuthRoutes(app) {
     const session = await requireAuth(request, response, { allowUnverified: true });
     if (!session) return;
     const id = session.userId;
-    const [profile, habits, completions, goals, tokens, achievements, notifications, logins, preferences, reports, suggestions] = await Promise.all([
+    const [profile, habits, completions, goals, tokens, achievements, notifications, logins, preferences, reports, suggestions, buddy, buddyItems] = await Promise.all([
       query('SELECT first_name AS "firstName", last_name AS "lastName", full_name AS "fullName", username, email, date_of_birth AS "dateOfBirth", gender, region, about, created_at AS "createdAt", privacy_consent_at AS "privacyConsentAt" FROM users WHERE id=$1', [id]),
       query('SELECT label, category, meta, goal, streak, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime" FROM habits WHERE user_id=$1 ORDER BY sort_order', [id]),
       query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1 ORDER BY completed_date', [id]),
@@ -195,6 +195,8 @@ export default function registerAuthRoutes(app) {
       query('SELECT preferences_json AS preferences FROM user_preferences WHERE user_id=$1', [id]),
       query('SELECT topic, timing, description, status, attachment_name AS "attachmentName", created_at AS "createdAt" FROM issue_reports WHERE user_id=$1', [id]),
       query('SELECT suggestion, created_at AS "createdAt" FROM feature_suggestions WHERE user_id=$1', [id]),
+      query('SELECT name, head_item AS "head", hand_item AS "hand" FROM user_buddy WHERE user_id=$1', [id]),
+      query('SELECT item_id AS "item", bought_at AS "boughtAt" FROM buddy_items WHERE user_id=$1 ORDER BY bought_at', [id]),
     ]);
     response.setHeader('Content-Disposition', `attachment; filename="habitai-my-data-${new Date().toISOString().slice(0, 10)}.json"`);
     response.json({
@@ -210,6 +212,7 @@ export default function registerAuthRoutes(app) {
       signIns: logins.rows,
       issueReports: reports.rows,
       featureSuggestions: suggestions.rows,
+      habitBuddy: buddy.rows[0] ? { ...buddy.rows[0], items: buddyItems.rows } : null,
     });
   });
 

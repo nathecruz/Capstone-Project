@@ -284,3 +284,19 @@ CREATE TABLE IF NOT EXISTS feature_suggestions (
   created_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS feature_suggestions_user_created_idx ON feature_suggestions(user_id, created_at DESC);
+
+-- Habit Buddy: the student's mascot, its name and what it wears. Items bought with tokens are in
+-- buddy_items (the token spend itself is in token_transactions).
+CREATE TABLE IF NOT EXISTS user_buddy (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL DEFAULT 'Habi',
+  head_item TEXT NOT NULL DEFAULT '',
+  hand_item TEXT NOT NULL DEFAULT '',
+  updated_at BIGINT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS buddy_items (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  item_id TEXT NOT NULL,
+  bought_at BIGINT NOT NULL,
+  PRIMARY KEY (user_id, item_id)
+);

@@ -10,6 +10,7 @@ import type { EditableHabitFields } from '@/utils/habit-edit';
 import { namesOf } from '@/utils/names';
 import { badgeProgress } from '@/utils/achievements';
 import { dailyChallenge, levelProgress, streakMilestone, todayAgenda } from '@/utils/engagement';
+import { weeklyQuests } from '@/utils/quests';
 import { computeStreak } from '@/utils/streaks';
 import { applyRemoteCompletionDates, applyVisibleOrder, getLocalDateKey } from './app-state/habit-progress';
 import { DarkModeContext } from './dark-mode-context';
@@ -101,7 +102,7 @@ type ColorSchemeContextValue = {
   isFaculty: boolean;
 };
 
-export type Celebration = { id: string; kind: 'streak' | 'badge' | 'level' | 'challenge' | 'allDone'; icon: string; title: string; message: string; color?: string };
+export type Celebration = { id: string; kind: 'streak' | 'badge' | 'quest' | 'level' | 'challenge' | 'allDone'; icon: string; title: string; message: string; color?: string };
 
 const ColorSchemeContext = createContext<ColorSchemeContextValue | undefined>(undefined);
 
@@ -449,6 +450,11 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       window.addEventListener('online', handleOnline);
     }
+    const handleWorkerMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'habitai-checked-in') void refreshRemoteState();
+    };
+    const workers = Platform.OS === 'web' && typeof navigator !== 'undefined' && 'serviceWorker' in navigator ? navigator.serviceWorker : null;
+    workers?.addEventListener('message', handleWorkerMessage);
 
     // Other devices' changes arrive within this interval; returning to the app refreshes immediately.
     // (It used to poll every second, which exhausted the API rate limit within minutes.)
@@ -472,6 +478,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
         window.removeEventListener('online', handleOnline);
       }
+      workers?.removeEventListener('message', handleWorkerMessage);
       if (refreshAppStateRef.current === refreshRemoteState) refreshAppStateRef.current = null;
     };
   }, [activeUserEmail, stateHydrated]);
@@ -522,10 +529,14 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     const agendaAfter = todayAgenda(habitsAfter, now);
     const earnedBefore = new Set(badgeProgress(habits, goals, now).filter((badge) => badge.earned).map((badge) => badge.id));
     const newBadge = badgeProgress(habitsAfter, goals, now).find((badge) => badge.earned && !earnedBefore.has(badge.id));
+    const questsBefore = new Set(weeklyQuests(habits, now).filter((quest) => quest.complete).map((quest) => quest.id));
+    const newQuest = weeklyQuests(habitsAfter, now).find((quest) => quest.complete && !questsBefore.has(quest.id));
     if (milestone) {
       celebrate({ id: `streak:${habit.id}:${milestone}:${dateKey}`, kind: 'streak', icon: 'flame', title: `${milestone}-day streak!`, message: `${habit.label}: ${milestone} days in a row. Keep the flame going!` });
     } else if (newBadge) {
       celebrate({ id: `badge:${newBadge.id}`, kind: 'badge', icon: newBadge.icon, color: newBadge.color, title: `Badge unlocked: ${newBadge.title}`, message: `You did it: ${newBadge.goal.charAt(0).toLowerCase()}${newBadge.goal.slice(1)}. See all your badges in Achievements.` });
+    } else if (newQuest) {
+      celebrate({ id: `quest:${newQuest.weekStart}:${newQuest.id}`, kind: 'quest', icon: 'flag', color: '#4BA3FF', title: 'Quest complete!', message: `${newQuest.title}: +${newQuest.reward} tokens this week.` });
     } else if (levelAfter > levelBefore) {
       celebrate({ id: `level:${levelAfter}`, kind: 'level', icon: 'star', title: `Level ${levelAfter}!`, message: `You reached level ${levelAfter}. Every check-in moves you up.` });
     } else if (challengeAfter.complete && !dailyChallenge(habits, now).complete) {
