@@ -1,12 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Image, Modal, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getMyLeaderboardRank } from '@/authentication';
 import { ClassPulseCard } from '@/components/class-pulse-card';
 import { useAppDialog } from '@/components/ui/app-dialog';
+import { badgeProgress, badgeRemaining, nextBadge } from '@/utils/achievements';
 import { askAi } from '@/utils/ai-client';
 import { rankSummary } from '@/utils/rank';
 import type { TranslationKey } from '@/constants/i18n';
@@ -46,6 +47,11 @@ export default function ProfileScreen() {
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
   const { averageProgress, maxStreak, completed } = getHabitProgressSummary(habits);
+  // Badges from the whole history: earned first, and the one closest to being earned.
+  const badges = useMemo(() => badgeProgress(habits, goals), [habits, goals]);
+  const earnedBadges = badges.filter((badge) => badge.earned).length;
+  const badgeStrip = [...badges].sort((a, b) => Number(b.earned) - Number(a.earned) || b.share - a.share).slice(0, 6);
+  const upcomingBadge = nextBadge(badges);
   const isNewUser = habits.length === 0 && points === 0;
   const firstActionLabel = isNewUser ? 'Start your first goal' : completed === 0 ? 'Complete a task' : 'Keep your momentum';
   const level = Math.floor(points / 100) + 1;
@@ -159,12 +165,30 @@ export default function ProfileScreen() {
             )}
           </View>
 
+          <Pressable style={styles.badgeStrip} onPress={() => router.push('/achievements')} accessibilityRole="button" accessibilityLabel={`Badges: ${earnedBadges} of ${badges.length} earned. Open achievements`}>
+            <View style={styles.badgeStripHeader}>
+              <Text style={styles.badgeStripTitle}>Badges</Text>
+              <View style={styles.badgeStripCountRow}>
+                <Text style={styles.badgeStripCount}>{earnedBadges}/{badges.length} earned</Text>
+                <Ionicons name="chevron-forward" size={14} color={themeColor('#5B42D8')} />
+              </View>
+            </View>
+            <View style={styles.badgeStripRow}>
+              {badgeStrip.map((badge) => (
+                <View key={badge.id} style={[styles.badgeStripIcon, { backgroundColor: themeColor(badge.earned ? badge.background : '#EEF0F4', 'backgroundColor') }]}>
+                  <Ionicons name={badge.icon as keyof typeof Ionicons.glyphMap} size={18} color={badge.earned ? badge.color : themeColor('#A3A8B5')} />
+                </View>
+              ))}
+            </View>
+            {upcomingBadge && <Text style={styles.badgeStripNext}>Next: {upcomingBadge.title} · {badgeRemaining(upcomingBadge)}</Text>}
+          </Pressable>
+
           <View style={[styles.firstActionCard, isDarkMode && styles.darkCard]}>
             <View style={styles.firstActionIcon}><Ionicons name={isNewUser ? 'flag-outline' : 'checkmark-circle-outline'} size={21} color={themeColor('#5B42D8')} /></View>
             <View style={styles.firstActionCopy}>
               <Text style={[styles.firstActionEyebrow, isDarkMode && styles.darkMutedText]}>{isNewUser ? 'YOUR NEXT STEP' : "TODAY'S WIN"}</Text>
-              <Text style={[styles.firstActionTitle, isDarkMode && styles.darkText]}>{isNewUser ? 'Build your first growth plan' : completed === 0 ? 'One completed task starts your streak' : 'You are building momentum'}</Text>
-              <Text style={[styles.firstActionBody, isDarkMode && styles.darkMutedText]}>{isNewUser ? 'Turn one intention into a clear, doable plan.' : completed === 0 ? 'Choose one small task and earn your first points.' : 'Keep the loop going with one more focused action.'}</Text>
+              <Text style={[styles.firstActionTitle, isDarkMode && styles.darkText]}>{isNewUser ? 'Build your first growth plan' : completed === 0 && maxStreak > 0 ? `Keep your ${maxStreak}-day streak going` : completed === 0 ? 'One completed task starts your streak' : 'You are building momentum'}</Text>
+              <Text style={[styles.firstActionBody, isDarkMode && styles.darkMutedText]}>{isNewUser ? 'Turn one intention into a clear, doable plan.' : completed === 0 && maxStreak > 0 ? 'Check off one habit today so it does not reset at midnight.' : completed === 0 ? 'Choose one small task and earn your first points.' : 'Keep the loop going with one more focused action.'}</Text>
             </View>
             <Pressable style={styles.firstActionButton} onPress={() => router.push(isNewUser ? '/goals' : '/')} accessibilityRole="button">
               <Text style={styles.firstActionButtonText}>{firstActionLabel}</Text>
@@ -244,7 +268,7 @@ export default function ProfileScreen() {
             <View style={styles.progressTrack}>
               <View style={[styles.progressFill, { width: `${averageProgress}%` }]} />
             </View>
-            <Text style={styles.progressMeta}>{averageProgress === 0 ? 'Complete your first task to start your streak.' : `${completed} task${completed === 1 ? '' : 's'} completed. Keep the momentum going.`}</Text>
+            <Text style={styles.progressMeta}>{averageProgress === 0 ? (maxStreak > 0 ? 'Check off a habit today to keep your streak.' : 'Complete your first task to start your streak.') :`${completed} task${completed === 1 ? '' : 's'} completed. Keep the momentum going.`}</Text>
           </View>
 
           {completed > 0 ? (
@@ -721,6 +745,14 @@ const themedStyles = createThemedStyles({
     color: '#5F596B',
     fontWeight: '600',
   },
+  badgeStrip: { width: '100%', backgroundColor: '#FFFFFF', borderRadius: 20, padding: 14, marginBottom: 14, shadowColor: '#201444', shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
+  badgeStripHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  badgeStripTitle: { fontSize: 15, fontWeight: '800', color: '#2F2D3C' },
+  badgeStripCountRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  badgeStripCount: { fontSize: 12, fontWeight: '800', color: '#5B42D8' },
+  badgeStripRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  badgeStripIcon: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+  badgeStripNext: { marginTop: 10, fontSize: 12, fontWeight: '700', color: '#6A6573' },
   firstActionCard: { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#DDD4F7' },
   firstActionIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: '#EEE8FF', alignItems: 'center', justifyContent: 'center', marginBottom: 11 },
   firstActionCopy: { marginBottom: 14 },

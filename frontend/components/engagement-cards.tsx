@@ -2,18 +2,20 @@
 // streak alert, the daily challenge and the Monday recap of last week.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect, useState } from 'react';
+import { router } from 'expo-router';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Animated, Pressable, Text, View } from 'react-native';
 import { openFocus } from '@/components/today-agenda';
-import type { Habit } from '@/hooks/app-state/types';
+import type { Goal, Habit } from '@/hooks/app-state/types';
 import { createThemedStyles, useThemedStyles } from '@/hooks/use-themed-styles';
+import { badgeProgress, badgeRemaining, nextBadge } from '@/utils/achievements';
 import { askAi } from '@/utils/ai-client';
 import { computeStreak } from '@/utils/streaks';
 import { dailyChallenge, habitsAtRisk, levelProgress, POINTS_PER_LEVEL, weeklyRecap } from '@/utils/engagement';
 import { getLocalDateKey } from '@/utils/habit-visibility';
 
 /** A bar that grows to `share` (0 to 1) whenever it changes. */
-function GrowingBar({ share, trackStyle, fillStyle }: { share: number; trackStyle: object; fillStyle: object }) {
+function GrowingBar({ share, trackStyle, fillStyle }: { share: number; trackStyle: object; fillStyle: object | object[] }) {
   const [width] = useState(() => new Animated.Value(0));
   useEffect(() => {
     Animated.timing(width, { toValue: share, duration: 600, useNativeDriver: false }).start();
@@ -26,20 +28,57 @@ function GrowingBar({ share, trackStyle, fillStyle }: { share: number; trackStyl
 }
 
 /** Level and XP: every check-in is 20 XP, every 100 XP is a level. */
-export function LevelBar({ points, style }: { points: number; style?: object | false }) {
+export function LevelBar({ points, streak = 0, style }: { points: number; streak?: number; style?: object | false }) {
   const styles = useThemedStyles(themedStyles);
   const { level, xp, toNext, share } = levelProgress(points);
   return (
-    <View style={[styles.level, style]} accessible accessibilityLabel={`Level ${level}, ${xp} of ${POINTS_PER_LEVEL} XP, ${toNext} XP to the next level`}>
+    <View style={[styles.level, style]} accessible accessibilityLabel={`Level ${level}, ${xp} of ${POINTS_PER_LEVEL} XP, ${toNext} XP to the next level${streak ? `, ${streak}-day streak` : ''}`}>
       <View style={styles.levelBadge}>
         <Ionicons name="star" size={13} color="#FFD44D" />
         <Text style={styles.levelBadgeText}>Lv {level}</Text>
       </View>
       <View style={styles.levelCopy}>
         <GrowingBar share={share} trackStyle={styles.levelTrack} fillStyle={styles.levelFill} />
-        <Text style={styles.levelText}>{xp} / {POINTS_PER_LEVEL} XP · {toNext} to level {level + 1}</Text>
+        <Text style={styles.levelText} numberOfLines={1}>{xp}/{POINTS_PER_LEVEL} XP · {toNext} to Lv {level + 1}</Text>
       </View>
+      {streak > 0 && (
+        <View style={styles.streakChip}>
+          <Ionicons name="flame" size={13} color="#F08A3C" />
+          <Text style={styles.streakChipText}>{streak}</Text>
+        </View>
+      )}
     </View>
+  );
+}
+
+/** The badge closest to being earned, with what is left; opens Achievements. */
+export function NextBadgeCard({ habits, goals, style }: { habits: Habit[]; goals: Goal[]; style?: object | false }) {
+  const styles = useThemedStyles(themedStyles);
+  const progress = useMemo(() => badgeProgress(habits, goals), [habits, goals]);
+  const next = nextBadge(progress);
+  if (!habits.length || !next) return null;
+  const earned = progress.filter((badge) => badge.earned).length;
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.card, pressed && styles.pressed, style]}
+      onPress={() => router.push('/achievements')}
+      accessibilityRole="button"
+      accessibilityLabel={`Next badge ${next.title}: ${badgeRemaining(next)}. ${earned} of ${progress.length} badges earned.`}
+    >
+      <View style={styles.cardHeader}>
+        <View style={[styles.cardIcon, { backgroundColor: next.color }]}><Ionicons name={next.icon as keyof typeof Ionicons.glyphMap} size={17} color="#FFFFFF" /></View>
+        <View style={styles.cardCopy}>
+          <Text style={styles.cardTitle}>Next badge: {next.title}</Text>
+          <Text style={styles.cardText} numberOfLines={1}>{next.goal}</Text>
+        </View>
+        <View style={styles.badgeTally}>
+          <Ionicons name="ribbon" size={13} color="#7A55D9" />
+          <Text style={styles.badgeTallyText}>{earned}/{progress.length}</Text>
+        </View>
+      </View>
+      <GrowingBar share={next.share} trackStyle={styles.badgeTrack} fillStyle={[styles.badgeFill, { backgroundColor: next.color }]} />
+      <Text style={styles.badgeLeft}>{badgeRemaining(next)} · {Math.min(next.current, next.target)} / {next.target}{next.unit === '%' ? '%' : ''}</Text>
+    </Pressable>
   );
 }
 
@@ -177,6 +216,13 @@ const themedStyles = createThemedStyles({
   levelTrack: { height: 8, borderRadius: 4, backgroundColor: '#E6DFFA', overflow: 'hidden' },
   levelFill: { height: '100%', borderRadius: 4, backgroundColor: '#7B5CF0' },
   levelText: { fontSize: 11, fontWeight: '700', color: '#6A6573' },
+  streakChip: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 10, backgroundColor: '#FFF1E6' },
+  streakChipText: { fontSize: 12, fontWeight: '900', color: '#C9661F' },
+  badgeTally: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: '#F0E9FF' },
+  badgeTallyText: { fontSize: 11, fontWeight: '900', color: '#5B42D8' },
+  badgeTrack: { height: 8, borderRadius: 4, backgroundColor: '#EFEBFA', marginTop: 12, overflow: 'hidden' },
+  badgeFill: { height: '100%', borderRadius: 4 },
+  badgeLeft: { marginTop: 6, fontSize: 11, fontWeight: '800', color: '#6A6573' },
   risk: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 18, backgroundColor: '#FFF1E6', borderWidth: 1, borderColor: '#FBD9BD' },
   riskIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F08A3C' },
   riskCopy: { flex: 1 },

@@ -53,18 +53,30 @@ function DoneChip({ habit }: { habit: Habit }) {
   );
 }
 
+/** How long a row shows its check before it moves to Done today. */
+const CHECK_ANIMATION_MS = 320;
+
 function HabitRow({ habit, late, onCheck }: { habit: Habit; late: boolean; onCheck: () => void }) {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const planned = plannedMinutes(habit);
+  // A tap fills the check with a little pop first, so finishing a habit feels like something.
+  const [checking, setChecking] = useState(false);
+  const [pop] = useState(() => new Animated.Value(0));
+  const check = () => {
+    if (checking) return;
+    setChecking(true);
+    Animated.spring(pop, { toValue: 1, friction: 4, tension: 180, useNativeDriver: Platform.OS !== 'web' }).start();
+    setTimeout(onCheck, CHECK_ANIMATION_MS);
+  };
   return (
     <View style={styles.row}>
       <Pressable
-        style={({ hovered, pressed }: HoverState) => [styles.rowMain, late && styles.rowMainLate, (hovered || pressed) && styles.rowMainActive]}
-        onPress={onCheck}
+        style={({ hovered, pressed }: HoverState) => [styles.rowMain, late && styles.rowMainLate, (hovered || pressed) && styles.rowMainActive, checking && styles.rowMainDone]}
+        onPress={check}
         accessibilityRole="checkbox"
-        accessibilityState={{ checked: false }}
-        aria-checked={false}
+        accessibilityState={{ checked: checking }}
+        aria-checked={checking}
         accessibilityLabel={`${habit.label} done today`}
       >
         {({ hovered, pressed }: HoverState) => (
@@ -73,7 +85,7 @@ function HabitRow({ habit, late, onCheck }: { habit: Habit; late: boolean; onChe
               <Ionicons name={habit.icon} size={17} color={habit.color || themeColor('#5b42d8')} />
             </View>
             <View style={styles.rowCopy}>
-              <Text style={styles.rowLabel} numberOfLines={1}>{habit.label}</Text>
+              <Text style={[styles.rowLabel, checking && styles.rowLabelDone]} numberOfLines={1}>{habit.label}</Text>
               {(planned !== null || habit.streak > 0) && (
                 <Text style={styles.rowMeta} numberOfLines={1}>
                   {planned !== null && <Text style={late && styles.lateText}>{late ? `Late · ${formatMinutes(planned)}` : formatMinutes(planned)}</Text>}
@@ -82,9 +94,9 @@ function HabitRow({ habit, late, onCheck }: { habit: Habit; late: boolean; onChe
                 </Text>
               )}
             </View>
-            <View style={[styles.check, (hovered || pressed) && styles.checkActive]}>
-              {(hovered || pressed) && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
-            </View>
+            <Animated.View style={[styles.check, (hovered || pressed || checking) && styles.checkActive, checking && styles.checkDone, checking && { transform: [{ scale: pop.interpolate({ inputRange: [0, 0.6, 1], outputRange: [1, 1.35, 1] }) }] }]}>
+              {(hovered || pressed || checking) && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
+            </Animated.View>
           </>
         )}
       </Pressable>
@@ -285,6 +297,9 @@ const themedStyles = createThemedStyles({
   // An empty ring that fills on hover or press: the row checks the habit off for today.
   check: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#5B42D8', alignItems: 'center', justifyContent: 'center' },
   checkActive: { backgroundColor: '#5B42D8' },
+  checkDone: { backgroundColor: '#3BAA74', borderColor: '#3BAA74' },
+  rowMainDone: { backgroundColor: '#ECF8F1' },
+  rowLabelDone: { textDecorationLine: 'line-through', color: '#6F8F7D' },
   focusButton: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F7F4FF' },
   focusButtonActive: { backgroundColor: '#EFE9FF' },
   undoBar: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 14, backgroundColor: '#ECF8F1' },

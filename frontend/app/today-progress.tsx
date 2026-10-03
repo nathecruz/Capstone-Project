@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { isHabitMissedOn } from '@/utils/habit-visibility';
+import { isHabitScheduledOn } from '@/utils/streaks';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 const weekdays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
@@ -89,6 +90,16 @@ export default function InsightsScreen() {
   // Every habit can be completed all day, so all of them are listed for the selected date.
   const visibleHabits = habits;
   const selectedDateProgress = visibleHabits.filter((habit) => habit.completionDates.includes(selectedDateKey));
+  // The selected day's week, Monday to Sunday: share of the habits due each day that were done.
+  const weekOverview = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate() - ((selectedDate.getDay() + 6) % 7) + index);
+    const dateKey = getDateKey(date);
+    const due = visibleHabits.filter((habit) => (!habit.startDate || habit.startDate <= dateKey) && isHabitScheduledOn(habit, dateKey));
+    const done = due.filter((habit) => habit.completionDates.includes(dateKey)).length;
+    return { dateKey, label: date.toLocaleDateString('en-US', { weekday: 'short' }), due: due.length, done, share: due.length ? done / due.length : 0 };
+  });
+  const weekDone = weekOverview.reduce((sum, day) => sum + day.done, 0);
+  const weekDue = weekOverview.reduce((sum, day) => sum + day.due, 0);
   const selectedCompletedCount = selectedDateProgress.length;
   const selectedCompletionPercent = visibleHabits.length ? Math.round((selectedCompletedCount / visibleHabits.length) * 100) : 0;
   const insightMessages = getInsightMessages(selectedCompletedCount, visibleHabits.length, !isSelectedToday);
@@ -202,7 +213,7 @@ export default function InsightsScreen() {
 
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>This Week Overview</Text>
-              <Text style={[styles.sectionCaption, isDarkMode && styles.darkMutedText]}>Initialized habits</Text>
+              <Text style={[styles.sectionCaption, isDarkMode && styles.darkMutedText]}>{weekDone} of {weekDue} check-ins</Text>
             </View>
 
             <View style={[styles.overviewCard, isDarkMode && styles.darkCard]}>
@@ -213,12 +224,12 @@ export default function InsightsScreen() {
                   <View style={styles.guideLine} />
                 </View>
                 <View style={styles.chartRow}>
-                  {visibleHabits.length ? visibleHabits.map((habit) => (
-                    <View key={habit.id} style={styles.chartColumn}>
-                      <View style={[styles.chartBar, { height: habit.completionDates.includes(selectedDateKey) ? 50 : 0 }]} />
-                      <Text style={styles.chartLabel}>{habit.label.slice(0, 4)}</Text>
+                  {visibleHabits.length ? weekOverview.map((day) => (
+                    <View key={day.dateKey} style={styles.chartColumn} accessible accessibilityLabel={`${day.label}: ${day.done} of ${day.due} habits done`}>
+                      <View style={[styles.chartBar, day.dateKey !== selectedDateKey && styles.chartBarOther, day.share === 1 && styles.chartBarPerfect, { height: day.done ? Math.max(8, Math.round(day.share * 110)) : 4 }]} />
+                      <Text style={[styles.chartLabel, day.dateKey === selectedDateKey && styles.chartLabelSelected]}>{day.label}</Text>
                     </View>
-                  )) : <Text style={styles.emptyChartText}>No initialized habits yet.</Text>}
+                  )) : <Text style={styles.emptyChartText}>Add a habit to see your week.</Text>}
                 </View>
               </View>
             </View>
@@ -544,6 +555,9 @@ const themedStyles = createThemedStyles({
     fontWeight: '700',
     marginTop: 8,
   },
+  chartLabelSelected: { color: '#5B42D8', fontWeight: '900' },
+  chartBarOther: { backgroundColor: '#B8ABF2' },
+  chartBarPerfect: { backgroundColor: '#3BAA74' },
   aiCard: {
     backgroundColor: '#F6F2FF',
     borderRadius: 20,

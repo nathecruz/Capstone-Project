@@ -6,11 +6,12 @@ import { Image, Modal, Platform, Pressable, ScrollView, Text, TextInput, useWind
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { ClassPulseCard } from '@/components/class-pulse-card';
-import { DailyChallengeCard, LevelBar, StreakRiskBanner, WeeklyRecapCard } from '@/components/engagement-cards';
+import { DailyChallengeCard, LevelBar, NextBadgeCard, StreakRiskBanner, WeeklyRecapCard } from '@/components/engagement-cards';
 import { TodayAgenda } from '@/components/today-agenda';
 import { WeekStrip } from '@/components/week-strip';
 import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
+import { historyStats } from '@/utils/achievements';
 import { greetingFor } from '@/utils/greeting';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
@@ -35,7 +36,7 @@ export default function HomeScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const showAlert = useAppDialog();
-  const { isDarkMode, avatarImage, habits, profile, addHabit: createHabit, toggleHabit, isFaculty, points } = useAppColorScheme();
+  const { isDarkMode, avatarImage, habits, profile, addHabit: createHabit, toggleHabit, isFaculty, points, goals } = useAppColorScheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   // Tablets and laptops: the hero image sits beside the title, and on laptops the progress
@@ -43,7 +44,6 @@ export default function HomeScreen() {
   const { isCentered: wide, isDesktop } = useResponsiveLayout();
   const compact = width < 370;
   const contentPadding = Math.max(16, Math.min(28, width * 0.07));
-  const characterSize = Math.min(170, Math.max(132, width * 0.42));
   const [now, setNow] = React.useState(() => new Date());
   const [quickAddVisible, setQuickAddVisible] = React.useState(false);
   const [quickHabitName, setQuickHabitName] = React.useState('');
@@ -65,7 +65,9 @@ export default function HomeScreen() {
   const [quickTimeHour, setQuickTimeHour] = React.useState('09');
   const [quickTimeMinute, setQuickTimeMinute] = React.useState('00');
   const [quickTimePeriod, setQuickTimePeriod] = React.useState<'AM' | 'PM'>('AM');
-  const { completed: completedHabits, completionPercent } = getHabitProgressSummary(habits);
+  const { completionPercent } = getHabitProgressSummary(habits);
+  const currentStreak = Math.max(0, ...habits.map((habit) => habit.streak));
+  const history = React.useMemo(() => historyStats(habits), [habits]);
   const quickFrequencies = [
     { label: 'Daily', icon: 'sunny-outline' },
     { label: 'Weekly', icon: 'calendar-outline' },
@@ -137,7 +139,7 @@ export default function HomeScreen() {
                   <Text style={styles.facultyModeText}>PSAU Faculty mode</Text>
                 </View>
               )}
-              <LevelBar points={points} style={styles.levelBar} />
+              <LevelBar points={points} streak={currentStreak} style={styles.levelBar} />
             </View>
 
             {wide && (
@@ -146,39 +148,36 @@ export default function HomeScreen() {
               </View>
             )}
 
-            <View style={styles.topControls}>
-              <Pressable
-                style={styles.avatarWrap}
-                onPress={() => router.navigate('/(tabs)/profile')}
-                accessibilityLabel="Open profile"
-                accessibilityRole="button"
-              >
-                {avatarImage ? <Image source={{ uri: avatarImage }} style={styles.avatarImage} /> : <Text style={styles.avatarEmoji}>👩🏻</Text>}
-              </Pressable>
-              <Pressable
-                style={styles.alertBubble}
-                onPress={() => router.push('/notifications')}
-                hitSlop={8}
-              >
-                <Ionicons name="notifications-outline" size={18} color={themeColor('#1d1d1d')} />
-              </Pressable>
+            <View style={styles.heroRight}>
+              <View style={styles.topControls}>
+                <Pressable
+                  style={styles.avatarWrap}
+                  onPress={() => router.navigate('/(tabs)/profile')}
+                  accessibilityLabel="Open profile"
+                  accessibilityRole="button"
+                >
+                  {avatarImage ? <Image source={{ uri: avatarImage }} style={styles.avatarImage} /> : <Text style={styles.avatarEmoji}>👩🏻</Text>}
+                </Pressable>
+                <Pressable
+                  style={styles.alertBubble}
+                  onPress={() => router.push('/notifications')}
+                  hitSlop={8}
+                >
+                  <Ionicons name="notifications-outline" size={18} color={themeColor('#1d1d1d')} />
+                </Pressable>
+              </View>
+              {/* Phones: the mascot sits beside the title, so Today shows without scrolling. */}
+              {!wide && (
+                <View style={styles.phoneCharacter}>
+                  <View style={styles.phoneCharacterImage}>
+                    <Image source={require('../../assets/images/download.jpg')} style={styles.characterImage} resizeMode="cover" />
+                  </View>
+                  <Text style={styles.phoneSparkle}>✦</Text>
+                  <Text style={styles.phoneSparkleTwo}>✦</Text>
+                </View>
+              )}
             </View>
           </View>
-
-          {!wide && <View style={styles.characterScene}>
-            <View style={[styles.characterImageWrap, { width: characterSize, height: characterSize, borderRadius: characterSize / 2, marginLeft: -characterSize / 2 }] }>
-              <Image
-                source={require('../../assets/images/download.jpg')}
-                style={styles.characterImage}
-                resizeMode="cover"
-              />
-            </View>
-            <View style={styles.sparkles}>
-              <Text style={styles.sparkle}>✦</Text>
-              <Text style={styles.sparkleTwo}>✦</Text>
-              <Text style={styles.sparkleThree}>✦</Text>
-            </View>
-          </View>}
 
           <View style={[isDesktop && styles.dashboardRow, isDesktop && { paddingHorizontal: contentPadding }]}>
           <View style={isDesktop && styles.dashboardMainColumn}>
@@ -188,9 +187,10 @@ export default function HomeScreen() {
 
           <View style={isDesktop && styles.dashboardSide}>
           <DailyChallengeCard habits={habits} now={now} style={!isDesktop && styles.cardPhone} />
+          <NextBadgeCard habits={habits} goals={goals} style={!isDesktop && styles.cardPhone} />
           <WeeklyRecapCard habits={habits} now={now} style={!isDesktop && styles.cardPhone} />
           <View style={[styles.statsRow, isDesktop && styles.dashboardStats]}>
-            {[{ value: String(Math.max(0, ...habits.map((habit) => habit.streak))), label: 'Day Streak' }, { value: String(completedHabits), label: 'Completed' }, { value: String(habits.length), label: 'Total Habits' }].map((item) => (
+            {[{ value: String(currentStreak), label: 'Day Streak' }, { value: String(history.totalCheckIns), label: 'Check-ins' }, { value: String(history.bestStreak), label: 'Best Streak' }].map((item) => (
               <View key={item.label} style={[styles.statCell, isDesktop && styles.dashboardStatCell]}>
                 <Text style={styles.statValue}>{item.value}</Text>
                 <Text style={styles.statLabel}>{item.label}</Text>
@@ -372,19 +372,18 @@ const themedStyles = createThemedStyles({
     color: '#5e6371',
     fontWeight: '500',
   },
-  characterScene: {
-    position: 'relative',
-    height: 180,
-    marginTop: 8,
+  characterImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 75,
   },
-  characterImageWrap: {
-    position: 'absolute',
-    top: 20,
-    left: '64%',
-    width: 170,
-    height: 170,
-    marginLeft: -85,
-    borderRadius: 85,
+  // Phones: the mascot beside the title, under the profile and bell buttons.
+  heroRight: { alignItems: 'flex-end', gap: 12 },
+  phoneCharacter: { width: 104, height: 104 },
+  phoneCharacterImage: {
+    width: 104,
+    height: 104,
+    borderRadius: 52,
     overflow: 'hidden',
     backgroundColor: '#f3e7dd',
     borderWidth: 4,
@@ -393,42 +392,9 @@ const themedStyles = createThemedStyles({
     shadowOpacity: 0.08,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  characterImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 75,
-  },
-  sparkles: {
-    position: 'absolute',
-    left: 44,
-    top: 36,
-    width: 80,
-    height: 60,
-  },
-  sparkle: {
-    position: 'absolute',
-    left: 0,
-    top: 8,
-    fontSize: 18,
-    color: '#f7b26f',
-  },
-  sparkleTwo: {
-    position: 'absolute',
-    left: 55,
-    top: 0,
-    fontSize: 16,
-    color: '#ffcf8f',
-  },
-  sparkleThree: {
-    position: 'absolute',
-    left: '50%',
-    top: 30,
-    fontSize: 14,
-    color: '#f2c1b8',
-  },
+  phoneSparkle: { position: 'absolute', left: -22, top: 4, fontSize: 16, color: '#f7b26f' },
+  phoneSparkleTwo: { position: 'absolute', left: -12, top: 34, fontSize: 12, color: '#ffcf8f' },
   focusCard: {
     marginHorizontal: 18,
     marginTop: 18,

@@ -8,6 +8,7 @@ import { normalizeHabitFields } from '@/utils/habit-data';
 import { CHECK_IN_UNDO_MS, canCompleteHabitForDate } from '@/utils/habit-visibility';
 import type { EditableHabitFields } from '@/utils/habit-edit';
 import { namesOf } from '@/utils/names';
+import { badgeProgress } from '@/utils/achievements';
 import { dailyChallenge, levelProgress, streakMilestone, todayAgenda } from '@/utils/engagement';
 import { computeStreak } from '@/utils/streaks';
 import { applyRemoteCompletionDates, applyVisibleOrder, getLocalDateKey } from './app-state/habit-progress';
@@ -100,7 +101,7 @@ type ColorSchemeContextValue = {
   isFaculty: boolean;
 };
 
-export type Celebration = { id: string; kind: 'streak' | 'level' | 'challenge' | 'allDone'; icon: string; title: string; message: string };
+export type Celebration = { id: string; kind: 'streak' | 'badge' | 'level' | 'challenge' | 'allDone'; icon: string; title: string; message: string; color?: string };
 
 const ColorSchemeContext = createContext<ColorSchemeContextValue | undefined>(undefined);
 
@@ -519,8 +520,12 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     const levelAfter = levelProgress(points + 20).level;
     const challengeAfter = dailyChallenge(habitsAfter, now);
     const agendaAfter = todayAgenda(habitsAfter, now);
+    const earnedBefore = new Set(badgeProgress(habits, goals, now).filter((badge) => badge.earned).map((badge) => badge.id));
+    const newBadge = badgeProgress(habitsAfter, goals, now).find((badge) => badge.earned && !earnedBefore.has(badge.id));
     if (milestone) {
       celebrate({ id: `streak:${habit.id}:${milestone}:${dateKey}`, kind: 'streak', icon: 'flame', title: `${milestone}-day streak!`, message: `${habit.label}: ${milestone} days in a row. Keep the flame going!` });
+    } else if (newBadge) {
+      celebrate({ id: `badge:${newBadge.id}`, kind: 'badge', icon: newBadge.icon, color: newBadge.color, title: `Badge unlocked: ${newBadge.title}`, message: `You did it: ${newBadge.goal.charAt(0).toLowerCase()}${newBadge.goal.slice(1)}. See all your badges in Achievements.` });
     } else if (levelAfter > levelBefore) {
       celebrate({ id: `level:${levelAfter}`, kind: 'level', icon: 'star', title: `Level ${levelAfter}!`, message: `You reached level ${levelAfter}. Every check-in moves you up.` });
     } else if (challengeAfter.complete && !dailyChallenge(habits, now).complete) {

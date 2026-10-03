@@ -8,7 +8,7 @@ import { Confetti } from '@/components/confetti';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { createThemedStyles, useThemedStyles } from '@/hooks/use-themed-styles';
 
-const ACCENT: Record<string, string> = { streak: '#F2A93B', level: '#5B42D8', challenge: '#3BAA74', allDone: '#5B42D8' };
+const ACCENT: Record<string, string> = { streak: '#F2A93B', badge: '#E7A72F', level: '#5B42D8', challenge: '#3BAA74', allDone: '#5B42D8' };
 
 export function CelebrationOverlay() {
   const styles = useThemedStyles(themedStyles);
@@ -19,7 +19,7 @@ export function CelebrationOverlay() {
   }, [celebration]);
 
   if (!celebration) return null;
-  const accent = ACCENT[celebration.kind] ?? '#5B42D8';
+  const accent = celebration.color ?? ACCENT[celebration.kind] ?? '#5B42D8';
   return (
     <Modal visible transparent animationType="fade" onRequestClose={dismissCelebration}>
       <Pressable style={styles.backdrop} onPress={dismissCelebration} accessibilityLabel="Close celebration">

@@ -1,97 +1,132 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { useAppColorScheme } from '@/hooks/color-scheme-context';
+import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
+import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
+import { badgeProgress, badgeRemaining, milestones, nextBadge, type BadgeProgress } from '@/utils/achievements';
 
-const badges = [
-  { title: '7 Day Streak', subtitle: 'Keep going!', icon: 'flame', color: '#48A66A', background: '#E6F6EA' },
-  { title: 'Early Bird', subtitle: 'Morning master', icon: 'sunny', color: '#E7A72F', background: '#FFF4D9' },
-  { title: 'Focus Master', subtitle: 'Stay focused', icon: 'eye', color: '#4F82D8', background: '#E7F0FF' },
-  { title: 'Consistency Pro', subtitle: 'Build the habit', icon: 'ribbon', color: '#7A55D9', background: '#F0E9FF' },
-  { title: 'Habit Hero', subtitle: 'All rounder', icon: 'shield-checkmark', color: '#3D83D8', background: '#E5F2FF' },
-  { title: 'Strongest Legend', subtitle: 'Keep pushing', icon: 'trophy', color: '#E86842', background: '#FFE9E1' },
-  { title: 'Hydration Hero', subtitle: 'Water champion', icon: 'water', color: '#3B9ED8', background: '#E2F5FF' },
-  { title: 'Workout Warrior', subtitle: 'Move your body', icon: 'fitness', color: '#D85D70', background: '#FFE7EC' },
-  { title: 'Bookworm', subtitle: 'Read every day', icon: 'book', color: '#9A6A3A', background: '#F6EBDD' },
-  { title: 'Perfect Week', subtitle: 'Seven for seven', icon: 'calendar', color: '#6C58CE', background: '#EEE9FF' },
-  { title: 'Goal Getter', subtitle: 'Aim higher', icon: 'locate', color: '#D48A28', background: '#FFF1D9' },
-  { title: 'Early Finisher', subtitle: 'Ahead of schedule', icon: 'rocket', color: '#4D8C75', background: '#E3F4ED' },
-];
+type IconName = keyof typeof Ionicons.glyphMap;
+
+function BadgeCard({ badge, wide }: { badge: BadgeProgress; wide: boolean }) {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
+  return (
+    <View
+      style={[styles.badgeCard, wide && styles.badgeCardWide, badge.earned && { borderColor: `${badge.color}55` }]}
+      accessible
+      accessibilityLabel={badge.earned ? `${badge.title}, earned` : `${badge.title}, locked: ${badge.goal}, ${badge.current} of ${badge.target}`}
+    >
+      <View style={[styles.badgeIcon, { backgroundColor: badge.earned ? themeColor(badge.background, 'backgroundColor') : themeColor('#EEF0F4', 'backgroundColor') }]}>
+        <Ionicons name={badge.icon as IconName} size={26} color={badge.earned ? badge.color : themeColor('#A3A8B5')} />
+        {!badge.earned && <View style={styles.lockDot}><Ionicons name="lock-closed" size={9} color="#FFFFFF" /></View>}
+        {badge.earned && <View style={[styles.lockDot, styles.earnedDot]}><Ionicons name="checkmark" size={10} color="#FFFFFF" /></View>}
+      </View>
+      <Text style={styles.badgeTitle} numberOfLines={2}>{badge.title}</Text>
+      {badge.earned ? (
+        <Text style={[styles.badgeFlavor, { color: themeColor(badge.color) }]} numberOfLines={2}>{badge.flavor}</Text>
+      ) : (
+        <>
+          <Text style={styles.badgeGoal} numberOfLines={2}>{badge.goal}</Text>
+          <View style={styles.badgeTrack}><View style={[styles.badgeFill, { width: `${Math.round(badge.share * 100)}%`, backgroundColor: badge.color }]} /></View>
+          <Text style={styles.badgeCount}>{Math.min(badge.current, badge.target)} / {badge.target}{badge.unit === '%' ? '%' : ''}</Text>
+        </>
+      )}
+    </View>
+  );
+}
 
 export default function AchievementsScreen() {
-  const { isDarkMode, habits } = useAppColorScheme();
+  const styles = useThemedStyles(themedStyles);
+  const { isDarkMode, habits, goals, points } = useAppColorScheme();
+  const { isCentered: wide } = useResponsiveLayout();
   const [activeTab, setActiveTab] = useState<'Badges' | 'Milestones'>('Badges');
-  const { maxStreak, completionPercent } = getHabitProgressSummary(habits);
-  const earnedBadges = new Set([
-    ...(maxStreak >= 7 ? ['7 Day Streak'] : []),
-    ...(habits.some((habit) => habit.reminderEnabled && /AM/i.test(habit.reminderTime)) ? ['Early Bird'] : []),
-    ...(habits.some((habit) => habit.category === 'Mind' && habit.done) ? ['Focus Master'] : []),
-    ...(completionPercent >= 80 ? ['Consistency Pro'] : []),
-    ...(habits.length >= 5 ? ['Habit Hero'] : []),
-    ...(habits.some((habit) => habit.category === 'Health' && habit.done) ? ['Hydration Hero'] : []),
-    ...(habits.some((habit) => /exercise|workout/i.test(habit.label) && habit.done) ? ['Workout Warrior'] : []),
-    ...(habits.some((habit) => /read|book/i.test(habit.label) && habit.done) ? ['Bookworm'] : []),
-  ]);
-  const earnedCount = earnedBadges.size;
+  const badges = useMemo(() => badgeProgress(habits, goals), [habits, goals]);
+  const rows = useMemo(() => milestones(habits, points), [habits, points]);
+  // Earned first, then the ones closest to being earned.
+  const ordered = [...badges].sort((a, b) => Number(b.earned) - Number(a.earned) || b.share - a.share);
+  const earnedCount = badges.filter((badge) => badge.earned).length;
+  const next = nextBadge(badges);
 
   return (
     <>
       <StatusBar style={isDarkMode ? 'light' : 'dark'} />
-      <SafeAreaView style={[styles.screen, isDarkMode && styles.darkScreen]}>
+      <SafeAreaView style={styles.screen}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.container}>
             <View style={styles.headerRow}>
               <Pressable style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back">
                 <Ionicons name="chevron-back" size={21} color={isDarkMode ? '#F2EFF8' : '#292633'} />
               </Pressable>
-              <Text style={[styles.headerTitle, isDarkMode && styles.darkHeaderTitle]}>Achievements &amp; Badges</Text>
+              <Text style={styles.headerTitle}>Achievements &amp; Badges</Text>
               <View style={styles.headerSpacer} />
             </View>
 
-            <View style={[styles.tabs, isDarkMode && styles.darkTabs]}>
+            <View style={styles.hero}>
+              <View style={styles.heroTop}>
+                <View style={styles.heroTrophy}><Ionicons name="trophy" size={26} color="#FFD44D" /></View>
+                <View style={styles.heroCopy}>
+                  <Text style={styles.heroValue}>{earnedCount} <Text style={styles.heroOf}>of {badges.length} badges</Text></Text>
+                  <Text style={styles.heroText}>{earnedCount ? 'Every check-in counts toward the next one.' : 'Your first badge is closer than you think.'}</Text>
+                </View>
+              </View>
+              <View style={styles.heroTrack}><View style={[styles.heroFill, { width: `${Math.round((earnedCount / badges.length) * 100)}%` }]} /></View>
+              {next && (
+                <Pressable style={styles.nextRow} onPress={() => router.push('/(tabs)')} accessibilityRole="button" accessibilityLabel={`Next badge ${next.title}: ${badgeRemaining(next)}`}>
+                  <View style={[styles.nextIcon, { backgroundColor: next.background }]}><Ionicons name={next.icon as IconName} size={18} color={next.color} /></View>
+                  <View style={styles.heroCopy}>
+                    <Text style={styles.nextLabel}>NEXT BADGE</Text>
+                    <Text style={styles.nextTitle}>{next.title} · {badgeRemaining(next)}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#E4DDFF" />
+                </Pressable>
+              )}
+            </View>
+
+            <View style={styles.tabs}>
               {(['Badges', 'Milestones'] as const).map((tab) => (
-                <Pressable key={tab} style={[styles.tab, activeTab === tab && styles.activeTab]} onPress={() => setActiveTab(tab)}>
-                  <Text style={[styles.tabText, isDarkMode && styles.darkMutedText, activeTab === tab && styles.activeTabText]}>{tab}</Text>
+                <Pressable key={tab} style={[styles.tab, activeTab === tab && styles.activeTab]} onPress={() => setActiveTab(tab)} accessibilityRole="tab" accessibilityState={{ selected: activeTab === tab }}>
+                  <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>{tab}</Text>
                 </Pressable>
               ))}
             </View>
 
             {activeTab === 'Badges' ? (
-              <>
-                <View style={styles.sectionHeader}>
-                  <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>Your Badges</Text>
-                  <Text style={[styles.sectionCount, isDarkMode && styles.darkMutedText]}>{earnedCount} / {badges.length} earned</Text>
-                </View>
-                <View style={styles.badgeGrid}>
-                  {badges.map((badge) => {
-                    const earned = earnedBadges.has(badge.title);
-                    return <Pressable key={badge.title} style={[styles.badgeCard, isDarkMode && styles.darkCard, !earned && styles.lockedBadgeCard]} onPress={() => router.push('/(tabs)/habits')} accessibilityRole="button">
-                      <View style={[styles.badgeIcon, { backgroundColor: earned ? (isDarkMode ? `${badge.color}2E` : badge.background) : (isDarkMode ? '#2A2635' : '#EEF0F4') }]}>
-                        <Ionicons name={earned ? badge.icon as keyof typeof Ionicons.glyphMap : 'lock-closed'} size={28} color={earned ? badge.color : isDarkMode ? '#8C8599' : '#9BA1AE'} />
-                      </View>
-                      <Text style={[styles.badgeTitle, isDarkMode && styles.darkText]}>{badge.title}</Text>
-                      <Text style={[styles.badgeSubtitle, isDarkMode && styles.darkMutedText]}>{earned ? 'Earned' : badge.subtitle}</Text>
-                    </Pressable>
-                  })}
-                </View>
-
-                <View style={styles.sectionHeaderRecent}>
-                  <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>Recent Unlocks</Text>
-                  <Pressable onPress={() => setActiveTab('Badges')}><Text style={[styles.viewAll, isDarkMode && styles.darkLink]}>View all</Text></Pressable>
-                </View>
-                <View style={[styles.recentCard, isDarkMode && styles.darkCard]}>
-                  {badges.filter((badge) => earnedBadges.has(badge.title)).slice(0, 2).map((item, index) => <View key={item.title} style={[styles.recentRow, index === 0 && styles.recentBorder, index === 0 && isDarkMode && styles.darkDivider]}><View style={[styles.recentIcon, { backgroundColor: `${item.color}20` }]}><Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={18} color={item.color} /></View><View style={styles.recentText}><Text style={[styles.recentTitle, isDarkMode && styles.darkText]}>{item.title}</Text><Text style={[styles.recentDate, isDarkMode && styles.darkMutedText]}>Earned from your current habit progress</Text></View><Ionicons name="checkmark-circle" size={18} color="#48A66A" /></View>)}
-                  {!earnedCount && <Text style={[styles.emptyRecent, isDarkMode && styles.darkMutedText]}>Complete habits to unlock your first badge.</Text>}
-                </View>
-              </>
+              <View style={styles.badgeGrid}>
+                {ordered.map((badge) => <BadgeCard key={badge.id} badge={badge} wide={wide} />)}
+              </View>
             ) : (
-              <View style={[styles.milestoneCard, isDarkMode && styles.darkCard]}>
-                <Ionicons name="flag-outline" size={32} color={isDarkMode ? '#B9A9FF' : '#5B42D8'} />
-                <Text style={[styles.milestoneTitle, isDarkMode && styles.darkText]}>Your milestones are on the way</Text>
-                <Text style={[styles.milestoneBody, isDarkMode && styles.darkMutedText]}>Complete more habits to unlock new milestones and celebrate your progress.</Text>
+              <View style={styles.milestoneList}>
+                {rows.map((row) => {
+                  const previous = row.reached.at(-1) ?? 0;
+                  const share = row.next ? Math.min(1, (row.current - previous) / (row.next - previous)) : 1;
+                  return (
+                    <View key={row.id} style={styles.milestoneCard}>
+                      <View style={styles.milestoneTop}>
+                        <View style={[styles.milestoneIcon, { backgroundColor: `${row.color}1F` }]}><Ionicons name={row.icon as IconName} size={20} color={row.color} /></View>
+                        <View style={styles.heroCopy}>
+                          <Text style={styles.milestoneTitle}>{row.title}</Text>
+                          <Text style={styles.milestoneNext}>{row.next ? `Next: ${row.next} ${row.unit === 'level' ? '' : row.unit}`.trim() : 'All milestones reached!'}</Text>
+                        </View>
+                        <Text style={[styles.milestoneValue, { color: row.color }]}>{row.current}</Text>
+                      </View>
+                      <View style={styles.badgeTrack}><View style={[styles.badgeFill, { width: `${Math.round(share * 100)}%`, backgroundColor: row.color }]} /></View>
+                      <View style={styles.stepRow}>
+                        {row.steps.map((step) => {
+                          const reached = row.current >= step;
+                          return (
+                            <View key={step} style={[styles.step, reached && { backgroundColor: row.color, borderColor: row.color }]}>
+                              <Text style={[styles.stepText, reached && styles.stepTextReached]}>{step}</Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  );
+                })}
               </View>
             )}
           </View>
@@ -101,47 +136,54 @@ export default function AchievementsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#F5F4F9', paddingTop: 35 }, darkScreen: { backgroundColor: '#111018' },
+const themedStyles = createThemedStyles({
+  screen: { flex: 1, backgroundColor: '#F5F4F9', paddingTop: 35 },
   content: { paddingBottom: 110 },
   container: { paddingHorizontal: 20 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   backButton: { width: 38, height: 38, justifyContent: 'center' },
   headerSpacer: { width: 38 },
   headerTitle: { fontSize: 17, fontWeight: '800', color: '#24212D' },
-  darkHeaderTitle: { color: '#F2EFF8' },
-  darkText: { color: '#F2EFF8' },
-  darkMutedText: { color: '#AAA4B7' },
-  darkLink: { color: '#C9BCFF' },
-  darkCard: { backgroundColor: '#1D1A24' },
-  darkTabs: { backgroundColor: '#1F1B28' },
-  darkDivider: { borderBottomColor: '#302B3B' },
-  tabs: { flexDirection: 'row', backgroundColor: '#ECE9F3', borderRadius: 14, padding: 4, marginBottom: 20 },
+  // Summary: the brand purple stays in dark mode.
+  hero: { backgroundColor: '#5B42D8', borderRadius: 24, padding: 18, marginBottom: 18, shadowColor: '#5B42D8', shadowOpacity: 0.28, shadowRadius: 16, shadowOffset: { width: 0, height: 8 } },
+  heroTop: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  heroTrophy: { width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(255,255,255,0.16)', alignItems: 'center', justifyContent: 'center' },
+  heroCopy: { flex: 1 },
+  heroValue: { fontSize: 28, fontWeight: '900', color: '#FFFFFF' },
+  heroOf: { fontSize: 15, fontWeight: '800', color: '#E4DDFF' },
+  heroText: { marginTop: 2, fontSize: 12, fontWeight: '700', color: '#E4DDFF' },
+  heroTrack: { height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.2)', marginTop: 14, overflow: 'hidden' },
+  heroFill: { height: '100%', borderRadius: 4, backgroundColor: '#FFD44D' },
+  nextRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14, padding: 10, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.12)' },
+  nextIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  nextLabel: { fontSize: 10, fontWeight: '900', letterSpacing: 1, color: '#C9BFF7' },
+  nextTitle: { fontSize: 13, fontWeight: '800', color: '#FFFFFF' },
+  tabs: { flexDirection: 'row', backgroundColor: '#ECE9F3', borderRadius: 14, padding: 4, marginBottom: 16 },
   tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 11 },
   activeTab: { backgroundColor: '#5B42D8' },
   tabText: { fontSize: 12, color: '#777283', fontWeight: '700' },
   activeTabText: { color: '#FFFFFF' },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  sectionTitle: { fontSize: 15, fontWeight: '800', color: '#302B3B' },
-  sectionCount: { fontSize: 10, color: '#827C8C', fontWeight: '700' },
-  badgeGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 10, marginBottom: 24 },
-  badgeCard: { width: '31.5%', minHeight: 128, backgroundColor: '#FFFFFF', borderRadius: 15, alignItems: 'center', justifyContent: 'center', padding: 8 },
-  lockedBadgeCard: { opacity: 0.72 },
-  badgeIcon: { width: 58, height: 58, borderRadius: 29, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  badgeTitle: { fontSize: 10, fontWeight: '800', color: '#36313F', textAlign: 'center' },
-  badgeSubtitle: { fontSize: 8, color: '#8A8492', fontWeight: '600', textAlign: 'center', marginTop: 3 },
-  sectionHeaderRecent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  viewAll: { fontSize: 10, color: '#5B42D8', fontWeight: '800' },
-  recentCard: { backgroundColor: '#FFFFFF', borderRadius: 17, paddingHorizontal: 14 },
-  recentRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
-  recentBorder: { borderBottomWidth: 1, borderBottomColor: '#F0EEF3' },
-  recentIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginRight: 11 },
-  recentText: { flex: 1 },
-  recentTitle: { fontSize: 12, fontWeight: '800', color: '#393440' },
-  recentDate: { fontSize: 9, color: '#888291', fontWeight: '600', marginTop: 3 },
-  emptyRecent: { color: '#888291', fontSize: 11, fontWeight: '600', paddingVertical: 18, textAlign: 'center' },
-  milestoneCard: { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 28, alignItems: 'center' },
-  milestoneTitle: { fontSize: 17, fontWeight: '800', color: '#302B3B', textAlign: 'center', marginVertical: 12 },
-  milestoneBody: { fontSize: 12, lineHeight: 18, color: '#777282', textAlign: 'center' },
+  badgeGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 10 },
+  badgeCard: { width: '31.5%', minHeight: 150, backgroundColor: '#FFFFFF', borderRadius: 16, alignItems: 'center', paddingHorizontal: 8, paddingVertical: 12, borderWidth: 1.5, borderColor: '#FFFFFF' },
+  badgeCardWide: { width: '23.5%' },
+  badgeIcon: { width: 54, height: 54, borderRadius: 27, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  lockDot: { position: 'absolute', right: -2, bottom: -2, width: 18, height: 18, borderRadius: 9, backgroundColor: '#9BA1AE', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFFFFF' },
+  earnedDot: { backgroundColor: '#3BAA74' },
+  badgeTitle: { fontSize: 11, fontWeight: '800', color: '#36313F', textAlign: 'center' },
+  badgeFlavor: { fontSize: 10, fontWeight: '800', textAlign: 'center', marginTop: 4 },
+  badgeGoal: { fontSize: 9, color: '#8A8492', fontWeight: '600', textAlign: 'center', marginTop: 3, minHeight: 22 },
+  badgeTrack: { alignSelf: 'stretch', height: 6, borderRadius: 3, backgroundColor: '#EFEBFA', marginTop: 8, overflow: 'hidden' },
+  badgeFill: { height: '100%', borderRadius: 3 },
+  badgeCount: { fontSize: 10, fontWeight: '800', color: '#6A6573', marginTop: 4 },
+  milestoneList: { gap: 12 },
+  milestoneCard: { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 14 },
+  milestoneTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  milestoneIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  milestoneTitle: { fontSize: 14, fontWeight: '800', color: '#302B3B' },
+  milestoneNext: { marginTop: 2, fontSize: 11, fontWeight: '700', color: '#8A8492' },
+  milestoneValue: { fontSize: 24, fontWeight: '900' },
+  stepRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
+  step: { minWidth: 36, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, borderWidth: 1, borderColor: '#DCD6EC', alignItems: 'center' },
+  stepText: { fontSize: 11, fontWeight: '800', color: '#8A8492' },
+  stepTextReached: { color: '#FFFFFF' },
 });
-

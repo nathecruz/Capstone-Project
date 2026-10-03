@@ -11,6 +11,7 @@ import { FACULTY_HABIT_IDEAS } from '@/constants/faculty';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { isHabitMissedYesterday, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
+import { historyStats } from '@/utils/achievements';
 import { filterHabitsByStatus } from '@/utils/habit-data';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
@@ -46,6 +47,8 @@ export default function HabitsScreen() {
   const overallProgress = visibleHabitList.length
     ? Math.round(visibleHabitList.reduce((sum, habit) => sum + habit.progress, 0) / visibleHabitList.length)
     : 0;
+  // This week's real rate (check-ins done of those due so far), not today's progress.
+  const weekRate = useMemo(() => historyStats(habitList).thisWeekRate, [habitList]);
   const getSuggestion = () => {
     const candidates = isFaculty ? FACULTY_HABIT_IDEAS : ['Drink Water', 'Read for 10 Minutes', 'Take a Short Walk', 'Write in a Journal', 'Practice Gratitude', 'Plan Tomorrow', 'Stretch for 5 Minutes', 'Organize One Small Space', 'Learn Something New', 'Sleep 30 Minutes Earlier', 'Take a Screen Break'];
     setSuggestion(candidates[Math.floor(Math.random() * candidates.length)]);
@@ -305,7 +308,7 @@ export default function HabitsScreen() {
             </View>
 
             <View style={styles.statsRow}>
-              {[{ label: 'Completed', value: `${completedCount} / ${habitList.length}`, sub: 'Today', color: '#5EC09A', icon: 'checkmark-circle-outline', bg: '#EAFBF2' }, { label: 'Current Streak', value: String(Math.max(0, ...habitList.map((habit) => habit.streak))), sub: 'days', color: '#4DA3FF', icon: 'flame-outline', bg: '#EAF4FF' }, { label: 'Success Rate', value: `${overallProgress}%`, sub: 'This week', color: '#9B6BF2', icon: 'sparkles-outline', bg: '#F2EBFF' }, { label: 'Total Habits', value: String(habitList.length), sub: 'Active', color: '#F2A95B', icon: 'trophy-outline', bg: '#FFF3E7' }].map((card) => (
+              {[{ label: 'Completed', value: `${completedCount} / ${habitList.length}`, sub: 'Today', color: '#5EC09A', icon: 'checkmark-circle-outline', bg: '#EAFBF2' }, { label: 'Current Streak', value: String(Math.max(0, ...habitList.map((habit) => habit.streak))), sub: 'days', color: '#4DA3FF', icon: 'flame-outline', bg: '#EAF4FF' }, { label: 'Success Rate', value: `${weekRate}%`, sub: 'This week', color: '#9B6BF2', icon: 'sparkles-outline', bg: '#F2EBFF' }, { label: 'Total Habits', value: String(habitList.length), sub: 'Active', color: '#F2A95B', icon: 'trophy-outline', bg: '#FFF3E7' }].map((card) => (
                 <View key={card.label} style={[styles.statCard, isCentered && styles.statCardWide, isDarkMode && styles.darkCard]}>
                   <View style={[styles.statIconWrap, { backgroundColor: themeColor(card.bg, 'backgroundColor') }]}>
                     <Ionicons name={card.icon as keyof typeof Ionicons.glyphMap} size={18} color={card.color} />

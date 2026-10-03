@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getHabitProgressSummary, getRecentCompletionHistory, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { historyStats } from '@/utils/achievements';
 import { getChartGeometry } from '@/utils/line-chart';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
@@ -15,16 +16,13 @@ export default function StatsProgressScreen() {
   const { isDarkMode, habits, preferences } = useAppColorScheme();
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
-  const { averageProgress, completed, completionPercent, maxStreak } = getHabitProgressSummary(habits);
+  const { completed, completionPercent, maxStreak } = getHabitProgressSummary(habits);
+  const history = useMemo(() => historyStats(habits), [habits]);
+  const consistency = history.last30Rate;
   const completionHistory = getRecentCompletionHistory(habits, 7);
   const maximumDailyCompletions = Math.max(1, ...completionHistory.map((entry) => entry.count));
   const [chartSize, setChartSize] = useState({ width: 0, height: 0 });
   const chart = getChartGeometry(completionHistory.map((entry) => (entry.count / maximumDailyCompletions) * 100), chartSize.width, chartSize.height);
-  const reminderCounts = habits.reduce<Record<string, number>>((counts, habit) => {
-    if (habit.reminderEnabled) counts[habit.reminderTime] = (counts[habit.reminderTime] ?? 0) + 1;
-    return counts;
-  }, {});
-  const mostActiveTime = Object.entries(reminderCounts).sort((left, right) => right[1] - left[1])[0]?.[0] ?? '--';
   const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>('Overview');
   const topHabits = [...habits].sort((a, b) => b.progress - a.progress).slice(0, 4);
 
@@ -88,23 +86,23 @@ export default function StatsProgressScreen() {
               <>
                 <View style={styles.summaryGrid}>
                   <View style={[styles.summaryCard, isDarkMode && styles.darkCard]}>
-                    <Text style={[styles.summaryLabel, isDarkMode && styles.darkMutedText]}>Average Completion</Text>
-                    <Text style={[styles.summaryValue, isDarkMode && styles.darkText]}>{averageProgress}%</Text>
-                    <View style={styles.miniRing}><View style={[styles.miniRingFill, { transform: [{ rotate: `${Math.round(averageProgress * 1.8)}deg` }] }]} /></View>
+                    <Text style={[styles.summaryLabel, isDarkMode && styles.darkMutedText]}>Last 7 Days</Text>
+                    <Text style={[styles.summaryValue, isDarkMode && styles.darkText]}>{history.last7Rate}%</Text>
+                    <View style={styles.miniRing}><View style={[styles.miniRingFill, { transform: [{ rotate: `${Math.round(history.last7Rate * 1.8)}deg` }] }]} /></View>
                   </View>
                   <View style={[styles.summaryCard, isDarkMode && styles.darkCard]}>
-                    <Text style={[styles.summaryLabel, isDarkMode && styles.darkMutedText]}>Total Habits Completed</Text>
-                    <Text style={[styles.summaryValue, isDarkMode && styles.darkText]}>{completed}</Text>
+                    <Text style={[styles.summaryLabel, isDarkMode && styles.darkMutedText]}>Total Check-ins</Text>
+                    <Text style={[styles.summaryValue, isDarkMode && styles.darkText]}>{history.totalCheckIns}</Text>
                     <Ionicons name="checkmark-circle" size={22} color={themeColor('#49A866')} />
                   </View>
                 </View>
                 <View style={styles.summaryGrid}>
                   <View style={[styles.smallCard, isDarkMode && styles.darkCard]}><Ionicons name="flame" size={18} color={themeColor('#E68D3D')} /><Text style={[styles.smallValue, isDarkMode && styles.darkText]}>{maxStreak}</Text><Text style={[styles.smallLabel, isDarkMode && styles.darkMutedText]}>Day Streak</Text></View>
-                  <View style={[styles.smallCard, isDarkMode && styles.darkCard]}><Ionicons name="time-outline" size={18} color={themeColor('#5B42D8')} /><Text style={[styles.smallValue, isDarkMode && styles.darkText]}>{mostActiveTime}</Text><Text style={[styles.smallLabel, isDarkMode && styles.darkMutedText]}>Most Active Time</Text></View>
+                  <View style={[styles.smallCard, isDarkMode && styles.darkCard]}><Ionicons name="trophy-outline" size={18} color={themeColor('#5B42D8')} /><Text style={[styles.smallValue, isDarkMode && styles.darkText]}>{history.bestStreak}</Text><Text style={[styles.smallLabel, isDarkMode && styles.darkMutedText]}>Best Streak</Text></View>
                 </View>
                 <View style={[styles.consistencyCard, isDarkMode && styles.darkCard]}>
-                  <View><Text style={[styles.cardTitle, isDarkMode && styles.darkText]}>Consistency Score</Text><Text style={styles.score}>{averageProgress} <Text style={styles.scoreLabel}>{averageProgress >= 80 ? 'Excellent' : averageProgress >= 50 ? 'Building' : 'Starting'}</Text></Text></View>
-                  <View style={styles.meter} accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: averageProgress }}><View style={styles.meterTrack}><View style={[styles.meterFill, { width: `${averageProgress}%` }]} /></View><Text style={[styles.meterCaption, isDarkMode && styles.darkMutedText]}>out of 100</Text></View>
+                  <View><Text style={[styles.cardTitle, isDarkMode && styles.darkText]}>Consistency Score</Text><Text style={styles.score}>{consistency} <Text style={styles.scoreLabel}>{consistency >= 80 ? 'Excellent' : consistency >= 50 ? 'Building' : 'Starting'}</Text></Text></View>
+                  <View style={styles.meter} accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: consistency }}><View style={styles.meterTrack}><View style={[styles.meterFill, { width: `${consistency}%` }]} /></View><Text style={[styles.meterCaption, isDarkMode && styles.darkMutedText]}>last 30 days</Text></View>
                 </View>
               </>
             ) : (
