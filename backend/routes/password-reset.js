@@ -16,6 +16,7 @@ import { normalizeEmail, parse } from '../lib/http.js';
 import { emailSchema, otpSchema, passwordSchema } from '../schemas.js';
 import { findUser } from '../services/accounts.js';
 import { passwordResetCodeEmail } from '../services/email-templates.js';
+import { clearFailedLogins } from '../services/login-protection.js';
 import { sendEmail } from '../services/mailer.js';
 import { hashPassword, passwordStrength } from '../services/passwords.js';
 import { notifyPasswordChanged } from './auth.js';
@@ -139,6 +140,7 @@ export default function registerPasswordResetRoutes(app) {
       await db.query('UPDATE users SET password_hash=$1 WHERE id=$2', [hash, user.id]);
       await db.query('DELETE FROM sessions WHERE user_id=$1', [user.id]);
       await db.query('DELETE FROM password_reset_requests WHERE email=$1', [emailAddress]);
+      await clearFailedLogins(user.id, db);
     });
     notifyPasswordChanged(user);
     response.json({ ok: true, message: 'Your password has been reset. You can now sign in with your new password.' });

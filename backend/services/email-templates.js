@@ -113,3 +113,55 @@ export function passwordChangedEmail({ name, when = new Date(), timeZone = 'Asia
     }),
   };
 }
+
+/** The account's email address was changed: sent to the old address. */
+export function emailChangedEmail({ name, newEmail, when = new Date(), timeZone = 'Asia/Manila' }) {
+  const formatted = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone }).format(when);
+  const greeting = `Hello ${firstName(name)},`;
+  return {
+    subject: 'Your HabitAI email address was changed',
+    text: [
+      greeting,
+      '',
+      `The email address of your HabitAI account was changed to ${newEmail} on ${formatted}.`,
+      'Messages about your account now go to the new address.',
+      '',
+      'If this was not you, contact support right away so the account can be secured.',
+    ].join('\n'),
+    html: layout({
+      preheader: 'Security notice for your HabitAI account.',
+      heading: 'Your email address was changed',
+      body: `
+        <p style="margin:0 0 12px;font-size:15px;line-height:1.6;">${escapeHtml(greeting)}</p>
+        <p style="margin:0 0 12px;font-size:15px;line-height:1.6;">The email address of your HabitAI account was changed to <strong>${escapeHtml(newEmail)}</strong> on <strong>${escapeHtml(formatted)}</strong>. Messages about your account now go to the new address.</p>
+        <p style="margin:0;font-size:14px;line-height:1.6;color:#4d4960;">If this was not you, contact support right away so the account can be secured.</p>`,
+    }),
+  };
+}
+
+/** Sign-in was paused after too many wrong passwords. */
+export function signInPausedEmail({ name, minutes, when = new Date(), timeZone = 'Asia/Manila' }) {
+  const formatted = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone }).format(when);
+  const greeting = `Hello ${firstName(name)},`;
+  return {
+    subject: 'Sign-in to your HabitAI account was paused',
+    text: [
+      greeting,
+      '',
+      `On ${formatted}, someone entered the wrong password for your HabitAI account several times in a row.`,
+      `To protect your account, sign-in is paused for ${minutes} minutes.`,
+      '',
+      'If this was you, wait and try again, or use "Forgot password" on the sign-in screen.',
+      'If this was not you, your account is still safe. Consider changing your password to one you do not use anywhere else.',
+    ].join('\n'),
+    html: layout({
+      preheader: 'Security notice for your HabitAI account.',
+      heading: 'Sign-in was paused',
+      body: `
+        <p style="margin:0 0 12px;font-size:15px;line-height:1.6;">${escapeHtml(greeting)}</p>
+        <p style="margin:0 0 12px;font-size:15px;line-height:1.6;">On <strong>${escapeHtml(formatted)}</strong>, someone entered the wrong password for your HabitAI account several times in a row. To protect your account, sign-in is paused for <strong>${escapeHtml(String(minutes))} minutes</strong>.</p>
+        <p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#4d4960;">If this was you, wait and try again, or use <strong>Forgot password</strong> on the sign-in screen.</p>
+        <p style="margin:0;font-size:14px;line-height:1.6;color:#4d4960;">If this was not you, your account is still safe. Consider changing your password to one you do not use anywhere else.</p>`,
+    }),
+  };
+}

@@ -624,7 +624,11 @@ export async function getRemoteAppState(since?: number | null) {
   }
 }
 
-export async function updateAuthenticatedProfile(profile: { firstName: string; lastName: string; username: string; email: string; dateOfBirth: string; gender: string; about: string }) {
+/**
+ * Saves the profile. Changing a confirmed email also needs the current password (code
+ * PASSWORD_REQUIRED or PASSWORD_INCORRECT when it is missing or wrong).
+ */
+export async function updateAuthenticatedProfile(profile: { firstName: string; lastName: string; username: string; email: string; dateOfBirth: string; gender: string; about: string; currentPassword?: string }): Promise<{ ok: boolean; message?: string; user?: SessionUser; code?: string }> {
   const token = await getSessionToken();
   if (!token) return { ok: false, message: 'You are not signed in.' };
 
@@ -639,7 +643,8 @@ export async function updateAuthenticatedProfile(profile: { firstName: string; l
     }
     return { ok: payload.ok, message: payload.message, user: payload.user };
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : 'Unable to update your profile.' };
+    const code = error instanceof ApiRequestError && typeof error.payload.code === 'string' ? error.payload.code : undefined;
+    return { ok: false, code, message: error instanceof Error ? error.message : 'Unable to update your profile.' };
   }
 }
 
@@ -789,12 +794,27 @@ export async function getLoginActivity() {
   }
 
   try {
-    const payload = await apiRequest<{ ok: boolean; activities?: LoginActivity[]; message?: string }>('/api/auth/login-activity', {
+    const payload = await apiRequest<{ ok: boolean; activities?: LoginActivity[]; otherSessions?: number; message?: string }>('/api/auth/login-activity', {
       headers: { Authorization: `Bearer ${token}` },
     });
-    return { ok: payload.ok, activities: payload.activities ?? [], message: payload.message };
+    return { ok: payload.ok, activities: payload.activities ?? [], otherSessions: payload.otherSessions ?? 0, message: payload.message };
   } catch (error) {
     return { ok: false, activities: [] as LoginActivity[], message: error instanceof Error ? error.message : 'Unable to load login activity.' };
+  }
+}
+
+/** Signs out every other device; this one stays signed in. */
+export async function signOutOtherDevices() {
+  const token = await getSessionToken();
+  if (!token) return { ok: false, signedOut: 0, message: 'You are not signed in.' };
+  try {
+    const payload = await apiRequest<{ ok: boolean; signedOut?: number; message?: string }>('/api/auth/sessions/others/logout', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return { ok: payload.ok, signedOut: payload.signedOut ?? 0, message: payload.message || 'Other devices were signed out.' };
+  } catch (error) {
+    return { ok: false, signedOut: 0, message: error instanceof Error ? error.message : 'Unable to sign out other devices.' };
   }
 }
 

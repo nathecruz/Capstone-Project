@@ -50,7 +50,7 @@ export function AiAvatar({ size = 30 }: { size?: number }) {
   );
 }
 
-function TypingDots() {
+export function TypingDots() {
   const styles = useThemedStyles(themedStyles);
   const [progress] = useState(() => new Animated.Value(0));
   useEffect(() => {

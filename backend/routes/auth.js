@@ -1,14 +1,15 @@
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import { query, withTransaction } from '../db/client.js';
-import { loginLimiter, registerLimiter, resendVerificationLimiter } from '../http/rate-limits.js';
+import { accountChangeLimiter, loginLimiter, registerLimiter, resendVerificationLimiter } from '../http/rate-limits.js';
 import { authToken, hashToken, normalizeEmail, parse } from '../lib/http.js';
 import { namesFromInput } from '../lib/names.js';
 import { loginSchema, passwordSchema, profileSchema, registerSchema } from '../schemas.js';
 import { ADMIN_APP_MESSAGE, createSession, findUser, requireAuth, userFromRow } from '../services/accounts.js';
-import { passwordChangedEmail } from '../services/email-templates.js';
+import { emailChangedEmail, passwordChangedEmail } from '../services/email-templates.js';
 import { sendVerificationCode, verificationEnabled, verifyCode } from '../services/email-verification.js';
 import { sendEmail } from '../services/mailer.js';
+import { clearFailedLogins, lockedFor, lockedMessage, recordFailedLogin } from '../services/login-protection.js';
 import { hashPassword, passwordStrength, verifyPassword } from '../services/passwords.js';
 
 // A real hash, so unknown emails take as long to reject as wrong passwords.
@@ -19,6 +20,12 @@ const deviceLabel = (input, request) => input.device || request.get('user-agent'
 export function notifyPasswordChanged(user) {
   const email = passwordChangedEmail({ name: user.firstName || user.fullName });
   sendEmail({ to: user.email, ...email }).catch((error) => console.warn(`[mail] password-changed notice failed: ${error?.code ?? error?.message}`));
+}
+
+/** Tells the old address that the account's email was changed. */
+function notifyEmailChanged(user, newEmail) {
+  const email = emailChangedEmail({ name: user.firstName || user.fullName, newEmail });
+  sendEmail({ to: user.email, ...email }).catch((error) => console.warn(`[mail] email-changed notice failed: ${error?.code ?? error?.message}`));
 }
 
 /**
@@ -95,11 +102,18 @@ export default function registerAuthRoutes(app) {
     const input = parse(loginSchema, request, response);
     if (!input) return;
     const user = await findUser(input.email);
+    const pausedFor = lockedFor(user);
+    if (pausedFor) return response.status(429).json({ ok: false, code: 'ACCOUNT_LOCKED', retryAfterSeconds: Math.ceil(pausedFor / 1000), message: lockedMessage(pausedFor) });
     const passwordOk = await verifyPassword(input.password, user?.passwordHash || timingDummyHash);
-    if (!user || !passwordOk) return response.status(401).json({ ok: false, message: 'Incorrect email or password.' });
+    if (!user || !passwordOk) {
+      const paused = user ? await recordFailedLogin(user) : 0;
+      if (paused) return response.status(429).json({ ok: false, code: 'ACCOUNT_LOCKED', retryAfterSeconds: Math.ceil(paused / 1000), message: lockedMessage(paused) });
+      return response.status(401).json({ ok: false, message: 'Incorrect email or password.' });
+    }
     if (user.status === 'deactivated') return response.status(403).json({ ok: false, message: 'This account has been deactivated. Please contact the HabitAI administrator.' });
     // Checked after the password, so the role of an account is not revealed to anyone else.
     if (user.role === 'admin') return response.status(403).json({ ok: false, code: 'ADMIN_ACCOUNT', message: ADMIN_APP_MESSAGE });
+    if (user.failedLogins || user.loginLockedUntil) await clearFailedLogins(user.id);
     await query('INSERT INTO login_activity (id,user_id,device,created_at) VALUES ($1,$2,$3,$4)', [crypto.randomUUID(), user.id, deviceLabel(input, request), Date.now()]);
     response.json({ ok: true, message: 'Login successful.', token: await createSession(user.id), user: userFromRow(user) });
   });
@@ -145,12 +159,24 @@ export default function registerAuthRoutes(app) {
   app.get('/api/auth/login-activity', async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
-    const result = await query('SELECT device, created_at AS "createdAt", login_date_time AS "loginDateTime" FROM login_activity WHERE user_id = $1 ORDER BY login_date_time DESC LIMIT 10', [session.userId]);
-    response.json({ ok: true, activities: result.rows });
+    const [result, others] = await Promise.all([
+      query('SELECT device, created_at AS "createdAt", login_date_time AS "loginDateTime" FROM login_activity WHERE user_id = $1 ORDER BY login_date_time DESC LIMIT 10', [session.userId]),
+      query('SELECT count(*)::int AS n FROM sessions WHERE user_id = $1 AND token_hash <> $2 AND expires_at > $3', [session.userId, hashToken(authToken(request)), Date.now()]),
+    ]);
+    response.json({ ok: true, activities: result.rows, otherSessions: others.rows[0].n });
+  });
+
+  // Sign out every other device (this one stays signed in). Always safe, so allowed before the
+  // email is confirmed too (for example right after changing it).
+  app.post('/api/auth/sessions/others/logout', accountChangeLimiter, async (request, response) => {
+    const session = await requireAuth(request, response, { allowUnverified: true });
+    if (!session) return;
+    const result = await query('DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2', [session.userId, hashToken(authToken(request))]);
+    response.json({ ok: true, signedOut: result.rowCount, message: result.rowCount ? `Signed out of ${result.rowCount} other device${result.rowCount === 1 ? '' : 's'}.` : 'No other devices were signed in.' });
   });
 
   // Allowed before verification so a mistyped sign-up email can be corrected.
-  app.put('/api/auth/profile', async (request, response) => {
+  app.put('/api/auth/profile', accountChangeLimiter, async (request, response) => {
     const session = await requireAuth(request, response, { allowUnverified: true });
     if (!session) return;
     const input = parse(profileSchema, request, response);
@@ -161,12 +187,20 @@ export default function registerAuthRoutes(app) {
     const duplicate = await query('SELECT id FROM users WHERE (email = $1 OR lower(username) = lower($2)) AND id <> $3', [emailAddress, input.username, session.userId]);
     if (duplicate.rows[0]) return response.status(409).json({ ok: false, message: 'This email or username is already in use.' });
     const emailChanged = emailAddress !== session.email;
+    // A stolen session must not be able to move the account to another email (and then reset the
+    // password), so a confirmed email changes only with the current password.
+    if (emailChanged && session.emailVerifiedAt) {
+      if (!input.currentPassword) return response.status(403).json({ ok: false, code: 'PASSWORD_REQUIRED', message: 'Enter your current password to change your email address.' });
+      const account = await findUser(session.email);
+      if (!account || !(await verifyPassword(input.currentPassword, account.passwordHash))) return response.status(401).json({ ok: false, code: 'PASSWORD_INCORRECT', message: 'The current password is incorrect.' });
+    }
     const reverify = emailChanged && verificationEnabled();
     await query(
       'UPDATE users SET full_name=$1,username=$2,email=$3,date_of_birth=$4,gender=$5,about=$6, email_verified_at = CASE WHEN $8 THEN NULL ELSE email_verified_at END, first_name=$9, last_name=$10 WHERE id=$7',
       [names.fullName, input.username, emailAddress, input.dateOfBirth, input.gender, input.about, session.userId, reverify, names.firstName, names.lastName],
     );
     const user = await findUser(emailAddress);
+    if (emailChanged && session.emailVerifiedAt) notifyEmailChanged(session, emailAddress);
     const verification = reverify ? await sendVerificationCode(user, { respectCooldown: false }) : null;
     const updatedMessage = !reverify
       ? 'Profile updated successfully.'
@@ -226,7 +260,7 @@ export default function registerAuthRoutes(app) {
     response.json({ ok: true, message: 'Logged out successfully.' });
   });
 
-  app.post('/api/auth/change-password', async (request, response) => {
+  app.post('/api/auth/change-password', accountChangeLimiter, async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
     const input = parse(z.object({ currentPassword: z.string().min(1).max(128), newPassword: passwordSchema }).strict(), request, response);
@@ -244,7 +278,7 @@ export default function registerAuthRoutes(app) {
     response.json({ ok: true, message: 'Your password has been updated. Please sign in again.' });
   });
 
-  app.delete('/api/auth/account', async (request, response) => {
+  app.delete('/api/auth/account', accountChangeLimiter, async (request, response) => {
     const session = await requireAuth(request, response, { allowUnverified: true });
     if (!session) return;
     const input = parse(z.object({ currentPassword: z.string().min(1).max(128) }).strict(), request, response);

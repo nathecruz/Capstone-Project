@@ -1,24 +1,52 @@
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { TypingDots } from '@/components/ai-chat';
+import { ProgressRing } from '@/components/progress-ring';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { generateGoalPlan } from '@/utils/ai-client';
 import { useAppColorScheme, type Goal } from '@/hooks/color-scheme-context';
+import { useAppTheme } from '@/hooks/dark-mode-context';
 import { CONTENT_MAX_WIDTH } from '@/hooks/use-responsive-layout';
-import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
+import { createThemedStyles, themedColor, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 type GoalTab = 'Planner' | 'My Goals';
 
 type GoalInsight = Goal;
 
-const samplePrompts = [
-  'I want to become healthier by being more consistent with exercise, sleep, and meal planning.',
-  'I want to grow in my career by improving my confidence, skills, and professional habits.',
-  'I want to save more money and build a better financial routine this year.',
-  'I want to become more disciplined and focused in my studies and personal growth.',
+/** Starter goals: a tap fills the goal field with a full example. */
+const STARTERS: { label: string; icon: keyof typeof Ionicons.glyphMap; prompt: string }[] = [
+  { label: 'Get fit', icon: 'barbell-outline', prompt: 'I want to become healthier by being more consistent with exercise, sleep, and meal planning.' },
+  { label: 'Study better', icon: 'school-outline', prompt: 'I want to become more disciplined and focused in my studies and personal growth.' },
+  { label: 'Save money', icon: 'wallet-outline', prompt: 'I want to save more money and build a better financial routine this year.' },
+  { label: 'Grow my career', icon: 'briefcase-outline', prompt: 'I want to grow in my career by improving my confidence, skills, and professional habits.' },
 ];
+
+const FOCUS_TARGETS = [
+  { value: '3 habits', label: '3 habits' },
+  { value: '4 habits', label: '4 habits' },
+  { value: '5 habits', label: '5 habits' },
+];
+const TIMELINES = [
+  { value: '7-14 days', label: '2 weeks' },
+  { value: '30-60 days', label: '1-2 months' },
+  { value: '90 days', label: '3 months' },
+];
+const timelineLabel = (value: string) => TIMELINES.find((option) => option.value === value)?.label ?? value;
+
+const CATEGORY_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
+  Health: 'fitness-outline',
+  Career: 'briefcase-outline',
+  Finance: 'wallet-outline',
+  Education: 'school-outline',
+  Relationships: 'people-outline',
+  'Personal Growth': 'leaf-outline',
+};
+
+/** Long goals are kept readable; the full text stays in the goal field. */
+const goalTitle = (input: string) => (input.length > 120 ? `${input.slice(0, 117)}...` : input);
 
 const detectCategory = (input: string) => {
   const lower = input.toLowerCase();
@@ -31,6 +59,7 @@ const detectCategory = (input: string) => {
   return 'Personal Growth';
 };
 
+/** Fields the AI plan may leave out, filled from the goal text. */
 const buildGoalInsight = (input: string, timeline = '30-60 days', focusTarget = '4 habits'): GoalInsight => {
   const trimmed = input.trim();
   const title = trimmed || 'Create a stronger life plan';
@@ -48,47 +77,31 @@ const buildGoalInsight = (input: string, timeline = '30-60 days', focusTarget = 
       ? 'Balanced'
       : 'Quick win';
 
-  const goalPhrase = title.toLowerCase();
-  const nextCheckIn = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
+  const nextCheckIn = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
   const subject = (title.match(/(?:in|for|with|on)\s+([^,.!?]+)/i)?.[1] || title)
     .replace(/^i want to (become|be|improve|learn|build|save|grow)\s+/i, '')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 46);
   const dueDates = [0, 1, 3, 7].map((days) => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
-  const actionPlan = [
-    `Choose one measurable ${subject} outcome for this week.`,
-    `Complete one focused 20-minute ${subject} session.`,
-    `Review what helped or blocked your ${subject} progress.`,
-    `Set a reminder for your next ${subject} session.`,
-  ];
-
-  const focusAreas = [
-    focusFromInput[0],
-    focusFromInput[1],
-    focusFromInput[2],
-  ];
-
-  const nextMilestone = `Finish one meaningful milestone this week for ${title.toLowerCase()}.`;
-
-  const summary = `This goal is strong because it is specific, meaningful, and realistic enough to sustain momentum. The right move is to make the plan visible and repeatable.`;
 
   return {
     id: `${Date.now()}`,
-    title: title.length > 50 ? `${title.slice(0, 47)}...` : title,
+    title: goalTitle(title),
     category,
-    summary,
+    summary: 'This goal is specific, meaningful and realistic enough to keep your momentum. Make the plan visible and repeatable.',
     intensity,
-    focusAreas,
-    actionPlan,
+    focusAreas: focusFromInput,
+    actionPlan: [
+      `Choose one measurable ${subject} outcome for this week.`,
+      `Complete one focused 20-minute ${subject} session.`,
+      `Review what helped or blocked your ${subject} progress.`,
+      `Set a reminder for your next ${subject} session.`,
+    ],
     actionDueDates: dueDates,
-    nextMilestone,
+    nextMilestone: `Finish one meaningful milestone this week for ${lower}.`,
     risk: 'Losing focus when tasks pile up or motivation drops for a few days.',
-    riskAction: `If tasks pile up, pause and complete only the smallest next action for ${goalPhrase} before rescheduling the rest.`,
+    riskAction: `If tasks pile up, do only the smallest next action for ${lower} before rescheduling the rest.`,
     timeline,
     focusTarget,
     nextCheckIn,
@@ -98,35 +111,82 @@ const buildGoalInsight = (input: string, timeline = '30-60 days', focusTarget = 
   };
 };
 
-const formatProgress = (progress: number) => `${Math.max(0, Math.min(100, progress))}%`;
 const getProgressFromSteps = (completedSteps: boolean[]) => Math.round((completedSteps.filter(Boolean).length / 4) * 100);
 const getGoalStatus = (progress: number) => progress >= 100 ? 'Completed' : progress >= 67 ? 'On track' : progress > 0 ? 'In progress' : 'Fresh plan';
+
+/** A row of choices for a plan setting. */
+function Choice({ label, options, value, onChange }: { label: string; options: { value: string; label: string }[]; value: string; onChange: (value: string) => void }) {
+  const styles = useThemedStyles(themedStyles);
+  return (
+    <View style={styles.choice}>
+      <Text style={styles.choiceLabel}>{label}</Text>
+      <View style={styles.choiceRow} accessibilityRole="radiogroup" accessibilityLabel={label}>
+        {options.map((option) => {
+          const selected = option.value === value;
+          return (
+            <Pressable key={option.value} style={({ pressed }) => [styles.choiceOption, selected && styles.choiceOptionActive, pressed && styles.pressed]} onPress={() => onChange(option.value)} accessibilityRole="radio" accessibilityState={{ checked: selected }} accessibilityLabel={`${label}: ${option.label}`}>
+              <Text style={[styles.choiceText, selected && styles.choiceTextActive]}>{option.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+/** One action step: tap to tick it off. */
+function StepRow({ step, due, done, index, last, onPress }: { step: string; due?: string; done: boolean; index: number; last: boolean; onPress: () => void }) {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
+  return (
+    <Pressable style={({ pressed }) => [styles.stepRow, pressed && styles.pressed]} onPress={onPress} accessibilityRole="checkbox" accessibilityState={{ checked: done }} accessibilityLabel={`Step ${index + 1}: ${step}${due ? `. Due ${due}` : ''}`}>
+      <View style={styles.stepRail}>
+        <View style={[styles.stepDot, done && styles.stepDotDone]}>
+          {done ? <Ionicons name="checkmark" size={15} color={themeColor('#FFFFFF')} /> : <Text style={styles.stepNumber}>{index + 1}</Text>}
+        </View>
+        {!last && <View style={[styles.stepLine, done && styles.stepLineDone]} />}
+      </View>
+      <View style={styles.stepCopy}>
+        <Text style={[styles.stepText, done && styles.stepTextDone]}>{step}</Text>
+        {due ? (
+          <View style={styles.dueChip}>
+            <Ionicons name="calendar-outline" size={11} color={themeColor('#6E6887')} />
+            <Text style={styles.dueText}>Due {due}</Text>
+          </View>
+        ) : null}
+      </View>
+    </Pressable>
+  );
+}
 
 export default function GoalsScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
+  const appTheme = useAppTheme();
   const showAlert = useAppDialog();
-  const { isDarkMode, getAppStateSnapshot, syncAppState } = useAppColorScheme();
+  const { isDarkMode, getAppStateSnapshot, syncAppState, goals: savedGoals, updateGoals } = useAppColorScheme();
   const { width } = useWindowDimensions();
-  const compact = width < 380;
   const [activeTab, setActiveTab] = useState<GoalTab>('Planner');
   const [goalInput, setGoalInput] = useState('');
+  const [inputFocused, setInputFocused] = useState(false);
   const [generatedGoal, setGeneratedGoal] = useState<GoalInsight | null>(null);
-  const { goals: savedGoals, updateGoals } = useAppColorScheme();
-  const [saveConfirmationVisible, setSaveConfirmationVisible] = useState(false);
   const [isSavingGoal, setIsSavingGoal] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [clearConfirmationVisible, setClearConfirmationVisible] = useState(false);
   const [clearUndoText, setClearUndoText] = useState<string | null>(null);
-  const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({});
+  const [openGoals, setOpenGoals] = useState<Record<string, boolean>>({});
   const [focusTarget, setFocusTarget] = useState('4 habits');
   const [timelineOption, setTimelineOption] = useState('30-60 days');
+  // The hero is purple in both modes; its ring needs the same colour in the middle.
+  const heroBackground = themedColor(isDarkMode ? '#30215A' : '#5B42D8', appTheme);
 
   const activeGoal = useMemo(() => {
     const currentGoal = generatedGoal ?? savedGoals[0] ?? null;
     if (!currentGoal) return null;
     return savedGoals.find((goal) => goal.id === currentGoal.id) ?? currentGoal;
   }, [generatedGoal, savedGoals]);
+  const activeGoalSaved = Boolean(activeGoal && savedGoals.some((goal) => goal.id === activeGoal.id));
+  const averageProgress = savedGoals.length ? Math.round(savedGoals.reduce((total, goal) => total + goal.progress, 0) / savedGoals.length) : 0;
+  const completedGoals = savedGoals.filter((goal) => goal.progress >= 100).length;
 
   useEffect(() => {
     if (!clearUndoText) return;
@@ -135,6 +195,7 @@ export default function GoalsScreen() {
   }, [clearUndoText]);
 
   const createInsight = async () => {
+    if (isGenerating) return;
     if (!goalInput.trim()) {
       showAlert('Goal prompt required', 'Write the goal you want to improve or pursue first.');
       return;
@@ -149,19 +210,19 @@ export default function GoalsScreen() {
         return;
       }
       const plan = result.plan;
-      const nextGoal: GoalInsight = {
-        ...buildGoalInsight(input, timelineOption, focusTarget),
+      const fallback = buildGoalInsight(input, timelineOption, focusTarget);
+      setGeneratedGoal({
+        ...fallback,
         ...plan,
         id: `${Date.now()}`,
-        title: input.length > 50 ? `${input.slice(0, 47)}...` : input,
+        title: goalTitle(input),
         focusTarget,
         timeline: timelineOption,
         completedSteps: [false, false, false, false],
-        actionDueDates: plan.actionDueDates ?? buildGoalInsight(input, timelineOption, focusTarget).actionDueDates,
+        actionDueDates: plan.actionDueDates ?? fallback.actionDueDates,
         progress: 0,
         status: 'Fresh plan',
-      } as GoalInsight;
-      setGeneratedGoal(nextGoal);
+      } as GoalInsight);
       setActiveTab('Planner');
     } finally {
       setIsGenerating(false);
@@ -169,41 +230,33 @@ export default function GoalsScreen() {
   };
 
   const saveGoal = async () => {
-    if (isSavingGoal) return;
-    if (!activeGoal) {
-      showAlert('No plan generated yet', 'Generate a plan before saving it.');
-      return;
-    }
-
-    const goalToSave: GoalInsight = {
-      ...activeGoal,
-      id: activeGoal.id || `${Date.now()}`,
-      progress: getProgressFromSteps(activeGoal.completedSteps),
-      status: getGoalStatus(getProgressFromSteps(activeGoal.completedSteps)),
-    };
-
-    const nextGoals = savedGoals.some((goal) => goal.title === goalToSave.title)
-      ? savedGoals
-      : [goalToSave, ...savedGoals];
+    if (isSavingGoal || !activeGoal) return;
+    const progress = getProgressFromSteps(activeGoal.completedSteps);
+    const goalToSave: GoalInsight = { ...activeGoal, id: activeGoal.id || `${Date.now()}`, progress, status: getGoalStatus(progress) };
+    const nextGoals = savedGoals.some((goal) => goal.title === goalToSave.title) ? savedGoals : [goalToSave, ...savedGoals];
     setIsSavingGoal(true);
     try {
       const result = await syncAppState({ ...getAppStateSnapshot(), goals: nextGoals });
       if (!result.ok) {
-        showAlert('Goal not synced', 'The goal was not saved to your account database. Check your connection and try again.');
+        showAlert('Goal not synced', 'The goal was not saved to your account. Check your connection and try again.');
         return;
       }
       updateGoals(result.state.goals);
-      setSaveConfirmationVisible(true);
+      showAlert('Goal saved', 'Your plan is in My Goals. Tick off each step as you do it.', [
+        { text: 'Stay here', style: 'cancel' },
+        { text: 'View goals', onPress: () => setActiveTab('My Goals') },
+      ], 'success');
     } finally {
       setIsSavingGoal(false);
     }
   };
 
-  const confirmClearGoal = () => {
-    const previousText = goalInput;
-    setGoalInput('');
-    setClearConfirmationVisible(false);
-    setClearUndoText(previousText);
+  const clearGoalText = () => {
+    if (!goalInput.trim()) return;
+    showAlert('Clear goal text?', 'This clears the goal field only. Your saved goals stay safe.', [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Clear text', style: 'destructive', onPress: () => { setClearUndoText(goalInput); setGoalInput(''); } },
+    ]);
   };
 
   const deleteGoal = (goalId: string) => {
@@ -214,477 +267,300 @@ export default function GoalsScreen() {
         style: 'destructive',
         onPress: () => {
           updateGoals((previous) => previous.filter((goal) => goal.id !== goalId));
-          if (generatedGoal && generatedGoal.id === goalId) {
-            setGeneratedGoal(null);
-          }
+          if (generatedGoal && generatedGoal.id === goalId) setGeneratedGoal(null);
         },
       },
     ]);
   };
 
   const toggleStep = (goalId: string, stepIndex: number) => {
-    updateGoals((previous) =>
-      previous.map((goal) => {
-        if (goal.id !== goalId) return goal;
-        const completedSteps = goal.completedSteps.map((completed, index) => index === stepIndex ? !completed : completed);
-        const progress = getProgressFromSteps(completedSteps);
-        return { ...goal, completedSteps, progress, status: getGoalStatus(progress) };
-      }),
-    );
-
-    if (generatedGoal && generatedGoal.id === goalId) {
-      const completedSteps = generatedGoal.completedSteps.map((completed, index) => index === stepIndex ? !completed : completed);
+    const toggled = (goal: GoalInsight) => {
+      const completedSteps = goal.completedSteps.map((completed, index) => index === stepIndex ? !completed : completed);
       const progress = getProgressFromSteps(completedSteps);
-      setGeneratedGoal({ ...generatedGoal, completedSteps, progress, status: getGoalStatus(progress) });
-    }
+      return { ...goal, completedSteps, progress, status: getGoalStatus(progress) };
+    };
+    updateGoals((previous) => previous.map((goal) => (goal.id === goalId ? toggled(goal) : goal)));
+    if (generatedGoal && generatedGoal.id === goalId) setGeneratedGoal(toggled(generatedGoal));
   };
 
-  const quickActions = [
-    { label: 'Week plan', value: 'Focus on 3 small wins this week.', icon: 'calendar-outline' },
-    { label: 'Daily action', value: 'Do the first step before noon.', icon: 'flash-outline' },
-    { label: 'Accountability', value: 'Review progress every evening.', icon: 'checkmark-done-outline' },
-  ];
+  const stepsDone = (goal: GoalInsight) => goal.completedSteps.filter(Boolean).length;
 
   return (
     <>
       <StatusBar style={isDarkMode ? 'light' : 'dark'} />
-      <SafeAreaView style={[styles.screen, isDarkMode && styles.darkScreen]}>
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <SafeAreaView style={styles.screen}>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <View style={[styles.container, { paddingHorizontal: width < 420 ? 16 : 22 }]}>
             <View style={styles.headerRow}>
-              {/* Goals is a tab, so there is nothing to go back to; the spacer keeps the title centred. */}
+              {/* Goals is a tab, so there is nothing to go back to; the spacers keep the title centred. */}
               <View style={styles.headerSpacer} />
               <View style={styles.headerTitleWrap}>
-                <Text style={[styles.headerEyebrow, isDarkMode && styles.darkMutedText]}>MY GOALS</Text>
-                <Text style={[styles.headerTitle, isDarkMode && styles.darkText]}>Personal Growth</Text>
+                <Text style={styles.headerEyebrow}>MY GOALS</Text>
+                <Text style={styles.headerTitle}>AI Goal Planner</Text>
               </View>
-              <View style={styles.headerSpacer} />
+              <View style={styles.headerBadge}><Ionicons name="flag" size={16} color={themeColor('#5B42D8')} /></View>
             </View>
 
-            <View style={[styles.heroCard, isDarkMode && styles.darkCard]}>
-              <View style={styles.heroHeader}>
-                <View style={styles.heroHeaderText}>
-                  <Text style={[styles.kicker, isDarkMode && styles.darkMutedText]}>AI Goal Builder</Text>
-                  <Text style={[styles.heroTitle, compact && styles.compactHeroTitle, isDarkMode && styles.darkText]}>Turn your dream into a plan.</Text>
+            <View style={[styles.hero, isDarkMode && styles.heroDark]}>
+              <View style={styles.heroCopy}>
+                <View style={styles.heroLabelRow}>
+                  <Ionicons name="sparkles" size={12} color={themedColor('#D8D0FF', appTheme)} />
+                  <Text style={styles.heroLabel}>AI GOAL PLANNER</Text>
                 </View>
-                <View style={styles.aiBadge}>
-                  <Ionicons name="sparkles" size={14} color={themeColor('#FFFFFF')} />
-                </View>
+                <Text style={styles.heroTitle}>Turn a goal into 4 clear steps.</Text>
+                <Text style={styles.heroSubtitle}>
+                  {savedGoals.length
+                    ? `${savedGoals.length} goal${savedGoals.length === 1 ? '' : 's'} saved · ${completedGoals} completed`
+                    : 'Describe it, get a plan, then tick off each step.'}
+                </Text>
               </View>
-
-              {/* No goal yet: how the planner works, instead of three empty boxes. */}
-              {!activeGoal && (
-                <View style={styles.heroStatsRow}>
-                  {[['1', 'Describe it'], ['2', 'Get a plan'], ['3', 'Track daily']].map(([step, label]) => (
-                    <View key={step} style={[styles.heroStat, isDarkMode && styles.darkHeroStat]}>
-                      <Text style={[styles.heroStatLabel, isDarkMode && styles.darkMutedText]}>Step {step}</Text>
-                      <Text style={[styles.heroStatValue, isDarkMode && styles.darkText]}>{label}</Text>
-                    </View>
-                  ))}
-                </View>
+              {savedGoals.length ? (
+                <ProgressRing value={averageProgress} size={88} thickness={8} color="#FFFFFF" trackColor="rgba(255,255,255,0.2)" innerColor={heroBackground}>
+                  <Text style={styles.heroRingValue}>{averageProgress}%</Text>
+                  <Text style={styles.heroRingLabel}>average</Text>
+                </ProgressRing>
+              ) : (
+                <View style={styles.heroIcon}><Ionicons name="rocket" size={30} color="#FFFFFF" /></View>
               )}
-              {activeGoal && <View style={styles.heroStatsRow}>
-                <View style={[styles.heroStat, isDarkMode && styles.darkHeroStat]}>
-                  <Text style={[styles.heroStatLabel, isDarkMode && styles.darkMutedText]}>Effort</Text>
-                  <Text style={[styles.heroStatValue, !activeGoal && styles.placeholderStatValue, isDarkMode && styles.darkText]}>{activeGoal?.intensity ?? '--'}</Text>
-                </View>
-                <View style={[styles.heroStat, isDarkMode && styles.darkHeroStat]}>
-                  <Text style={[styles.heroStatLabel, isDarkMode && styles.darkMutedText]}>Focus</Text>
-                  <Text style={[styles.heroStatValue, !activeGoal && styles.placeholderStatValue, isDarkMode && styles.darkText]}>{activeGoal?.focusTarget ?? '--'}</Text>
-                </View>
-                <View style={[styles.heroStat, isDarkMode && styles.darkHeroStat]}>
-                  <Text style={[styles.heroStatLabel, isDarkMode && styles.darkMutedText]}>Time</Text>
-                  <Text style={[styles.heroStatValue, !activeGoal && styles.placeholderStatValue, isDarkMode && styles.darkText]}>{activeGoal?.timeline ?? '--'}</Text>
-                </View>
-              </View>}
+            </View>
 
-              <View style={[styles.tabRow, isDarkMode && styles.darkTabRow]}>
-                {(['Planner', 'My Goals'] as const).map((tab) => (
-                  <Pressable key={tab} style={[styles.tabButton, activeTab === tab && styles.activeTabButton]} onPress={() => setActiveTab(tab)}>
-                    <Text style={[styles.tabText, activeTab === tab && styles.activeTabText, isDarkMode && styles.darkTabText]}>{tab}</Text>
+            <View style={styles.tabs} accessibilityRole="tablist">
+              {(['Planner', 'My Goals'] as const).map((tab) => {
+                const active = activeTab === tab;
+                return (
+                  <Pressable key={tab} style={[styles.tab, active && styles.tabActive]} onPress={() => setActiveTab(tab)} accessibilityRole="tab" accessibilityState={{ selected: active }}>
+                    <Ionicons name={tab === 'Planner' ? 'sparkles' : 'flag'} size={15} color={active ? themeColor('#FFFFFF') : themeColor('#777283')} />
+                    <Text style={[styles.tabText, active && styles.tabTextActive]}>{tab === 'My Goals' && savedGoals.length ? `My Goals (${savedGoals.length})` : tab}</Text>
                   </Pressable>
-                ))}
-              </View>
+                );
+              })}
             </View>
 
             {activeTab === 'Planner' ? (
               <>
-                <View style={[styles.inputCard, isDarkMode && styles.darkCard]}>
-                    <View style={styles.inputHeaderRow}>
-                    <View>
-                      <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>What are you working toward?</Text>
-                      <Text style={[styles.sectionHint, isDarkMode && styles.darkMutedText]}>Describe it in your own words.</Text>
-                    </View>
-                    <Pressable style={styles.modePill} onPress={() => showAlert('Live AI suggestions', 'Your goal is analyzed when you tap Generate plan. Nothing is sent until you submit it.')} accessibilityLabel="Explain live AI suggestions">
-                      <View style={styles.liveDot} />
-                      <Text style={styles.modePillText}>AI-ready</Text>
-                    </Pressable>
-                  </View>
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>What do you want to achieve?</Text>
+                  <Text style={styles.cardHint}>Write it in your own words: the outcome, and the routine you want to build.</Text>
 
                   <TextInput
                     value={goalInput}
                     onChangeText={setGoalInput}
                     maxLength={500}
                     multiline
-                    placeholder="Example: I want to become healthier, more disciplined, and consistent with my fitness routine."
-                    placeholderTextColor={isDarkMode ? '#A6A1AF' : '#8A8397'}
-                    style={[styles.textInput, isDarkMode && styles.darkInput]}
+                    placeholder="Example: I want to get fit and sleep better while keeping up with my classes."
+                    placeholderTextColor={themeColor('#8A8397')}
+                    style={[styles.textInput, inputFocused && styles.textInputFocused, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null]}
+                    onFocus={() => setInputFocused(true)}
+                    onBlur={() => setInputFocused(false)}
+                    accessibilityLabel="Your goal"
                   />
-
-                  <View style={styles.inputMetaRow}>
-                    <Text style={[styles.inputGuidance, isDarkMode && styles.darkMutedText]}>Add the outcome, context, and routine you want to build.</Text>
-                    <Text style={[styles.characterCount, isDarkMode && styles.darkMutedText]}>{goalInput.length}/500</Text>
-                  </View>
-
-                  <View style={styles.customizeRow}>
-                    <Text style={[styles.customizeLabel, isDarkMode && styles.darkText]}>Plan settings</Text>
-                    <View style={styles.customizeControls}>
-                      <Pressable style={styles.settingControl} onPress={() => setFocusTarget(focusTarget === '3 habits' ? '4 habits' : focusTarget === '4 habits' ? '5 habits' : '3 habits')}>
-                        <Ionicons name="locate-outline" size={14} color={themeColor('#5B42D8')} />
-                        <Text style={styles.settingControlText}>{focusTarget}</Text>
-                      </Pressable>
-                      <Pressable style={styles.settingControl} onPress={() => setTimelineOption(timelineOption === '7-14 days' ? '30-60 days' : timelineOption === '30-60 days' ? '90 days' : '7-14 days')}>
-                        <Ionicons name="calendar-outline" size={14} color={themeColor('#5B42D8')} />
-                        <Text style={styles.settingControlText}>{timelineOption}</Text>
-                      </Pressable>
+                  <View style={styles.inputMeta}>
+                    <View style={styles.privacyNote}>
+                      <Ionicons name="lock-closed" size={11} color={themeColor('#8A8294')} />
+                      <Text style={styles.metaText}>Only this text is sent to the AI.</Text>
                     </View>
+                    <Text style={styles.metaText}>{goalInput.length}/500</Text>
                   </View>
 
-                  <View style={styles.quickPromptRow}>
-                    {samplePrompts.map((prompt) => (
-                      <Pressable key={prompt} style={[styles.quickPromptChip, isDarkMode && styles.darkPromptChip]} onPress={() => setGoalInput(prompt)}>
-                        <Ionicons name="add-circle-outline" size={14} color={themeColor('#5B42D8')} />
-                        <Text style={[styles.quickPromptText, isDarkMode && styles.darkPromptText]}>{prompt}</Text>
+                  <Text style={styles.subheading}>Need an idea?</Text>
+                  <View style={styles.starters}>
+                    {STARTERS.map((starter) => (
+                      <Pressable key={starter.label} style={({ pressed }) => [styles.starter, pressed && styles.pressed]} onPress={() => setGoalInput(starter.prompt)} accessibilityRole="button" accessibilityLabel={`Use the example goal: ${starter.label}`}>
+                        <Ionicons name={starter.icon} size={15} color={themeColor('#5B42D8')} />
+                        <Text style={styles.starterText}>{starter.label}</Text>
                       </Pressable>
                     ))}
                   </View>
 
+                  <Choice label="Habits to focus on" options={FOCUS_TARGETS} value={focusTarget} onChange={setFocusTarget} />
+                  <Choice label="Timeline" options={TIMELINES} value={timelineOption} onChange={setTimelineOption} />
+
                   <View style={styles.actionRow}>
-                    <Pressable style={styles.secondaryButton} onPress={() => {
-                      if (goalInput.trim()) setClearConfirmationVisible(true);
-                    }}>
+                    <Pressable style={({ pressed }) => [styles.secondaryButton, !goalInput.trim() && styles.disabled, pressed && styles.pressed]} onPress={clearGoalText} disabled={!goalInput.trim()} accessibilityRole="button">
                       <Text style={styles.secondaryButtonText}>Clear</Text>
                     </Pressable>
-                    <Pressable style={styles.primaryButton} onPress={createInsight} disabled={isGenerating}>
-                      {isGenerating ? <ActivityIndicator size="small" color={themeColor('#FFFFFF')} /> : <Ionicons name="sparkles-outline" size={17} color={themeColor('#FFFFFF')} />}
+                    <Pressable style={({ pressed }) => [styles.primaryButton, (isGenerating || !goalInput.trim()) && styles.disabled, pressed && styles.pressed]} onPress={createInsight} disabled={isGenerating} accessibilityRole="button">
+                      {isGenerating ? <ActivityIndicator size="small" color={themeColor('#FFFFFF')} /> : <Ionicons name="sparkles" size={17} color={themeColor('#FFFFFF')} />}
                       <Text style={styles.primaryButtonText}>{isGenerating ? 'Creating plan...' : 'Generate plan'}</Text>
                     </Pressable>
                   </View>
                 </View>
 
-                {!activeGoal && !savedGoals.length ? (
-                  <View style={[styles.emptyStateCard, isDarkMode && styles.darkCard]}>
-                    <View style={styles.emptyIconWrap}>
-                      <Ionicons name="flag-outline" size={26} color={themeColor('#5B42D8')} />
+                {isGenerating ? (
+                  <View style={styles.card} accessibilityLiveRegion="polite">
+                    <View style={styles.buildingRow}>
+                      <View style={styles.buildingIcon}><Ionicons name="sparkles" size={17} color={themeColor('#FFFFFF')} /></View>
+                      <View style={styles.buildingCopy}>
+                        <Text style={styles.cardTitle}>Building your plan</Text>
+                        <Text style={styles.cardHint}>Picking 4 steps for {timelineLabel(timelineOption).toLowerCase()}</Text>
+                      </View>
+                      <TypingDots />
                     </View>
-                    <Text style={[styles.emptyTitle, isDarkMode && styles.darkText]}>No goal plan yet</Text>
-                    <Text style={[styles.emptyBody, isDarkMode && styles.darkMutedText]}>
-                      Write a personal goal and let the planner turn it into a realistic action plan for you.
-                    </Text>
-                    <Pressable style={styles.emptyStateButton} onPress={() => setGoalInput(samplePrompts[0])}>
-                      <Ionicons name="create-outline" size={16} color={themeColor('#FFFFFF')} />
-                      <Text style={styles.emptyStateButtonText}>Use a starter goal</Text>
-                    </Pressable>
+                    {[0.92, 0.7, 0.84, 0.6].map((share) => <View key={share} style={[styles.skeleton, { width: `${share * 100}%` }]} />)}
                   </View>
-                ) : null}
-
-                {activeGoal ? (
-                  <View style={[styles.resultCard, isDarkMode && styles.darkCard]}>
-                    <View style={styles.resultGlow} />
-
-                    <View style={styles.resultHeader}>
-                      <View style={styles.resultTitleWrap}>
-                        <Text style={[styles.resultCategory, isDarkMode && styles.darkMutedText]}>{activeGoal.category}</Text>
-                        <Text style={[styles.resultTitle, isDarkMode && styles.darkText]}>{activeGoal.title}</Text>
+                ) : activeGoal ? (
+                  <View style={styles.card}>
+                    <View style={styles.planHeader}>
+                      <View style={styles.planHeaderCopy}>
+                        <View style={styles.tagRow}>
+                          <View style={styles.tag}>
+                            <Ionicons name={CATEGORY_ICONS[activeGoal.category] ?? 'leaf-outline'} size={12} color={themeColor('#5B42D8')} />
+                            <Text style={styles.tagText}>{activeGoal.category}</Text>
+                          </View>
+                          <View style={[styles.tag, styles.tagMuted]}>
+                            <Ionicons name="flash-outline" size={12} color={themeColor('#6E6887')} />
+                            <Text style={[styles.tagText, styles.tagTextMuted]}>{activeGoal.intensity}</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.planTitle}>{activeGoal.title}</Text>
                       </View>
-                      <View style={styles.scoreBadge}>
-                        <Text style={styles.scoreBadgeLabel}>Action plan</Text>
-                        <Text style={styles.scoreBadgeText}>{activeGoal.actionPlan.length} steps</Text>
-                      </View>
+                      <ProgressRing value={activeGoal.progress} size={70} thickness={7} color={themedColor('#5B42D8', appTheme)} trackColor={themeColor('#ECE8F6', 'backgroundColor')} innerColor={themeColor('#FFFFFF', 'backgroundColor')}>
+                        <Text style={styles.ringValue}>{stepsDone(activeGoal)}/4</Text>
+                        <Text style={styles.ringLabel}>steps</Text>
+                      </ProgressRing>
                     </View>
 
-                    <View style={styles.summaryBanner}>
+                    <View style={styles.summary}>
                       <Ionicons name="sparkles" size={15} color={themeColor('#5B42D8')} />
-                      <Text style={[styles.summaryText, isDarkMode && styles.darkMutedText]}>{activeGoal.summary}</Text>
+                      <Text style={styles.summaryText}>{activeGoal.summary}</Text>
                     </View>
 
-                    <View style={styles.metricRow}>
-                      <View style={[styles.metricCard, isDarkMode && styles.darkMetricCard]}>
-                        <Text style={[styles.metricLabel, isDarkMode && styles.darkMutedText]}>Focus areas</Text>
-                        <Text style={[styles.metricValue, isDarkMode && styles.darkText]}>{activeGoal.focusAreas.length}</Text>
+                    <View style={styles.factRow}>
+                      <View style={styles.fact}><Ionicons name="time-outline" size={14} color={themeColor('#6E6887')} /><Text style={styles.factText}>{timelineLabel(activeGoal.timeline)}</Text></View>
+                      <View style={styles.fact}><Ionicons name="layers-outline" size={14} color={themeColor('#6E6887')} /><Text style={styles.factText}>{activeGoal.focusTarget}</Text></View>
+                      <View style={styles.fact}><Ionicons name="calendar-outline" size={14} color={themeColor('#6E6887')} /><Text style={styles.factText}>Check in {activeGoal.nextCheckIn}</Text></View>
+                    </View>
+
+                    <Text style={styles.subheading}>Focus areas</Text>
+                    <View style={styles.pillRow}>
+                      {activeGoal.focusAreas.map((focus) => <View key={focus} style={styles.pill}><Text style={styles.pillText}>{focus}</Text></View>)}
+                    </View>
+
+                    <View style={styles.sectionRow}>
+                      <Text style={styles.subheading}>Your 4 steps</Text>
+                      <Text style={styles.sectionHint}>Tap a step when it is done</Text>
+                    </View>
+                    {activeGoal.actionPlan.map((step, index) => (
+                      <StepRow key={`${activeGoal.id}-${index}`} step={step} due={activeGoal.actionDueDates[index]} done={Boolean(activeGoal.completedSteps[index])} index={index} last={index === activeGoal.actionPlan.length - 1} onPress={() => toggleStep(activeGoal.id, index)} />
+                    ))}
+
+                    <View style={styles.milestone}>
+                      <View style={styles.calloutIcon}><Ionicons name="flag" size={15} color={themeColor('#5B42D8')} /></View>
+                      <View style={styles.calloutCopy}>
+                        <Text style={styles.calloutLabel}>NEXT MILESTONE</Text>
+                        <Text style={styles.calloutText}>{activeGoal.nextMilestone}</Text>
                       </View>
-                      <View style={[styles.metricCard, isDarkMode && styles.darkMetricCard]}>
-                        <Text style={[styles.metricLabel, isDarkMode && styles.darkMutedText]}>Timeline</Text>
-                        <Text style={[styles.metricValue, isDarkMode && styles.darkText]}>{activeGoal.timeline}</Text>
-                      </View>
-                      <View style={[styles.metricCard, isDarkMode && styles.darkMetricCard]}>
-                        <Text style={[styles.metricLabel, isDarkMode && styles.darkMutedText]}>Status</Text>
-                        <Text style={[styles.metricValue, isDarkMode && styles.darkText]}>{activeGoal.status}</Text>
+                    </View>
+                    <View style={styles.watchOut}>
+                      <View style={[styles.calloutIcon, styles.watchOutIcon]}><Ionicons name="alert" size={15} color={themeColor('#B7791F')} /></View>
+                      <View style={styles.calloutCopy}>
+                        <Text style={[styles.calloutLabel, styles.watchOutLabel]}>WATCH OUT FOR</Text>
+                        <Text style={styles.calloutText}>{activeGoal.risk}</Text>
+                        <Text style={styles.watchOutAction}><Text style={styles.watchOutActionStrong}>If it happens: </Text>{activeGoal.riskAction}</Text>
                       </View>
                     </View>
 
-                    <View style={styles.analysisPanel}>
-                      <View style={styles.panelHeaderRow}>
-                        <Text style={[styles.panelTitle, isDarkMode && styles.darkText]}>Focus areas</Text>
-                        <View style={styles.panelTag}>
-                          <Text style={styles.panelTagText}>{activeGoal.intensity}</Text>
-                        </View>
-                      </View>
-                      <View style={styles.pillRow}>
-                        {activeGoal.focusAreas.map((focus) => (
-                          <View key={focus} style={styles.pill}>
-                            <Text style={styles.pillText}>{focus}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    </View>
-
-                    <View style={styles.analysisPanel}>
-                      <Text style={[styles.panelTitle, isDarkMode && styles.darkText]}>AI insight</Text>
-                      <Text style={[styles.panelBody, isDarkMode && styles.darkMutedText]}>{activeGoal.summary}</Text>
-                    </View>
-
-                    <View style={styles.analysisPanel}>
-                      <View style={styles.panelHeaderRow}>
-                        <View>
-                          <Text style={[styles.panelTitle, isDarkMode && styles.darkText]}>Action plan</Text>
-                          <Text style={[styles.panelHint, isDarkMode && styles.darkMutedText]}>Check off each step to update your growth path.</Text>
-                        </View>
-                        <Text style={[styles.stepCount, isDarkMode && styles.darkMutedText]}>{activeGoal.completedSteps.filter(Boolean).length}/4</Text>
-                      </View>
-                      {activeGoal.actionPlan.map((step, index) => (
-                        <Pressable key={`${step}-${index}`} style={styles.stepRow} onPress={() => toggleStep(activeGoal.id, index)} accessibilityRole="checkbox" accessibilityState={{ checked: activeGoal.completedSteps[index] }}>
-                          <View style={[styles.stepNumber, activeGoal.completedSteps[index] && styles.stepNumberComplete]}>
-                            <Ionicons name={activeGoal.completedSteps[index] ? 'checkmark' : 'ellipse-outline'} size={activeGoal.completedSteps[index] ? 15 : 12} color={themeColor('#FFFFFF')} />
-                          </View>
-                          <View style={styles.stepCopy}>
-                            <Text style={[styles.stepText, activeGoal.completedSteps[index] && styles.stepTextComplete, isDarkMode && styles.darkMutedText]} numberOfLines={expandedSteps[`${activeGoal.id}-${index}`] ? undefined : 2}>{step}</Text>
-                            <View style={styles.stepMetaRow}>
-                              <Text style={[styles.stepDueDate, isDarkMode && styles.darkMutedText]}>Due {activeGoal.actionDueDates[index]}</Text>
-                              {step.length > 70 ? <Pressable onPress={() => setExpandedSteps((previous) => ({ ...previous, [`${activeGoal.id}-${index}`]: !previous[`${activeGoal.id}-${index}`] }))}><Text style={styles.expandStepText}>{expandedSteps[`${activeGoal.id}-${index}`] ? 'Show less' : 'Show more'}</Text></Pressable> : null}
-                            </View>
-                          </View>
-                        </Pressable>
-                      ))}
-                    </View>
-
-                    <View style={styles.analysisPanel}>
-                      <View style={styles.panelHeaderRow}>
-                        <Text style={[styles.panelTitle, isDarkMode && styles.darkText]}>Next milestone</Text>
-                        <View style={styles.dateChip}><Ionicons name="calendar-outline" size={12} color={themeColor('#5B42D8')} /><Text style={styles.dateChipText}>{activeGoal.nextCheckIn}</Text></View>
-                      </View>
-                      <Text style={[styles.panelBody, isDarkMode && styles.darkMutedText]}>{activeGoal.nextMilestone}</Text>
-                      <Text style={[styles.panelBody, isDarkMode && styles.darkMutedText]}>Risk to watch: {activeGoal.risk}</Text>
-                      <View style={styles.riskAction}><Ionicons name="shield-checkmark-outline" size={15} color={themeColor('#2E9D5C')} /><Text style={[styles.riskActionText, isDarkMode && styles.darkMutedText]}>{activeGoal.riskAction}</Text></View>
-                    </View>
-
-                    <View style={[styles.progressWrap, isDarkMode && styles.darkProgressWrap]}>
-                      <View style={styles.progressHeader}>
-                        <View style={styles.progressHeadingGroup}>
-                          <View style={styles.progressTitleIcon}>
-                            <Ionicons name="map-outline" size={15} color={themeColor('#5B42D8')} />
-                          </View>
-                          <View>
-                            <Text style={[styles.panelTitle, styles.progressTitle, isDarkMode && styles.darkText]}>Your growth path</Text>
-                            <Text style={[styles.progressSubtitle, isDarkMode && styles.darkMutedText]}>Move forward one stage at a time</Text>
-                          </View>
-                        </View>
-                        <Text style={[styles.progressValue, isDarkMode && styles.darkText]}>{formatProgress(activeGoal.progress)}</Text>
-                      </View>
-
-                      <View style={styles.stageRow}>
-                        {[
-                          { label: 'Start', threshold: 0, range: '0-33%', icon: 'flag-outline' },
-                          { label: 'Build', threshold: 34, range: '34-66%', icon: 'construct-outline' },
-                          { label: 'Grow', threshold: 67, range: '67-100%', icon: 'trophy-outline' },
-                        ].map((stage) => {
-                          const reached = activeGoal.progress >= stage.threshold;
-                          return (
-                            <View key={stage.label} style={styles.stageItem}>
-                              <View style={[styles.stageDot, reached && styles.stageDotActive]}>
-                                <Ionicons name={stage.icon as keyof typeof Ionicons.glyphMap} size={14} color={reached ? themeColor('#FFFFFF') : themeColor('#A69DB8')} />
-                              </View>
-                              <Text style={[styles.stageLabel, reached && styles.stageLabelActive, isDarkMode && styles.darkMutedText]}>{stage.label}</Text>
-                              <Text style={[styles.stageRange, isDarkMode && styles.darkMutedText]}>{stage.range}</Text>
-                            </View>
-                          );
-                        })}
-                      </View>
-
-                      <View style={styles.stageTrack}>
-                        <View style={[styles.stageTrackFill, { width: `${activeGoal.progress}%` }]} />
-                        <Text style={[styles.trackLabel, activeGoal.progress > 45 && styles.trackLabelOnFill]}>{formatProgress(activeGoal.progress)}</Text>
-                      </View>
-
-                      <View style={[styles.progressSummaryCard, isDarkMode && styles.darkProgressSummaryCard]}>
-                        <View style={styles.progressSummaryIcon}>
-                          <Ionicons name="arrow-forward-outline" size={15} color={themeColor('#5B42D8')} />
-                        </View>
-                        <View style={styles.progressSummaryCopy}>
-                          <Text style={[styles.progressSummaryLabel, isDarkMode && styles.darkText]}>Next step</Text>
-                          <Text style={[styles.progressSummaryText, isDarkMode && styles.darkMutedText]}>Keep momentum by updating your progress daily.</Text>
-                        </View>
-                      </View>
-
-                    </View>
-
-                    <Pressable style={[styles.primaryButton, styles.saveGoalButton]} onPress={() => void saveGoal()} disabled={isSavingGoal}>
-                      {isSavingGoal ? <ActivityIndicator size="small" color={themeColor('#FFFFFF')} /> : <Ionicons name="bookmark-outline" size={17} color={themeColor('#FFFFFF')} />}
-                      <Text style={styles.primaryButtonText}>{isSavingGoal ? 'Saving...' : 'Save goal'}</Text>
-                    </Pressable>
+                    {activeGoalSaved ? (
+                      <Pressable style={({ pressed }) => [styles.savedRow, pressed && styles.pressed]} onPress={() => setActiveTab('My Goals')} accessibilityRole="button">
+                        <Ionicons name="checkmark-circle" size={18} color={themeColor('#2E9D5C')} />
+                        <Text style={styles.savedText}>Saved to My Goals</Text>
+                        <Text style={styles.savedLink}>Open</Text>
+                        <Ionicons name="chevron-forward" size={15} color={themeColor('#5B42D8')} />
+                      </Pressable>
+                    ) : (
+                      <Pressable style={({ pressed }) => [styles.primaryButton, styles.saveButton, isSavingGoal && styles.disabled, pressed && styles.pressed]} onPress={() => void saveGoal()} disabled={isSavingGoal} accessibilityRole="button">
+                        {isSavingGoal ? <ActivityIndicator size="small" color={themeColor('#FFFFFF')} /> : <Ionicons name="bookmark" size={17} color={themeColor('#FFFFFF')} />}
+                        <Text style={styles.primaryButtonText}>{isSavingGoal ? 'Saving...' : 'Save to My Goals'}</Text>
+                      </Pressable>
+                    )}
                   </View>
-                ) : null}
+                ) : (
+                  <View style={styles.card}>
+                    <Text style={styles.cardTitle}>How it works</Text>
+                    {[
+                      { icon: 'create-outline' as const, title: 'Describe your goal', text: 'In English, Filipino or Taglish.' },
+                      { icon: 'sparkles-outline' as const, title: 'Get 4 clear steps', text: 'With due dates, focus areas and what to watch out for.' },
+                      { icon: 'checkmark-done-outline' as const, title: 'Tick them off', text: 'Save the plan and track it in My Goals.' },
+                    ].map((item, index) => (
+                      <View key={item.title} style={styles.howRow}>
+                        <View style={styles.howIcon}><Ionicons name={item.icon} size={17} color={themeColor('#5B42D8')} /></View>
+                        <View style={styles.calloutCopy}>
+                          <Text style={styles.howTitle}>{index + 1}. {item.title}</Text>
+                          <Text style={styles.cardHint}>{item.text}</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </>
             ) : (
-              <View style={styles.goalBoard}>
+              <View style={styles.goalList}>
                 {!savedGoals.length ? (
-                  <View style={[styles.emptyStateCard, isDarkMode && styles.darkCard]}>
-                    <View style={styles.emptyIconWrap}>
-                      <Ionicons name="bookmark-outline" size={26} color={themeColor('#5B42D8')} />
-                    </View>
-                    <Text style={[styles.emptyTitle, isDarkMode && styles.darkText]}>Your saved goals will appear here</Text>
-                    <Text style={[styles.emptyBody, isDarkMode && styles.darkMutedText]}>
-                      Once you save a goal plan, it stays here so you can track progress and adjust it over time.
-                    </Text>
+                  <View style={[styles.card, styles.emptyCard]}>
+                    <View style={styles.emptyIcon}><Ionicons name="bookmark-outline" size={26} color={themeColor('#5B42D8')} /></View>
+                    <Text style={styles.emptyTitle}>No saved goals yet</Text>
+                    <Text style={styles.emptyText}>Make a plan in the Planner and save it. It stays here so you can tick off each step.</Text>
+                    <Pressable style={({ pressed }) => [styles.primaryButton, styles.emptyButton, pressed && styles.pressed]} onPress={() => setActiveTab('Planner')} accessibilityRole="button">
+                      <Ionicons name="sparkles" size={16} color={themeColor('#FFFFFF')} />
+                      <Text style={styles.primaryButtonText}>Plan a goal</Text>
+                    </Pressable>
                   </View>
                 ) : null}
 
-                {savedGoals.map((goal) => (
-                  <View key={goal.id} style={[styles.goalCard, isDarkMode && styles.darkCard]}>
-                    <View style={styles.goalCardHeader}>
-                      <View style={styles.goalCardTitleWrap}>
-                        <Text style={[styles.goalCardCategory, isDarkMode && styles.darkMutedText]}>{goal.category}</Text>
-                        <Text style={[styles.goalCardTitle, isDarkMode && styles.darkText]}>{goal.title}</Text>
+                {savedGoals.map((goal) => {
+                  const done = stepsDone(goal);
+                  const nextStep = goal.actionPlan.find((_, index) => !goal.completedSteps[index]);
+                  const open = Boolean(openGoals[goal.id]);
+                  const complete = goal.progress >= 100;
+                  return (
+                    <View key={goal.id} style={styles.card}>
+                      <View style={styles.goalHeader}>
+                        <View style={styles.goalIcon}><Ionicons name={CATEGORY_ICONS[goal.category] ?? 'leaf-outline'} size={19} color={themeColor('#5B42D8')} /></View>
+                        <View style={styles.planHeaderCopy}>
+                          <Text style={styles.goalMeta}>{goal.category} · {timelineLabel(goal.timeline)}</Text>
+                          <Text style={styles.goalTitle} numberOfLines={open ? undefined : 2}>{goal.title}</Text>
+                        </View>
+                        <Pressable style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]} onPress={() => deleteGoal(goal.id)} accessibilityRole="button" accessibilityLabel={`Delete goal: ${goal.title}`}>
+                          <Ionicons name="trash-outline" size={16} color={themeColor('#D94E64')} />
+                        </Pressable>
                       </View>
-                      <View style={[styles.statusChip, goal.progress >= 70 ? styles.statusChipGood : styles.statusChipNeutral]}>
-                        <Text style={[styles.statusChipText, goal.progress >= 70 ? styles.statusTextGood : styles.statusTextNeutral]}>{goal.status}</Text>
+
+                      <View style={styles.progressRow}>
+                        <View style={styles.progressTrack}><View style={[styles.progressFill, complete && styles.progressFillDone, { width: `${goal.progress}%` }]} /></View>
+                        <Text style={styles.progressText}>{done}/4</Text>
+                        <View style={[styles.statusChip, complete && styles.statusChipDone]}><Text style={[styles.statusText, complete && styles.statusTextDone]}>{goal.status}</Text></View>
                       </View>
-                      <Pressable style={styles.cardDeleteButton} onPress={() => deleteGoal(goal.id)} accessibilityLabel="Delete goal">
-                        <Ionicons name="trash-outline" size={16} color={themeColor('#D94E64')} />
+
+                      <View style={styles.nextRow}>
+                        <Ionicons name={nextStep ? 'arrow-forward-circle' : 'trophy'} size={16} color={nextStep ? themeColor('#5B42D8') : themeColor('#C98A0E')} />
+                        <Text style={styles.nextText} numberOfLines={open ? undefined : 2}>{nextStep ? `Next: ${nextStep}` : 'All 4 steps done. Great work!'}</Text>
+                      </View>
+
+                      {open && (
+                        <View style={styles.goalSteps}>
+                          {goal.actionPlan.map((step, index) => (
+                            <StepRow key={`${goal.id}-${index}`} step={step} due={goal.actionDueDates[index]} done={Boolean(goal.completedSteps[index])} index={index} last={index === goal.actionPlan.length - 1} onPress={() => toggleStep(goal.id, index)} />
+                          ))}
+                        </View>
+                      )}
+                      <Pressable style={({ pressed }) => [styles.expandButton, pressed && styles.pressed]} onPress={() => setOpenGoals((current) => ({ ...current, [goal.id]: !open }))} accessibilityRole="button" accessibilityState={{ expanded: open }}>
+                        <Text style={styles.expandText}>{open ? 'Hide steps' : 'Show steps'}</Text>
+                        <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={15} color={themeColor('#5B42D8')} />
                       </Pressable>
                     </View>
-
-                    <View style={styles.progressBar}>
-                      <View style={[styles.progressFill, { width: `${goal.progress}%` }]} />
-                      <Text style={[styles.trackLabel, goal.progress > 45 && styles.trackLabelOnFill]}>{formatProgress(goal.progress)}</Text>
-                    </View>
-
-                    <Text style={[styles.progressMeta, isDarkMode && styles.darkMutedText]}>{formatProgress(goal.progress)} complete</Text>
-
-                    <View style={styles.goalMetaRow}>
-                      <View style={styles.metaItem}>
-                        <Ionicons name="timer-outline" size={14} color={themeColor('#7A6AE7')} />
-                        <Text style={[styles.metaText, isDarkMode && styles.darkMutedText]}>{goal.timeline}</Text>
-                      </View>
-                      <View style={styles.metaItem}>
-                        <Ionicons name="flash-outline" size={14} color={themeColor('#7A6AE7')} />
-                        <Text style={[styles.metaText, isDarkMode && styles.darkMutedText]}>{goal.intensity}</Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.savedStepsList}>
-                      {goal.actionPlan.map((step, index) => (
-                        <Pressable key={`${goal.id}-${index}`} style={styles.savedStepRow} onPress={() => toggleStep(goal.id, index)} accessibilityRole="checkbox" accessibilityState={{ checked: goal.completedSteps[index] }}>
-                          <View style={[styles.savedStepCheck, goal.completedSteps[index] && styles.savedStepCheckActive]}>
-                            {goal.completedSteps[index] ? <Ionicons name="checkmark" size={12} color={themeColor('#FFFFFF')} /> : null}
-                          </View>
-                          <View style={styles.stepCopy}>
-                            <Text style={[styles.savedStepText, goal.completedSteps[index] && styles.savedStepTextComplete, isDarkMode && styles.darkMutedText]} numberOfLines={expandedSteps[`${goal.id}-${index}`] ? undefined : 2}>{step}</Text>
-                            <Text style={[styles.stepDueDate, isDarkMode && styles.darkMutedText]}>Due {goal.actionDueDates[index]}</Text>
-                          </View>
-                        </Pressable>
-                      ))}
-                    </View>
-
-                  </View>
-                ))}
-
-                <View style={[styles.quickTipsCard, isDarkMode && styles.darkCard]}>
-                  <Text style={[styles.panelTitle, isDarkMode && styles.darkText]}>Daily reminders</Text>
-                  {quickActions.map((item) => (
-                    <View key={item.label} style={styles.tipRow}>
-                      <View style={styles.tipIcon}><Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={15} color={themeColor('#5B42D8')} /></View>
-                      <View style={styles.tipCopy}>
-                        <Text style={[styles.tipLabel, isDarkMode && styles.darkText]}>{item.label}</Text>
-                        <Text style={[styles.tipValue, isDarkMode && styles.darkMutedText]}>{item.value}</Text>
-                      </View>
-                    </View>
-                  ))}
-                </View>
+                  );
+                })}
               </View>
             )}
           </View>
         </ScrollView>
       </SafeAreaView>
-      <Modal
-        visible={saveConfirmationVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSaveConfirmationVisible(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.saveModal, isDarkMode && styles.darkSaveModal]}>
-            <View style={styles.saveIconWrap}>
-              <Ionicons name="checkmark" size={26} color={themeColor('#FFFFFF')} />
-            </View>
-            <Text style={[styles.saveModalTitle, isDarkMode && styles.darkText]}>Goal saved</Text>
-            <Text style={[styles.saveModalBody, isDarkMode && styles.darkMutedText]}>
-              Your plan is ready in My Goals. Keep building momentum one small step at a time.
-            </Text>
-
-            <View style={styles.saveModalActions}>
-              <Pressable
-                style={[styles.saveModalButton, styles.saveModalSecondaryButton, isDarkMode && styles.darkSaveModalSecondaryButton]}
-                onPress={() => setSaveConfirmationVisible(false)}
-              >
-                <Text style={[styles.saveModalSecondaryText, isDarkMode && styles.darkSaveModalSecondaryText]}>Stay here</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.saveModalButton, styles.saveModalPrimaryButton]}
-                onPress={() => {
-                  setSaveConfirmationVisible(false);
-                  setActiveTab('My Goals');
-                }}
-              >
-                <Text style={styles.saveModalPrimaryText}>View goals</Text>
-                <Ionicons name="arrow-forward" size={16} color={themeColor('#FFFFFF')} />
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-      <Modal
-        visible={clearConfirmationVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setClearConfirmationVisible(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.clearModal, isDarkMode && styles.darkSaveModal]}>
-            <View style={styles.clearModalIcon}>
-              <Ionicons name="document-text-outline" size={22} color={themeColor('#5B42D8')} />
-            </View>
-            <Text style={[styles.saveModalTitle, isDarkMode && styles.darkText]}>Clear goal text?</Text>
-            <Text style={[styles.saveModalBody, isDarkMode && styles.darkMutedText]}>
-              This clears the text in the goal field only. Your saved goal plans will stay safe.
-            </Text>
-            <View style={styles.saveModalActions}>
-              <Pressable style={[styles.saveModalButton, styles.keepEditingButton]} onPress={() => setClearConfirmationVisible(false)}>
-                <Text style={styles.keepEditingText}>Keep editing</Text>
-              </Pressable>
-              <Pressable style={[styles.saveModalButton, styles.clearDestructiveButton]} onPress={confirmClearGoal}>
-                <Text style={styles.clearDestructiveText}>Clear text</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
       {clearUndoText ? (
-        <View style={[styles.undoSnackbar, isDarkMode && styles.darkUndoSnackbar]}>
-          <Ionicons name="checkmark-circle-outline" size={18} color={themeColor('#A9F0C7')} />
-          <Text style={styles.undoSnackbarText}>Goal text cleared</Text>
-          <Pressable onPress={() => { setGoalInput(clearUndoText); setClearUndoText(null); }}>
-            <Text style={styles.undoButtonText}>Undo</Text>
+        <View style={styles.snackbar} accessibilityLiveRegion="polite">
+          <Ionicons name="checkmark-circle-outline" size={18} color="#A9F0C7" />
+          <Text style={styles.snackbarText}>Goal text cleared</Text>
+          <Pressable onPress={() => { setGoalInput(clearUndoText); setClearUndoText(null); }} accessibilityRole="button">
+            <Text style={styles.snackbarButton}>Undo</Text>
           </Pressable>
         </View>
       ) : null}
@@ -693,234 +569,145 @@ export default function GoalsScreen() {
 }
 
 const themedStyles = createThemedStyles({
-  screen: { flex: 1, backgroundColor: '#F4F1F9', paddingTop: 20 },
-  darkScreen: { backgroundColor: '#0F0D16' },
-  darkText: { color: '#F2EEF9' },
-  darkMutedText: { color: '#B5AFC4' },
-  darkCard: { backgroundColor: '#1B1823', borderColor: '#2B2433', borderWidth: 1 },
-  darkInput: { backgroundColor: '#201C2B', borderColor: '#3A3246', color: '#F2EEF9' },
-  darkMetricCard: { backgroundColor: '#221E2B', borderColor: '#2F2A3B' },
-  darkTabRow: { backgroundColor: '#1F1B28' },
-  darkProgressWrap: { backgroundColor: '#211D2B', borderColor: '#342C43' },
-  darkProgressSummaryCard: { backgroundColor: '#2A2436' },
-  darkTrackButtonSecondary: { backgroundColor: '#30293D' },
-  darkTabText: { color: '#D7D1E0' },
-  darkSaveModal: { backgroundColor: '#1B1823', borderColor: '#342C43' },
-  darkSaveModalSecondaryButton: { backgroundColor: '#292331' },
-  darkSaveModalSecondaryText: { color: '#D7D1E0' },
+  screen: { flex: 1, backgroundColor: '#F5F4F9' },
   content: { paddingBottom: 120 },
   // Same width as the other tabs, so switching tabs does not resize the page.
-  container: { width: '100%', maxWidth: CONTENT_MAX_WIDTH, alignSelf: 'center' },
+  container: { width: '100%', maxWidth: CONTENT_MAX_WIDTH, alignSelf: 'center', paddingTop: 8 },
+  pressed: { opacity: 0.75 },
+  disabled: { opacity: 0.55 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 },
-  headerSpacer: { width: 38 },
+  headerSpacer: { width: 38, height: 38 },
   headerTitleWrap: { flex: 1, alignItems: 'center' },
-  headerEyebrow: { fontSize: 9, letterSpacing: 1.8, fontWeight: '800', color: '#8A7BB5', marginBottom: 2 },
-  headerTitle: { fontSize: 20, fontWeight: '800', color: '#272131' },
-  heroCard: { backgroundColor: '#FFFFFF', borderRadius: 24, padding: 20, marginBottom: 14, borderWidth: 1, borderColor: '#EDE7F5' },
-  heroHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  heroHeaderText: { flex: 1, paddingRight: 12 },
-  kicker: { fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, color: '#7A6AE7', fontWeight: '800' },
-  heroTitle: { marginTop: 6, fontSize: 26, lineHeight: 32, fontWeight: '800', color: '#201A2A' },
-  compactHeroTitle: { fontSize: 23, lineHeight: 29 },
-  aiBadge: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#5B42D8', alignItems: 'center', justifyContent: 'center' },
-  heroStatsRow: { flexDirection: 'row', gap: 10, marginTop: 16 },
-  heroStat: { flex: 1, backgroundColor: '#F7F3FF', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 12 },
-  darkHeroStat: { backgroundColor: '#211D2B' },
-  heroStatLabel: { fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, color: '#7C718C', fontWeight: '700' },
-  heroStatValue: { fontSize: 15, fontWeight: '800', color: '#201A2A', marginTop: 6 },
-  placeholderStatValue: { color: '#B9B0C7' },
-  tabRow: { flexDirection: 'row', backgroundColor: '#F0EBF8', borderRadius: 14, padding: 4, marginTop: 18 },
-  tabButton: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 11 },
-  activeTabButton: { backgroundColor: '#5B42D8' },
-  tabText: { fontSize: 12, fontWeight: '800', color: '#766F82' },
-  activeTabText: { color: '#FFFFFF' },
-  inputCard: { backgroundColor: '#FFFFFF', borderRadius: 22, padding: 18, marginBottom: 14, borderWidth: 1, borderColor: '#EDE7F5' },
-  inputHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  sectionTitle: { fontSize: 15, fontWeight: '800', color: '#2B2432' },
-  sectionHint: { fontSize: 11, color: '#8A8294', marginTop: 3 },
-  modePill: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 36, backgroundColor: '#EEE8FF', borderRadius: 999, paddingHorizontal: 11 },
-  modePillText: { color: '#5B42D8', fontSize: 10, fontWeight: '800' },
-  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#2E9D5C' },
-  textInput: {
-    minHeight: 120,
-    borderWidth: 1,
-    borderColor: '#E7E0F2',
-    borderRadius: 16,
-    backgroundColor: '#FBF9FE',
-    paddingHorizontal: 14,
-    paddingTop: 14,
-    paddingBottom: 14,
-    textAlignVertical: 'top',
-    fontSize: 13,
-    color: '#201A2A',
-    lineHeight: 20,
-  },
-  inputMetaRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginTop: 7 },
-  inputGuidance: { flex: 1, color: '#8A8294', fontSize: 10.5, lineHeight: 15 },
-  characterCount: { color: '#8A8294', fontSize: 10.5, fontWeight: '700' },
-  customizeRow: { marginTop: 15, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#EEE8F5' },
-  customizeLabel: { color: '#342A45', fontSize: 11, fontWeight: '800', marginBottom: 8 },
-  customizeControls: { flexDirection: 'row', gap: 8 },
-  settingControl: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, backgroundColor: '#F2EDFF', borderRadius: 10, paddingHorizontal: 7 },
-  settingControlText: { color: '#5B42D8', fontSize: 10.5, fontWeight: '800' },
-  quickPromptRow: { gap: 8, marginTop: 14, marginBottom: 6 },
-  quickPromptChip: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, backgroundColor: '#F2EDFF', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 9 },
-  darkPromptChip: { backgroundColor: '#2A2433' },
-  quickPromptText: { flex: 1, color: '#4F3BAF', fontSize: 10.5, lineHeight: 15, fontWeight: '700' },
-  darkPromptText: { color: '#D8D0F0' },
-  actionRow: { flexDirection: 'row', gap: 10, marginTop: 12, marginBottom: 16 },
-  primaryButton: {
-    flex: 1,
-    backgroundColor: '#5B42D8',
-    borderRadius: 12,
-    height: 46,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  primaryButtonText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13 },
-  secondaryButton: {
-    width: 100,
-    backgroundColor: '#F0EBF8',
-    borderRadius: 12,
-    height: 46,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  secondaryButtonText: { color: '#473A64', fontWeight: '800', fontSize: 13 },
-  resultCard: { backgroundColor: '#FFFFFF', borderRadius: 24, padding: 18, marginBottom: 16, overflow: 'hidden', position: 'relative', borderWidth: 1, borderColor: '#EDE7F5' },
-  resultGlow: { position: 'absolute', top: 0, left: 0, right: 0, height: 110, backgroundColor: '#F0EAFF' },
-  resultHeader: { position: 'relative', zIndex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  resultTitleWrap: { flex: 1, paddingRight: 10 },
-  resultCategory: { fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.1, color: '#7A6AE7', fontWeight: '800' },
-  resultTitle: { fontSize: 20, fontWeight: '800', color: '#211B2C', marginTop: 5 },
-  scoreBadge: { backgroundColor: '#5B42D8', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 7 },
-  scoreBadgeLabel: { color: '#DCD4FF', fontSize: 8, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 2 },
-  scoreBadgeText: { color: '#FFFFFF', fontWeight: '800', fontSize: 12 },
-  summaryBanner: { position: 'relative', zIndex: 1, backgroundColor: '#F7F3FF', borderRadius: 16, padding: 12, marginBottom: 12, flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  summaryText: { flex: 1, fontSize: 12.5, lineHeight: 20, color: '#665E74', marginBottom: 0 },
-  metricRow: { position: 'relative', zIndex: 1, flexDirection: 'row', gap: 10, marginBottom: 14 },
-  metricCard: { flex: 1, backgroundColor: '#F8F5FF', borderRadius: 14, borderWidth: 1, borderColor: '#E9E2FF', padding: 12 },
-  metricLabel: { fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.8, color: '#7B7387', fontWeight: '700' },
-  metricValue: { fontSize: 13, fontWeight: '800', color: '#201A2A', marginTop: 6 },
-  analysisPanel: { position: 'relative', zIndex: 1, backgroundColor: '#F9F7FC', borderRadius: 16, padding: 14, marginBottom: 12 },
-  panelHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  panelTag: { backgroundColor: '#EEE8FF', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5 },
-  panelTagText: { color: '#5B42D8', fontSize: 9, fontWeight: '800' },
-  panelTitle: { fontSize: 14, fontWeight: '800', color: '#2C2434', marginBottom: 8 },
-  panelHint: { fontSize: 10.5, color: '#8A8294', marginTop: -4, marginBottom: 10 },
-  stepCount: { color: '#5B42D8', fontSize: 12, fontWeight: '800' },
-  panelBody: { fontFamily: 'System', fontSize: 12.5, lineHeight: 20, color: '#655F74' },
+  headerEyebrow: { fontSize: 11, letterSpacing: 1.2, fontWeight: '800', color: '#8D8998', marginBottom: 3 },
+  headerTitle: { fontSize: 23, fontWeight: '800', color: '#24212D' },
+  headerBadge: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ECE8FF' },
+  hero: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#5B42D8', borderRadius: 24, padding: 20, marginBottom: 14 },
+  heroDark: { backgroundColor: '#30215A' },
+  heroCopy: { flex: 1, minWidth: 0 },
+  heroLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  heroLabel: { fontSize: 11, color: '#D8D0FF', fontWeight: '800', letterSpacing: 1 },
+  heroTitle: { fontSize: 21, lineHeight: 26, color: '#FFFFFF', fontWeight: '800' },
+  heroSubtitle: { fontSize: 12, lineHeight: 17, color: '#D8D0FF', fontWeight: '600', marginTop: 6 },
+  heroRingValue: { fontSize: 19, color: '#FFFFFF', fontWeight: '900' },
+  heroRingLabel: { fontSize: 11, color: '#D8D0FF', fontWeight: '700' },
+  heroIcon: { width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.16)' },
+  tabs: { flexDirection: 'row', backgroundColor: '#ECE9F3', borderRadius: 16, padding: 4, marginBottom: 16 },
+  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 12 },
+  tabActive: { backgroundColor: '#5B42D8' },
+  tabText: { fontSize: 13, color: '#777283', fontWeight: '700' },
+  tabTextActive: { color: '#FFFFFF' },
+  card: { backgroundColor: '#FFFFFF', borderRadius: 22, padding: 18, marginBottom: 14, shadowColor: '#292047', shadowOpacity: 0.04, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
+  cardTitle: { fontSize: 17, fontWeight: '800', color: '#25222E' },
+  cardHint: { fontSize: 12, lineHeight: 17, color: '#7A728B', fontWeight: '600', marginTop: 3 },
+  textInput: { minHeight: 112, marginTop: 14, borderWidth: 2, borderColor: '#EEEAF6', borderRadius: 16, backgroundColor: '#F8F6FD', paddingHorizontal: 14, paddingTop: 12, paddingBottom: 12, textAlignVertical: 'top', fontSize: 16, lineHeight: 22, color: '#201A2A' },
+  textInputFocused: { borderColor: '#8E7AE8' },
+  inputMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 7 },
+  privacyNote: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1 },
+  metaText: { fontSize: 11, color: '#8A8294', fontWeight: '600' },
+  subheading: { fontSize: 13, fontWeight: '800', color: '#3B3650', marginTop: 16, marginBottom: 8 },
+  starters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  starter: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 38, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: '#E1DAF7', backgroundColor: '#FAF8FF' },
+  starterText: { fontSize: 13, fontWeight: '700', color: '#4F3BAF' },
+  choice: { marginTop: 16 },
+  choiceLabel: { fontSize: 13, fontWeight: '800', color: '#3B3650', marginBottom: 8 },
+  choiceRow: { flexDirection: 'row', backgroundColor: '#F2F0F7', borderRadius: 13, padding: 4, gap: 4 },
+  choiceOption: { flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingHorizontal: 4 },
+  choiceOptionActive: { backgroundColor: '#FFFFFF', shadowColor: '#292047', shadowOpacity: 0.08, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
+  choiceText: { fontSize: 13, fontWeight: '700', color: '#777283' },
+  choiceTextActive: { color: '#5B42D8', fontWeight: '900' },
+  actionRow: { flexDirection: 'row', gap: 10, marginTop: 20 },
+  primaryButton: { flex: 1, minHeight: 50, borderRadius: 14, backgroundColor: '#5B42D8', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16 },
+  primaryButtonText: { color: '#FFFFFF', fontWeight: '900', fontSize: 14 },
+  secondaryButton: { width: 96, minHeight: 50, borderRadius: 14, backgroundColor: '#F0EDF7', alignItems: 'center', justifyContent: 'center' },
+  secondaryButtonText: { color: '#473A64', fontWeight: '800', fontSize: 14 },
+  buildingRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  buildingIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: '#5B42D8' },
+  buildingCopy: { flex: 1, minWidth: 0 },
+  skeleton: { height: 14, borderRadius: 7, backgroundColor: '#EFECF6', marginTop: 10 },
+  planHeader: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  planHeaderCopy: { flex: 1, minWidth: 0 },
+  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 },
+  tag: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999, backgroundColor: '#F0EBFF' },
+  tagMuted: { backgroundColor: '#F2F0F7' },
+  tagText: { fontSize: 11, fontWeight: '800', color: '#5B42D8' },
+  tagTextMuted: { color: '#6E6887' },
+  planTitle: { fontSize: 18, lineHeight: 24, fontWeight: '900', color: '#211B2C' },
+  ringValue: { fontSize: 16, fontWeight: '900', color: '#2D2A3D' },
+  ringLabel: { fontSize: 11, fontWeight: '700', color: '#7A728B' },
+  summary: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginTop: 14, padding: 12, borderRadius: 14, backgroundColor: '#F5F1FF' },
+  summaryText: { flex: 1, fontSize: 13, lineHeight: 20, fontWeight: '600', color: '#4A4458' },
+  factRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+  fact: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 6, borderRadius: 10, backgroundColor: '#F6F5FA' },
+  factText: { fontSize: 12, fontWeight: '700', color: '#5C5670' },
   pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  pill: { backgroundColor: '#EEE8FF', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
-  pillText: { color: '#5B42D8', fontWeight: '700', fontSize: 11 },
-  stepRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 },
-  stepNumber: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#A79BC0', alignItems: 'center', justifyContent: 'center', marginRight: 9 },
-  stepNumberComplete: { backgroundColor: '#2E9D5C' },
-  stepText: { flex: 1, fontFamily: 'System', fontSize: 12.5, lineHeight: 20, color: '#655F74' },
-  stepTextComplete: { color: '#2E9D5C', textDecorationLine: 'line-through' },
-  stepCopy: { flex: 1 },
-  stepMetaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
-  stepDueDate: { color: '#8A8294', fontSize: 10, fontWeight: '700' },
-  expandStepText: { color: '#5B42D8', fontSize: 10, fontWeight: '800' },
-  dateChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#EEE8FF', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5 },
-  dateChipText: { color: '#5B42D8', fontSize: 9.5, fontWeight: '800' },
-  riskAction: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, backgroundColor: '#EFFAF3', borderRadius: 10, padding: 9, marginTop: 10 },
-  riskActionText: { flex: 1, color: '#47715A', fontSize: 11.5, lineHeight: 17 },
-  progressWrap: { marginTop: 8, marginBottom: 22, padding: 15, backgroundColor: '#FBF9FE', borderRadius: 18, borderWidth: 1, borderColor: '#EDE7F5' },
-  progressHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
-  progressHeadingGroup: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9 },
-  progressTitleIcon: { width: 30, height: 30, borderRadius: 10, backgroundColor: '#EEE8FF', alignItems: 'center', justifyContent: 'center' },
-  progressTitle: { flex: 1, marginBottom: 0 },
-  progressSubtitle: { color: '#8A8294', fontSize: 10.5, marginTop: 2 },
-  progressValue: { color: '#5B42D8', fontWeight: '900', fontSize: 16, marginLeft: 12 },
-  stageRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
-  stageItem: { alignItems: 'center', flex: 1 },
-  stageDot: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F0ECF6', borderWidth: 1, borderColor: '#E4DDEE', alignItems: 'center', justifyContent: 'center' },
-  stageDotActive: { backgroundColor: '#5B42D8', borderColor: '#5B42D8' },
-  stageLabel: { fontSize: 10.5, fontWeight: '700', color: '#9A92A5', marginTop: 6 },
-  stageLabelActive: { color: '#5B42D8' },
-  stageRange: { fontSize: 9, color: '#AAA2B4', marginTop: 2 },
-  stageTrack: { height: 20, backgroundColor: '#EEE8F5', borderRadius: 999, overflow: 'hidden', marginHorizontal: 30, marginTop: -19, marginBottom: 20, justifyContent: 'center' },
-  stageTrackFill: { height: '100%', backgroundColor: '#5B42D8', borderRadius: 999 },
-  progressBar: { height: 22, backgroundColor: '#EEE8F5', borderRadius: 999, overflow: 'hidden', justifyContent: 'center' },
-  progressFill: { height: '100%', backgroundColor: '#5B42D8', borderRadius: 999 },
-  trackLabel: { position: 'absolute', left: 0, right: 0, textAlign: 'center', color: '#5B42D8', fontSize: 10, fontWeight: '900' },
-  trackLabelOnFill: { color: '#FFFFFF' },
-  progressSummaryCard: { marginTop: 14, backgroundColor: '#F6F2FF', borderRadius: 12, paddingHorizontal: 11, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  progressSummaryIcon: { width: 24, height: 24, borderRadius: 8, backgroundColor: '#EEE8FF', alignItems: 'center', justifyContent: 'center' },
-  progressSummaryCopy: { flex: 1 },
-  progressSummaryLabel: { fontSize: 11, fontWeight: '800', color: '#342A45', marginBottom: 2 },
-  progressSummaryText: { fontSize: 11.5, lineHeight: 18, color: '#675D7A' },
-  goalBoard: { gap: 14 },
-  goalCard: { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 16, borderWidth: 1, borderColor: '#EDE7F5' },
-  goalCardHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 12 },
-  goalCardTitleWrap: { flex: 1, minWidth: 0, paddingRight: 10 },
-  goalCardCategory: { fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.1, color: '#7B6AE7', fontWeight: '800' },
-  goalCardTitle: { fontSize: 16, fontWeight: '800', color: '#201A2A', marginTop: 6 },
-  statusChip: { flexShrink: 0, maxWidth: 104, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5 },
-  statusChipGood: { backgroundColor: '#EAF9EF' },
-  statusChipNeutral: { backgroundColor: '#F2EDFF' },
-  statusChipText: { fontSize: 9.5, fontWeight: '800', textAlign: 'center' },
-  statusTextGood: { color: '#1E8F52' },
-  statusTextNeutral: { color: '#5B42D8' },
-  cardDeleteButton: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#FFF0F1', alignItems: 'center', justifyContent: 'center', marginLeft: 8 },
-  progressMeta: { fontSize: 11, fontWeight: '700', color: '#7E708B', marginTop: 8, marginBottom: 12 },
-  goalMetaRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 14 },
-  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  metaText: { fontSize: 11, color: '#716B7D', fontWeight: '700' },
-  smallActionRow: { flexDirection: 'row', gap: 10 },
-  savedStepsList: { gap: 8, marginBottom: 14 },
-  savedStepRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  savedStepCheck: { width: 18, height: 18, borderRadius: 6, borderWidth: 1, borderColor: '#CFC5DE', alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-  savedStepCheckActive: { backgroundColor: '#2E9D5C', borderColor: '#2E9D5C' },
-  savedStepText: { flex: 1, color: '#655F74', fontSize: 11.5, lineHeight: 17 },
-  savedStepTextComplete: { color: '#2E9D5C', textDecorationLine: 'line-through' },
-  smallButton: { flex: 1, borderRadius: 10, backgroundColor: '#F0EBF8', height: 38, alignItems: 'center', justifyContent: 'center' },
-  smallButtonText: { color: '#4E3B8D', fontWeight: '800', fontSize: 12 },
-  smallButtonPrimary: { flex: 1, borderRadius: 10, backgroundColor: '#5B42D8', height: 38, alignItems: 'center', justifyContent: 'center' },
-  smallButtonPrimaryText: { color: '#FFFFFF', fontWeight: '800', fontSize: 12 },
-  deleteButton: { width: 40, borderRadius: 10, backgroundColor: '#FFECEE', height: 38, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#FFD3DA' },
-  quickTipsCard: { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 16, borderWidth: 1, borderColor: '#EDE7F5' },
-  emptyStateCard: { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 24, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#EDE7F5' },
-  emptyIconWrap: { width: 54, height: 54, borderRadius: 18, backgroundColor: '#EEE8FF', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-  emptyTitle: { fontWeight: '800', fontSize: 17, textAlign: 'center', color: '#201A2A', marginBottom: 6 },
-  emptyBody: { fontFamily: 'System', fontSize: 12.5, lineHeight: 19, textAlign: 'center', color: '#665E74' },
-  emptyStateButton: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: '#5B42D8', borderRadius: 12, paddingHorizontal: 16, marginTop: 16 },
-  emptyStateButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
-  tipRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
-  tipIcon: { width: 28, height: 28, borderRadius: 10, backgroundColor: '#EEE8FF', alignItems: 'center', justifyContent: 'center', marginRight: 10 },
-  tipCopy: { flex: 1 },
-  tipLabel: { fontSize: 12, fontWeight: '800', color: '#201A2A' },
-  tipValue: { fontSize: 11, color: '#6A627B', marginTop: 3 },
-  trackButtons: { flexDirection: 'row', gap: 10, marginTop: 14 },
-  trackButton: { flex: 1, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  trackButtonSecondary: { backgroundColor: '#F0EBF8' },
-  trackButtonPrimary: { backgroundColor: '#5B42D8' },
-  trackButtonText: { color: '#FFFFFF', fontWeight: '800', fontSize: 12 },
-  trackButtonTextSecondary: { color: '#4E3B8D', fontWeight: '800', fontSize: 12 },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(25, 18, 38, 0.58)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  saveModal: { width: '100%', maxWidth: 360, backgroundColor: '#FFFFFF', borderRadius: 24, borderWidth: 1, borderColor: '#EEE8F8', padding: 24, alignItems: 'center', shadowColor: '#20152F', shadowOpacity: 0.2, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 10 },
-  clearModal: { width: '100%', maxWidth: 360, backgroundColor: '#FFFFFF', borderRadius: 24, borderWidth: 2, borderColor: '#DCD2FF', padding: 24, alignItems: 'center', shadowColor: '#20152F', shadowOpacity: 0.2, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 10 },
-  clearModalIcon: { width: 48, height: 48, borderRadius: 16, backgroundColor: '#F0EBFF', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-  saveIconWrap: { width: 58, height: 58, borderRadius: 20, backgroundColor: '#5B42D8', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
-  saveModalTitle: { color: '#211B2C', fontSize: 21, fontWeight: '800', marginBottom: 8 },
-  saveModalBody: { color: '#6B6377', fontSize: 13, lineHeight: 20, textAlign: 'center', maxWidth: 280 },
-  saveModalActions: { flexDirection: 'row', width: '100%', gap: 10, marginTop: 22 },
-  saveModalButton: { flex: 1, minHeight: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7 },
-  saveModalSecondaryButton: { backgroundColor: '#F1EDF8' },
-  saveModalPrimaryButton: { backgroundColor: '#5B42D8' },
-  saveModalSecondaryText: { color: '#4E3B8D', fontSize: 12, fontWeight: '800' },
-  saveModalPrimaryText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
-  keepEditingButton: { backgroundColor: '#5B42D8', borderWidth: 1, borderColor: '#5B42D8' },
-  keepEditingText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900' },
-  clearDestructiveButton: { backgroundColor: '#FFF0F1', borderWidth: 1, borderColor: '#F2B7BF' },
-  clearDestructiveText: { color: '#C53D53', fontSize: 12, fontWeight: '800' },
-  undoSnackbar: { position: 'absolute', left: 16, right: 16, bottom: 24, minHeight: 52, borderRadius: 14, backgroundColor: '#30215A', flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 14, shadowColor: '#20152F', shadowOpacity: 0.2, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 8 },
-  darkUndoSnackbar: { backgroundColor: '#4B32C0' },
-  undoSnackbarText: { flex: 1, color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
-  undoButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900', textDecorationLine: 'underline' },
-  saveGoalButton: { marginTop: 4, minHeight: 50, borderRadius: 14 },
+  pill: { backgroundColor: '#EEE8FF', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  pillText: { color: '#5B42D8', fontWeight: '800', fontSize: 12 },
+  sectionRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
+  sectionHint: { fontSize: 11, color: '#8A8294', fontWeight: '600' },
+  stepRow: { flexDirection: 'row', alignItems: 'stretch', gap: 12 },
+  stepRail: { width: 28, alignItems: 'center' },
+  stepDot: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#CFC6EE', backgroundColor: '#FFFFFF' },
+  stepDotDone: { backgroundColor: '#2E9D5C', borderColor: '#2E9D5C' },
+  stepNumber: { fontSize: 12, fontWeight: '900', color: '#5B42D8' },
+  stepLine: { flex: 1, width: 2, minHeight: 10, backgroundColor: '#E6E1F3', marginVertical: 3 },
+  stepLineDone: { backgroundColor: '#9ED8B7' },
+  stepCopy: { flex: 1, minWidth: 0, paddingBottom: 14 },
+  stepText: { fontSize: 14, lineHeight: 20, fontWeight: '700', color: '#2D2A3D', marginTop: 3 },
+  stepTextDone: { color: '#2E9D5C', textDecorationLine: 'line-through' },
+  dueChip: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 4, marginTop: 5 },
+  dueText: { fontSize: 11, fontWeight: '700', color: '#6E6887' },
+  milestone: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 4, padding: 12, borderRadius: 16, backgroundColor: '#F5F1FF' },
+  watchOut: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 10, padding: 12, borderRadius: 16, backgroundColor: '#FFF7E8' },
+  calloutIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
+  watchOutIcon: { backgroundColor: '#FFFFFF' },
+  calloutCopy: { flex: 1, minWidth: 0 },
+  calloutLabel: { fontSize: 11, fontWeight: '900', letterSpacing: 0.8, color: '#5B42D8' },
+  watchOutLabel: { color: '#A0661A' },
+  calloutText: { fontSize: 13, lineHeight: 19, fontWeight: '600', color: '#3B3650', marginTop: 3 },
+  watchOutAction: { fontSize: 13, lineHeight: 19, fontWeight: '600', color: '#5C5670', marginTop: 6 },
+  watchOutActionStrong: { fontWeight: '900', color: '#3B3650' },
+  saveButton: { flex: 0, marginTop: 16 },
+  savedRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, minHeight: 48, paddingHorizontal: 14, borderRadius: 14, backgroundColor: '#EAF8F0' },
+  savedText: { flex: 1, fontSize: 14, fontWeight: '800', color: '#23774A' },
+  savedLink: { fontSize: 13, fontWeight: '800', color: '#5B42D8' },
+  howRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginTop: 14 },
+  howIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F0EBFF' },
+  howTitle: { fontSize: 14, fontWeight: '800', color: '#2D2A3D' },
+  goalList: { gap: 0 },
+  emptyCard: { alignItems: 'center', paddingVertical: 26 },
+  emptyIcon: { width: 54, height: 54, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: '#EEE8FF', marginBottom: 12 },
+  emptyTitle: { fontSize: 17, fontWeight: '800', color: '#201A2A', textAlign: 'center' },
+  emptyText: { fontSize: 13, lineHeight: 19, fontWeight: '600', color: '#6B6377', textAlign: 'center', marginTop: 6, maxWidth: 300 },
+  emptyButton: { flex: 0, marginTop: 16, alignSelf: 'stretch' },
+  goalHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  goalIcon: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F0EBFF' },
+  goalMeta: { fontSize: 11, fontWeight: '800', color: '#7A6AE7', letterSpacing: 0.3 },
+  goalTitle: { fontSize: 16, lineHeight: 21, fontWeight: '900', color: '#201A2A', marginTop: 3 },
+  deleteButton: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF0F1' },
+  progressRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14 },
+  progressTrack: { flex: 1, height: 8, borderRadius: 4, overflow: 'hidden', backgroundColor: '#EEEAF6' },
+  progressFill: { height: '100%', borderRadius: 4, backgroundColor: '#5B42D8' },
+  progressFillDone: { backgroundColor: '#2E9D5C' },
+  progressText: { fontSize: 12, fontWeight: '900', color: '#3B3650' },
+  statusChip: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999, backgroundColor: '#F0EBFF' },
+  statusChipDone: { backgroundColor: '#EAF8F0' },
+  statusText: { fontSize: 11, fontWeight: '800', color: '#5B42D8' },
+  statusTextDone: { color: '#23774A' },
+  nextRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginTop: 12 },
+  nextText: { flex: 1, fontSize: 13, lineHeight: 19, fontWeight: '700', color: '#3B3650' },
+  goalSteps: { marginTop: 14 },
+  expandButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, minHeight: 40, marginTop: 10, borderTopWidth: 1, borderTopColor: '#F0EEF5' },
+  expandText: { fontSize: 13, fontWeight: '800', color: '#5B42D8' },
+  snackbar: { position: 'absolute', left: 16, right: 16, bottom: 96, minHeight: 52, borderRadius: 14, backgroundColor: '#30215A', flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 14, shadowColor: '#20152F', shadowOpacity: 0.2, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 8 },
+  snackbarText: { flex: 1, color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  snackbarButton: { color: '#FFFFFF', fontSize: 13, fontWeight: '900', textDecorationLine: 'underline' },
+}, {
+  // Dark mode: the hero keeps its deep purple, the selected choice sits a step above its track.
+  hero: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#30215A', borderRadius: 24, padding: 20, marginBottom: 14 },
+  choiceOptionActive: { backgroundColor: '#3A3150', shadowColor: '#000000', shadowOpacity: 0.2, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
+  calloutIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#2B2540' },
+  watchOutIcon: { backgroundColor: '#3A2E1A' },
+  watchOut: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 10, padding: 12, borderRadius: 16, backgroundColor: '#2E2617' },
+  stepDot: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#4A3F6B', backgroundColor: '#1B1823' },
+  snackbar: { position: 'absolute', left: 16, right: 16, bottom: 96, minHeight: 52, borderRadius: 14, backgroundColor: '#4B32C0', flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 14, shadowColor: '#000000', shadowOpacity: 0.3, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 8 },
 });
-

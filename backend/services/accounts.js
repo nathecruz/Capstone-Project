@@ -26,7 +26,7 @@ export function userFromRow(row) {
 
 export async function findUser(emailAddress) {
   const result = await query(
-    `SELECT u.id, ${USER_COLUMNS}, u.password_hash AS "passwordHash", u.status FROM users u WHERE u.email = $1`,
+    `SELECT u.id, ${USER_COLUMNS}, u.password_hash AS "passwordHash", u.status, u.failed_logins AS "failedLogins", u.login_locked_until AS "loginLockedUntil" FROM users u WHERE u.email = $1`,
     [normalizeEmail(emailAddress)],
   );
   return result.rows[0] || null;

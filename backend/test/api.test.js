@@ -522,6 +522,65 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(wrong.body.code, undefined);
   });
 
+  await t.test('sign-in is paused after too many wrong passwords, from any network', async () => {
+    const password = 'Copper!Meadow5!Swift8!Elm';
+    await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, firstName: 'Lock', lastName: 'Tester', username: 'lock_tester', email: 'lock@example.com', password, privacyConsent: true }) });
+    await db.query('UPDATE users SET email_verified_at = 1 WHERE email = $1', ['lock@example.com']);
+    const attempt = (secret) => request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'lock@example.com', password: secret }) });
+    for (let index = 1; index < 8; index += 1) {
+      const wrong = await attempt(`Wrong!Guess${index}!Pine9!Lake`);
+      assert.equal(wrong.response.status, 401, `wrong password ${index} is just refused`);
+    }
+    const eighth = await attempt('Wrong!Guess8!Pine9!Lake');
+    assert.equal(eighth.response.status, 429, 'the 8th wrong password pauses sign-in');
+    assert.equal(eighth.body.code, 'ACCOUNT_LOCKED');
+    assert.match(eighth.body.message, /paused for 15 minutes/);
+    const right = await attempt(password);
+    assert.equal(right.response.status, 429, 'while paused even the right password is refused, so guessing cannot continue');
+    assert.equal(right.body.token, undefined);
+
+    // After the pause the right password works and the count starts again.
+    await db.query('UPDATE users SET login_locked_until = $2 WHERE email = $1', ['lock@example.com', Date.now() - 1000]);
+    const later = await attempt(password);
+    assert.equal(later.response.status, 200, JSON.stringify(later.body));
+    const counters = await db.query('SELECT failed_logins AS "failedLogins", login_locked_until AS "lockedUntil" FROM users WHERE email = $1', ['lock@example.com']);
+    assert.deepEqual(counters.rows[0], { failedLogins: 0, lockedUntil: null });
+  });
+
+  await t.test('a confirmed email changes only with the current password; other devices can be signed out', async () => {
+    const password = 'Silver!Brook4!Calm7!Ash';
+    const registered = await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, firstName: 'Mia', lastName: 'Lopez', username: 'mia_lopez', email: 'mia@example.com', password, privacyConsent: true }) });
+    await db.query('UPDATE users SET email_verified_at = 1 WHERE email = $1', ['mia@example.com']);
+    const phone = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'mia@example.com', password, device: 'Phone' }) });
+    const laptop = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'mia@example.com', password, device: 'Laptop' }) });
+    const phoneHeaders = { Authorization: `Bearer ${phone.body.token}` };
+    const profile = { firstName: 'Mia', lastName: 'Lopez', username: 'mia_lopez', email: 'mia.new@example.com', dateOfBirth: registration.dateOfBirth, gender: registration.gender, about: '' };
+
+    const without = await request('/api/auth/profile', { method: 'PUT', headers: phoneHeaders, body: JSON.stringify(profile) });
+    assert.equal(without.response.status, 403);
+    assert.equal(without.body.code, 'PASSWORD_REQUIRED');
+    const wrong = await request('/api/auth/profile', { method: 'PUT', headers: phoneHeaders, body: JSON.stringify({ ...profile, currentPassword: 'Not!The!Password1' }) });
+    assert.equal(wrong.response.status, 401);
+    assert.equal((await db.query('SELECT email FROM users WHERE username = $1', ['mia_lopez'])).rows[0].email, 'mia@example.com', 'the email did not change');
+    const sameEmail = await request('/api/auth/profile', { method: 'PUT', headers: phoneHeaders, body: JSON.stringify({ ...profile, email: 'mia@example.com', about: 'Hi' }) });
+    assert.equal(sameEmail.response.status, 200, 'other details change without the password');
+    const changed = await request('/api/auth/profile', { method: 'PUT', headers: phoneHeaders, body: JSON.stringify({ ...profile, currentPassword: password }) });
+    assert.equal(changed.response.status, 200, JSON.stringify(changed.body));
+    assert.equal(changed.body.user.email, 'mia.new@example.com');
+    await db.query('UPDATE users SET email_verified_at = 1 WHERE email = $1', ['mia.new@example.com']);
+
+    // The phone sees the other signed-in devices and signs them out; it stays signed in itself.
+    const activity = await request('/api/auth/login-activity', { headers: phoneHeaders });
+    assert.equal(activity.body.otherSessions, 2, 'the laptop and the sign-up session');
+    const out = await request('/api/auth/sessions/others/logout', { method: 'POST', headers: phoneHeaders });
+    assert.equal(out.response.status, 200);
+    assert.equal(out.body.signedOut, 2);
+    for (const token of [laptop.body.token, registered.body.token]) {
+      assert.equal((await request('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })).response.status, 401, 'other devices are signed out');
+    }
+    assert.equal((await request('/api/auth/me', { headers: phoneHeaders })).response.status, 200, 'this device stays signed in');
+  });
+
   await t.test('weekly quests, the mystery box, the habit buddy and the Done button on reminders', async () => {
     const password = 'Cobalt!River8!Maple3!Stone';
     await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, firstName: 'Quest', lastName: 'Runner', username: 'quest_runner', email: 'quest@example.com', password, privacyConsent: true }) });
@@ -782,7 +841,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
   });
 
   await t.test('profile, login activity, multi-device merge and account deletion', async () => {
-    const profile = await request('/api/auth/profile', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ fullName: 'Updated User', username: 'updated_user', email: 'updated@example.com', dateOfBirth: 'June 1, 1997', gender: 'Female', about: 'Updated profile.' }) });
+    const profile = await request('/api/auth/profile', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ fullName: 'Updated User', username: 'updated_user', email: 'updated@example.com', dateOfBirth: 'June 1, 1997', gender: 'Female', about: 'Updated profile.', currentPassword: password }) });
     assert.equal(profile.response.status, 200, JSON.stringify(profile.body));
     assert.equal(profile.body.user.emailVerified, false, 'a new email must be confirmed again');
     await db.query('UPDATE users SET email_verified_at = 1 WHERE id = $1', [userId]);

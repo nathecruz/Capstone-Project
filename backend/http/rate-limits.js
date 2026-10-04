@@ -28,5 +28,8 @@ export const registerLimiter = limiter({ limit: 20, keyGenerator: (request) => `
 export const resetRequestLimiter = limiter({ limit: 5, keyGenerator: emailKey, message: 'Too many password reset requests. Please try again later.' });
 export const resetVerificationLimiter = limiter({ limit: 15, keyGenerator: emailKey, message: 'Too many verification attempts. Please try again later.' });
 export const resendVerificationLimiter = limiter({ limit: 20, message: 'Too many verification requests. Please try again later.' });
+// Changing the password or email, or deleting the account, needs the current password: a stolen
+// session must not be able to guess it quickly.
+export const accountChangeLimiter = limiter({ limit: 20, message: 'Too many account changes. Please wait 15 minutes and try again.' });
 export const aiLimiter = limiter({ limit: 30, message: 'You have reached the AI request limit. Please try again in a few minutes.' });
 export const predictionLimiter = limiter({ limit: 120, message: 'Too many prediction requests. Please try again shortly.' });

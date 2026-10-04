@@ -29,6 +29,10 @@ export async function ensureNeonSchema({ log = () => {} } = {}) {
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'");
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'");
   await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at BIGINT');
+  // Sign-in protection: wrong passwords in a row (from any network) pause sign-in for a while.
+  await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_logins INTEGER NOT NULL DEFAULT 0');
+  await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_at BIGINT');
+  await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS login_locked_until BIGINT');
   await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_consent_at BIGINT');
   // First and last name are stored separately; full_name stays as "First Last".
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT NOT NULL DEFAULT ''");

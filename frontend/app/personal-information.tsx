@@ -45,15 +45,22 @@ export default function PersonalInformationScreen() {
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isGenderPickerOpen, setIsGenderPickerOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  // Changing the email needs the current password, so a borrowed phone cannot move the account.
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const emailChanging = isEditing && draftProfile.email.trim().toLowerCase() !== profile.email.trim().toLowerCase();
   const [draftBirthDate, setDraftBirthDate] = useState(() => parseDateOfBirth(profile.dateOfBirth));
 
   const startEditing = () => {
+    setCurrentPassword('');
+    setShowPassword(false);
     setDraftProfile(profile);
     setDraftBirthDate(parseDateOfBirth(profile.dateOfBirth));
     setIsEditing(true);
   };
 
   const cancelEditing = () => {
+    setCurrentPassword('');
     setDraftProfile(profile);
     setDraftBirthDate(parseDateOfBirth(profile.dateOfBirth));
     setIsDatePickerOpen(false);
@@ -81,6 +88,10 @@ export default function PersonalInformationScreen() {
       showAlert('Incomplete information', 'Please complete your first name, last name, email, and username.');
       return;
     }
+    if (emailChanging && !currentPassword) {
+      showAlert('Password needed', 'Enter your current password to change your email address.');
+      return;
+    }
     const nextProfile = {
       ...draftProfile,
       firstName: draftProfile.firstName.trim(),
@@ -92,16 +103,17 @@ export default function PersonalInformationScreen() {
       about: draftProfile.about.trim(),
     };
     setIsSaving(true);
-    const result = await updateAuthenticatedProfile(nextProfile);
+    const result = await updateAuthenticatedProfile(emailChanging ? { ...nextProfile, currentPassword } : nextProfile);
     setIsSaving(false);
     if (!result.ok || !result.user) {
       showAlert('Profile update failed', result.message || 'Unable to update your profile.');
       return;
     }
     updateProfile(result.user as Profile);
+    setCurrentPassword('');
     setIsDatePickerOpen(false);
     setIsEditing(false);
-    showAlert('Profile updated', 'Your personal information has been saved.', undefined, 'success');
+    showAlert('Profile updated', result.message && emailChanging ? result.message : 'Your personal information has been saved.', undefined, 'success');
   };
 
   const openAvatarActions = () => {
@@ -252,6 +264,30 @@ export default function PersonalInformationScreen() {
                       autoCapitalize={field.key === 'email' || field.key === 'username' ? 'none' : 'words'}
                     />
                   )}
+                  {field.key === 'email' && emailChanging ? (
+                    <View style={[styles.passwordBox, isDarkMode && styles.darkPasswordBox]}>
+                      <View style={styles.passwordHint}>
+                        <Ionicons name="shield-checkmark" size={15} color={themeColor('#5B42D8')} />
+                        <Text style={[styles.passwordHintText, isDarkMode && styles.darkSecondaryText]}>For your security, enter your current password to change your email. We will also tell your old address.</Text>
+                      </View>
+                      <View style={[styles.input, styles.passwordInputWrap, isDarkMode && styles.darkInput]}>
+                        <TextInput
+                          value={currentPassword}
+                          onChangeText={setCurrentPassword}
+                          secureTextEntry={!showPassword}
+                          autoCapitalize="none"
+                          autoComplete="current-password"
+                          style={[styles.passwordInput, isDarkMode && styles.darkInputText]}
+                          placeholder="Current password"
+                          placeholderTextColor={isDarkMode ? '#827C8C' : '#A19CAA'}
+                          accessibilityLabel="Current password"
+                        />
+                        <Pressable style={styles.passwordToggle} onPress={() => setShowPassword((current) => !current)} accessibilityRole="button" accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}>
+                          <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={isDarkMode ? '#CFC8E7' : '#657089'} />
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : null}
                 </View>
               ))}
               <View style={styles.inputGroup}>
@@ -357,6 +393,14 @@ const themedStyles = createThemedStyles({
   dateInput: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   dateInputText: { color: '#302B3B', fontSize: 14 },
   darkInput: { borderColor: '#3B3647', color: '#F2EFF8', backgroundColor: '#25212E' },
+  passwordBox: { marginTop: 10, padding: 12, borderRadius: 14, backgroundColor: '#F5F1FF', gap: 10 },
+  darkPasswordBox: { backgroundColor: '#292340' },
+  passwordHint: { flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
+  passwordHintText: { flex: 1, fontSize: 12, lineHeight: 17, fontWeight: '600', color: '#5C5670' },
+  passwordInputWrap: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 0 },
+  passwordInput: { flex: 1, minHeight: 44, paddingHorizontal: 13, color: '#302B3B', fontSize: 16 },
+  darkInputText: { color: '#F2EFF8' },
+  passwordToggle: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   datePickerContainer: { alignItems: 'center', borderRadius: 12, marginTop: 8, overflow: 'hidden' },
   genderCard: { backgroundColor: '#FFFFFF', borderRadius: 20, marginHorizontal: 24, padding: 20 },
   genderOption: { minHeight: 52, borderBottomWidth: 1, borderBottomColor: '#ECE9F0', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
