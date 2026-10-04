@@ -168,4 +168,21 @@ describe('SettingsPreferencesScreen', () => {
 
     expect(mockUpdatePreferences).toHaveBeenCalledWith({ appTheme: 'ocean' });
   });
+
+  it('shows the region from sign-up locked, while the language can still be changed', async () => {
+    const screen = await render(<SettingsPreferencesScreen />);
+    // The region is information only: not a button, and nothing opens a region list.
+    const region = screen.getByLabelText('region: Metro Manila. Set when you signed up. It cannot be changed.');
+    expect(region.props.onPress).toBeUndefined();
+    expect(region.props.accessibilityRole).toBeUndefined();
+    expect(screen.getByText('Set when you signed up')).toBeTruthy();
+
+    await fireEvent.press(screen.getByLabelText('language: English. Change language'));
+    expect(screen.queryByText('Bulacan')).toBeNull();
+    const choices = screen.UNSAFE_root.findAll((node) => node.props.accessibilityRole === 'radio');
+    expect(choices.length).toBeGreaterThan(1);
+    await fireEvent.press(screen.getByText('Filipino'));
+    expect(mockUpdatePreferences).toHaveBeenCalledWith({ language: 'Filipino' });
+    expect(mockUpdatePreferences).not.toHaveBeenCalledWith(expect.objectContaining({ region: expect.anything() }));
+  });
 });

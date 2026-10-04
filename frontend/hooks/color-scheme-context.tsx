@@ -125,7 +125,10 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   const [darkModeOverride, setDarkModeOverride] = useState<boolean | null>(null);
   const [avatarImage, setAvatarImage] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile>(initialProfile);
-  const [preferences, setPreferences] = useState<Preferences>(initialPreferences);
+  const [storedPreferences, setPreferences] = useState<Preferences>(initialPreferences);
+  // The region is the account's, chosen at sign-up; the app shows it but cannot change it.
+  const [accountRegion, setAccountRegion] = useState('');
+  const preferences = useMemo(() => (accountRegion && storedPreferences.region !== accountRegion ? { ...storedPreferences, region: accountRegion } : storedPreferences), [accountRegion, storedPreferences]);
   const [habits, setHabits] = useState<Habit[]>([]);
   // Check-ins made in this session that can still be undone: habit id -> when the Undo ends.
   const [undoUntil, setUndoUntil] = useState<Record<string, number>>({});
@@ -237,6 +240,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       unsavedRef.current = false;
       setActiveUserEmail('');
       setAccountRole('user');
+      setAccountRegion('');
       setAvatarImage(null);
       setProfile(initialProfile);
       setPreferences(initialPreferences);
@@ -319,7 +323,8 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         gender: savedState.profile?.gender || session.gender || '',
         about: savedState.profile?.about || session.about || '',
       });
-      setPreferences({ ...initialPreferences, ...(savedState.preferences ?? {}), region: savedState.preferences?.region || session.region || initialPreferences.region });
+      setAccountRegion(session.region || '');
+      setPreferences({ ...initialPreferences, ...(savedState.preferences ?? {}), region: session.region || savedState.preferences?.region || initialPreferences.region });
       const savedHabits = Array.isArray(savedState.habits) ? savedState.habits : [];
       const completionsByHabit = new Map<string, string[]>();
       for (const completion of remoteCompletions ?? []) {
@@ -734,7 +739,8 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   };
 
   const updatePreferences = (changes: Partial<Preferences>) => {
-    setPreferences((current) => ({ ...current, ...changes }));
+    // The region stays the one set at sign-up.
+    setPreferences((current) => ({ ...current, ...changes, region: current.region }));
   };
 
   const updateProfile = (nextProfile: Profile) => {
@@ -769,6 +775,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     setAvatarImage(null);
     setProfile(initialProfile);
     setPreferences(initialPreferences);
+    setAccountRegion('');
     setHabits([]);
     setPoints(0);
     setTokens(0);

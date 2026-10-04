@@ -2,9 +2,10 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Image, Modal, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Image, Modal, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getMyLeaderboardRank } from '@/authentication';
+import { AiChatSheet, useAiChat, type ChatAnswer } from '@/components/ai-chat';
 import { BentoTile } from '@/components/bento-tiles';
 import { ClassPulseCard } from '@/components/class-pulse-card';
 import { FramedAvatar } from '@/components/framed-avatar';
@@ -27,6 +28,9 @@ const settings = [
   { key: 'achievementsBadges', icon: 'ribbon-outline', route: '/achievements' },
   { key: 'helpSupport', icon: 'help-circle-outline', route: '/help-support' },
 ] as const;
+
+/** Tokens one AI Coach answer costs (the server charges it). */
+const COACH_COST = 10;
 
 export default function ProfileScreen() {
   const styles = useThemedStyles(themedStyles);
@@ -69,36 +73,16 @@ export default function ProfileScreen() {
   const avatarInitial = (profile.firstName || profile.fullName || 'H').trim().charAt(0).toUpperCase();
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [coachOpen, setCoachOpen] = useState(false);
-  const [coachQuestion, setCoachQuestion] = useState('');
-  const [coachReply, setCoachReply] = useState('');
-  const [coachError, setCoachError] = useState('');
-  const [coachLoading, setCoachLoading] = useState(false);
-  const [coachLockedOpen, setCoachLockedOpen] = useState(false);
-
-  const askCoach = async () => {
-    const question = coachQuestion.trim();
-    if (!question) return;
-    if (tokens < 10) {
-      setCoachLockedOpen(true);
-      return;
+  // AI Coach: each answer costs COACH_COST tokens, charged by the server only when it answers.
+  const coachChat = useAiChat(async (question): Promise<ChatAnswer> => {
+    if (tokens < COACH_COST) {
+      return { ok: false, tone: 'warning', message: `A Coach answer costs ${COACH_COST} tokens and you have ${tokens}. Check in your habits or claim your daily reward to earn more.` };
     }
-
-    setCoachLoading(true);
-    setCoachError('');
-    try {
-      // The server charges 10 tokens only when the coach actually answers.
-      const result = await askAi('coach', question);
-      if (result.ok) {
-        applyWallet(result);
-        setCoachReply(result.answer);
-        setCoachQuestion('');
-      } else {
-        setCoachError(result.status === 402 ? result.message : `${result.message} Your tokens were not spent.`);
-      }
-    } finally {
-      setCoachLoading(false);
-    }
-  };
+    const result = await askAi('coach', question);
+    if (!result.ok) return { ok: false, message: result.status === 402 ? result.message : `${result.message} Your tokens were not spent.` };
+    applyWallet(result);
+    return { ok: true, answer: result.answer, note: `${COACH_COST} tokens used` };
+  });
 
   const chooseFromGallery = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -351,74 +335,19 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
-      <Modal visible={coachOpen} animationType="slide" transparent onRequestClose={() => setCoachOpen(false)}>
-        <View style={styles.coachBackdrop}>
-          <View style={[styles.coachModal, isDarkMode && styles.darkCard]}>
-            <View style={styles.coachHeader}>
-              <View style={styles.coachHeaderText}>
-                <Text style={[styles.coachTitle, isDarkMode && styles.darkText]}>{t('aiCoach')}</Text>
-                <Text style={[styles.coachBody, isDarkMode && styles.darkMutedText]}>Ask for a focused habit suggestion. Each answer costs 10 tokens.</Text>
-              </View>
-              <Pressable onPress={() => { setCoachOpen(false); setCoachError(''); }} accessibilityLabel="Close AI Coach">
-                <Ionicons name="close" size={24} color={isDarkMode ? '#F2EFF8' : '#292633'} />
-              </Pressable>
-            </View>
-
-            <View style={styles.coachTokenPill}>
-              <Ionicons name="sparkles" size={14} color={themeColor('#5B42D8')} />
-              <Text style={styles.coachTokenText}>{tokens} tokens available</Text>
-            </View>
-
-            <Text style={[styles.coachFieldLabel, isDarkMode && styles.darkMutedText]}>What should I focus on today?</Text>
-            <TextInput
-              value={coachQuestion}
-              onChangeText={setCoachQuestion}
-              placeholder="Ask your coach..."
-              placeholderTextColor={isDarkMode ? '#827C8C' : '#9A94A4'}
-              multiline
-              style={[styles.coachInput, isDarkMode && styles.darkInput]}
-            />
-
-            <View style={styles.quickPromptRow}>
-              {['What should I do today?', 'How do I restart my streak?', 'What habit is most important?'].map((prompt) => (
-                <Pressable key={prompt} style={[styles.quickPrompt, isDarkMode && styles.darkQuickPrompt]} onPress={() => setCoachQuestion(prompt)}>
-                  <Text style={[styles.quickPromptText, isDarkMode && styles.darkText]}>{prompt}</Text>
-                </Pressable>
-              ))}
-            </View>
-
-            {coachError ? <Text style={styles.coachError}>{coachError}</Text> : null}
-
-            {coachReply ? (
-              <View style={[styles.coachReplyCard, isDarkMode && styles.darkReplyCard]}>
-                <Text style={[styles.coachReplyLabel, isDarkMode && styles.darkMutedText]}>Coach response</Text>
-                <Text style={[styles.coachReplyText, isDarkMode && styles.darkText]}>{coachReply}</Text>
-              </View>
-            ) : null}
-
-            <Pressable
-              style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryButtonPressed, coachLoading && styles.primaryButtonDisabled]}
-              onPress={askCoach}
-              disabled={coachLoading}
-            >
-              <Text style={styles.primaryButtonText}>{coachLoading ? 'Thinking...' : t('askCoach')}</Text>
-              <Ionicons name="sparkles" size={16} color={themeColor('#FFFFFF')} />
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={coachLockedOpen} transparent animationType="fade" onRequestClose={() => setCoachLockedOpen(false)}>
-        <View style={styles.coachLockBackdrop}>
-          <View style={styles.coachLockCard}>
-            <Text style={styles.coachLockTitle}>Not enough tokens</Text>
-            <Text style={styles.coachLockText}>Complete more habits to unlock another AI Coach answer.</Text>
-            <Pressable style={styles.coachLockButton} onPress={() => setCoachLockedOpen(false)}>
-              <Text style={styles.coachLockButtonText}>OK</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+      <AiChatSheet
+        chat={coachChat}
+        visible={coachOpen}
+        onClose={() => setCoachOpen(false)}
+        title={t('aiCoach')}
+        subtitle="One specific next step, from your own habits"
+        greeting={`Hi ${profile.firstName?.trim() || 'there'}! I'm your AI Coach. Ask what to focus on and I'll give you one specific next step based on your habits and streaks.`}
+        suggestions={['What should I do today?', 'How do I restart my streak?', 'What habit is most important?']}
+        placeholder="Ask your coach..."
+        costLabel={`${COACH_COST} tokens per answer · ${tokens} left`}
+        footnote="Tokens are used only when the Coach answers. Answers can be wrong."
+        autoFocus
+      />
       {titleOpen && <TitleSheet current={rewards.title} onClose={() => setTitleOpen(false)} />}
       <FrameSheet visible={frameOpen} onClose={() => setFrameOpen(false)} />
     </SafeAreaView>
@@ -511,31 +440,6 @@ const themedStyles = createThemedStyles({
     color: '#2F2B3B',
   },
   darkInput: { borderColor: '#3B3647', color: '#F2EFF8', backgroundColor: '#25212E' },
-  coachBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(20, 16, 32, 0.5)' },
-  coachModal: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, maxHeight: '82%' },
-  coachHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 },
-  coachHeaderText: { flex: 1, paddingRight: 10 },
-  coachTitle: { fontSize: 22, fontWeight: '800', color: '#24212D' },
-  coachBody: { fontSize: 12, lineHeight: 18, color: '#827C8C', marginTop: 4 },
-  coachFieldLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 0.5, color: '#5F596B', marginBottom: 8 },
-  coachTokenPill: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', backgroundColor: '#F1ECFF', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 14, gap: 6 },
-  coachTokenText: { fontSize: 11, fontWeight: '700', color: '#4D3AA6' },
-  coachInput: { minHeight: 58, borderWidth: 1, borderColor: '#E2DEEA', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, color: '#302B3B', marginBottom: 12, textAlignVertical: 'top' },
-  quickPromptRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
-  quickPrompt: { backgroundColor: '#F5F1FF', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: '#E5DDFE' },
-  quickPromptText: { color: '#4A3B8A', fontSize: 10.5, fontWeight: '700' },
-  darkQuickPrompt: { backgroundColor: '#2A2337', borderColor: '#3B3547' },
-  coachError: { color: '#C54F4F', fontSize: 11, lineHeight: 16, marginBottom: 12 },
-  coachReplyCard: { backgroundColor: '#F7F4FF', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#E5DDFE', marginBottom: 12 },
-  darkReplyCard: { backgroundColor: '#221D2A', borderColor: '#382F48' },
-  coachReplyLabel: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1, color: '#72698B', marginBottom: 6 },
-  coachReplyText: { fontSize: 12.5, lineHeight: 20, color: '#2C2737', fontWeight: '600' },
-  coachLockBackdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(18, 18, 28, 0.42)', paddingHorizontal: 22 },
-  coachLockCard: { width: '100%', maxWidth: 360, backgroundColor: '#FFFFFF', borderRadius: 18, paddingHorizontal: 18, paddingTop: 20, paddingBottom: 14, alignItems: 'center' },
-  coachLockTitle: { fontSize: 24, lineHeight: 30, fontWeight: '800', color: '#2B2C36', textAlign: 'center', marginBottom: 10 },
-  coachLockText: { fontSize: 18, lineHeight: 26, fontWeight: '400', color: '#2B2C36', textAlign: 'center', marginBottom: 18 },
-  coachLockButton: { width: '100%', paddingVertical: 12, borderRadius: 12, backgroundColor: '#F5F2FF', alignItems: 'center', justifyContent: 'center' },
-  coachLockButtonText: { fontSize: 18, fontWeight: '700', color: '#4B3AA7' },
   primaryButtonDisabled: { opacity: 0.75 },
   content: {
     paddingBottom: 110,

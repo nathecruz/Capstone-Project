@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, AppState, Easing, Keyboard, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { AppState, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getApiBaseUrl, getAuthenticatedHeaders } from '@/authentication';
+import { AiChatSheet, AskAiCard, useAiChat, type ChatAnswer } from '@/components/ai-chat';
 import { HabitAnalysisPanel } from '@/components/habit-analysis-panel';
+import { ProgressRing } from '@/components/progress-ring';
 import { getHabitProgressSummary, getRecentCompletionHistory, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { getChartGeometry } from '@/utils/line-chart';
 import { historyStats } from '@/utils/achievements';
@@ -142,20 +144,12 @@ export default function InsightsScreen() {
   const [selectedHabitId, setSelectedHabitId] = useState('all');
   const [monthDropdownOpen, setMonthDropdownOpen] = useState(false);
   const [habitDropdownOpen, setHabitDropdownOpen] = useState(false);
-  const [assistantVisible, setAssistantVisible] = useState(false);
-  const [assistantQuestion, setAssistantQuestion] = useState('');
-  const [assistantResponse, setAssistantResponse] = useState('');
-  const [assistantResponseSource, setAssistantResponseSource] = useState<'ai' | 'local' | null>(null);
-  const [assistantError, setAssistantError] = useState('');
-  const [assistantLoading, setAssistantLoading] = useState(false);
-  const [keyboardInset, setKeyboardInset] = useState(0);
-  const assistantInputRef = useRef<TextInput | null>(null);
-  const assistantScrollRef = useRef<ScrollView | null>(null);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantFocus, setAssistantFocus] = useState(false);
   const [mlPrediction, setMlPrediction] = useState<{ habit_name?: string; completion_probability?: number; dropout_risk?: number; confidence?: number; recommended_action?: string; suggested_reminder_time?: string; summary?: string; prediction_source?: 'model' | 'fallback'; is_fallback?: boolean } | null>(null);
   const [predictionError, setPredictionError] = useState<string | null>(null);
   const [predictionLoading, setPredictionLoading] = useState(false);
-  const [predictionProgress] = useState(() => new Animated.Value(0));
-  const { completed, completionPercent, averageProgress, maxStreak } = getHabitProgressSummary(habits);
+  const { completed, averageProgress, maxStreak } = getHabitProgressSummary(habits);
   const completionHistory = getRecentCompletionHistory(habits, 7);
   const dailyRates = completionHistory.map((entry) => habits.length ? Math.round((entry.count / habits.length) * 100) : 0);
   const [chartSize, setChartSize] = useState({ width: 0, height: 0 });
@@ -165,7 +159,6 @@ export default function InsightsScreen() {
   const weeklyRate = dailyRates.length ? Math.round(dailyRates.reduce((total, rate) => total + rate, 0) / dailyRates.length) : 0;
   // Not missed yet: a habit can be completed until the day is over.
   const openHabits = Math.max(0, habits.length - completed);
-  const successRate = habits.length ? Math.round(habits.reduce((total, habit) => total + habit.progress, 0) / habits.length) : 0;
   const strongestHabit = [...habits].sort((a, b) => b.progress - a.progress || b.streak - a.streak)[0];
   const weakestHabit = [...habits].sort((a, b) => a.progress - b.progress || a.streak - b.streak)[0];
   const insightMessages = weeklyRate >= 80
@@ -179,70 +172,46 @@ export default function InsightsScreen() {
     ? [`Give ${weakestHabit.label} a two-minute start today.`, `Try ${weakestHabit.label} before your next break.`, `A smaller version of ${weakestHabit.label} can keep your streak moving.`]
     : ['Add one simple habit to start your consistency data.', 'Pick one small action and repeat it tomorrow.', 'Your first habit is the beginning of your trend.'];
   const suggestion = suggestionOptions[(deviceDate.getDate() + habits.length + completed) % suggestionOptions.length];
+  // The hero cards are purple in both modes; their rings need the same colour in the middle.
+  const heroBackground = themedColor(isDarkMode ? '#30215A' : '#5B42D8', appTheme);
 
-  useEffect(() => {
-    const keyboardDidShow = Keyboard.addListener('keyboardDidShow', (event) => {
-      setKeyboardInset(event.endCoordinates?.height ?? 0);
-      setTimeout(() => {
-        assistantScrollRef.current?.scrollToEnd({ animated: true });
-        assistantInputRef.current?.focus();
-      }, 80);
-    });
-    const keyboardDidHide = Keyboard.addListener('keyboardDidHide', () => {
-      setKeyboardInset(0);
-    });
+  // "What HabitAI noticed": patterns in the student's own data, each one a question for the AI.
+  // The strongest habit is only an anchor once it has some progress or a streak.
+  const anchorHabit = strongestHabit && (strongestHabit.progress > 0 || strongestHabit.streak > 0) ? strongestHabit : null;
+  const focusHabit = weakestHabit && weakestHabit.id !== anchorHabit?.id ? weakestHabit : null;
+  const noticed: { icon: keyof typeof Ionicons.glyphMap; color: string; background: string; title: string; detail: string; ask: string }[] = habits.length === 0 ? [] : [
+    { icon: 'today', color: '#5B42D8', background: '#EEE9FF', title: `${completed} of ${habits.length} done today`, detail: openHabits ? `${openHabits} still open. There is time before the day ends.` : 'Everything is done today. Nice work!', ask: 'What should I focus on today?' },
+    ...(anchorHabit ? [{ icon: 'trophy' as const, color: '#C98A0E', background: '#FFF4D9', title: `${anchorHabit.label} is your anchor`, detail: `${anchorHabit.progress}% progress · ${anchorHabit.streak}-day streak. Keep it at the same time each day.`, ask: `How do I keep ${anchorHabit.label} going?` }] : []),
+    ...(focusHabit ? [{ icon: 'leaf' as const, color: '#2F9E6E', background: '#E3F6EC', title: `${focusHabit.label} needs a smaller step`, detail: suggestion, ask: `How can I improve ${focusHabit.label}?` }] : []),
+  ];
 
-    return () => {
-      keyboardDidShow.remove();
-      keyboardDidHide.remove();
-    };
-  }, []);
-
-  const askAssistant = () => {
-    setAssistantResponse('');
-    setAssistantResponseSource(null);
-    setAssistantError('');
-    setAssistantVisible(true);
+  // AI Assistant: the server answers from the student's habits and check-ins (only the question
+  // is sent). If it cannot, a tip from the same data is shown and labelled as such.
+  const offlineTip = weakestHabit && openHabits > 0
+    ? `Start with ${weakestHabit.label}: do the smallest version of it before the day ends, then check it in.`
+    : 'Pick one habit and repeat it at the same time tomorrow, so it becomes automatic.';
+  const assistantChat = useAiChat(async (question): Promise<ChatAnswer> => {
+    const result = await askAi('assistant', question);
+    if (result.ok) return { ok: true, answer: result.answer };
+    if (result.status === 401 || result.status === 429) return { ok: false, message: result.message, tone: 'warning' };
+    return { ok: true, answer: offlineTip, note: `Offline tip from your habit data. ${result.message}` };
+  });
+  const openAssistant = (question?: string) => {
+    setAssistantOpen(true);
+    setAssistantFocus(!question);
+    if (question) void assistantChat.send(question);
   };
-
-  const assistantReply = assistantQuestion.trim()
-    ? `Based on your data, ${completionPercent}% of tracked habits are complete today. Focus next on ${weakestHabit?.label || 'one small habit'} and keep the action easy to repeat.`
-    : strongestHabit
-      ? `${strongestHabit.label} is currently your strongest habit at ${strongestHabit.progress}%. Keep that routine as your anchor, then give ${weakestHabit?.label || 'your next habit'} a smaller starting step.`
-      : 'Add your first habit and I can turn your activity into a personalized plan.';
-
-  const requestAssistantGuidance = async () => {
-    if (assistantLoading) return;
-    const localReply = assistantQuestion.trim()
-      ? assistantReply
-      : 'Try one small action next: complete the habit with the lowest progress before the day ends.';
-    setAssistantResponse('Thinking...');
-    setAssistantResponseSource(null);
-    setAssistantError('');
-    setAssistantLoading(true);
-    try {
-      // The server reads the student's habits and check-ins itself; only the question is sent.
-      const result = await askAi('assistant', assistantQuestion || 'What should I focus on next?');
-      if (result.ok) {
-        setAssistantResponse(result.answer);
-        setAssistantResponseSource('ai');
-      } else {
-        setAssistantResponse(localReply);
-        setAssistantResponseSource('local');
-        setAssistantError(result.message);
-      }
-    } finally {
-      setAssistantLoading(false);
-    }
-  };
-
-  type PredictionTone = 'green' | 'blue' | 'orange';
-
-  const toneStyles: Record<PredictionTone, object> = {
-    green: styles.greenCard,
-    blue: styles.blueCard,
-    orange: styles.orangeCard,
-  };
+  const assistantGreeting = habits.length === 0
+    ? 'Hi! Add your first habit and I can turn your check-ins into a personal plan.'
+    : openHabits === 0
+      ? `All ${habits.length} habits are done today. Ask me how to keep this going, or about your streaks and goals.`
+      : `You have ${openHabits} habit${openHabits === 1 ? '' : 's'} left today${weakestHabit ? `, and ${weakestHabit.label} needs the most attention` : ''}. Ask me anything about your habits, streaks or goals.`;
+  const assistantSuggestions = [
+    'What should I focus on today?',
+    ...(weakestHabit ? [`How can I improve ${weakestHabit.label}?`] : []),
+    'Which day am I most consistent?',
+    'How do I protect my streak?',
+  ];
   const currentYear = deviceDate.getFullYear();
   const currentMonth = deviceDate.getMonth();
   const activeMonth = Math.min(selectedMonth, currentMonth);
@@ -321,16 +290,8 @@ export default function InsightsScreen() {
   const forecastHeadline = !predictionPresentation.hasForecast
     ? 'Recorded progress so far'
     : displayedCompletionProbability >= 75 ? 'Your next week looks promising.' : displayedCompletionProbability >= 50 ? 'Your next week looks steady.' : 'Your next week needs a reset.';
-  const forecastMessage = displayedRecommendation;
-
-  useEffect(() => {
-    Animated.timing(predictionProgress, {
-      toValue: displayedCompletionProbability,
-      duration: 650,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start();
-  }, [displayedCompletionProbability, predictionProgress]);
+  // Named as well as coloured, so the level does not rely on colour alone.
+  const riskLevel = displayedRisk === null ? null : displayedRisk >= 60 ? { label: 'High', color: '#FF7A85' } : displayedRisk >= 30 ? { label: 'Medium', color: '#FFC15E' } : { label: 'Low', color: '#5FD69C' };
 
   return (
     <>
@@ -358,6 +319,7 @@ export default function InsightsScreen() {
                   accessibilityRole="tab"
                   accessibilityState={{ selected: activeTab === tab }}
                 >
+                  <Ionicons name={tab === 'Insights' ? 'bulb' : 'trending-up'} size={15} color={activeTab === tab ? themeColor('#FFFFFF') : isDarkMode ? '#AAA4B7' : '#777283'} />
                   <Text style={[styles.segmentText, isDarkMode && styles.darkSegmentText, activeTab === tab && styles.segmentTextActive]}>{tab}</Text>
                 </Pressable>
               ))}
@@ -368,16 +330,16 @@ export default function InsightsScreen() {
                 <View style={[styles.heroCard, isDarkMode && styles.darkHeroCard]}>
                   <View style={styles.heroCopy}>
                     <View style={styles.heroLabelRow}>
-                      <View style={styles.liveDot} />
-                      <Text style={styles.heroLabel}>WEEKLY OVERVIEW</Text>
+                      <Ionicons name="sparkles" size={12} color={themedColor('#D8D0FF', appTheme)} />
+                      <Text style={styles.heroLabel}>AI WEEKLY OVERVIEW</Text>
                     </View>
-                    <Text style={styles.heroTitle}>{insightMessages[insightIndex]}</Text>
-                    <Text style={styles.heroSubtitle}>Over the last 7 days you did {weeklyRate}% of your habits. Today: {completed} of {habits.length} done.</Text>
+                    <Text style={styles.heroTitle}>{weeklyInsight}</Text>
+                    <Text style={styles.heroSubtitle}>You did {weeklyRate}% of your habits over the last 7 days. Today: {completed} of {habits.length} done.</Text>
                   </View>
-                  <View style={styles.heroScore}>
+                  <ProgressRing value={weeklyRate} size={96} thickness={9} color="#FFFFFF" trackColor="rgba(255,255,255,0.2)" innerColor={heroBackground}>
                     <Text style={styles.heroScoreValue}>{weeklyRate}%</Text>
                     <Text style={styles.heroScoreLabel}>this week</Text>
-                  </View>
+                  </ProgressRing>
                 </View>
 
                 <View style={styles.metricsRow}>
@@ -427,112 +389,101 @@ export default function InsightsScreen() {
                   </View>
                 </View>
 
-                <View style={[styles.insightCard, isDarkMode && styles.darkCard]}>
-                  <View style={styles.insightHeading}>
-                    <View style={styles.statusDot} />
-                    <Text style={[styles.insightTitle, isDarkMode && styles.darkPrimaryText]}>Weekly Insight</Text>
-                  </View>
-                  <Text style={styles.insightHeadline}>{weeklyInsight}</Text>
-                  <Text style={[styles.insightBody, isDarkMode && styles.darkMutedText]}>{completed} completed and {openHabits} still open today. Your current average progress is {averageProgress}%.</Text>
-                </View>
-
-                <View style={[styles.suggestionCard, isDarkMode && styles.darkCard]}>
-                  <View style={styles.suggestionHeading}>
+                <View style={[styles.noticedCard, isDarkMode && styles.darkCard]}>
+                  <View style={styles.noticedHeader}>
                     <Ionicons name="sparkles" size={18} color={themeColor('#5B42D8')} />
-                    <Text style={[styles.insightTitle, isDarkMode && styles.darkPrimaryText]}>Habit suggestion</Text>
+                    <View style={styles.noticedHeaderCopy}>
+                      <Text style={[styles.cardTitle, isDarkMode && styles.darkPrimaryText]}>What HabitAI noticed</Text>
+                      <Text style={[styles.cardSubtitle, isDarkMode && styles.darkMutedText]}>Tap one to ask the AI about it</Text>
+                    </View>
                   </View>
-                  <Text style={[styles.insightBody, isDarkMode && styles.darkMutedText]}>{suggestion}</Text>
+                  {noticed.length === 0 ? (
+                    <Text style={[styles.insightBody, isDarkMode && styles.darkMutedText]}>{suggestion}</Text>
+                  ) : noticed.map((item, index) => (
+                    <Pressable
+                      key={item.title}
+                      style={({ pressed }) => [styles.noticedRow, index > 0 && styles.noticedRowBorder, isDarkMode && styles.darkNoticedRow, pressed && styles.pressed]}
+                      onPress={() => openAssistant(item.ask)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${item.title}. ${item.detail} Ask HabitAI: ${item.ask}`}
+                    >
+                      <View style={[styles.noticedIcon, { backgroundColor: themeColor(item.background, 'backgroundColor') }]}>
+                        <Ionicons name={item.icon} size={17} color={themeColor(item.color)} />
+                      </View>
+                      <View style={styles.noticedCopy}>
+                        <Text style={[styles.noticedTitle, isDarkMode && styles.darkPrimaryText]}>{item.title}</Text>
+                        <Text style={[styles.insightBody, isDarkMode && styles.darkMutedText]}>{item.detail}</Text>
+                      </View>
+                      <View style={[styles.askTag, isDarkMode && styles.darkAskTag]}>
+                        <Ionicons name="chatbubble-ellipses" size={12} color={themeColor('#5B42D8')} />
+                        <Text style={styles.askTagText}>Ask</Text>
+                      </View>
+                    </Pressable>
+                  ))}
                 </View>
               </>
             ) : (
               <View style={styles.predictionScreen}>
                 <HabitAnalysisPanel habits={habits} />
-                <View style={[styles.predictionHeroCard, isDarkMode && styles.darkHeroCard]}>
+                <View style={[styles.forecastCard, isDarkMode && styles.darkHeroCard]}>
                   <View style={styles.heroLabelRow}>
-                    <View style={styles.liveDot} />
+                    <Ionicons name="sparkles" size={12} color={themedColor('#D8D0FF', appTheme)} />
                     <Text style={styles.heroLabel}>NEXT WEEK</Text>
-                      <View style={styles.forecastPill}><Ionicons name={predictionPresentation.icon as keyof typeof Ionicons.glyphMap} size={11} color={themeColor('#5B42D8')} /><Text style={styles.forecastPillText}>{predictionPresentation.label}</Text></View>
+                    <View style={styles.forecastPill}><Ionicons name={predictionPresentation.icon as keyof typeof Ionicons.glyphMap} size={12} color="#FFFFFF" /><Text style={styles.forecastPillText}>{predictionPresentation.label}</Text></View>
                   </View>
 
-                  <View style={styles.predictionHeroLayout}>
-                    <View style={styles.predictionHeroTextWrap}>
-                      <Text style={[styles.predictionTitle, isDarkMode && styles.darkPrimaryText]}>
-                        {forecastHeadline}
-                      </Text>
-                      <Text style={[styles.predictionSubtitle, isDarkMode && styles.darkMutedText]}>
-                        {displayedPredictionSummary} {predictionPresentation.detail}
-                      </Text>
-                      <View style={styles.predictionSummaryBox}>
-                        <View style={styles.predictionSummaryRow}>
-                          <Text style={styles.predictionSummaryLabel}>{predictionPresentation.hasForecast ? 'Completion forecast' : 'Average progress'}</Text>
-                            <Text style={styles.predictionSummaryValue}>{displayedCompletionProbability}%</Text>
-                        </View>
-                        <View style={styles.predictionSummaryRow}>
-                          <Text style={styles.predictionSummaryLabel}>Dropout risk</Text>
-                            <Text style={styles.predictionSummaryValue}>{displayedRisk === null ? '--' : `${displayedRisk}%`}</Text>
-                        </View>
-                        <View style={styles.predictionProgressTrack}>
-                          <Animated.View style={[styles.predictionProgressFill, { width: predictionProgress.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }) }]} />
-                        </View>
-                        <Text style={styles.predictionProgressLabel}>{predictionLoading ? 'Checking for a model forecast...' : predictionPresentation.hasForecast ? `${displayedCompletionProbability}% predicted completion` : `${displayedCompletionProbability}% recorded average progress`}</Text>
+                  <View style={styles.forecastBody}>
+                    <ProgressRing value={displayedCompletionProbability} size={112} thickness={10} color="#FFFFFF" trackColor="rgba(255,255,255,0.2)" innerColor={heroBackground}>
+                      <Text style={styles.forecastValue}>{displayedCompletionProbability}%</Text>
+                      <Text style={styles.forecastValueLabel}>{predictionPresentation.hasForecast ? 'likely done' : 'avg progress'}</Text>
+                    </ProgressRing>
+                    <View style={styles.forecastCopy}>
+                      <Text style={styles.forecastTitle}>{forecastHeadline}</Text>
+                      {mlPrediction?.habit_name ? <Text style={styles.forecastFor} numberOfLines={1}>For {mlPrediction.habit_name}</Text> : null}
+                      <View style={styles.riskRow}>
+                        <Text style={styles.riskLabel}>Dropout risk</Text>
+                        <Text style={styles.riskValue}>{displayedRisk === null || !riskLevel ? '--' : `${displayedRisk}% · ${riskLevel.label}`}</Text>
                       </View>
-                      {predictionError ? <Text style={styles.predictionErrorText}>{predictionError}</Text> : null}
-                    </View>
-
-                    <View style={styles.chatBubbleWrap}>
-                      <View style={styles.chatBubble}>
-                        <Text style={styles.chatBubbleText}>{forecastMessage}</Text>
-                      </View>
-                      <View style={styles.robotBubble}>
-                        <View style={styles.robotHead}>
-                          <View style={styles.robotFace}>
-                            <View style={styles.robotEye} />
-                            <View style={styles.robotEye} />
-                            <View style={styles.robotMouth} />
-                          </View>
-                        </View>
+                      <View style={styles.riskTrack}>
+                        <View style={[styles.riskFill, { width: `${displayedRisk ?? 0}%`, backgroundColor: riskLevel?.color ?? 'transparent' }]} />
                       </View>
                     </View>
                   </View>
 
-                  <View style={styles.predictionStatsRow}>
-                    <View style={styles.predictionStatCard}>
-                      <View style={styles.circleGauge}>
-                        <Text style={styles.circleGaugeText}>{displayedPredictionConfidence === null ? '--' : `${displayedPredictionConfidence}%`}</Text>
-                      </View>
-                      <Text style={styles.predictionStatLabel}>model agreement (uncalibrated)</Text>
-                    </View>
-                    <View style={styles.predictionStatCard}>
-                      <View style={styles.trendPillLarge}><Ionicons name="trending-up" size={16} color={themeColor('#2E9D5C')} /></View>
-                      <Text style={styles.predictionStatValue}>{averageProgress}%</Text>
-                      <Text style={styles.predictionStatLabel}>average progress</Text>
-                    </View>
-                    <View style={styles.predictionStatCard}>
-                      <View style={styles.trophyBadgeLarge}><Ionicons name="trophy" size={16} color={themeColor('#E8A126')} /></View>
-                      <Text style={styles.predictionStatValue}>{habits.length}</Text>
-                      <Text style={styles.predictionStatLabel}>habits tracked</Text>
-                    </View>
-                    <View style={styles.predictionStatCard}>
-                      <View style={styles.trendPillLarge}><Ionicons name="close-circle" size={16} color={themeColor('#D56A6A')} /></View>
-                      <Text style={styles.predictionStatValue}>{openHabits}</Text>
-                      <Text style={styles.predictionStatLabel}>open today</Text>
+                  <View style={styles.nextStep}>
+                    <View style={styles.nextStepIcon}><Ionicons name="bulb" size={16} color="#FFD36E" /></View>
+                    <View style={styles.nextStepCopy}>
+                      <Text style={styles.nextStepLabel}>NEXT STEP</Text>
+                      <Text style={styles.nextStepText}>{displayedRecommendation}</Text>
+                      {mlPrediction?.suggested_reminder_time ? (
+                        <View style={styles.reminderChip}>
+                          <Ionicons name="alarm-outline" size={13} color="#FFFFFF" />
+                          <Text style={styles.reminderChipText}>Suggested reminder: {mlPrediction.suggested_reminder_time}</Text>
+                        </View>
+                      ) : null}
                     </View>
                   </View>
+                  <Text style={styles.forecastNote}>{predictionLoading ? 'Checking for a model forecast…' : `${displayedPredictionSummary} ${predictionPresentation.detail}`}</Text>
+                  {predictionError ? <Text style={styles.predictionErrorText}>{predictionError}</Text> : null}
                 </View>
 
-                <View style={[styles.suggestionCard, isDarkMode && styles.darkCard]}>
-                  <View style={styles.suggestionHeading}>
-                    <Ionicons name="bulb-outline" size={18} color={themeColor('#5B42D8')} />
-                    <Text style={[styles.insightTitle, isDarkMode && styles.darkPrimaryText]}>Prediction action</Text>
-                  </View>
-                  <Text style={[styles.insightBody, isDarkMode && styles.darkMutedText]}>{displayedRecommendation}</Text>
-                  {mlPrediction?.suggested_reminder_time ? (
-                    <Text style={[styles.insightBody, isDarkMode && styles.darkMutedText]}>
-                      Suggested reminder: {mlPrediction.suggested_reminder_time}
-                    </Text>
-                  ) : null}
+                <View style={styles.statGrid}>
+                  {([
+                    { icon: 'git-compare', color: '#5B42D8', background: '#EEE9FF', value: displayedPredictionConfidence === null ? '--' : `${displayedPredictionConfidence}%`, label: 'Model agreement', hint: 'Uncalibrated' },
+                    { icon: 'trending-up', color: '#2E9D5C', background: '#E3F6EC', value: `${averageProgress}%`, label: 'Average progress' },
+                    { icon: 'albums', color: '#C98A0E', background: '#FFF4D9', value: String(habits.length), label: 'Habits tracked' },
+                    { icon: 'time', color: '#D56A6A', background: '#FFECEC', value: String(openHabits), label: 'Open today' },
+                  ] as const).map((stat) => (
+                    <View key={stat.label} style={[styles.statTile, isDarkMode && styles.darkCard]}>
+                      <View style={[styles.statIcon, { backgroundColor: themeColor(stat.background, 'backgroundColor') }]}><Ionicons name={stat.icon} size={17} color={themeColor(stat.color)} /></View>
+                      <View style={styles.statCopy}>
+                        <Text style={[styles.statValue, isDarkMode && styles.darkPrimaryText]}>{stat.value}</Text>
+                        <Text style={[styles.statLabel, isDarkMode && styles.darkMutedText]} numberOfLines={1}>{stat.label}</Text>
+                        {'hint' in stat ? <Text style={[styles.statHint, isDarkMode && styles.darkMutedText]}>{stat.hint}</Text> : null}
+                      </View>
+                    </View>
+                  ))}
                 </View>
-
                 <View style={[styles.predictionTrendCard, isDarkMode && styles.darkCard]}>
                   <View style={styles.cardHeaderRow}>
                     <View>
@@ -649,7 +600,7 @@ export default function InsightsScreen() {
                   )}
 
                   <View style={styles.heatmapHeaderRow}>
-                    <View style={[styles.heatmapHeaderLabel, selectedHeatmap.isDaily && styles.heatmapDailySpacer]}><Ionicons name="calendar-outline" size={14} color={themeColor('#6E6887')} /><Text style={styles.heatmapHeaderText}>{selectedHeatmap.isDaily ? 'Date' : 'Period'}</Text></View>
+                    <View style={[styles.heatmapHeaderLabel, selectedHeatmap.isDaily && styles.heatmapDailySpacer]}>{selectedHeatmap.isDaily && <Ionicons name="calendar-outline" size={14} color={themeColor('#6E6887')} />}<Text style={styles.heatmapHeaderText}>{selectedHeatmap.isDaily ? 'Date' : 'Period'}</Text></View>
                     {selectedHeatmap.isDaily ? <View style={styles.heatmapCompletionHeader}><Ionicons name="briefcase-outline" size={14} color={themeColor('#6E6887')} /><Text style={styles.heatmapHeaderText}>Completion</Text></View> : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => <Text key={day} style={styles.heatmapDayLabel}>{day}</Text>)}
                     <View style={styles.heatmapAverageHeader}><Ionicons name="trending-up-outline" size={14} color={themeColor('#6E6887')} /><Text style={styles.heatmapHeaderText}>Avg.</Text></View>
                   </View>
@@ -670,102 +621,91 @@ export default function InsightsScreen() {
                   </View>
                 </View>
 
-                <View style={styles.quickPredictionsHeader}>
-                  <View>
-                    <Text style={[styles.quickPredictionsTitle, isDarkMode && styles.darkPrimaryText]}>Quick Predictions</Text>
-                    <Text style={[styles.quickPredictionsSubtitle, isDarkMode && styles.darkMutedText]}>AI insights to help you stay on track.</Text>
-                  </View>
-                  <Pressable style={styles.viewAllTextWrap} onPress={() => setActiveTab('Predictions')} accessibilityRole="button">
-                    <Text style={styles.viewAllText}>View All</Text>
-                    <Ionicons name="chevron-forward" size={13} color={themeColor('#5B42D8')} />
-                  </Pressable>
-                </View>
-
-                <View style={styles.quickCardsRow}>
-                  {([
-                    { title: 'Completed today', value: `${completed} habit${completed === 1 ? '' : 's'}`, detail: `${completionPercent}% of your tracked habits are complete today.`, tone: 'green', icon: 'trophy', tag: 'Live progress' },
-                    { title: 'Success rate', value: `${successRate}%`, detail: `${averageProgress}% average progress across your current habits.`, tone: 'blue', icon: 'calendar', tag: 'Live progress' },
-                    { title: 'Open habits', value: String(openHabits), detail: `${maxStreak}-day best streak. Keep the next action small.`, tone: 'orange', icon: 'flash', tag: 'Live progress' },
-                  ] as const).map((card) => (
-                    <View key={card.title} style={[styles.quickCard, toneStyles[card.tone]]}>
-                      <View style={styles.quickCardTopRow}>
-                        <View style={styles.quickIconWrap}><Ionicons name={card.icon as keyof typeof Ionicons.glyphMap} size={18} color={card.tone === 'green' ? themeColor('#2E9D5C') : card.tone === 'blue' ? themeColor('#4D57D4') : themeColor('#D9841A')} /></View>
-                        <View style={styles.quickTag}><Text style={styles.quickTagText}>{card.tag}</Text></View>
-                      </View>
-                      <Text style={styles.quickCardTitle}>{card.title}</Text>
-                      <Text style={styles.quickCardValue}>{card.value}</Text>
-                      <Text style={styles.quickCardDetail}>{card.detail}</Text>
-                    </View>
-                  ))}
-                </View>
-
-                <View style={[styles.finalInsightBanner, isDarkMode && styles.darkCard]}>
-                  <View style={styles.bannerIcon}><Ionicons name="flag" size={20} color={themeColor('#5B42D8')} /></View>
-                  <View style={styles.bannerCopy}>
-                    <Text style={[styles.bannerTitle, isDarkMode && styles.darkPrimaryText]}>Small steps, big results!</Text>
-                    <Text style={[styles.bannerSubtitle, isDarkMode && styles.darkMutedText]}>Stay consistent and make next week even better.</Text>
-                  </View>
-                </View>
               </View>
             )}
 
-            <Pressable style={styles.assistantButton} onPress={askAssistant} accessibilityRole="button">
-              <Ionicons name="sparkles" size={16} color={themeColor('#FFFFFF')} />
-              <Text style={styles.assistantText}>Ask AI Assistant</Text>
-            </Pressable>
+            <View style={styles.askCardWrap}>
+              <AskAiCard
+                title="Ask HabitAI"
+                subtitle="Answers from your real habits, check-ins and goals."
+                suggestions={assistantSuggestions.slice(0, 2)}
+                onOpen={() => openAssistant()}
+                onAsk={openAssistant}
+              />
+            </View>
           </View>
         </ScrollView>
       </SafeAreaView>
-      <Modal visible={assistantVisible} transparent animationType="slide" onRequestClose={() => setAssistantVisible(false)}>
-        <View style={styles.assistantModalBackdrop}>
-          <View style={[
-            styles.assistantModalCard,
-            isDarkMode && styles.darkCard,
-            keyboardInset > 0 ? { marginBottom: Math.min(keyboardInset, 260) } : null,
-          ]}>
-            <View style={styles.assistantModalHeader}>
-              <View style={styles.assistantModalIcon}><Ionicons name="sparkles" size={20} color={themeColor('#5B42D8')} /></View>
-              <View style={styles.assistantModalHeaderCopy}><Text style={[styles.assistantModalTitle, isDarkMode && styles.darkPrimaryText]}>Ask AI Assistant</Text><Text style={[styles.assistantModalSubtitle, isDarkMode && styles.darkMutedText]}>Personal guidance from your habit data</Text></View>
-              <Pressable onPress={() => setAssistantVisible(false)} accessibilityLabel="Close AI Assistant"><Ionicons name="close-circle" size={25} color={isDarkMode ? '#AAA4B7' : '#888291'} /></Pressable>
-            </View>
-            <View style={styles.assistantReply}><Text style={[styles.assistantReplyLabel, isDarkMode && styles.darkMutedText]}>{assistantResponseSource === 'ai' ? 'AI response' : assistantResponseSource === 'local' ? 'Local guidance' : 'Your insight'}</Text><Text style={[styles.assistantReplyText, isDarkMode && styles.darkPrimaryText]}>{assistantResponse || assistantReply}</Text>{assistantError ? <Text style={styles.assistantError}>{assistantError}</Text> : null}</View>
-            <TextInput
-              ref={assistantInputRef}
-              value={assistantQuestion}
-              onChangeText={setAssistantQuestion}
-              placeholder="Ask about your consistency..."
-              placeholderTextColor={isDarkMode ? '#8C849B' : '#9A94A4'}
-              style={[styles.assistantInput, isDarkMode && styles.darkAssistantInput]}
-              multiline
-              autoCapitalize="sentences"
-              autoFocus
-              selectionColor={themedColor('#5B42D8', appTheme)}
-              textAlignVertical="top"
-              onFocus={() => setTimeout(() => assistantScrollRef.current?.scrollToEnd({ animated: true }), 100)}
-            />
-            <Pressable style={[styles.assistantSendButton, assistantLoading && styles.assistantSendButtonDisabled]} onPress={requestAssistantGuidance} disabled={assistantLoading} accessibilityRole="button"><Ionicons name="send" size={16} color={themeColor('#FFFFFF')} /><Text style={styles.assistantSendText}>{assistantLoading ? 'Thinking...' : 'Get guidance'}</Text></Pressable>
-            <Text style={[styles.assistantFootnote, isDarkMode && styles.darkMutedText]}>Powered by the secure HabitAI server (Groq AI).</Text>
-          </View>
-        </View>
-      </Modal>
+      <AiChatSheet
+        chat={assistantChat}
+        visible={assistantOpen}
+        onClose={() => setAssistantOpen(false)}
+        title="HabitAI Assistant"
+        subtitle="Answers from your habits, check-ins and goals"
+        greeting={assistantGreeting}
+        suggestions={assistantSuggestions}
+        placeholder="Ask about your habits..."
+        footnote="Free to use. Answered by the secure HabitAI server (Groq AI); answers can be wrong."
+        autoFocus={assistantFocus}
+      />
     </>
   );
 }
 
 const themedStyles = createThemedStyles({
+  pressed: { opacity: 0.75 },
+  noticedCard: { backgroundColor: '#FFFFFF', borderRadius: 22, padding: 16, marginBottom: 2, shadowColor: '#292047', shadowOpacity: 0.04, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
+  noticedHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 6 },
+  noticedHeaderCopy: { flex: 1 },
+  noticedRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
+  noticedRowBorder: { borderTopWidth: 1, borderTopColor: '#F0EEF5' },
+  darkNoticedRow: { borderTopColor: '#2C2838' },
+  noticedIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  noticedCopy: { flex: 1, minWidth: 0, gap: 2 },
+  noticedTitle: { fontSize: 14, lineHeight: 19, fontWeight: '800', color: '#302B3B' },
+  askTag: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 6, borderRadius: 999, backgroundColor: '#F1ECFF' },
+  darkAskTag: { backgroundColor: '#2E2648' },
+  askTagText: { fontSize: 11, fontWeight: '800', color: '#5B42D8' },
+  forecastCard: { backgroundColor: '#5B42D8', borderRadius: 26, padding: 18, gap: 14, overflow: 'hidden' },
+  forecastBody: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  forecastValue: { fontSize: 26, fontWeight: '900', color: '#FFFFFF' },
+  forecastValueLabel: { fontSize: 11, fontWeight: '700', color: '#D8D0FF', marginTop: 1 },
+  forecastCopy: { flex: 1, minWidth: 0 },
+  forecastTitle: { fontSize: 19, lineHeight: 24, fontWeight: '900', color: '#FFFFFF' },
+  forecastFor: { fontSize: 12, fontWeight: '700', color: '#D8D0FF', marginTop: 4 },
+  riskRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 },
+  riskLabel: { fontSize: 11, fontWeight: '700', color: '#D8D0FF' },
+  riskValue: { fontSize: 12, fontWeight: '900', color: '#FFFFFF' },
+  riskTrack: { height: 7, marginTop: 6, borderRadius: 4, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.2)' },
+  riskFill: { height: '100%', borderRadius: 4 },
+  nextStep: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, padding: 12, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.12)' },
+  nextStepIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.14)' },
+  nextStepCopy: { flex: 1, minWidth: 0 },
+  nextStepLabel: { fontSize: 11, fontWeight: '900', letterSpacing: 0.8, color: '#D8D0FF' },
+  nextStepText: { fontSize: 14, lineHeight: 20, fontWeight: '700', color: '#FFFFFF', marginTop: 3 },
+  reminderChip: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 5, marginTop: 8, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.16)' },
+  reminderChipText: { fontSize: 11, fontWeight: '800', color: '#FFFFFF' },
+  forecastNote: { fontSize: 11, lineHeight: 16, fontWeight: '600', color: '#D8D0FF' },
+  statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  statTile: { flexGrow: 1, flexBasis: '45%', flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 72, padding: 12, borderRadius: 18, backgroundColor: '#FFFFFF' },
+  statIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  statCopy: { flex: 1, minWidth: 0 },
+  statValue: { fontSize: 19, fontWeight: '900', color: '#2C2C46' },
+  statLabel: { fontSize: 11, fontWeight: '700', color: '#6B6780', marginTop: 1 },
+  statHint: { fontSize: 11, fontWeight: '600', color: '#9A94A4' },
+  askCardWrap: { marginTop: 18 },
   screen: { flex: 1, backgroundColor: '#F5F4F9' }, darkScreen: { backgroundColor: '#111018' },
   content: { flexGrow: 1, paddingBottom: 110 },
   container: { flex: 1, paddingHorizontal: 18, paddingTop: 8 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
   headerSpacer: { width: 38, height: 38 },
-  darkIconButton: { backgroundColor: '#211D2C' },
   headerTitleWrap: { alignItems: 'center', flex: 1 },
   eyebrow: { fontSize: 9, letterSpacing: 1.2, color: '#8D8998', fontWeight: '800', marginBottom: 3 },
   headerTitle: { fontSize: 23, fontWeight: '800', color: '#24212D' },
   headerBadge: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ECE8FF' },
   darkBadge: { backgroundColor: '#2B263A' },
   segmentedControl: { flexDirection: 'row', backgroundColor: '#ECE9F3', borderRadius: 16, padding: 4, marginBottom: 18 },
-  segment: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12 },
+  segment: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 12 },
   segmentActive: { backgroundColor: '#5B42D8' },
   segmentText: { fontSize: 13, color: '#777283', fontWeight: '700' },
   segmentTextActive: { color: '#FFFFFF' },
@@ -775,16 +715,14 @@ const themedStyles = createThemedStyles({
   darkHeroCard: { backgroundColor: '#30215A' },
   darkPrimaryText: { color: '#F7F4FF' },
   darkMutedText: { color: '#AAA4B7' },
-  heroCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#5B42D8', borderRadius: 24, padding: 20, marginBottom: 14, overflow: 'hidden' },
-  heroCopy: { flex: 1, paddingRight: 14 },
-  heroLabelRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#A9F0C7', marginRight: 7 },
+  heroCard: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#5B42D8', borderRadius: 24, padding: 20, marginBottom: 14, overflow: 'hidden' },
+  heroCopy: { flex: 1, minWidth: 0 },
+  heroLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
   heroLabel: { fontSize: 10, color: '#D8D0FF', fontWeight: '800', letterSpacing: 1 },
   heroTitle: { fontSize: 21, lineHeight: 26, color: '#FFFFFF', fontWeight: '800', marginBottom: 6 },
   heroSubtitle: { fontSize: 12, lineHeight: 17, color: '#D8D0FF', fontWeight: '600' },
-  heroScore: { width: 82, height: 82, borderRadius: 41, borderWidth: 1, borderColor: '#9584EC', backgroundColor: '#4B32C0', alignItems: 'center', justifyContent: 'center' },
-  heroScoreValue: { fontSize: 21, color: '#FFFFFF', fontWeight: '800' },
-  heroScoreLabel: { fontSize: 9, color: '#D8D0FF', fontWeight: '700', marginTop: 2 },
+  heroScoreValue: { fontSize: 22, color: '#FFFFFF', fontWeight: '900' },
+  heroScoreLabel: { fontSize: 11, color: '#D8D0FF', fontWeight: '700', marginTop: 1 },
   metricsRow: { flexDirection: 'row', gap: 9, marginBottom: 14 },
   metricCard: { flex: 1, minHeight: 105, backgroundColor: '#FFFFFF', borderRadius: 17, padding: 11, shadowColor: '#292047', shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
   metricIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 9 },
@@ -809,47 +747,11 @@ const themedStyles = createThemedStyles({
   chartPointInner: { flex: 1, margin: 2, borderRadius: 3, backgroundColor: '#5B42D8' },
   xAxis: { position: 'absolute', left: 36, right: 0, bottom: 0, height: 14 },
   xAxisLabel: { position: 'absolute', width: 30, marginLeft: -15, textAlign: 'center' },
-  insightCard: { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 17, marginBottom: 12 },
-  insightHeading: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  statusDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: '#42A85F', marginRight: 8 },
-  insightTitle: { fontSize: 14, fontWeight: '800', color: '#302B3B' },
-  insightHeadline: { fontSize: 15, fontWeight: '800', color: '#4A2CC9', marginBottom: 4 },
   insightBody: { fontSize: 12, lineHeight: 18, color: '#6F6A79', fontWeight: '600' },
-  suggestionCard: { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 17, marginBottom: 16 },
-  suggestionHeading: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  predictionScreen: { gap: 20 },
-  predictionHeroCard: { backgroundColor: '#F0EBFF', borderRadius: 28, padding: 20, marginBottom: 0, shadowColor: '#5B42D8', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 2 },
-  forecastPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FFFFFF', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 5, marginLeft: 'auto' },
-  forecastPillText: { fontSize: 9, color: '#5B42D8', fontWeight: '800' },
-  predictionHeroLayout: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 10, marginTop: 12 },
-  predictionHeroTextWrap: { flex: 1 },
-  hightlightText: { color: '#5B42D8' },
-  predictionTitle: { fontSize: 20, lineHeight: 25, fontWeight: '800', color: '#302B3B', textAlign: 'left', marginVertical: 0 },
-  predictionSubtitle: { fontSize: 12, lineHeight: 18, color: '#6F6A79', fontWeight: '600', marginTop: 12 },
-  predictionSummaryBox: { marginTop: 12, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
-  predictionSummaryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 3 },
-  predictionSummaryLabel: { fontSize: 10, color: '#D9D0FF', fontWeight: '700', letterSpacing: 0.5 },
-  predictionSummaryValue: { fontSize: 12, color: '#FFFFFF', fontWeight: '800' },
-  predictionProgressTrack: { height: 7, marginTop: 9, overflow: 'hidden', borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.28)' },
-  predictionProgressFill: { height: '100%', borderRadius: 4, backgroundColor: '#FFFFFF' },
-  predictionProgressLabel: { marginTop: 5, fontSize: 9, color: '#E7E0FF', fontWeight: '700' },
-  predictionErrorText: { marginTop: 10, fontSize: 10, color: '#F8DCCD', fontWeight: '700' },
-  chatBubbleWrap: { width: 140, alignItems: 'center' },
-  chatBubble: { backgroundColor: '#FFFFFF', borderRadius: 18, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 8, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
-  chatBubbleText: { fontSize: 11, color: '#4F4780', fontWeight: '700', textAlign: 'center', lineHeight: 15 },
-  robotBubble: { width: 110, height: 84, alignItems: 'center', justifyContent: 'center' },
-  robotHead: { width: 98, height: 70, borderRadius: 32, backgroundColor: '#E8EBF8', borderWidth: 4, borderColor: '#F8F9FF', alignItems: 'center', justifyContent: 'center' },
-  robotFace: { width: 72, height: 46, borderRadius: 22, backgroundColor: '#4A46A6', alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10 },
-  robotEye: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFFFFF' },
-  robotMouth: { position: 'absolute', width: 20, height: 10, borderBottomWidth: 3, borderBottomColor: '#FFFFFF', borderRadius: 10, bottom: 10 },
-  predictionStatsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 22, gap: 8 },
-  predictionStatCard: { flex: 1, height: 104, backgroundColor: '#FFFFFF', borderRadius: 16, alignItems: 'center', justifyContent: 'center', padding: 10 },
-  circleGauge: { width: 52, height: 52, borderRadius: 26, borderWidth: 5, borderColor: '#5B42D8', borderTopColor: '#DCD4FF', transform: [{ rotate: '45deg' }], alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  circleGaugeText: { fontSize: 12, fontWeight: '800', color: '#5B42D8', transform: [{ rotate: '-45deg' }] },
-  trendPillLarge: { width: 32, height: 32, borderRadius: 12, backgroundColor: '#EAF8F0', alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  trophyBadgeLarge: { width: 32, height: 32, borderRadius: 12, backgroundColor: '#FFF4D9', alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  predictionStatValue: { fontSize: 19, fontWeight: '800', color: '#2C2C46', marginBottom: 3 },
-  predictionStatLabel: { fontSize: 10, color: '#6B6780', fontWeight: '700', textAlign: 'center' },
+  predictionScreen: { gap: 16 },
+  forecastPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.16)', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5, marginLeft: 'auto' },
+  forecastPillText: { fontSize: 11, color: '#FFFFFF', fontWeight: '800' },
+  predictionErrorText: { fontSize: 11, lineHeight: 16, color: '#FFD9C7', fontWeight: '700' },
   predictionTrendCard: { backgroundColor: '#FFFFFF', borderRadius: 22, padding: 20, shadowColor: '#292047', shadowOpacity: 0.04, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
   heatmapTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   heatmapIcon: { width: 30, height: 30, borderRadius: 10, backgroundColor: '#F0EBFF', alignItems: 'center', justifyContent: 'center' },
@@ -900,10 +802,8 @@ const themedStyles = createThemedStyles({
   heatmapCompletionHeader: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
   heatmapAverageHeader: { width: 43, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 3 },
   heatmapHeaderText: { fontSize: 9, color: '#6E6887', fontWeight: '800' },
-  heatmapWeekSpacer: { width: 48, fontSize: 9, color: '#8D8998', fontWeight: '700' },
   heatmapDailySpacer: { width: 112 },
   heatmapDayLabel: { flex: 1, textAlign: 'center', fontSize: 9, color: '#8D8998', fontWeight: '800' },
-  heatmapAverageLabel: { width: 39, textAlign: 'right', fontSize: 9, color: '#8D8998', fontWeight: '800' },
   heatmapRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   dailyHeatmapRow: { minHeight: 42, paddingHorizontal: 7, paddingVertical: 5, borderRadius: 12 },
   todayHeatmapRow: { backgroundColor: '#F5F1FF' },
@@ -916,10 +816,6 @@ const themedStyles = createThemedStyles({
   heatmapAverageBadge: { width: 43, alignItems: 'center', backgroundColor: '#F0EBFF', borderRadius: 10, paddingVertical: 6 },
   todayAverageBadge: { backgroundColor: '#DDD3FF' },
   heatmapAverage: { fontSize: 10, color: '#5B42D8', fontWeight: '800' },
-  heatmapLevel1: { backgroundColor: '#F0ECFF' },
-  heatmapLevel2: { backgroundColor: '#DCD2FF' },
-  heatmapLevel3: { backgroundColor: '#A998F2' },
-  heatmapLevel4: { backgroundColor: '#5B42D8' },
   heatmapFooter: { marginTop: 16, gap: 10 },
   heatmapGuide: { fontSize: 10, color: '#8D8998', fontWeight: '600' },
   heatmapLegend: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 5 },
@@ -927,50 +823,5 @@ const themedStyles = createThemedStyles({
   legendText: { fontSize: 10, color: '#6E6887', fontWeight: '600' },
   heatmapNote: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#EAF8F0', borderRadius: 12, paddingHorizontal: 11, paddingVertical: 9 },
   heatmapNoteText: { flex: 1, fontSize: 10, color: '#328651', fontWeight: '700' },
-  quickPredictionsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 },
-  quickPredictionsTitle: { fontSize: 19, lineHeight: 23, fontWeight: '800', color: '#2D2A3D' },
-  quickPredictionsSubtitle: { fontSize: 12, lineHeight: 17, color: '#7A728B', fontWeight: '600', marginTop: 5 },
-  viewAllTextWrap: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  viewAllText: { fontSize: 11, color: '#5B42D8', fontWeight: '700' },
-  quickCardsRow: { gap: 10, marginTop: 15 },
-  quickCard: { borderRadius: 18, padding: 15, minHeight: 146 },
-  greenCard: { backgroundColor: '#EAF9F0' },
-  blueCard: { backgroundColor: '#EEF0FF' },
-  orangeCard: { backgroundColor: '#FFF5E9' },
-  quickCardTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  quickIconWrap: { width: 32, height: 32, borderRadius: 11, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
-  quickCardTitle: { fontSize: 12, lineHeight: 16, color: '#413B5C', fontWeight: '700' },
-  quickCardValue: { fontSize: 17, lineHeight: 21, fontWeight: '800', color: '#2D2A3D', marginTop: 5, marginBottom: 8 },
-  quickCardDetail: { fontSize: 10.5, lineHeight: 16, color: '#5C5870', fontWeight: '600' },
-  quickTag: { backgroundColor: 'rgba(255,255,255,0.7)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 6 },
-  quickTagText: { fontSize: 9, color: '#3F3B55', fontWeight: '800' },
-  finalInsightBanner: { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 16, flexDirection: 'row', alignItems: 'center', marginTop: 2 },
-  bannerIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F0EBFF', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  bannerCopy: { flex: 1 },
-  bannerTitle: { fontSize: 14, fontWeight: '800', color: '#2F2A3F' },
-  bannerSubtitle: { fontSize: 10, color: '#736E84', marginTop: 4 },
-  bannerButton: { backgroundColor: '#5B42D8', borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 8 },
-  bannerButtonText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
-  assistantButton: { height: 48, borderRadius: 13, backgroundColor: '#5B2BC7', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, marginTop: 12 },
-  assistantModalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(25, 19, 42, 0.5)' },
-  assistantModalScrollView: { flex: 1 },
-  assistantModalScrollContent: { flexGrow: 1, justifyContent: 'flex-end', paddingTop: 16 },
-  assistantModalCard: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 28 },
-  assistantModalHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  assistantModalIcon: { width: 40, height: 40, borderRadius: 13, backgroundColor: '#EEE8FF', alignItems: 'center', justifyContent: 'center' },
-  assistantModalHeaderCopy: { flex: 1 },
-  assistantModalTitle: { fontSize: 18, fontWeight: '900', color: '#2D2A3D' },
-  assistantModalSubtitle: { fontSize: 10, color: '#7A728B', fontWeight: '600', marginTop: 3 },
-  assistantReply: { backgroundColor: '#F5F1FF', borderRadius: 15, borderWidth: 1, borderColor: '#E4DAFF', padding: 14, marginTop: 18 },
-  assistantReplyLabel: { fontSize: 10, color: '#7A728B', fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 },
-  assistantReplyText: { fontSize: 13, lineHeight: 19, color: '#393440', fontWeight: '700', marginTop: 6 },
-  assistantError: { color: '#B34242', fontSize: 11, lineHeight: 15, marginTop: 8 },
-  assistantInput: { minHeight: 48, maxHeight: 90, borderWidth: 1, borderColor: '#DDD6EC', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, color: '#302B3B', fontSize: 12, marginTop: 12, textAlignVertical: 'top', backgroundColor: '#F9F7FF' },
-  darkAssistantInput: { borderColor: '#40374F', color: '#F2EFF8', backgroundColor: '#211D2B' },
-  assistantSendButton: { height: 44, borderRadius: 12, backgroundColor: '#5B2BC7', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 10 },
-  assistantSendButtonDisabled: { opacity: 0.65 },
-  assistantSendText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
-  assistantFootnote: { color: '#8A8492', fontSize: 9, lineHeight: 14, textAlign: 'center', marginTop: 10 },
-  assistantText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
 });
 
