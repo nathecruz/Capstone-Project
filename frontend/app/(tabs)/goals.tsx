@@ -139,7 +139,7 @@ function StepRow({ step, due, done, index, last, onPress }: { step: string; due?
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   return (
-    <Pressable style={({ pressed }) => [styles.stepRow, pressed && styles.pressed]} onPress={onPress} accessibilityRole="checkbox" accessibilityState={{ checked: done }} accessibilityLabel={`Step ${index + 1}: ${step}${due ? `. Due ${due}` : ''}`}>
+    <Pressable style={({ pressed }) => [styles.stepRow, pressed && styles.pressed]} onPress={onPress} accessibilityRole="checkbox" accessibilityState={{ checked: done }} accessibilityLabel={`Step ${index + 1}: ${step}${due ? `. Due ${due}` : ''}${done ? '. Done' : ''}`} accessibilityHint={done ? 'Done steps stay checked' : 'Marks the step as done'}>
       <View style={styles.stepRail}>
         <View style={[styles.stepDot, done && styles.stepDotDone]}>
           {done ? <Ionicons name="checkmark" size={15} color={themeColor('#FFFFFF')} /> : <Text style={styles.stepNumber}>{index + 1}</Text>}
@@ -148,7 +148,12 @@ function StepRow({ step, due, done, index, last, onPress }: { step: string; due?
       </View>
       <View style={styles.stepCopy}>
         <Text style={[styles.stepText, done && styles.stepTextDone]}>{step}</Text>
-        {due ? (
+        {done ? (
+          <View style={styles.dueChip}>
+            <Ionicons name="lock-closed" size={11} color={themeColor('#2E9D5C')} />
+            <Text style={[styles.dueText, styles.doneText]}>Done</Text>
+          </View>
+        ) : due ? (
           <View style={styles.dueChip}>
             <Ionicons name="calendar-outline" size={11} color={themeColor('#6E6887')} />
             <Text style={styles.dueText}>Due {due}</Text>
@@ -273,14 +278,25 @@ export default function GoalsScreen() {
     ]);
   };
 
-  const toggleStep = (goalId: string, stepIndex: number) => {
-    const toggled = (goal: GoalInsight) => {
-      const completedSteps = goal.completedSteps.map((completed, index) => index === stepIndex ? !completed : completed);
-      const progress = getProgressFromSteps(completedSteps);
-      return { ...goal, completedSteps, progress, status: getGoalStatus(progress) };
+  // A finished step stays finished (the server keeps it done too), so ticking one is confirmed first.
+  const completeStep = (goal: GoalInsight, stepIndex: number) => {
+    if (goal.completedSteps[stepIndex]) {
+      showAlert('Step already done', 'Finished steps stay checked, so your goal progress stays real.');
+      return;
+    }
+    const markDone = () => {
+      const completed = (item: GoalInsight) => {
+        const completedSteps = item.completedSteps.map((done, index) => done || index === stepIndex);
+        const progress = getProgressFromSteps(completedSteps);
+        return { ...item, completedSteps, progress, status: getGoalStatus(progress) };
+      };
+      updateGoals((previous) => previous.map((item) => (item.id === goal.id ? completed(item) : item)));
+      if (generatedGoal && generatedGoal.id === goal.id) setGeneratedGoal(completed(generatedGoal));
     };
-    updateGoals((previous) => previous.map((goal) => (goal.id === goalId ? toggled(goal) : goal)));
-    if (generatedGoal && generatedGoal.id === goalId) setGeneratedGoal(toggled(generatedGoal));
+    showAlert('Mark this step as done?', `"${goal.actionPlan[stepIndex]}"\n\nOnce it is done, it cannot be unchecked.`, [
+      { text: 'Not yet', style: 'cancel' },
+      { text: 'Mark as done', onPress: markDone },
+    ]);
   };
 
   const stepsDone = (goal: GoalInsight) => goal.completedSteps.filter(Boolean).length;
@@ -438,10 +454,10 @@ export default function GoalsScreen() {
 
                     <View style={styles.sectionRow}>
                       <Text style={styles.subheading}>Your 4 steps</Text>
-                      <Text style={styles.sectionHint}>Tap a step when it is done</Text>
+                      <Text style={styles.sectionHint}>Tap a step when you finish it</Text>
                     </View>
                     {activeGoal.actionPlan.map((step, index) => (
-                      <StepRow key={`${activeGoal.id}-${index}`} step={step} due={activeGoal.actionDueDates[index]} done={Boolean(activeGoal.completedSteps[index])} index={index} last={index === activeGoal.actionPlan.length - 1} onPress={() => toggleStep(activeGoal.id, index)} />
+                      <StepRow key={`${activeGoal.id}-${index}`} step={step} due={activeGoal.actionDueDates[index]} done={Boolean(activeGoal.completedSteps[index])} index={index} last={index === activeGoal.actionPlan.length - 1} onPress={() => completeStep(activeGoal, index)} />
                     ))}
 
                     <View style={styles.milestone}>
@@ -539,7 +555,7 @@ export default function GoalsScreen() {
                       {open && (
                         <View style={styles.goalSteps}>
                           {goal.actionPlan.map((step, index) => (
-                            <StepRow key={`${goal.id}-${index}`} step={step} due={goal.actionDueDates[index]} done={Boolean(goal.completedSteps[index])} index={index} last={index === goal.actionPlan.length - 1} onPress={() => toggleStep(goal.id, index)} />
+                            <StepRow key={`${goal.id}-${index}`} step={step} due={goal.actionDueDates[index]} done={Boolean(goal.completedSteps[index])} index={index} last={index === goal.actionPlan.length - 1} onPress={() => completeStep(goal, index)} />
                           ))}
                         </View>
                       )}
@@ -656,6 +672,7 @@ const themedStyles = createThemedStyles({
   stepTextDone: { color: '#2E9D5C', textDecorationLine: 'line-through' },
   dueChip: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 4, marginTop: 5 },
   dueText: { fontSize: 11, fontWeight: '700', color: '#6E6887' },
+  doneText: { color: '#2E9D5C' },
   milestone: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 4, padding: 12, borderRadius: 16, backgroundColor: '#F5F1FF' },
   watchOut: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 10, padding: 12, borderRadius: 16, backgroundColor: '#FFF7E8' },
   calloutIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },

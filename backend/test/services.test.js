@@ -5,7 +5,7 @@ import { originMatcher } from '../config/index.js';
 import { goalPlanSchema } from '../schemas.js';
 import { buildHabitContext, habitFrequency } from '../services/ai-context.js';
 import { FACULTY_CONTEXT, buildUserPrompt, cleanAnswer, forAudience, normalizeGoalPlan, systemPromptFor } from '../services/ai-prompts.js';
-import { sameState, stableStringify } from '../services/app-state-sync.js';
+import { keepCompletedGoalSteps, sameState, stableStringify } from '../services/app-state-sync.js';
 import { escapeHtml, passwordChangedEmail, passwordResetCodeEmail } from '../services/email-templates.js';
 import { getEmailConfig, sendEmail } from '../services/mailer.js';
 import { passwordStrength } from '../services/passwords.js';
@@ -108,6 +108,18 @@ test('state comparison ignores key order, as JSONB reorders keys', () => {
   assert.equal(stableStringify({ b: 1, a: [{ d: 2, c: 3 }] }), '{"a":[{"c":3,"d":2}],"b":1}');
   assert.equal(sameState({ a: 1, b: { c: 2 } }, { b: { c: 2 }, a: 1 }), true);
   assert.equal(sameState({ a: 1 }, { a: 2 }), false);
+});
+
+test('a done goal step stays done, whatever a device sends', () => {
+  const stored = { goals: [{ id: 'g1', completedSteps: [true, true, false, false], progress: 50, status: 'In progress' }, { id: 'g2', completedSteps: [true, false, false, false], progress: 25, status: 'In progress' }] };
+  // A device unchecks step 2 of g1 and ticks step 3; g2 was deleted; g3 is new.
+  const incoming = { goals: [{ id: 'g1', completedSteps: [true, false, true, false], progress: 50, status: 'In progress' }, { id: 'g3', completedSteps: [false, false, false, false], progress: 0, status: 'Fresh plan' }] };
+  const kept = keepCompletedGoalSteps(incoming, stored);
+  assert.deepEqual(kept.goals[0].completedSteps, [true, true, true, false], 'step 2 stays done, the new tick is kept');
+  assert.equal(kept.goals[0].progress, 75);
+  assert.equal(kept.goals[0].status, 'On track');
+  assert.deepEqual(kept.goals.map((goal) => goal.id), ['g1', 'g3'], 'a deleted goal stays deleted and a new one is added');
+  assert.equal(keepCompletedGoalSteps(stored, stored), stored, 'nothing changed: the same state is returned');
 });
 
 test('AI context is built from check-ins, not client-reported progress', () => {

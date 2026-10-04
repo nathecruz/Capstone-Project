@@ -120,3 +120,26 @@ export function mergeAppState(base, current, incoming) {
   merged.tokens = current.tokens;
   return normalizeAppState(merged);
 }
+
+const goalStatus = (progress) => (progress >= 100 ? 'Completed' : progress >= 67 ? 'On track' : progress > 0 ? 'In progress' : 'Fresh plan');
+
+/**
+ * A goal step, once done, stays done: no device (or an older copy of the state) can uncheck it.
+ * Progress and status follow the steps. Deleting a whole goal is still allowed.
+ */
+export function keepCompletedGoalSteps(state, current) {
+  const doneById = new Map((current?.goals || []).filter((goal) => goal?.id).map((goal) => [goal.id, Array.isArray(goal.completedSteps) ? goal.completedSteps : []]));
+  if (!Array.isArray(state?.goals) || !doneById.size) return state;
+  let changed = false;
+  const goals = state.goals.map((goal) => {
+    const done = doneById.get(goal?.id);
+    if (!done) return goal;
+    const incoming = Array.isArray(goal.completedSteps) ? goal.completedSteps : [];
+    const steps = Array.from({ length: Math.max(incoming.length, done.length) }, (_, index) => Boolean(incoming[index]) || Boolean(done[index]));
+    if (steps.length === incoming.length && steps.every((value, index) => value === Boolean(incoming[index]))) return goal;
+    changed = true;
+    const progress = Math.round((steps.filter(Boolean).length / Math.max(1, steps.length)) * 100);
+    return { ...goal, completedSteps: steps, progress, status: goalStatus(progress) };
+  });
+  return changed ? { ...state, goals } : state;
+}

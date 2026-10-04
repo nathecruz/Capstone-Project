@@ -3,7 +3,7 @@ import { parse } from '../lib/http.js';
 import { habitCompletionSchema, stateSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
 import { recordActivity } from '../services/activity.js';
-import { mergeAppState, normalizeAppState, withNewIncomingCheckIns } from '../services/app-state-sync.js';
+import { keepCompletedGoalSteps, mergeAppState, normalizeAppState, withNewIncomingCheckIns } from '../services/app-state-sync.js';
 import {
   buildServerState,
   getCanonicalHabits,
@@ -65,9 +65,10 @@ export default function registerAppStateRoutes(app) {
       // a cold start) must not replace it: an empty or stale habit list would delete other
       // devices' habits and their check-ins. Merge it instead, with the server winning conflicts.
       const merged = Boolean(existing && (!baseState || Number(baseUpdatedAt) !== existingUpdatedAt));
-      const state = merged
+      // Done goal steps stay done, whatever the device sends.
+      const state = keepCompletedGoalSteps(merged
         ? withNewIncomingCheckIns(mergeAppState(baseState || {}, currentState, incomingState), baseState, incomingState)
-        : normalizeAppState(incomingState);
+        : normalizeAppState(incomingState), currentState);
 
       // Nothing the app owns changed (points, tokens and streaks are the server's): skip the write.
       if (existing && sameClientState(state, currentState)) return { state: currentState, updatedAt: existingUpdatedAt, merged, unchanged: true };

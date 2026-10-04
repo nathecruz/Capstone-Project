@@ -547,6 +547,27 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.deepEqual(counters.rows[0], { failedLogins: 0, lockedUntil: null });
   });
 
+  await t.test('a done goal step cannot be unchecked by a later save', async () => {
+    const password = 'Maple!Harbor3!Quick6!Fig';
+    await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, firstName: 'Gia', lastName: 'Santos', username: 'gia_santos', email: 'gia@example.com', password, privacyConsent: true }) });
+    await db.query('UPDATE users SET email_verified_at = 1 WHERE email = $1', ['gia@example.com']);
+    const login = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'gia@example.com', password }) });
+    const headers = { Authorization: `Bearer ${login.body.token}` };
+    const goal = { id: 'goal-1', title: 'Get fit', category: 'Health', summary: 'Plan.', intensity: 'Balanced', focusAreas: ['A', 'B', 'C'], actionPlan: ['One', 'Two', 'Three', 'Four'], actionDueDates: ['Oct 7', 'Oct 14', 'Oct 25', 'Nov 18'], nextMilestone: 'M', risk: 'R', riskAction: 'A', timeline: '30-60 days', focusTarget: '4 habits', nextCheckIn: 'Oct 11, 2026', completedSteps: [true, false, false, false], progress: 25, status: 'In progress' };
+    const first = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, goals: [goal] }) });
+    assert.equal(first.response.status, 200, JSON.stringify(first.body));
+
+    // The same device, up to date, sends step 1 unchecked and step 2 ticked.
+    const unchecked = { ...goal, completedSteps: [false, true, false, false], progress: 25 };
+    const second = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, goals: [unchecked], baseUpdatedAt: first.body.updatedAt, baseState: first.body.state }) });
+    assert.equal(second.response.status, 200, JSON.stringify(second.body));
+    const saved = second.body.state.goals[0];
+    assert.deepEqual(saved.completedSteps, [true, true, false, false], 'step 1 stays done, step 2 is added');
+    assert.equal(saved.progress, 50);
+    const stored = await db.query("SELECT completed FROM goal_steps WHERE id LIKE '%goal-1:step:0'");
+    assert.equal(stored.rows[0].completed, true);
+  });
+
   await t.test('a confirmed email changes only with the current password; other devices can be signed out', async () => {
     const password = 'Silver!Brook4!Calm7!Ash';
     const registered = await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, firstName: 'Mia', lastName: 'Lopez', username: 'mia_lopez', email: 'mia@example.com', password, privacyConsent: true }) });
