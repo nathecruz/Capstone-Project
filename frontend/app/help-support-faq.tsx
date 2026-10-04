@@ -273,6 +273,7 @@ const themedStyles = createThemedStyles({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 8,
+    paddingVertical: 10,
   },
   answerCopy: { flex: 1 },
   answerText: {

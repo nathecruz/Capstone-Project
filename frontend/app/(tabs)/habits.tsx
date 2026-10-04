@@ -764,9 +764,9 @@ const themedStyles = createThemedStyles({
     justifyContent: 'center',
   },
   editButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
     backgroundColor: '#F1EEFF',
     alignItems: 'center',
     justifyContent: 'center',

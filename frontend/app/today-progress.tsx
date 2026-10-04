@@ -381,8 +381,8 @@ const themedStyles = createThemedStyles({
     marginBottom: 16,
   },
   dateArrow: {
-    width: 28,
-    height: 28,
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },

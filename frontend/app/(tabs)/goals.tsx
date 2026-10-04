@@ -272,7 +272,18 @@ export default function GoalsScreen() {
                 </View>
               </View>
 
-              <View style={styles.heroStatsRow}>
+              {/* No goal yet: how the planner works, instead of three empty boxes. */}
+              {!activeGoal && (
+                <View style={styles.heroStatsRow}>
+                  {[['1', 'Describe it'], ['2', 'Get a plan'], ['3', 'Track daily']].map(([step, label]) => (
+                    <View key={step} style={[styles.heroStat, isDarkMode && styles.darkHeroStat]}>
+                      <Text style={[styles.heroStatLabel, isDarkMode && styles.darkMutedText]}>Step {step}</Text>
+                      <Text style={[styles.heroStatValue, isDarkMode && styles.darkText]}>{label}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              {activeGoal && <View style={styles.heroStatsRow}>
                 <View style={[styles.heroStat, isDarkMode && styles.darkHeroStat]}>
                   <Text style={[styles.heroStatLabel, isDarkMode && styles.darkMutedText]}>Effort</Text>
                   <Text style={[styles.heroStatValue, !activeGoal && styles.placeholderStatValue, isDarkMode && styles.darkText]}>{activeGoal?.intensity ?? '--'}</Text>
@@ -285,7 +296,7 @@ export default function GoalsScreen() {
                   <Text style={[styles.heroStatLabel, isDarkMode && styles.darkMutedText]}>Time</Text>
                   <Text style={[styles.heroStatValue, !activeGoal && styles.placeholderStatValue, isDarkMode && styles.darkText]}>{activeGoal?.timeline ?? '--'}</Text>
                 </View>
-              </View>
+              </View>}
 
               <View style={[styles.tabRow, isDarkMode && styles.darkTabRow]}>
                 {(['Planner', 'My Goals'] as const).map((tab) => (
@@ -727,7 +738,7 @@ const themedStyles = createThemedStyles({
   inputHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   sectionTitle: { fontSize: 15, fontWeight: '800', color: '#2B2432' },
   sectionHint: { fontSize: 11, color: '#8A8294', marginTop: 3 },
-  modePill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#EEE8FF', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 6 },
+  modePill: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 36, backgroundColor: '#EEE8FF', borderRadius: 999, paddingHorizontal: 11 },
   modePillText: { color: '#5B42D8', fontSize: 10, fontWeight: '800' },
   liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#2E9D5C' },
   textInput: {

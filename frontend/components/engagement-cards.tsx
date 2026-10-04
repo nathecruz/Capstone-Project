@@ -306,7 +306,7 @@ export function WeeklyRecapCard({ habits, now, style }: { habits: Habit[]; now: 
           <Text style={styles.cardTitle}>Your week in review</Text>
           <Text style={styles.cardText}>Last week, Monday to Sunday</Text>
         </View>
-        <Pressable onPress={dismiss} hitSlop={10} accessibilityRole="button" accessibilityLabel="Hide the weekly recap">
+        <Pressable onPress={dismiss} hitSlop={10} style={styles.closeTap} accessibilityRole="button" accessibilityLabel="Hide the weekly recap">
           <Ionicons name="close" size={18} color="#8A8492" />
         </Pressable>
       </View>
@@ -340,6 +340,7 @@ export function WeeklyRecapCard({ habits, now, style }: { habits: Habit[]; now: 
 }
 
 const themedStyles = createThemedStyles({
+  closeTap: { width: 40, height: 40, marginTop: -8, marginRight: -8, alignItems: 'center', justifyContent: 'center' },
   pressed: { opacity: 0.85, transform: [{ scale: 0.98 }] },
   level: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.72)', borderWidth: 1, borderColor: '#ECE6FB' },
   levelBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 10, backgroundColor: '#4327A0' },

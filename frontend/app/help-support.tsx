@@ -73,7 +73,7 @@ export default function HelpSupportScreen() {
               <Text style={styles.bannerText}>Find answers and get support whenever you need.</Text>
               <View style={styles.availability}>
                 <View style={styles.availabilityDot} />
-                <Text style={styles.availabilityText}>Usually replies in a few minutes</Text>
+                <Text style={styles.availabilityText}>The AI answers right away; the team reads every report</Text>
               </View>
             </View>
             <View style={styles.supportAvatar}>

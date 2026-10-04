@@ -677,7 +677,7 @@ const themedStyles = createThemedStyles({
   profileGoalsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   profileGoalsTitle: { color: '#292531', fontSize: 15, fontWeight: '800' },
   profileGoalsSubtitle: { color: '#777180', fontSize: 10, lineHeight: 15, marginTop: 2 },
-  profileGoalsViewAll: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  profileGoalsViewAll: { flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: 40, paddingLeft: 10 },
   profileGoalsViewAllText: { color: '#5B42D8', fontSize: 11, fontWeight: '800' },
   profileGoalCard: { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: '#E8E4EF' },
   profileGoalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },

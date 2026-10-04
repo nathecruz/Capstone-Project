@@ -91,7 +91,7 @@ export default function ActivityHistoryScreen() {
 
             <View style={styles.activityHeader}>
               <Text style={styles.sectionTitle}>Recent Activity</Text>
-              <Pressable onPress={() => setRangeDays(rangeDays === 7 ? 30 : 7)} accessibilityRole="button"><Text style={styles.viewAll}>{rangeDays === 7 ? 'Show 30 days' : 'Show 7 days'}</Text></Pressable>
+              <Pressable onPress={() => setRangeDays(rangeDays === 7 ? 30 : 7)} style={{ paddingVertical: 10, paddingLeft: 10 }} accessibilityRole="button"><Text style={styles.viewAll}>{rangeDays === 7 ? 'Show 30 days' : 'Show 7 days'}</Text></Pressable>
             </View>
             <View style={styles.activityCard}>
               {activityEntries.length ? activityEntries.slice(0, 12).map(({ habit, dateKey }, index) => (
@@ -143,7 +143,7 @@ const themedStyles = createThemedStyles({
   headerTitle: { fontSize: 18, fontWeight: '800', color: '#24212D' },
   rangeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 14 },
   rangePicker: { flexDirection: 'row', alignSelf: 'center', backgroundColor: '#FFFFFF', borderRadius: 12, padding: 3, marginBottom: 10 },
-  rangeOption: { minWidth: 82, alignItems: 'center', paddingVertical: 8, borderRadius: 9 },
+  rangeOption: { minWidth: 82, minHeight: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
   rangeOptionActive: { backgroundColor: '#5B42D8' },
   rangeOptionText: { color: '#827C8C', fontSize: 11, fontWeight: '800' },
   rangeOptionTextActive: { color: '#FFFFFF' },

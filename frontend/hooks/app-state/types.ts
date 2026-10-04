@@ -84,6 +84,8 @@ export type Preferences = {
   showOnLeaderboard?: boolean;
   /** App colour theme from the Premium Themes reward (classic, ocean, sunset, forest, midnight). */
   appTheme?: string;
+  /** Notification types the student turned off on the Notifications screen. */
+  hiddenNotificationTypes?: string[];
 };
 
 const languageNames: Record<string, SupportedLanguage> = {
