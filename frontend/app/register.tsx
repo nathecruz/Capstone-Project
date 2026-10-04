@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supportedRegions } from '@/constants/i18n';
+import { withReadableText } from '@/hooks/use-themed-styles';
 import { joinName } from '@/utils/names';
 
 import { AppDialog, type AppDialogVariant } from '@/components/ui/app-dialog';
@@ -451,7 +452,7 @@ export default function RegisterScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create(withReadableText({
   safeArea: {
     flex: 1,
     backgroundColor: '#f4f7ff',
@@ -733,4 +734,4 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     lineHeight: 18,
   },
-});
+}));

@@ -16,12 +16,13 @@ export default function StatsProgressScreen() {
   const { isDarkMode, habits, preferences, streakFreeze } = useAppColorScheme();
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
-  const { completed, completionPercent, maxStreak } = getHabitProgressSummary(habits);
+  const { completed, maxStreak } = getHabitProgressSummary(habits);
   const frozenDays = streakFreeze?.frozenDays;
   const history = useMemo(() => historyStats(habits, new Date(), frozenDays), [frozenDays, habits]);
   const consistency = history.last30Rate;
   const completionHistory = getRecentCompletionHistory(habits, 7);
   const maximumDailyCompletions = Math.max(1, ...completionHistory.map((entry) => entry.count));
+  const weekRate = habits.length ? Math.round((completionHistory.reduce((total, entry) => total + entry.count, 0) / (completionHistory.length * habits.length)) * 100) : 0;
   const [chartSize, setChartSize] = useState({ width: 0, height: 0 });
   const chart = getChartGeometry(completionHistory.map((entry) => (entry.count / maximumDailyCompletions) * 100), chartSize.width, chartSize.height);
   const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>('Overview');
@@ -62,10 +63,10 @@ export default function StatsProgressScreen() {
             <View style={[styles.chartCard, isDarkMode && styles.darkCard]}>
               <View style={styles.cardHeader}>
                 <View>
-                  <Text style={[styles.cardTitle, isDarkMode && styles.darkText]}>Overall Completion Rate</Text>
+                  <Text style={[styles.cardTitle, isDarkMode && styles.darkText]}>Completion, last 7 days</Text>
                   <View style={styles.metricRow}>
-                    <Text style={styles.metric}>{completionPercent}%</Text>
-                    <Text style={styles.positive}>{completed} completed today</Text>
+                    <Text style={styles.metric}>{weekRate}%</Text>
+                    <Text style={styles.positive}>{completed} of {habits.length} done today</Text>
                   </View>
                 </View>
                 <Ionicons name="trending-up" size={22} color={themeColor('#49A866')} />

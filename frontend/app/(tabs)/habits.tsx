@@ -115,60 +115,19 @@ export default function HabitsScreen() {
               onLongPress={Platform.OS === 'web' ? undefined : drag}
               style={[styles.habitCard, isDarkMode && styles.darkCard, item.done && styles.habitCardDone, isActive && styles.habitCardDragging]}
             >
+              {/* The name gets the full width; the check is on the right, the actions under it. */}
               <View style={styles.habitCardHeader}>
-                <View style={styles.habitTitleWrap}>
-                  <View style={[styles.habitIconWrap, { backgroundColor: `${item.color}22` }]}>
-                    <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={19} color={item.color} />
-                  </View>
-                  <Text style={[styles.habitTitle, isDarkMode && styles.darkText]}>{item.label}</Text>
+                <View style={[styles.habitIconWrap, { backgroundColor: `${item.color}22` }]}>
+                  <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={19} color={item.color} />
                 </View>
-                <View style={[styles.progressPill, isDarkMode && styles.darkProgressPill]}>
-                  <Text style={[styles.progressPillText, isDarkMode && styles.darkProgressPillText]}>{item.total}</Text>
+                <View style={styles.habitCopy}>
+                  <Text style={[styles.habitTitle, isDarkMode && styles.darkText]} numberOfLines={2}>{item.label}</Text>
+                  <Text style={[styles.metaText, isDarkMode && styles.darkMutedText]} numberOfLines={1}>
+                    {isHabitLate(item, currentTime) && <Text style={styles.lateText}>Late · </Text>}
+                    {!isHabitLate(item, currentTime) && isHabitMissedYesterday(item, currentTime) && <Text style={styles.missedText}>Missed yesterday · </Text>}
+                    {item.meta}
+                  </Text>
                 </View>
-                {/* Not done yet: start a focus session that checks it off at the end. */}
-                {!item.done && (
-                  <Pressable
-                    style={[styles.editButton, isDarkMode && styles.darkEditButton]}
-                    onPress={() => openFocus(item.id)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Start a focus session for ${item.label}`}
-                  >
-                    <Ionicons name="timer-outline" size={17} color={themeColor('#5B42D8')} />
-                  </Pressable>
-                )}
-                {/* Rename, recategorize, reschedule or delete: all in the edit sheet. */}
-                <Pressable
-                  style={[styles.editButton, isDarkMode && styles.darkEditButton]}
-                  onPress={() => setEditingHabit(item)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Edit ${item.label}`}
-                >
-                  <Ionicons name="create-outline" size={17} color={themeColor('#5B42D8')} />
-                </Pressable>
-              </View>
-
-              <View style={styles.metaRow}>
-                <Text style={[styles.metaText, isDarkMode && styles.darkMutedText]}>{isHabitMissedYesterday(item, currentTime) ? 'MISSED YESTERDAY · ' : ''}{isHabitLate(item, currentTime) && <Text style={styles.lateText}>LATE · </Text>}{item.meta}</Text>
-                <View style={styles.streakRow}>
-                  <Ionicons name="flame-outline" size={12} color={themeColor('#F29A3D')} />
-                  <Text style={[styles.streakText, isDarkMode && styles.darkText]}>{item.streak}</Text>
-                </View>
-              </View>
-
-              <View style={[styles.progressTrack, isDarkMode && styles.darkProgressTrack]}>
-                <View
-                  style={[
-                    styles.progressFill,
-                    {
-                      width: `${item.progress}%`,
-                      backgroundColor: item.color,
-                    },
-                  ]}
-                />
-              </View>
-
-              <View style={styles.progressPercentRow}>
-                <Text style={[styles.progressPercent, isDarkMode && styles.darkMutedText]}>{item.done ? (canUndoCheckIn(item.id) ? 'Done · tap again to undo' : 'Done for today') : `${item.progress}%`}</Text>
                 <Pressable
                   style={[styles.checkButton, item.done ? styles.checkButtonDone : [styles.checkButtonEmpty, isDarkMode && styles.darkCheckButtonEmpty]]}
                   onPress={() => {
@@ -180,8 +139,41 @@ export default function HabitsScreen() {
                   accessibilityLabel={`${item.label} done today`}
                   accessibilityState={{ checked: item.done }}
                   aria-checked={item.done}
+                  hitSlop={6}
                 >
                   {item.done ? <Ionicons name="checkmark" size={18} color={themeColor('#FFFFFF')} /> : null}
+                </Pressable>
+              </View>
+
+              <View style={styles.habitFooter}>
+                <View style={styles.footerProgress}>
+                  <View style={[styles.progressTrack, isDarkMode && styles.darkProgressTrack]}>
+                    <View style={[styles.progressFill, { width: `${item.progress}%`, backgroundColor: item.color }]} />
+                  </View>
+                  <Text style={[styles.progressPercent, isDarkMode && styles.darkMutedText]} numberOfLines={1}>
+                    {item.done ? (canUndoCheckIn(item.id) ? 'Done · tap again to undo' : 'Done for today') : `${item.total} today`}
+                    {item.streak > 0 ? `  ·  🔥 ${item.streak}` : ''}
+                  </Text>
+                </View>
+                {/* Not done yet: start a focus session that checks it off at the end. */}
+                {!item.done && (
+                  <Pressable
+                    style={[styles.editButton, isDarkMode && styles.darkEditButton]}
+                    onPress={() => openFocus(item.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Start a focus session for ${item.label}`}
+                  >
+                    <Ionicons name="timer-outline" size={18} color={themeColor('#5B42D8')} />
+                  </Pressable>
+                )}
+                {/* Rename, recategorize, reschedule or delete: all in the edit sheet. */}
+                <Pressable
+                  style={[styles.editButton, isDarkMode && styles.darkEditButton]}
+                  onPress={() => setEditingHabit(item)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit ${item.label}`}
+                >
+                  <Ionicons name="create-outline" size={18} color={themeColor('#5B42D8')} />
                 </Pressable>
               </View>
             </Pressable>
@@ -737,9 +729,8 @@ const themedStyles = createThemedStyles({
   },
   habitCardHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    gap: 12,
   },
   habitTitleWrap: {
     flexDirection: 'row',
@@ -753,14 +744,16 @@ const themedStyles = createThemedStyles({
     borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
   },
   habitTitle: {
-    flex: 1,
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '800',
     color: '#1E1D29',
   },
+  habitCopy: { flex: 1, minWidth: 0, gap: 2 },
+  missedText: { color: '#B5701F', fontWeight: '800' },
+  habitFooter: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
+  footerProgress: { flex: 1, minWidth: 0, gap: 6 },
   progressPill: {
     minWidth: 48,
     paddingHorizontal: 10,
@@ -812,7 +805,6 @@ const themedStyles = createThemedStyles({
     borderRadius: 999,
     backgroundColor: '#E7E7ED',
     overflow: 'hidden',
-    marginBottom: 10,
   },
   progressFill: {
     height: '100%',
@@ -829,9 +821,9 @@ const themedStyles = createThemedStyles({
     color: '#4A5367',
   },
   checkButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     justifyContent: 'center',
     alignItems: 'center',
   },

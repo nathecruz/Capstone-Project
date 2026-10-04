@@ -57,7 +57,10 @@ export default function LeaderboardsScreen() {
   const { tokens, applyWallet, points, profile, tokenHistory, isFaculty, streakFreeze } = useAppColorScheme();
   const catalog = useRewards();
   const insets = useSafeAreaInsets();
-  const compact = useWindowDimensions().width < 375;
+  const { width } = useWindowDimensions();
+  const compact = width < 375;
+  // The "Earn more tokens" list needs room; on phones the balance keeps the space.
+  const showTokenRules = width >= 440;
 
   useEffect(() => {
     const refreshDate = () => setDeviceDate(new Date());
@@ -232,9 +235,9 @@ export default function LeaderboardsScreen() {
           <View style={[styles.tokenBanner, compact && styles.compactTokenBanner]}>
             <View style={styles.tokenGlow} />
             <View style={styles.tokenCoin}><Ionicons name="star" size={27} color={themeColor('#FFF5A5')} /></View>
-            <View style={styles.tokenCopy}><View style={styles.tokenTopline}><Text style={styles.tokenLabel}>TOKEN BALANCE</Text><View style={styles.activeBadge}><View style={styles.activeDot} /><Text style={styles.activeText}>ACTIVE</Text></View></View><Text style={styles.tokenValue}>{tokens}</Text><Text style={styles.tokenHint}>{points} total points</Text><Pressable style={styles.historyButton} onPress={() => setShowTokenHistory(true)}><Text style={styles.historyText}>View History</Text><Ionicons name="chevron-forward" size={15} color={themeColor('#FFFFFF')} /></Pressable></View>
+            <View style={styles.tokenCopy}><View style={styles.tokenTopline}><Text style={styles.tokenLabel}>TOKEN BALANCE</Text><View style={styles.activeBadge}><View style={styles.activeDot} /><Text style={styles.activeText}>ACTIVE</Text></View></View><Text style={styles.tokenValue} numberOfLines={1}>{tokens}</Text><Text style={styles.tokenHint}>{points} total points</Text><Pressable style={styles.historyButton} onPress={() => setShowTokenHistory(true)}><Text style={styles.historyText}>View History</Text><Ionicons name="chevron-forward" size={15} color={themeColor('#FFFFFF')} /></Pressable></View>
             <View style={styles.giftWrap}><View style={styles.giftGlow} /><Ionicons name="gift" size={54} color={themeColor('#FFD75A')} /></View>
-            {!compact && <View style={styles.tokenRules}><Text style={styles.rulesTitle}>Earn more tokens</Text><Text style={styles.rule}><Text style={styles.ruleIcon}>✓</Text> Daily habits</Text><Text style={styles.rule}><Text style={styles.ruleIcon}>🔥</Text> Join challenges</Text><Text style={styles.rule}><Text style={styles.ruleIcon}>★</Text> Rank up</Text></View>}
+            {showTokenRules && <View style={styles.tokenRules}><Text style={styles.rulesTitle}>Earn more tokens</Text><Text style={styles.rule}><Text style={styles.ruleIcon}>✓</Text> Daily habits</Text><Text style={styles.rule}><Text style={styles.ruleIcon}>🔥</Text> Join challenges</Text><Text style={styles.rule}><Text style={styles.ruleIcon}>★</Text> Rank up</Text></View>}
           </View>
 
           {/* ---------------- Token rewards ---------------- */}

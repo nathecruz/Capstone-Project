@@ -1,12 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, AppState, Easing, Keyboard, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getApiBaseUrl, getAuthenticatedHeaders } from '@/authentication';
 import { HabitAnalysisPanel } from '@/components/habit-analysis-panel';
 import { getHabitProgressSummary, getRecentCompletionHistory, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { getChartGeometry } from '@/utils/line-chart';
+import { historyStats } from '@/utils/achievements';
 import { getPredictionPresentation } from '@/utils/ai-presentation';
 import { askAi } from '@/utils/ai-client';
 import { useAppTheme } from '@/hooks/dark-mode-context';
@@ -131,7 +132,9 @@ export default function InsightsScreen() {
   const themeColor = useThemeColor();
   const appTheme = useAppTheme();
   const heatmapColors = ['#F0ECFF', '#DCD2FF', '#A998F2', '#5B42D8'].map((color) => themedColor(color, appTheme));
-  const { isDarkMode, habits } = useAppColorScheme();
+  const { isDarkMode, habits, streakFreeze } = useAppColorScheme();
+  const frozenDays = streakFreeze?.frozenDays;
+  const bestStreak = useMemo(() => historyStats(habits, new Date(), frozenDays).bestStreak, [frozenDays, habits]);
   const deviceDate = useDeviceDate();
   const [activeTab, setActiveTab] = useState<'Insights' | 'Predictions'>('Insights');
   const [heatmapView, setHeatmapView] = useState<HeatmapView>('Weeks');
@@ -159,14 +162,16 @@ export default function InsightsScreen() {
   const [chartSize, setChartSize] = useState({ width: 0, height: 0 });
   const trendChart = getChartGeometry(dailyRates, chartSize.width, chartSize.height);
   const trendChange = dailyRates.length > 1 ? dailyRates[dailyRates.length - 1] - dailyRates[0] : 0;
+  // The share of habits done per day over the last 7 days.
+  const weeklyRate = dailyRates.length ? Math.round(dailyRates.reduce((total, rate) => total + rate, 0) / dailyRates.length) : 0;
   // Not missed yet: a habit can be completed until the day is over.
   const openHabits = Math.max(0, habits.length - completed);
   const successRate = habits.length ? Math.round(habits.reduce((total, habit) => total + habit.progress, 0) / habits.length) : 0;
   const strongestHabit = [...habits].sort((a, b) => b.progress - a.progress || b.streak - a.streak)[0];
   const weakestHabit = [...habits].sort((a, b) => a.progress - b.progress || a.streak - b.streak)[0];
-  const insightMessages = completionPercent >= 80
+  const insightMessages = weeklyRate >= 80
     ? ['You are building a reliable rhythm.', 'Your consistency is becoming a strength.', 'Small wins are turning into a strong routine.']
-    : completionPercent >= 40
+    : weeklyRate >= 40
       ? ['You are making steady progress.', 'Your routine is taking shape one win at a time.', 'Keep the next action small and repeatable.']
       : ['Start with one easy win today.', 'A small action is enough to restart your rhythm.', 'Your next completed habit can change the trend.'];
   const insightIndex = (deviceDate.getDate() + completed + Math.max(0, trendChange)) % insightMessages.length;
@@ -369,16 +374,16 @@ export default function InsightsScreen() {
                       <Text style={styles.heroLabel}>WEEKLY OVERVIEW</Text>
                     </View>
                     <Text style={styles.heroTitle}>{insightMessages[insightIndex]}</Text>
-                    <Text style={styles.heroSubtitle}>{completionPercent}% of today&apos;s tracked habits are complete. Keep showing up for your routine.</Text>
+                    <Text style={styles.heroSubtitle}>Over the last 7 days you did {weeklyRate}% of your habits. Today: {completed} of {habits.length} done.</Text>
                   </View>
                   <View style={styles.heroScore}>
-                    <Text style={styles.heroScoreValue}>{completionPercent}%</Text>
-                    <Text style={styles.heroScoreLabel}>consistency</Text>
+                    <Text style={styles.heroScoreValue}>{weeklyRate}%</Text>
+                    <Text style={styles.heroScoreLabel}>this week</Text>
                   </View>
                 </View>
 
                 <View style={styles.metricsRow}>
-                  {[{ value: String(completed), label: 'Completed', icon: 'checkmark-circle', color: '#46B883', background: '#E7F8F0' }, { value: String(maxStreak), label: 'Best streak', icon: 'flame', color: '#EE9B43', background: '#FFF2E2' }, { value: `${averageProgress}%`, label: 'Avg. progress', icon: 'trending-up', color: '#6B57D9', background: '#EEEAFF' }].map((metric) => (
+                  {[{ value: `${completed}/${habits.length}`, label: 'Done today', icon: 'checkmark-circle', color: '#46B883', background: '#E7F8F0' }, { value: String(maxStreak), label: 'Current streak', icon: 'flame', color: '#EE9B43', background: '#FFF2E2' }, { value: String(bestStreak), label: 'Best streak', icon: 'trophy', color: '#6B57D9', background: '#EEEAFF' }].map((metric) => (
                     <View key={metric.label} style={[styles.metricCard, isDarkMode && styles.darkCard]}>
                       <View style={[styles.metricIcon, { backgroundColor: isDarkMode ? '#2B263A' : metric.background }]}>
                         <Ionicons name={metric.icon as keyof typeof Ionicons.glyphMap} size={16} color={isDarkMode ? '#C8BFFF' : metric.color} />

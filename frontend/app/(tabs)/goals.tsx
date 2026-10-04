@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
@@ -253,11 +252,10 @@ export default function GoalsScreen() {
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={[styles.container, { paddingHorizontal: width < 420 ? 16 : 22 }]}>
             <View style={styles.headerRow}>
-              <Pressable style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back">
-                <Ionicons name="chevron-back" size={22} color={isDarkMode ? '#F2EFF8' : '#25212C'} />
-              </Pressable>
+              {/* Goals is a tab, so there is nothing to go back to; the spacer keeps the title centred. */}
+              <View style={styles.headerSpacer} />
               <View style={styles.headerTitleWrap}>
-                <Text style={[styles.headerEyebrow, isDarkMode && styles.darkMutedText]}>MYGOALS</Text>
+                <Text style={[styles.headerEyebrow, isDarkMode && styles.darkMutedText]}>MY GOALS</Text>
                 <Text style={[styles.headerTitle, isDarkMode && styles.darkText]}>Personal Growth</Text>
               </View>
               <View style={styles.headerSpacer} />
@@ -703,7 +701,6 @@ const themedStyles = createThemedStyles({
   // Same width as the other tabs, so switching tabs does not resize the page.
   container: { width: '100%', maxWidth: CONTENT_MAX_WIDTH, alignSelf: 'center' },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 },
-  backButton: { width: 38, height: 38, justifyContent: 'center', alignItems: 'center' },
   headerSpacer: { width: 38 },
   headerTitleWrap: { flex: 1, alignItems: 'center' },
   headerEyebrow: { fontSize: 9, letterSpacing: 1.8, fontWeight: '800', color: '#8A7BB5', marginBottom: 2 },

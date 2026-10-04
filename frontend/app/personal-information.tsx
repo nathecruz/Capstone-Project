@@ -39,20 +39,13 @@ export default function PersonalInformationScreen() {
   const showAlert = useAppDialog();
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
-  const { isDarkMode, avatarImage, setAvatarImage, habits, profile, updateProfile } = useAppColorScheme();
+  const { isDarkMode, avatarImage, setAvatarImage, profile, updateProfile } = useAppColorScheme();
   const [draftProfile, setDraftProfile] = useState(profile);
   const [isEditing, setIsEditing] = useState(false);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isGenderPickerOpen, setIsGenderPickerOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [draftBirthDate, setDraftBirthDate] = useState(() => parseDateOfBirth(profile.dateOfBirth));
-  const completedHabits = habits.filter((habit) => habit.done).length;
-  const progress = habits.length
-    ? Math.round(habits.reduce((total, habit) => total + habit.progress, 0) / habits.length)
-    : 0;
-  const timeManagementSummary = habits.length
-    ? `${completedHabits}/${habits.length} habits completed today • ${progress}% progress`
-    : 'No activity yet';
 
   const startEditing = () => {
     setDraftProfile(profile);
@@ -183,15 +176,6 @@ export default function PersonalInformationScreen() {
                 </View>
               </View>
             ))}
-            <View style={styles.detailRow}>
-              <View style={styles.detailIcon}>
-                <Ionicons name="time-outline" size={22} color={themeColor('#5B42D8')} />
-              </View>
-              <View style={styles.detailCopy}>
-                <Text style={styles.detailLabel}>Time Management</Text>
-                <Text style={[styles.detailValue, isDarkMode && styles.darkText]}>{timeManagementSummary}</Text>
-              </View>
-            </View>
           </View>
 
           <View style={[styles.aboutCard, isDarkMode && styles.darkCard]}>

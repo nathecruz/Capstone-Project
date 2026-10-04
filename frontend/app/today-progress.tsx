@@ -252,8 +252,8 @@ export default function InsightsScreen() {
                 <Ionicons name="flame" size={17} color={themeColor('#E68D3D')} />
               </View>
               <View style={styles.streakTextWrap}>
-                <Text style={styles.streakTitle}>You&apos;re on a {maxStreak}-day streak!</Text>
-                <Text style={styles.streakSubtitle}>Keep the momentum going.</Text>
+                <Text style={styles.streakTitle}>{maxStreak > 0 ? `You're on a ${maxStreak}-day streak!` : 'Start a streak today'}</Text>
+                <Text style={styles.streakSubtitle}>{maxStreak > 0 ? 'Keep the momentum going.' : 'Check off one habit to begin.'}</Text>
               </View>
               <Ionicons name="chevron-forward" size={16} color={themeColor('#B4B0BE')} />
             </View>

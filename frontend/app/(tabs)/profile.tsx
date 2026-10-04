@@ -5,10 +5,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Image, Modal, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getMyLeaderboardRank } from '@/authentication';
+import { BentoTile } from '@/components/bento-tiles';
 import { ClassPulseCard } from '@/components/class-pulse-card';
 import { TitleBadge, TitleSheet } from '@/components/reward-sheets';
 import { useAppDialog } from '@/components/ui/app-dialog';
-import { badgeProgress, badgeRemaining, nextBadge } from '@/utils/achievements';
+import { badgeProgress, badgeRemaining, historyStats, nextBadge } from '@/utils/achievements';
 import { askAi } from '@/utils/ai-client';
 import { rankSummary } from '@/utils/rank';
 import type { TranslationKey } from '@/constants/i18n';
@@ -51,18 +52,17 @@ export default function ProfileScreen() {
   const rankText = rankInfo ? rankSummary(rankInfo.rank, rankInfo.total) : null;
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
-  const { averageProgress, maxStreak, completed } = getHabitProgressSummary(habits);
+  const { maxStreak } = getHabitProgressSummary(habits);
   // Badges from the whole history: earned first, and the one closest to being earned.
   const frozenDays = streakFreeze?.frozenDays;
   const badges = useMemo(() => badgeProgress(habits, goals, new Date(), frozenDays), [frozenDays, habits, goals]);
   const earnedBadges = badges.filter((badge) => badge.earned).length;
   const badgeStrip = [...badges].sort((a, b) => Number(b.earned) - Number(a.earned) || b.share - a.share).slice(0, 6);
   const upcomingBadge = nextBadge(badges);
-  const isNewUser = habits.length === 0 && points === 0;
-  const firstActionLabel = isNewUser ? 'Start your first goal' : completed === 0 ? 'Complete a task' : 'Keep your momentum';
+  const bestStreak = useMemo(() => historyStats(habits, new Date(), frozenDays).bestStreak, [frozenDays, habits]);
   const level = Math.floor(points / 100) + 1;
-  const displayName = profile.fullName?.trim() || 'Zaira Samson';
-  const displayUsername = profile.username?.trim() ? `@${profile.username.trim()}` : '@zai';
+  const displayName = profile.fullName?.trim() || 'Your profile';
+  const displayUsername = profile.username?.trim() ? `@${profile.username.trim()}` : '';
   // Without a photo the avatar shows the student's initial.
   const avatarInitial = (profile.firstName || profile.fullName || 'H').trim().charAt(0).toUpperCase();
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
@@ -157,7 +157,7 @@ export default function ProfileScreen() {
               </View>
             </Pressable>
             <Text style={[styles.name, isDarkMode && styles.darkText]}>{displayName}</Text>
-            <Text style={styles.username}>{displayUsername}</Text>
+            {displayUsername ? <Text style={styles.username}>{displayUsername}</Text> : null}
             {rewards.owns('custom-title') && <TitleBadge title={rewards.title} onPress={() => setTitleOpen(true)} style={styles.titleBadge} />}
             <View style={styles.levelPill}>
               <Text style={styles.levelText}>Level {level}</Text>
@@ -170,6 +170,53 @@ export default function ProfileScreen() {
                 <Text style={styles.facultyPillText}>PSAU Faculty</Text>
               </View>
             )}
+          </View>
+
+          <View style={styles.bentoGrid}>
+            <BentoTile
+              tone="streak"
+              label="Streak"
+              value={String(maxStreak)}
+              unit={maxStreak === 1 ? 'day' : 'days'}
+              detail={`Best ${bestStreak} ${bestStreak === 1 ? 'day' : 'days'}`}
+              onPress={() => router.push('/stats-progress')}
+              accessibilityLabel={`${maxStreak}-day streak, best ${bestStreak}. Open stats`}
+            />
+            <BentoTile
+              tone="level"
+              label="Points"
+              value={String(points)}
+              detail={`Level ${level} · ${100 - (points % 100)} XP to next`}
+              onPress={() => router.push('/achievements')}
+              accessibilityLabel={`${points} points, level ${level}. Open badges`}
+            />
+            {isFaculty ? (
+              <BentoTile
+                tone="rank"
+                label="Goals"
+                value={String(goals.length)}
+                detail={goals.length ? 'Plans in progress' : 'Turn an idea into a plan'}
+                onPress={() => router.push('/goals')}
+                accessibilityLabel={`${goals.length} goals. Open goals`}
+              />
+            ) : (
+              <BentoTile
+                tone="rank"
+                label="Rank"
+                value={rankInfo ? `#${rankInfo.rank}` : '—'}
+                detail={rankText ? `${rankText.title} · ${rankText.of}` : 'Earn points to join the leaderboard'}
+                onPress={() => router.push('/leaderboards')}
+                accessibilityLabel={rankInfo ? `Rank ${rankInfo.rank} of ${rankInfo.total}. Open leaderboards` : 'Open leaderboards'}
+              />
+            )}
+            <BentoTile
+              tone="tokens"
+              label="Tokens"
+              value={String(tokens)}
+              detail="Ask your AI Coach"
+              onPress={() => setCoachOpen(true)}
+              accessibilityLabel={`${tokens} tokens. Ask your AI Coach`}
+            />
           </View>
 
           <Pressable style={styles.badgeStrip} onPress={() => router.push('/achievements')} accessibilityRole="button" accessibilityLabel={`Badges: ${earnedBadges} of ${badges.length} earned. Open achievements`}>
@@ -189,19 +236,6 @@ export default function ProfileScreen() {
             </View>
             {upcomingBadge && <Text style={styles.badgeStripNext}>Next: {upcomingBadge.title} · {badgeRemaining(upcomingBadge)}</Text>}
           </Pressable>
-
-          <View style={[styles.firstActionCard, isDarkMode && styles.darkCard]}>
-            <View style={styles.firstActionIcon}><Ionicons name={isNewUser ? 'flag-outline' : 'checkmark-circle-outline'} size={21} color={themeColor('#5B42D8')} /></View>
-            <View style={styles.firstActionCopy}>
-              <Text style={[styles.firstActionEyebrow, isDarkMode && styles.darkMutedText]}>{isNewUser ? 'YOUR NEXT STEP' : "TODAY'S WIN"}</Text>
-              <Text style={[styles.firstActionTitle, isDarkMode && styles.darkText]}>{isNewUser ? 'Build your first growth plan' : completed === 0 && maxStreak > 0 ? `Keep your ${maxStreak}-day streak going` : completed === 0 ? 'One completed task starts your streak' : 'You are building momentum'}</Text>
-              <Text style={[styles.firstActionBody, isDarkMode && styles.darkMutedText]}>{isNewUser ? 'Turn one intention into a clear, doable plan.' : completed === 0 && maxStreak > 0 ? 'Check off one habit today so it does not reset at midnight.' : completed === 0 ? 'Choose one small task and earn your first points.' : 'Keep the loop going with one more focused action.'}</Text>
-            </View>
-            <Pressable style={styles.firstActionButton} onPress={() => router.push(isNewUser ? '/goals' : '/')} accessibilityRole="button">
-              <Text style={styles.firstActionButtonText}>{firstActionLabel}</Text>
-              <Ionicons name="arrow-forward" size={15} color={themeColor('#FFFFFF')} />
-            </Pressable>
-          </View>
 
           <View style={styles.profileGoalsSection}>
             <View style={styles.profileGoalsHeader}>
@@ -250,134 +284,7 @@ export default function ProfileScreen() {
             )}
           </View>
 
-          <View style={[styles.statsCard, isDarkMode && styles.darkCard]}>
-            <View style={styles.statCell}>
-              <Ionicons name="flame" size={17} color={themeColor('#E68D3D')} />
-              <Text style={styles.statValue}>{maxStreak}</Text>
-              <Text style={styles.statLabel}>{t('dayStreak')}</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statCell}>
-              <Ionicons name="trophy" size={17} color={themeColor('#E3A52E')} />
-              <Text style={styles.statValue}>{points}</Text>
-              <Text style={styles.statLabel}>{t('totalPoints')}</Text>
-            </View>
-          </View>
-
-          <View style={[styles.progressCard, isDarkMode && styles.darkCard]}>
-            <View style={styles.progressHeader}>
-              <View>
-                <Text style={styles.cardTitle}>{t('currentProgress')}</Text>
-                <Text style={styles.cardSubtitle}>{t('keepMomentum')}</Text>
-              </View>
-              <Text style={styles.progressPercent}>{averageProgress}%</Text>
-            </View>
-            <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: `${averageProgress}%` }]} />
-            </View>
-            <Text style={styles.progressMeta}>{averageProgress === 0 ? (maxStreak > 0 ? 'Check off a habit today to keep your streak.' : 'Complete your first task to start your streak.') :`${completed} task${completed === 1 ? '' : 's'} completed. Keep the momentum going.`}</Text>
-          </View>
-
-          {completed > 0 ? (
-            <View style={[styles.dailyWinCard, isDarkMode && styles.darkCard]}>
-              <View style={styles.dailyWinIcon}><Ionicons name="sparkles" size={16} color={themeColor('#E3A52E')} /></View>
-              <View style={styles.dailyWinCopy}>
-                <Text style={[styles.dailyWinTitle, isDarkMode && styles.darkText]}>Daily win unlocked</Text>
-                <Text style={[styles.dailyWinBody, isDarkMode && styles.darkMutedText]}>Every completed task adds points and strengthens your streak.</Text>
-              </View>
-              <Text style={styles.dailyWinPoints}>+20 pts</Text>
-            </View>
-          ) : null}
-
-          {isFaculty ? <ClassPulseCard style={styles.facultyClassCard} /> : (
-          <View style={styles.leaderboardSection}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>{t('leaderboards')}</Text>
-            </View>
-
-            {points === 0 ? (
-              <View style={[styles.leaderboardEmptyCard, isDarkMode && styles.darkCard]}>
-                <View style={styles.leaderboardEmptyIcon}><Ionicons name="trophy-outline" size={20} color={themeColor('#5B42D8')} /></View>
-                <View style={styles.leaderboardEmptyCopy}>
-                  <Text style={[styles.leaderboardEmptyTitle, isDarkMode && styles.darkText]}>Your leaderboard journey starts here</Text>
-                  <Text style={[styles.leaderboardEmptyBody, isDarkMode && styles.darkMutedText]}>Complete tasks to earn points and join the leaderboard.</Text>
-                </View>
-              </View>
-            ) : <View style={[styles.leaderboardCard, isDarkMode && styles.darkCard]}>
-              <View style={styles.leaderboardColumn}>
-                <Text style={styles.leaderboardLabel}>Your Rank</Text>
-                <View style={styles.rankRow}>
-                  <Text style={styles.rankValue}>{rankInfo ? `#${rankInfo.rank}` : '#—'}</Text>
-                  <View style={styles.badgeCircle}>
-                    <Image
-                      source={require('../../assets/images/trophy.jpg')}
-                      style={styles.trophyImage}
-                      resizeMode="cover"
-                    />
-                  </View>
-                </View>
-                <Text style={styles.risingStarText}>{rankText ? rankText.title : 'Ranking…'}</Text>
-                <Text style={styles.leagueText}>{rankText ? rankText.of : 'All time'}</Text>
-                <Text style={styles.rankMeta}>{rankText ? rankText.standing : ' '}</Text>
-              </View>
-
-              <View style={styles.leaderboardDivider} />
-
-              <View style={styles.leaderboardColumn}>
-                <Text style={styles.leaderboardLabel}>Score</Text>
-                <Text style={styles.scoreValue}>{points}</Text>
-                <Text style={styles.rankMeta}>Total Points</Text>
-              </View>
-            </View>}
-
-            <Pressable
-              style={({ pressed }) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}
-              onPress={() => router.push('/leaderboards')}
-              accessibilityRole="button"
-              accessibilityLabel="View leaderboards"
-            >
-              <Text style={styles.secondaryButtonText}>{t('viewLeaderboards')}</Text>
-              <Ionicons name="chevron-forward" size={16} color={themeColor('#FFFFFF')} />
-            </Pressable>
-          </View>
-          )}
-
-          <View style={[styles.tokenCard, isDarkMode && styles.darkCard]}>
-            <View style={styles.tokenLeft}>
-              <View style={styles.tokenIconWrap}>
-                <Image
-                  source={require('../../assets/images/coach.png')}
-                  style={styles.coachImage}
-                  resizeMode="cover"
-                />
-              </View>
-              <View style={styles.tokenTextWrap}>
-                <Text style={styles.tokenTitle}>Exchange Tokens for AI Coach</Text>
-                <Text style={styles.tokenDescription}>Use your tokens to get personalized advice & motivation from your AI Coach!</Text>
-              </View>
-            </View>
-
-            <View style={styles.tokenMetaRow}>
-              <View style={styles.tokenValueWrap}>
-                <Image
-                  source={require('../../assets/images/token.jpg')}
-                  style={styles.tokenBadgeImage}
-                  resizeMode="cover"
-                />
-                <Text style={styles.tokenValueLarge}>{tokens}</Text>
-              </View>
-              <Text style={styles.tokenLabel}>{t('tokens')}</Text>
-            </View>
-
-            <Pressable
-              style={({ pressed }) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}
-              onPress={() => setCoachOpen(true)}
-              accessibilityRole="button"
-              accessibilityLabel="Go to AI Coach"
-            >
-              <Text style={styles.secondaryButtonText}>{t('goToAiCoach')}</Text>
-            </Pressable>
-          </View>
+          {isFaculty && <ClassPulseCard style={styles.facultyClassCard} />}
 
           <Text style={styles.sectionLabel}>{t('account')} &amp; {t('preferences')}</Text>
           <View style={[styles.settingsCard, isDarkMode && styles.darkCard]}>
@@ -708,6 +615,7 @@ const themedStyles = createThemedStyles({
     marginTop: 3,
   },
   titleBadge: { alignSelf: 'center', marginTop: 7 },
+  bentoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
   facultyPill: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: '#5B42D8' },
   facultyPillText: { fontSize: 10, fontWeight: '800', color: '#FFFFFF' },
   facultyClassCard: { marginTop: 16 },

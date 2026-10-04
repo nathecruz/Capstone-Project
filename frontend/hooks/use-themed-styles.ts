@@ -157,6 +157,20 @@ function withTheme(style: Record<string, unknown>, theme: AppTheme) {
   return themed;
 }
 
+/** The smallest text the app shows; anything written smaller is raised to it so it stays readable on phones. */
+export const MIN_FONT_SIZE = 11;
+
+function readable(style: Record<string, unknown>) {
+  if (typeof style.fontSize !== 'number' || style.fontSize >= MIN_FONT_SIZE) return style;
+  const lineHeight = typeof style.lineHeight === 'number' && style.lineHeight < MIN_FONT_SIZE * 1.3 ? Math.round(MIN_FONT_SIZE * 1.3) : style.lineHeight;
+  return { ...style, fontSize: MIN_FONT_SIZE, ...(lineHeight === undefined ? {} : { lineHeight }) };
+}
+
+/** A plain style sheet with every font size at least MIN_FONT_SIZE (createThemedStyles does this itself). */
+export function withReadableText<T extends object>(styles: T): T {
+  return Object.fromEntries(Object.entries(styles).map(([name, style]) => [name, style && typeof style === 'object' && !Array.isArray(style) ? readable(style as Record<string, unknown>) : style])) as T;
+}
+
 /**
  * Light and dark versions of a style sheet; read them with useThemedStyles. The other app themes
  * are built the first time they are used: the theme's colours first, then the dark derivation.
@@ -166,7 +180,7 @@ export function createThemedStyles<T extends StyleSheet.NamedStyles<T>>(styles: 
     const light = {} as Record<keyof T, object>;
     const dark = {} as Record<keyof T, object>;
     for (const name of Object.keys(styles) as (keyof T)[]) {
-      const style = withTheme(styles[name] as Record<string, unknown>, theme);
+      const style = withTheme(readable(styles[name] as Record<string, unknown>), theme);
       light[name] = style;
       const darkStyle = { ...style };
       for (const property of KEEP_LIGHT.test(String(name)) ? [] : COLOR_PROPERTIES) {
