@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, AppState, Easing, Keyboard, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -339,9 +338,8 @@ export default function InsightsScreen() {
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.container}>
             <View style={styles.headerRow}>
-              <Pressable style={[styles.backButton, isDarkMode && styles.darkIconButton]} onPress={() => router.back()} accessibilityLabel="Go back">
-                <Ionicons name="chevron-back" size={21} color={isDarkMode ? '#F7F4FF' : '#292633'} />
-              </Pressable>
+              {/* Insights is a tab, so there is nothing to go back to; the spacer keeps the title centred. */}
+              <View style={styles.headerSpacer} />
               <View style={styles.headerTitleWrap}>
                 <Text style={[styles.eyebrow, isDarkMode && styles.darkMutedText]}>YOUR PERSONAL DASHBOARD</Text>
                 <Text style={[styles.headerTitle, isDarkMode && styles.darkPrimaryText]}>AI Insights</Text>
@@ -759,7 +757,7 @@ const themedStyles = createThemedStyles({
   content: { flexGrow: 1, paddingBottom: 110 },
   container: { flex: 1, paddingHorizontal: 18, paddingTop: 8 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
-  backButton: { width: 38, height: 38, borderRadius: 12, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFFFFF' },
+  headerSpacer: { width: 38, height: 38 },
   darkIconButton: { backgroundColor: '#211D2C' },
   headerTitleWrap: { alignItems: 'center', flex: 1 },
   eyebrow: { fontSize: 9, letterSpacing: 1.2, color: '#8D8998', fontWeight: '800', marginBottom: 3 },

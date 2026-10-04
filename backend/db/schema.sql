@@ -309,6 +309,15 @@ CREATE TABLE IF NOT EXISTS user_streak_freezes (
   available INTEGER NOT NULL DEFAULT 0,
   updated_at BIGINT NOT NULL
 );
+-- Daily claim: one row per day the student claimed the daily reward (day 1 to 7 of the calendar).
+CREATE TABLE IF NOT EXISTS daily_claims (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  claim_date DATE NOT NULL,
+  cycle_day INTEGER NOT NULL,
+  amount INTEGER NOT NULL,
+  claimed_at BIGINT NOT NULL,
+  PRIMARY KEY (user_id, claim_date)
+);
 CREATE TABLE IF NOT EXISTS streak_freeze_days (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   freeze_date DATE NOT NULL,

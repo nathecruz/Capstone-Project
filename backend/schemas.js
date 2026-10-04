@@ -33,6 +33,8 @@ const timeZoneSchema = z.string().trim().min(1).max(80).refine((value) => {
 // `summary` is accepted for older app builds; the server now builds AI context from the database.
 export const buddyItemSchema = z.object({ itemId: z.string().trim().min(1).max(40) }).strict();
 export const buddySaveSchema = z.object({ name: z.string().trim().min(1).max(20).optional(), head: z.string().max(40).optional(), hand: z.string().max(40).optional(), room: z.string().max(40).optional() }).strict();
+export const dayInputSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: timeZoneSchema.optional() }).strict();
+export const rewardFrameSchema = z.object({ frame: z.string().max(20) }).strict();
 export const mysteryBoxSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: timeZoneSchema.optional() }).strict();
 export const streakFreezeSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: timeZoneSchema.optional() }).strict();
 export const webPushDoneSchema = z.object({ token: z.string().min(20).max(1000) }).strict();

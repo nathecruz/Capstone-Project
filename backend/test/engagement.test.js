@@ -6,6 +6,7 @@ import { weekStartOf, weeklyQuests } from '../services/quests.js';
 import { daysToFreeze, STREAK_FREEZE_COST, STREAK_FREEZE_MAX } from '../services/streak-freeze.js';
 import { computeStreak } from '../services/streaks.js';
 import { doneActionSecret, getWebPushDoneUrl, localDateIn, makeDoneToken, readDoneToken } from '../services/web-push-actions.js';
+import { dailyChallenges, minuteOfDay, ROTATING_CHALLENGES } from '../services/daily-challenges.js';
 
 const daily = (id) => ({ id, frequency: 'Daily', startDate: '2026-09-01', reminderDays: [], meta: 'Daily • Anytime' });
 const done = (entries) => new Map(Object.entries(entries).map(([date, ids]) => [date, new Set(ids)]));
@@ -100,4 +101,39 @@ test('the Done button on a reminder carries a signed, expiring token', () => {
   assert.equal(getWebPushDoneUrl({ WEB_PUSH_API_URL: 'https://api.example.com' }), 'https://api.example.com/api/web-push/done');
   assert.equal(getWebPushDoneUrl({ WEB_PUSH_API_URL: 'http://api.example.com' }), null, 'https only (except localhost)');
   assert.equal(localDateIn('Asia/Manila', new Date('2026-10-03T17:00:00.000Z')), '2026-10-04');
+});
+
+test('daily challenges: finish N every day, plus two extras that fit the student\'s habits', () => {
+  const habit = (id, extra = {}) => ({ id, label: id, frequency: 'Daily', startDate: '2026-09-01', reminderDays: [], meta: 'Daily • Anytime', ...extra });
+  const today = '2026-10-04';
+  // Two habits, nothing missed, no streaks: only the time-of-day extras fit.
+  const two = dailyChallenges({ habits: [habit('a'), habit('b')], doneToday: new Map([['a', 9 * 60], ['b', 11 * 60 + 40]]), doneYesterday: new Set(['a', 'b']), streaksBefore: new Map(), today });
+  assert.equal(two[0].id, 'finish');
+  assert.deepEqual(two[0], { id: 'finish', title: 'Finish 2 habits today', icon: 'trophy', target: 2, progress: 2, reward: 10, date: today, complete: true });
+  assert.deepEqual(two.slice(1).map((challenge) => challenge.id).sort(), ['early-bird', 'two-by-noon']);
+  assert.ok(two.every((challenge) => challenge.complete), 'checked in at 9:00 and 11:40');
+
+  // Four habits, one missed yesterday, one on a 5-day streak: everything fits, the day picks two.
+  const four = dailyChallenges({
+    habits: ['a', 'b', 'c', 'd'].map((id) => habit(id)),
+    doneToday: new Map([['b', 20 * 60]]),
+    doneYesterday: new Set(['a', 'c', 'd']),
+    streaksBefore: new Map([['a', 5]]),
+    today,
+  });
+  const start = Math.floor(Date.parse(`${today}T00:00:00Z`) / 86_400_000) % ROTATING_CHALLENGES.length;
+  assert.deepEqual(four.map((challenge) => challenge.id), ['finish', ROTATING_CHALLENGES[start], ROTATING_CHALLENGES[(start + 1) % ROTATING_CHALLENGES.length]]);
+  const all = Object.fromEntries(ROTATING_CHALLENGES.map((id) => [id, dailyChallenges({
+    habits: ['a', 'b', 'c', 'd'].map((key) => habit(key)), doneToday: new Map([['b', 20 * 60]]), doneYesterday: new Set(['a', 'c', 'd']), streaksBefore: new Map([['a', 5]]),
+    today: ['2026-10-04', '2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08'].find((day) => ROTATING_CHALLENGES[Math.floor(Date.parse(`${day}T00:00:00Z`) / 86_400_000) % ROTATING_CHALLENGES.length] === id),
+  }).find((challenge) => challenge.id === id)]));
+  assert.deepEqual([all.comeback.title, all.comeback.complete], ['Bounce back: do b today', true]);
+  assert.deepEqual([all['streak-keeper'].title, all['streak-keeper'].complete], ['Keep your 5-day a streak', false]);
+  assert.deepEqual([all['perfect-day'].target, all['perfect-day'].progress], [4, 1]);
+  assert.equal(all['early-bird'].complete, false, 'checked in at 8 PM');
+
+  // Nothing due today: no challenges.
+  assert.deepEqual(dailyChallenges({ habits: [habit('a', { startDate: '2026-12-01' })], doneToday: new Map(), doneYesterday: new Set(), streaksBefore: new Map(), today }), []);
+  // The time of a check-in in the student's own time zone.
+  assert.equal(minuteOfDay(Date.UTC(2026, 9, 4, 1, 30), 'Asia/Manila'), 9 * 60 + 30);
 });

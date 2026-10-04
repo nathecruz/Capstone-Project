@@ -35,6 +35,8 @@ export async function ensureNeonSchema({ log = () => {} } = {}) {
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT NOT NULL DEFAULT ''");
   // The Custom Title reward; rewards can be retired (kept for old redemptions, no longer sold).
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_title TEXT NOT NULL DEFAULT ''");
+  // The Profile Frames reward: the frame chosen for the student's photo.
+  await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_frame TEXT NOT NULL DEFAULT ''");
   // Habit Buddy rooms (backgrounds bought with tokens).
   await query("ALTER TABLE user_buddy ADD COLUMN IF NOT EXISTS room_item TEXT NOT NULL DEFAULT ''");
   await query('ALTER TABLE rewards ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE');

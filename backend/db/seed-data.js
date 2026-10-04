@@ -15,6 +15,7 @@ export const rewardSeeds = [
   ['xp-booster', 'XP Booster', 500, '+20% points for 3 days'],
   ['grace-day', 'Grace Day', 620, 'Skip logging for a day, streak stays safe'],
   ['custom-title', 'Custom Title', 250, 'Your own title under your name on your profile and the leaderboard'],
+  ['profile-frames', 'Profile Frames', 180, 'Four frames for your photo: Gold, Neon, Leaf and Fire'],
 ];
 
 export async function seedCatalog(connection) {

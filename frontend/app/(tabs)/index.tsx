@@ -8,7 +8,10 @@ import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BentoTiles } from '@/components/bento-tiles';
 import { ClassPulseCard } from '@/components/class-pulse-card';
-import { DailyChallengeCard, MysteryBoxCard, NextBadgeCard, StreakRiskBanner, WeeklyQuestsCard, WeeklyRecapCard } from '@/components/engagement-cards';
+import { DailyChallengesCard, DailyClaimCard } from '@/components/daily-cards';
+import { FramedAvatar } from '@/components/framed-avatar';
+import { useRewards } from '@/hooks/use-rewards';
+import { MysteryBoxCard, NextBadgeCard, StreakRiskBanner, WeeklyQuestsCard, WeeklyRecapCard } from '@/components/engagement-cards';
 import { StreakFreezeSheet } from '@/components/streak-freeze-sheet';
 import { TodayAgenda } from '@/components/today-agenda';
 import { WeekStrip } from '@/components/week-strip';
@@ -44,6 +47,7 @@ export default function HomeScreen() {
   const firstName = profile.firstName || profile.fullName.split(' ')[0] || '';
   const openFreeze = () => setFreezeSheetVisible(true);
   const tiles = <BentoTiles habits={habits} onFreeze={openFreeze} />;
+  const { frame } = useRewards();
   const progress = (
     <>
       <SectionTitle title="Your progress" subtitle="How your week is going" />
@@ -78,8 +82,12 @@ export default function HomeScreen() {
             <Pressable style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]} onPress={() => router.push('/notifications')} accessibilityRole="button" accessibilityLabel="Notifications" hitSlop={6}>
               <Ionicons name="notifications-outline" size={20} color={themeColor('#2F2D3C')} />
             </Pressable>
-            <Pressable style={({ pressed }) => [styles.avatar, pressed && styles.pressed]} onPress={() => router.navigate('/(tabs)/profile')} accessibilityRole="button" accessibilityLabel="Open profile">
-              {avatarImage ? <Image source={{ uri: avatarImage }} style={styles.avatarImage} /> : <Text style={styles.avatarInitial}>{(firstName.charAt(0) || 'H').toUpperCase()}</Text>}
+            <Pressable style={({ pressed }) => pressed && styles.pressed} onPress={() => router.navigate('/(tabs)/profile')} accessibilityRole="button" accessibilityLabel="Open profile">
+              <FramedAvatar frame={frame} size={frame ? 36 : 44}>
+                <View style={[styles.avatar, frame ? styles.avatarFramed : null]}>
+                  {avatarImage ? <Image source={{ uri: avatarImage }} style={styles.avatarImage} /> : <Text style={styles.avatarInitial}>{(firstName.charAt(0) || 'H').toUpperCase()}</Text>}
+                </View>
+              </FramedAvatar>
             </Pressable>
           </View>
         </View>
@@ -93,9 +101,10 @@ export default function HomeScreen() {
 
           <View style={[styles.column, isDesktop && styles.sideColumn]}>
             {isDesktop && tiles}
-            <SectionTitle title="Challenges" subtitle="Earn tokens and XP every day" />
+            <SectionTitle title="Rewards and challenges" subtitle="Earn tokens every day" />
+            <DailyClaimCard />
+            <DailyChallengesCard habitCount={habits.length} />
             <MysteryBoxCard habits={habits} tokenHistory={tokenHistory} onWallet={applyWallet} />
-            <DailyChallengeCard habits={habits} now={now} />
             <WeeklyQuestsCard habits={habits} now={now} />
             {!isDesktop && progress}
           </View>
@@ -124,6 +133,8 @@ const themedStyles = createThemedStyles({
   iconButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', shadowColor: '#201444', shadowOpacity: 0.06, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#EEE9FF', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderWidth: 2, borderColor: '#FFFFFF' },
   avatarImage: { width: '100%', height: '100%' },
+  // Inside a frame: the frame's own rings replace the white border.
+  avatarFramed: { width: 36, height: 36, borderRadius: 18, borderWidth: 0 },
   avatarInitial: { fontSize: 18, fontWeight: '900', color: '#5B42D8' },
   column: { gap: 14 },
   // Laptops: two columns, the hero and habits wider than the side column.

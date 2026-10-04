@@ -4,11 +4,12 @@
 import { config } from '../config/index.js';
 import { buildServerState, getLatestAppState, saveUserAppState, syncNormalizedState } from './app-state-store.js';
 import { syncWeeklyQuests } from './quests.js';
-import { awardCheckIn, revokeCheckIn, syncDailyChallenge } from './wallet.js';
+import { syncDailyChallenges } from './daily-challenges.js';
+import { awardCheckIn, revokeCheckIn } from './wallet.js';
 
 /**
  * Returns null when the habit does not exist, { locked: true } when an undo is too late, else
- * { serverState, updatedAt, label }. Call inside a transaction; the date must already be checked
+ * { serverState, updatedAt, label, dailyChallenges }. Call inside a transaction; the date must already be checked
  * to be the user's today.
  */
 export async function setCheckIn(connection, { userId, habitId, date, timeZone, completed, now = Date.now() }) {
@@ -45,9 +46,9 @@ export async function setCheckIn(connection, { userId, habitId, date, timeZone, 
   };
   const updatedAt = Math.max(now, Number(saved.updatedAt) + 1);
   await syncNormalizedState(userId, state, updatedAt, connection);
-  await syncDailyChallenge(connection, userId, date, now);
+  const dailyChallenges = await syncDailyChallenges(connection, userId, date, timeZone || 'UTC', now);
   await syncWeeklyQuests(connection, userId, date, now);
   const serverState = await buildServerState(userId, state, connection);
   await saveUserAppState(userId, serverState, updatedAt, connection);
-  return { serverState, updatedAt, label: habit.label };
+  return { serverState, updatedAt, label: habit.label, dailyChallenges };
 }

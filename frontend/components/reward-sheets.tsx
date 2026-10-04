@@ -1,9 +1,10 @@
 // What the Premium Themes and Custom Title rewards unlock: the theme picker and the title editor.
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, Modal, Pressable, Text, TextInput, View } from 'react-native';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
-import { saveTitle } from '@/hooks/use-rewards';
+import { FramedAvatar, PROFILE_FRAMES } from '@/components/framed-avatar';
+import { saveFrame, saveTitle, useRewards } from '@/hooks/use-rewards';
 import { APP_THEMES, createThemedStyles, isAppTheme, themedColor, useThemeColor, useThemedStyles, type AppTheme } from '@/hooks/use-themed-styles';
 
 const TITLE_IDEAS = ['Early Riser', 'Night Owl', 'Bookworm', 'Hydration Hero', 'Streak Master', 'Gym Buddy', 'Focus Mode', 'Habit Builder'];
@@ -43,6 +44,62 @@ export function ThemePicker({ value, onChange }: { value: AppTheme; onChange: (t
 export function useChosenTheme(): [AppTheme, (theme: AppTheme) => void] {
   const { preferences, updatePreferences } = useAppColorScheme();
   return [isAppTheme(preferences.appTheme) ? preferences.appTheme : 'classic', (theme) => updatePreferences({ appTheme: theme })];
+}
+
+/** Picks the frame around the student's photo (Profile Frames reward). */
+export function FrameSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const styles = useThemedStyles(themedStyles);
+  const { avatarImage, profile } = useAppColorScheme();
+  const { frame } = useRewards();
+  const [saving, setSaving] = useState('');
+  const [error, setError] = useState('');
+  const initial = (profile.firstName || profile.fullName || 'H').trim().charAt(0).toUpperCase();
+  const choose = async (id: string) => {
+    setSaving(id || 'none');
+    setError('');
+    const result = await saveFrame(id);
+    setSaving('');
+    if (!result.ok) setError(result.message);
+  };
+  const face = (size: number) => (
+    <View style={[styles.frameFace, { width: size, height: size, borderRadius: size / 2 }]}>
+      {avatarImage ? <Image source={{ uri: avatarImage }} style={{ width: size, height: size }} /> : <Text style={[styles.frameInitial, { fontSize: size * 0.42 }]}>{initial}</Text>}
+    </View>
+  );
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close profile frames">
+        <Pressable style={styles.sheet} onPress={() => undefined} accessibilityViewIsModal>
+          <View style={styles.header}>
+            <View style={[styles.icon, styles.frameIcon]}><Ionicons name="person-circle" size={24} color="#FFFFFF" /></View>
+            <View style={styles.headerCopy}>
+              <Text style={styles.title}>Profile frame</Text>
+              <Text style={styles.subtitle}>Shown on your profile and the leaderboard.</Text>
+            </View>
+          </View>
+          <View style={styles.framePreview}>
+            <FramedAvatar frame={frame} size={78}>{face(78)}</FramedAvatar>
+          </View>
+          <View style={styles.frameRow} accessibilityRole="radiogroup">
+            {[{ id: '', name: 'None' }, ...PROFILE_FRAMES].map((item) => {
+              const selected = frame === item.id;
+              return (
+                <Pressable key={item.id || 'none'} style={({ pressed }) => [styles.frameOption, selected && styles.frameOptionOn, pressed && styles.pressed]} onPress={() => void choose(item.id)} disabled={Boolean(saving)} accessibilityRole="radio" accessibilityState={{ selected }} accessibilityLabel={`${item.name} frame`}>
+                  <FramedAvatar frame={item.id} size={34}>{face(34)}</FramedAvatar>
+                  <Text style={[styles.themeName, selected && styles.themeNameSelected]}>{saving === (item.id || 'none') ? 'Saving…' : item.name}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {Boolean(error) && <Text style={styles.errorText}>{error}</Text>}
+          <Pressable style={({ pressed }) => [styles.primary, pressed && styles.pressed]} onPress={onClose} accessibilityRole="button">
+            <Text style={styles.primaryText}>Done</Text>
+          </Pressable>
+          <Text style={[styles.hintText, styles.centerHint]}>Other students see your frame on the leaderboard.</Text>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
 }
 
 export function ThemeSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
@@ -181,6 +238,14 @@ const themedStyles = createThemedStyles({
   header: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   icon: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#5B42D8', alignItems: 'center', justifyContent: 'center' },
   titleIcon: { backgroundColor: '#C2549B' },
+  frameIcon: { backgroundColor: '#E9A21B' },
+  framePreview: { alignItems: 'center', paddingVertical: 6 },
+  frameFace: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden', backgroundColor: '#EEE9FF' },
+  frameInitial: { fontWeight: '900', color: '#5B42D8' },
+  frameRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 6 },
+  frameOption: { flexGrow: 1, flexBasis: '18%', alignItems: 'center', gap: 6, paddingVertical: 8, borderRadius: 14, borderWidth: 2, borderColor: 'transparent' },
+  frameOptionOn: { borderColor: '#5B42D8', backgroundColor: '#F4F0FF' },
+  centerHint: { textAlign: 'center', marginTop: -4 },
   headerCopy: { flex: 1 },
   title: { fontSize: 20, fontWeight: '900', color: '#24212D' },
   subtitle: { marginTop: 2, fontSize: 13, fontWeight: '600', color: '#6A6573' },

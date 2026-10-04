@@ -551,7 +551,9 @@ export const openMysteryBox = (date: string) => authedRequest<{ amount: number; 
 
 export type ServerReward = { id: string; name: string; cost: number; description: string; permanent: boolean };
 /** Token rewards on sale, the ones this student owns (Premium Themes, Custom Title) and their title. */
-export const getRewards = () => authedRequest<{ rewards: ServerReward[]; owned: string[]; title: string }>('/api/rewards');
+export const getRewards = () => authedRequest<{ rewards: ServerReward[]; owned: string[]; title: string; frame?: string }>('/api/rewards');
+/** Chooses the frame around the student's photo ('' takes it off); needs the Profile Frames reward. */
+export const saveRewardFrame = (frame: string) => authedRequest<{ frame: string }>('/api/rewards/frame', { method: 'PUT', body: JSON.stringify({ frame }) });
 /** Sets the title under the student's name ('' removes it); needs the Custom Title reward. */
 export const saveRewardTitle = (title: string) => authedRequest<{ title: string }>('/api/rewards/title', { method: 'PUT', body: JSON.stringify({ title }) });
 
@@ -559,6 +561,16 @@ export type StreakFreezeStatus = { available: number; max: number; cost: number;
 const deviceTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 /** Uses held streak freezes for days missed before `date` (the device's today) and returns the status. */
 export const syncStreakFreezes = (date: string) => authedRequest<StreakFreezeStatus>('/api/streak-freezes/sync', { method: 'POST', body: JSON.stringify({ date, timeZone: deviceTimeZone() }) });
+export type DailyChallenge = { id: string; title: string; icon: string; target: number; progress: number; reward: number; date: string; complete: boolean };
+export type DailyClaim = { date: string; day: number; claimedToday: boolean; amount: number; rewards: number[]; alreadyClaimed?: boolean };
+const todayQuery = (date: string) => `date=${date}&timeZone=${encodeURIComponent(deviceTimeZone())}`;
+/** Today's three challenges and their progress, as the server counts (and pays) them. */
+export const getDailyChallenges = (date: string) => authedRequest<{ challenges: DailyChallenge[] }>(`/api/daily-challenges?${todayQuery(date)}`);
+/** The 7-day daily claim calendar for `date` (the device's today). */
+export const getDailyClaim = (date: string) => authedRequest<DailyClaim>(`/api/daily-claim?${todayQuery(date)}`);
+/** Claims today's reward (once a day); the server picks the day of the calendar and pays it. */
+export const claimDailyReward = (date: string) => authedRequest<DailyClaim & WalletResponse>('/api/daily-claim', { method: 'POST', body: JSON.stringify({ date, timeZone: deviceTimeZone() }) });
+
 /** Buys a streak freeze with tokens; it is used right away if yesterday's streak needs it. */
 export const buyStreakFreeze = (date: string) => authedRequest<StreakFreezeStatus & WalletResponse>('/api/streak-freezes/buy', { method: 'POST', body: JSON.stringify({ date, timeZone: deviceTimeZone() }) });
 
@@ -661,7 +673,7 @@ export async function saveRemoteHabitCompletion(completion: HabitCompletion & { 
   const token = await getSessionToken();
   if (!token) return null;
   try {
-    return await apiRequest<{ ok: boolean; updatedAt?: number; state?: AppStateSyncPayload; completions?: HabitCompletion[]; points?: number; tokens?: number; tokenHistory?: object[]; habit?: { id: string; streak: number; done: boolean } | null }>('/api/habit-completions', {
+    return await apiRequest<{ ok: boolean; updatedAt?: number; state?: AppStateSyncPayload; completions?: HabitCompletion[]; points?: number; tokens?: number; tokenHistory?: object[]; habit?: { id: string; streak: number; done: boolean } | null; dailyChallenges?: DailyChallenge[] }>('/api/habit-completions', {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({ ...completion, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }),

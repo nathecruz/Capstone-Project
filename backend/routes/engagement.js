@@ -1,10 +1,12 @@
 import { query, withTransaction } from '../db/client.js';
 import { parse } from '../lib/http.js';
-import { buddyItemSchema, buddySaveSchema, mysteryBoxSchema, streakFreezeSchema, webPushDoneSchema } from '../schemas.js';
+import { buddyItemSchema, buddySaveSchema, dayInputSchema, mysteryBoxSchema, streakFreezeSchema, webPushDoneSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
 import { buyBuddyItem, getBuddy, saveBuddy } from '../services/buddy.js';
 import { setCheckIn } from '../services/check-ins.js';
 import { isOpenCheckInDate } from '../services/completion-date.js';
+import { getDailyChallenges } from '../services/daily-challenges.js';
+import { claimDaily, getDailyClaim } from '../services/daily-claims.js';
 import { openMysteryBox } from '../services/mystery-box.js';
 import { applyStreakFreezes, buyStreakFreeze, getStreakFreezeStatus } from '../services/streak-freeze.js';
 import { getWallet } from '../services/wallet.js';
@@ -41,6 +43,41 @@ export default function registerEngagementRoutes(app) {
     const refused = await saveBuddy({ query }, session.userId, input);
     if (refused) return response.status(refused.status).json({ ok: false, message: refused.message });
     response.json({ ok: true, buddy: await getBuddy({ query }, session.userId) });
+  });
+
+  // Today's three challenges and their progress (paid by each check-in).
+  app.get('/api/daily-challenges', async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const input = dayInputSchema.safeParse({ date: request.query.date, ...(request.query.timeZone ? { timeZone: request.query.timeZone } : {}) });
+    if (!input.success || !isOpenCheckInDate(input.data.date, input.data.timeZone)) return response.status(400).json({ ok: false, message: 'Send your today and time zone.' });
+    response.json({ ok: true, challenges: await getDailyChallenges({ query }, session.userId, input.data.date, input.data.timeZone || 'UTC') });
+  });
+
+  // The daily claim calendar, and claiming today's reward (once a day).
+  app.get('/api/daily-claim', async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const input = dayInputSchema.safeParse({ date: request.query.date, ...(request.query.timeZone ? { timeZone: request.query.timeZone } : {}) });
+    if (!input.success || !isOpenCheckInDate(input.data.date, input.data.timeZone)) return response.status(400).json({ ok: false, message: 'Send your today and time zone.' });
+    response.json({ ok: true, ...await getDailyClaim({ query }, session.userId, input.data.date) });
+  });
+
+  app.post('/api/daily-claim', async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const input = parse(dayInputSchema, request, response);
+    if (!input) return;
+    if (!isOpenCheckInDate(input.date, input.timeZone)) {
+      return response.status(409).json({ ok: false, code: 'DAY_CLOSED', message: 'That day is over. Claim today\'s reward instead.' });
+    }
+    const result = await withTransaction(async (db) => {
+      await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
+      const claim = await claimDaily(db, session.userId, input.date);
+      return { ...claim, wallet: await getWallet(db, session.userId) };
+    });
+    const { wallet, ...claim } = result;
+    response.json({ ok: true, ...claim, ...wallet });
   });
 
   // The daily mystery box, opened once after the day's first check-in.

@@ -3,10 +3,10 @@ import { query, withTransaction } from '../db/client.js';
 import { leaderboardName } from '../lib/display.js';
 import { namesFromRow } from '../lib/names.js';
 import { getPeriodStart, parse } from '../lib/http.js';
-import { leaderboardSchema, rewardRedemptionSchema, rewardTitleSchema } from '../schemas.js';
+import { leaderboardSchema, rewardFrameSchema, rewardRedemptionSchema, rewardTitleSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
 import { refreshSnapshot, serverCompletionPoints } from '../services/app-state-store.js';
-import { cleanTitle, getRewards, PERMANENT_REWARDS } from '../services/rewards.js';
+import { cleanTitle, getRewards, PERMANENT_REWARDS, PROFILE_FRAMES } from '../services/rewards.js';
 import { getWallet, POINTS_PER_CHECK_IN, spendTokens } from '../services/wallet.js';
 
 /** First name and last initial; accounts from before the name split fall back to splitting full_name. */
@@ -35,6 +35,19 @@ export default function registerGamificationRoutes(app) {
     if (title === null) return response.status(400).json({ ok: false, message: 'Use 2 to 24 letters, numbers, spaces or simple punctuation.' });
     await query('UPDATE users SET custom_title=$2 WHERE id=$1', [session.userId, title]);
     response.json({ ok: true, title });
+  });
+
+  // Chooses (or takes off, with '') the frame around the student's photo; needs Profile Frames.
+  app.put('/api/rewards/frame', async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const input = parse(rewardFrameSchema, request, response);
+    if (!input) return;
+    if (input.frame && !PROFILE_FRAMES.includes(input.frame)) return response.status(400).json({ ok: false, message: 'That frame does not exist.' });
+    const owned = (await query("SELECT 1 FROM reward_redemptions WHERE user_id=$1 AND reward_id='profile-frames' LIMIT 1", [session.userId])).rowCount;
+    if (!owned) return response.status(403).json({ ok: false, message: 'Redeem the Profile Frames reward first.' });
+    await query('UPDATE users SET profile_frame=$2 WHERE id=$1', [session.userId, input.frame]);
+    response.json({ ok: true, frame: input.frame });
   });
 
   app.post('/api/rewards/redeem', async (request, response) => {
@@ -70,14 +83,14 @@ export default function registerGamificationRoutes(app) {
     if (!['This Week', 'This Month', 'All Time'].includes(period)) return response.status(400).json({ ok: false, message: 'Unsupported leaderboard period.' });
     const start = period === 'All Time' ? null : getPeriodStart(period);
     const result = await query(
-      `SELECT u.id, u.full_name AS "fullName", u.first_name AS "firstName", u.last_name AS "lastName", u.custom_title AS "title", (COUNT(c.completed_date)::integer * $3) AS points, COALESCE(l.avatar, LEFT(u.full_name, 1)) AS avatar
+      `SELECT u.id, u.full_name AS "fullName", u.first_name AS "firstName", u.last_name AS "lastName", u.custom_title AS "title", u.profile_frame AS "frame", (COUNT(c.completed_date)::integer * $3) AS points, COALESCE(l.avatar, LEFT(u.full_name, 1)) AS avatar
          FROM users u
          LEFT JOIN habit_completions c ON c.user_id=u.id AND ($1::date IS NULL OR c.completed_date >= $1::date)
          LEFT JOIN leaderboard_users l ON l.user_id=u.id
          LEFT JOIN user_preferences p ON p.user_id=u.id
         WHERE u.role = 'user' AND u.status = 'active'
           AND (u.id = $2 OR (p.preferences_json->'showOnLeaderboard') IS DISTINCT FROM 'false'::jsonb)
-        GROUP BY u.id,u.full_name,u.first_name,u.last_name,u.custom_title,l.avatar
+        GROUP BY u.id,u.full_name,u.first_name,u.last_name,u.custom_title,u.profile_frame,l.avatar
         ORDER BY points DESC,u.full_name ASC`,
       [start, session.userId, POINTS_PER_CHECK_IN],
     );
@@ -90,6 +103,7 @@ export default function registerGamificationRoutes(app) {
         points: row.points,
         avatar: row.avatar,
         title: row.title || '',
+        frame: row.frame || '',
         isYou: row.id === session.userId,
       })),
     });

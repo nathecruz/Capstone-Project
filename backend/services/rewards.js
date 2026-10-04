@@ -7,7 +7,11 @@ export const RETIRED_REWARDS = ['plant-buddy', 'kindness-boost', 'habit-swap', '
 export const REAL_REWARDS = {
   'premium-theme': { name: 'Premium Themes', cost: 200, description: 'Four app colour themes: Ocean, Sunset, Forest and Midnight' },
   'custom-title': { name: 'Custom Title', cost: 250, description: 'Your own title under your name on your profile and the leaderboard' },
+  'profile-frames': { name: 'Profile Frames', cost: 180, description: 'Four frames for your photo: Gold, Neon, Leaf and Fire' },
 };
+
+/** The frames the Profile Frames reward unlocks ('' is no frame). */
+export const PROFILE_FRAMES = ['gold', 'neon', 'leaf', 'fire'];
 
 /** Rewards bought once and kept. */
 export const PERMANENT_REWARDS = new Set(Object.keys(REAL_REWARDS));
@@ -33,17 +37,18 @@ export async function retireRewards(db, now = Date.now()) {
   return redemptions.rowCount;
 }
 
-/** The rewards on sale, the permanent ones this student owns, and their title. */
+/** The rewards on sale, the permanent ones this student owns, their title and their frame. */
 export async function getRewards(db, userId) {
   const [rewards, owned, user] = await Promise.all([
     db.query('SELECT id, name, token_cost AS "cost", description FROM rewards WHERE active ORDER BY token_cost, id'),
     db.query('SELECT DISTINCT reward_id AS "rewardId" FROM reward_redemptions WHERE user_id=$1', [userId]),
-    db.query('SELECT custom_title AS "title" FROM users WHERE id=$1', [userId]),
+    db.query('SELECT custom_title AS "title", profile_frame AS "frame" FROM users WHERE id=$1', [userId]),
   ]);
   return {
     rewards: rewards.rows.map((row) => ({ ...row, cost: Number(row.cost), permanent: PERMANENT_REWARDS.has(row.id) })),
     owned: owned.rows.map((row) => row.rewardId).filter((id) => PERMANENT_REWARDS.has(id)),
     title: user.rows[0]?.title ?? '',
+    frame: user.rows[0]?.frame ?? '',
   };
 }
 

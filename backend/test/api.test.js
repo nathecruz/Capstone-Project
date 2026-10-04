@@ -144,6 +144,8 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 
+  /** Tokens from the rotating daily challenges (not "Finish N habits") in an answer's history. */
+  const extraDailyTokens = (body) => body.tokenHistory.filter((item) => item.label.startsWith('Daily challenge: ')).reduce((sum, item) => sum + item.amount, 0);
   async function request(pathname, options = {}) {
     const response = await fetch(`${baseUrl}${pathname}`, { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) } });
     const text = await response.text();
@@ -319,12 +321,13 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const done = await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'habit-1', date: today, completed: true, timeZone: 'UTC' }) });
     assert.equal(done.response.status, 200, JSON.stringify(done.body));
     assert.equal(done.body.points, 20);
-    assert.equal(done.body.tokens, 5, 'the daily challenge is not done yet: 1 of the 2 habits due today');
-    assert.equal(done.body.tokenHistory[0].label, 'Completed Read');
+    assert.equal(done.body.tokens, 5 + extraDailyTokens(done.body), '"Finish 2 habits" is not done yet: 1 of the 2 habits due today');
+    assert.ok(!done.body.tokenHistory.some((item) => item.label === 'Daily challenge'));
+    assert.equal(done.body.tokenHistory.find((item) => !item.label.startsWith('Daily challenge')).label, 'Completed Read');
     assert.equal(done.body.habit.streak, 1);
 
     const repeat = await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'habit-1', date: today, completed: true, timeZone: 'UTC' }) });
-    assert.equal(repeat.body.tokens, 5, 'the same check-in is only rewarded once');
+    assert.equal(repeat.body.tokens, 5 + extraDailyTokens(repeat.body), 'the same check-in is only rewarded once');
 
     const stale = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...appState, preferences: { language: 'Filipino' } }) });
     assert.equal(stale.response.status, 200);
@@ -482,12 +485,12 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(checkIn.response.status, 200, 'faculty can track their own habits');
     const questBonus = weeklyQuests([{ id: 'prep', frequency: 'Daily', startDate: '2026-01-01', reminderDays: [], meta: '' }], new Map([[today, new Set(['prep'])]]), today)
       .filter((quest) => quest.complete).reduce((sum, quest) => sum + quest.reward, 0);
-    assert.equal(checkIn.body.tokens, 15 + questBonus, '+5 for the check-in, +10 for the daily challenge (1 of 1 habit due today), and any weekly quest it completes');
-    assert.deepEqual(checkIn.body.tokenHistory.filter((item) => !item.label.startsWith('Weekly quest')).slice(0, 2).map((item) => item.label), ['Daily challenge', "Completed Prepare tomorrow's lesson"]);
+    assert.equal(checkIn.body.tokens, 15 + questBonus + extraDailyTokens(checkIn.body), '+5 for the check-in, +10 for "Finish 1 habit", and any other challenge or weekly quest it completes');
+    assert.deepEqual(checkIn.body.tokenHistory.filter((item) => !item.label.startsWith('Weekly quest') && !item.label.startsWith('Daily challenge: ')).slice(0, 2).map((item) => item.label), ['Daily challenge', "Completed Prepare tomorrow's lesson"]);
     const undone = await request('/api/habit-completions', { method: 'PUT', headers: facultyHeaders, body: JSON.stringify({ habitId: 'prep', date: today, completed: false, timeZone: 'UTC' }) });
     assert.equal(undone.body.tokens, 0, 'an undo also takes the challenge bonus back');
     const again = await request('/api/habit-completions', { method: 'PUT', headers: facultyHeaders, body: JSON.stringify({ habitId: 'prep', date: today, completed: true, timeZone: 'UTC' }) });
-    assert.equal(again.body.tokens, 15 + questBonus, 'and pays it again, once, when the challenge is done again');
+    assert.equal(again.body.tokens, 15 + questBonus + extraDailyTokens(again.body), 'and pays it again, once, when the challenge is done again');
     const board = await request('/api/leaderboard?period=All%20Time', { headers: facultyHeaders });
     assert.ok(!JSON.stringify(board.body).includes('Santos'), 'faculty are not on the student leaderboard');
   });
@@ -602,7 +605,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
 
     const catalog = await request('/api/rewards', { headers });
     assert.equal(catalog.response.status, 200, JSON.stringify(catalog.body));
-    assert.deepEqual(catalog.body.rewards.map((reward) => [reward.id, reward.cost, reward.permanent]), [['premium-theme', 200, true], ['custom-title', 250, true]], 'only rewards that do something are on sale');
+    assert.deepEqual(catalog.body.rewards.map((reward) => [reward.id, reward.cost, reward.permanent]), [['profile-frames', 180, true], ['premium-theme', 200, true], ['custom-title', 250, true]], 'only rewards that do something are on sale');
     assert.deepEqual({ owned: catalog.body.owned, title: catalog.body.title }, { owned: [], title: '' });
     assert.equal((await request('/api/rewards/redeem', { method: 'POST', headers, body: JSON.stringify({ rewardId: 'grace-day', rewardName: 'Grace Day', tokenCost: 620 }) })).response.status, 400, 'retired rewards cannot be bought');
 
@@ -627,6 +630,66 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.deepEqual((await request('/api/rewards', { headers })).body.owned, ['custom-title']);
     const board = await request('/api/leaderboard?period=All%20Time', { headers });
     assert.equal(board.body.leaders.find((leader) => leader.isYou).title, 'Early Riser', 'shown on the leaderboard');
+  });
+
+  await t.test('daily claim, daily challenges and profile frames', async () => {
+    const password = 'Juniper!Coast6!Lantern2!Moss';
+    await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, firstName: 'Dani', lastName: 'Cruz', username: 'dani_cruz', email: 'dani@example.com', password, privacyConsent: true }) });
+    await db.query('UPDATE users SET email_verified_at = 1 WHERE email = $1', ['dani@example.com']);
+    const login = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'dani@example.com', password }) });
+    const headers = { Authorization: `Bearer ${login.body.token}` };
+    const userId = (await db.query('SELECT id FROM users WHERE email=$1', ['dani@example.com'])).rows[0].id;
+    const shift = (days) => new Date(Date.parse(`${today}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+
+    // Daily claim: day 1 is 2 tokens, once a day.
+    const calendar = await request(`/api/daily-claim?date=${today}&timeZone=UTC`, { headers });
+    assert.deepEqual({ day: calendar.body.day, claimed: calendar.body.claimedToday, amount: calendar.body.amount, rewards: calendar.body.rewards }, { day: 1, claimed: false, amount: 2, rewards: [2, 3, 4, 5, 6, 8, 15] });
+    const claim = await request('/api/daily-claim', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+    assert.deepEqual({ status: claim.response.status, tokens: claim.body.tokens, claimed: claim.body.claimedToday, again: claim.body.alreadyClaimed, label: claim.body.tokenHistory[0].label }, { status: 200, tokens: 2, claimed: true, again: false, label: 'Daily claim: day 1' });
+    const twice = await request('/api/daily-claim', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+    assert.deepEqual({ again: twice.body.alreadyClaimed, tokens: twice.body.tokens }, { again: true, tokens: 2 }, 'claimed once a day');
+    assert.equal((await request('/api/daily-claim', { method: 'POST', headers, body: JSON.stringify({ date: shift(-1), timeZone: 'UTC' }) })).response.status, 409, 'only today can be claimed');
+
+    // Days in a row climb the calendar; day 7 is 15 tokens; after day 7, or a gap, it starts again.
+    const dayAfter = async (lastDay, daysAgo) => {
+      await db.query('DELETE FROM daily_claims WHERE user_id=$1', [userId]);
+      await db.query('INSERT INTO daily_claims(user_id,claim_date,cycle_day,amount,claimed_at) VALUES($1,$2,$3,1,1)', [userId, shift(-daysAgo), lastDay]);
+      return (await request(`/api/daily-claim?date=${today}&timeZone=UTC`, { headers })).body;
+    };
+    assert.deepEqual(await dayAfter(6, 1).then((body) => [body.day, body.amount, body.claimedToday]), [7, 15, false]);
+    assert.equal((await dayAfter(7, 1)).day, 1, 'a new calendar after day 7');
+    assert.equal((await dayAfter(3, 2)).day, 1, 'a missed day starts again at day 1');
+
+    // Daily challenges: "Finish N habits" plus two that fit; each check-in pays the ones it completes.
+    await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], id: 'one', label: 'One' }, { ...appState.habits[0], id: 'two', label: 'Two' }] }) });
+    const challenges = await request(`/api/daily-challenges?date=${today}&timeZone=UTC`, { headers });
+    assert.equal(challenges.response.status, 200, JSON.stringify(challenges.body));
+    assert.deepEqual(challenges.body.challenges[0], { id: 'finish', title: 'Finish 2 habits today', icon: 'trophy', target: 2, progress: 0, reward: 10, date: today, complete: false });
+    assert.equal(challenges.body.challenges.length, 3);
+    await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'one', date: today, completed: true, timeZone: 'UTC' }) });
+    const both = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'two', date: today, completed: true, timeZone: 'UTC' }) });
+    assert.equal(both.body.dailyChallenges[0].complete, true);
+    for (const challenge of both.body.dailyChallenges) {
+      const label = challenge.id === 'finish' ? 'Daily challenge' : `Daily challenge: ${challenge.title}`;
+      const paid = both.body.tokenHistory.filter((item) => item.label === label);
+      assert.deepEqual(paid.map((item) => item.amount), challenge.complete ? [challenge.reward] : [], label);
+    }
+    const undo = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'two', date: today, completed: false, timeZone: 'UTC' }) });
+    assert.equal(undo.body.dailyChallenges[0].complete, false);
+    assert.ok(!undo.body.tokenHistory.some((item) => item.label === 'Daily challenge'), 'an undo takes the bonus back');
+
+    // Profile Frames: bought once, then a frame is chosen and shown on the leaderboard.
+    assert.equal((await request('/api/rewards/frame', { method: 'PUT', headers, body: JSON.stringify({ frame: 'gold' }) })).response.status, 403);
+    await db.query("INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,200,'Test tokens',$3,$4)", [`${userId}:token:test-frames`, userId, new Date().toISOString(), Date.now()]);
+    const catalog = await request('/api/rewards', { headers });
+    assert.ok(catalog.body.rewards.some((reward) => reward.id === 'profile-frames' && reward.cost === 180 && reward.permanent));
+    const bought = await request('/api/rewards/redeem', { method: 'POST', headers, body: JSON.stringify({ rewardId: 'profile-frames', rewardName: 'Profile Frames', tokenCost: 180 }) });
+    assert.equal(bought.response.status, 200, JSON.stringify(bought.body));
+    assert.equal((await request('/api/rewards/frame', { method: 'PUT', headers, body: JSON.stringify({ frame: 'rainbow' }) })).response.status, 400);
+    assert.deepEqual((await request('/api/rewards/frame', { method: 'PUT', headers, body: JSON.stringify({ frame: 'neon' }) })).body, { ok: true, frame: 'neon' });
+    assert.equal((await request('/api/rewards', { headers })).body.frame, 'neon');
+    const board = await request('/api/leaderboard?period=All%20Time', { headers });
+    assert.equal(board.body.leaders.find((leader) => leader.isYou).frame, 'neon');
   });
 
   await t.test('issue reports store attachments in the database and validate content', async () => {

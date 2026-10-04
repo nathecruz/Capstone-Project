@@ -10,12 +10,13 @@ import type { EditableHabitFields } from '@/utils/habit-edit';
 import { namesOf } from '@/utils/names';
 import { badgeProgress } from '@/utils/achievements';
 import { buddyGrowth } from '@/utils/buddy';
-import { dailyChallenge, levelProgress, streakMilestone, todayAgenda } from '@/utils/engagement';
+import { levelProgress, streakMilestone, todayAgenda } from '@/utils/engagement';
 import { weeklyQuests } from '@/utils/quests';
 import { computeStreak } from '@/utils/streaks';
 import { applyRemoteCompletionDates, applyVisibleOrder, getLocalDateKey } from './app-state/habit-progress';
 import { AppThemeContext, DarkModeContext } from './dark-mode-context';
 import { adjustBuddyCheckIns, getCachedBuddy } from './use-buddy';
+import { getKnownChallenges, publishDailyChallenges } from './use-daily-challenges';
 import { isAppTheme } from './use-themed-styles';
 import { APP_STATE_KEY_PREFIX, clearSyncMeta, loadSyncMeta, persistSyncBase, persistUnsaved } from './app-state/sync-storage';
 import { useHabitReminders } from './app-state/use-habit-reminders';
@@ -133,12 +134,14 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     return () => clearTimeout(timer);
   }, [undoUntil]);
   // Celebrations: each moment shows once per session, so an undo and a new tap do not repeat it.
-  const [celebration, setCelebration] = useState<Celebration | null>(null);
+  // Several at once (a streak and a challenge from one check-in) show one after the other.
+  const [celebrations, setCelebrations] = useState<Celebration[]>([]);
+  const celebration = celebrations[0] ?? null;
   const celebrated = useRef(new Set<string>());
   const celebrate = (next: Celebration) => {
     if (celebrated.current.has(next.id)) return;
     celebrated.current.add(next.id);
-    setCelebration(next);
+    setCelebrations((current) => [...current, next]);
   };
 
   // Streak freezes: days they covered count as neither done nor missed in every streak.
@@ -555,7 +558,6 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     const milestone = streakMilestone(computeStreak(habit, habit.completionDates, dateKey, frozen), computeStreak(habit, datesAfter, dateKey, frozen));
     const levelBefore = levelProgress(points).level;
     const levelAfter = levelProgress(points + 20).level;
-    const challengeAfter = dailyChallenge(habitsAfter, now);
     const agendaAfter = todayAgenda(habitsAfter, now);
     const earnedBefore = new Set(badgeProgress(habits, goals, now, frozen).filter((badge) => badge.earned).map((badge) => badge.id));
     const newBadge = badgeProgress(habitsAfter, goals, now, frozen).find((badge) => badge.earned && !earnedBefore.has(badge.id));
@@ -577,8 +579,6 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       celebrate({ id: `quest:${newQuest.weekStart}:${newQuest.id}`, kind: 'quest', icon: 'flag', color: '#4BA3FF', title: 'Quest complete!', message: `${newQuest.title}: +${newQuest.reward} tokens this week.` });
     } else if (levelAfter > levelBefore) {
       celebrate({ id: `level:${levelAfter}`, kind: 'level', icon: 'star', title: `Level ${levelAfter}!`, message: `You reached level ${levelAfter}. Every check-in moves you up.` });
-    } else if (challengeAfter.complete && !dailyChallenge(habits, now).complete) {
-      celebrate({ id: `challenge:${dateKey}`, kind: 'challenge', icon: 'trophy', title: 'Daily challenge done!', message: `+${challengeAfter.bonus} bonus tokens for finishing ${challengeAfter.target} habit${challengeAfter.target === 1 ? '' : 's'} today.` });
     } else if (agendaAfter.scheduled.length > 0 && agendaAfter.open.length === 0) {
       celebrate({ id: `all:${dateKey}`, kind: 'allDone', icon: 'sparkles', title: 'All done for today!', message: 'Every habit is checked off. See you tomorrow.' });
     }
@@ -628,6 +628,16 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         return;
       }
       applyWallet(result);
+      // Daily challenges as the server counted them: announce any this check-in completed.
+      if (result.dailyChallenges) {
+        const known = getKnownChallenges();
+        publishDailyChallenges(result.dailyChallenges);
+        if (completed) {
+          for (const challenge of result.dailyChallenges.filter((item) => item.complete && !known.some((before) => before.id === item.id && before.complete))) {
+            celebrate({ id: `challenge:${challenge.date}:${challenge.id}`, kind: 'challenge', icon: challenge.icon, title: 'Challenge complete!', message: `${challenge.title}: +${challenge.reward} tokens.` });
+          }
+        }
+      }
       // The response carries the new server snapshot: use it as the sync base so the next save
       // is not treated as a conflicting edit (which used to undo a reorder made right after).
       if (result.state && result.updatedAt && (!syncBaseRef.current || result.updatedAt > syncBaseRef.current.updatedAt)) {
@@ -782,7 +792,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         setHabits((current) => current.map((habit) => applyRemoteCompletionDates(habit, habit.completionDates, result.frozenDays)));
         return { ok: true, message: result.used.length ? 'It saved your streak right away.' : 'It will protect your streaks on a day you miss.' };
       },
-      dismissCelebration: () => setCelebration(null),
+      dismissCelebration: () => setCelebrations((current) => current.slice(1)),
       deleteHabit,
       updateHabit,
       reorderHabits,

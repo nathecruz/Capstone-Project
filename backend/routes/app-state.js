@@ -117,6 +117,7 @@ export default function registerAppStateRoutes(app) {
       tokens: serverState.tokens,
       tokenHistory: serverState.tokenHistory,
       habit: habit ? { id: habit.id, streak: habit.streak, done: habit.done, completionDates: habit.completionDates } : null,
+      dailyChallenges: result.dailyChallenges,
     });
   });
 }

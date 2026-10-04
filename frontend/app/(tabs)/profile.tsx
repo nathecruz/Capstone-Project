@@ -7,7 +7,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { getMyLeaderboardRank } from '@/authentication';
 import { BentoTile } from '@/components/bento-tiles';
 import { ClassPulseCard } from '@/components/class-pulse-card';
-import { TitleBadge, TitleSheet } from '@/components/reward-sheets';
+import { FramedAvatar } from '@/components/framed-avatar';
+import { FrameSheet, TitleBadge, TitleSheet } from '@/components/reward-sheets';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { badgeProgress, badgeRemaining, historyStats, nextBadge } from '@/utils/achievements';
 import { askAi } from '@/utils/ai-client';
@@ -34,6 +35,7 @@ export default function ProfileScreen() {
   // The Custom Title reward: shown under the name once bought.
   const rewards = useRewards();
   const [titleOpen, setTitleOpen] = useState(false);
+  const [frameOpen, setFrameOpen] = useState(false);
   const { isDarkMode, avatarImage, setAvatarImage, habits, goals, profile, points, tokens, applyWallet, t, isFaculty, streakFreeze } = useAppColorScheme();
   // Faculty mode: no student leaderboards; a shortcut to their class's Class Pulse instead.
   const menuItems = isFaculty ? settings.filter((item) => item.key !== 'leaderboards') : settings;
@@ -147,11 +149,19 @@ export default function ProfileScreen() {
 
           <View style={styles.profileHeader}>
             <Pressable style={styles.avatarPressable} onPress={openAvatarActions} accessibilityLabel="Change profile picture">
-              <View style={styles.avatarRing}>
-              <View style={styles.avatarCircle}>
-                  {avatarImage ? <Image source={{ uri: avatarImage }} style={styles.avatarImage} /> : <Text style={styles.avatarEmoji}>{avatarInitial}</Text>}
-              </View>
-              </View>
+              {rewards.frame ? (
+                <FramedAvatar frame={rewards.frame} size={78}>
+                  <View style={styles.avatarCircle}>
+                    {avatarImage ? <Image source={{ uri: avatarImage }} style={styles.avatarImage} /> : <Text style={styles.avatarEmoji}>{avatarInitial}</Text>}
+                  </View>
+                </FramedAvatar>
+              ) : (
+                <View style={styles.avatarRing}>
+                  <View style={styles.avatarCircle}>
+                    {avatarImage ? <Image source={{ uri: avatarImage }} style={styles.avatarImage} /> : <Text style={styles.avatarEmoji}>{avatarInitial}</Text>}
+                  </View>
+                </View>
+              )}
               <View style={styles.cameraBadge}>
                 <Ionicons name="camera" size={12} color={themeColor('#FFFFFF')} />
               </View>
@@ -159,6 +169,12 @@ export default function ProfileScreen() {
             <Text style={[styles.name, isDarkMode && styles.darkText]}>{displayName}</Text>
             {displayUsername ? <Text style={styles.username}>{displayUsername}</Text> : null}
             {rewards.owns('custom-title') && <TitleBadge title={rewards.title} onPress={() => setTitleOpen(true)} style={styles.titleBadge} />}
+            {rewards.owns('profile-frames') && (
+              <Pressable style={({ pressed }) => [styles.frameChip, pressed && styles.frameChipPressed]} onPress={() => setFrameOpen(true)} accessibilityRole="button" accessibilityLabel="Change profile frame">
+                <Ionicons name="person-circle-outline" size={13} color={themeColor('#8A5A00')} />
+                <Text style={styles.frameChipText}>{rewards.frame ? 'Change frame' : 'Add a frame'}</Text>
+              </Pressable>
+            )}
             <View style={styles.levelPill}>
               <Text style={styles.levelText}>Level {level}</Text>
               <Ionicons name="star" size={11} color={themeColor('#F2B94B')} />
@@ -404,6 +420,7 @@ export default function ProfileScreen() {
         </View>
       </Modal>
       {titleOpen && <TitleSheet current={rewards.title} onClose={() => setTitleOpen(false)} />}
+      <FrameSheet visible={frameOpen} onClose={() => setFrameOpen(false)} />
     </SafeAreaView>
   );
 }
@@ -615,6 +632,9 @@ const themedStyles = createThemedStyles({
     marginTop: 3,
   },
   titleBadge: { alignSelf: 'center', marginTop: 7 },
+  frameChip: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'center', marginTop: 6, minHeight: 30, paddingHorizontal: 10, borderRadius: 999, backgroundColor: '#FFF4D6' },
+  frameChipPressed: { opacity: 0.85 },
+  frameChipText: { fontSize: 11, fontWeight: '800', color: '#8A5A00' },
   bentoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
   facultyPill: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: '#5B42D8' },
   facultyPillText: { fontSize: 10, fontWeight: '800', color: '#FFFFFF' },
