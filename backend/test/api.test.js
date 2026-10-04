@@ -172,6 +172,18 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
   let userId;
   let authHeaders;
 
+  await t.test('every API answer carries the security headers and is not cached', async () => {
+    for (const pathname of ['/api/health', '/api/no-such-route']) {
+      const { response } = await request(pathname);
+      assert.equal(response.headers.get('x-content-type-options'), 'nosniff', pathname);
+      assert.equal(response.headers.get('x-frame-options'), 'DENY', pathname);
+      assert.equal(response.headers.get('content-security-policy'), "default-src 'none'; frame-ancestors 'none'", pathname);
+      assert.equal(response.headers.get('referrer-policy'), 'no-referrer', pathname);
+      assert.equal(response.headers.get('cache-control'), 'no-store', pathname);
+      assert.equal(response.headers.get('x-powered-by'), null, pathname);
+    }
+  });
+
   await t.test('registration requires privacy consent and email verification', async () => {
     const noConsent = await request('/api/auth/register', { method: 'POST', body: JSON.stringify(registration) });
     assert.equal(noConsent.response.status, 400);

@@ -6,6 +6,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AppStateSyncBase } from '@/authentication/authService';
 
+/** The account's saved copy of its habits and settings, for a quick start and offline use. */
+export const APP_STATE_KEY_PREFIX = 'habitai_app_state:';
 const BASE_KEY_PREFIX = 'habitai_sync_base:';
 const UNSAVED_KEY_PREFIX = 'habitai_unsaved:';
 
@@ -32,6 +34,21 @@ export function persistUnsaved(email: string, unsaved: boolean) {
   if (!email) return;
   const key = `${UNSAVED_KEY_PREFIX}${email}`;
   void (unsaved ? AsyncStorage.setItem(key, '1') : AsyncStorage.removeItem(key)).catch(() => undefined);
+}
+
+/**
+ * Signing out (a shared or school computer, say): remove the account's saved copy from this
+ * device. Changes that have not reached the server yet are kept, so they are not lost; they are
+ * sent the next time this account signs in here.
+ */
+export async function forgetAccountOnDevice(email: string) {
+  if (!email) return;
+  try {
+    if ((await AsyncStorage.getItem(`${UNSAVED_KEY_PREFIX}${email}`)) === '1') return;
+    await Promise.all([AsyncStorage.removeItem(`${APP_STATE_KEY_PREFIX}${email}`), AsyncStorage.removeItem(`${BASE_KEY_PREFIX}${email}`)]);
+  } catch {
+    // Storage unavailable: nothing to remove.
+  }
 }
 
 export function clearSyncMeta(email: string) {

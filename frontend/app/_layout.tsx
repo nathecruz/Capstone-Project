@@ -9,6 +9,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ColorSchemeProvider, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { AppDialogProvider } from '@/components/ui/app-dialog';
+import { StorageNotice } from '@/components/storage-notice';
 import { getSession, subscribeToAuthChanges, type SessionUser } from '@/authentication';
 import { CelebrationOverlay } from '@/components/celebration-overlay';
 import { PageSidebar } from '@/components/desktop-sidebar';
@@ -187,6 +188,7 @@ function RootNavigator() {
       )}
       <ServerStatusBanner />
       <CelebrationOverlay />
+      <StorageNotice />
       <StatusBar
         style={colorScheme === 'dark' ? 'light' : 'dark'}
       />

@@ -15,7 +15,7 @@ import { computeStreak } from '@/utils/streaks';
 import { applyRemoteCompletionDates, applyVisibleOrder, getLocalDateKey } from './app-state/habit-progress';
 import { AppThemeContext, DarkModeContext } from './dark-mode-context';
 import { isAppTheme } from './use-themed-styles';
-import { clearSyncMeta, loadSyncMeta, persistSyncBase, persistUnsaved } from './app-state/sync-storage';
+import { APP_STATE_KEY_PREFIX, clearSyncMeta, loadSyncMeta, persistSyncBase, persistUnsaved } from './app-state/sync-storage';
 import { useHabitReminders } from './app-state/use-habit-reminders';
 import { initialPreferences, initialProfile, type Goal, type Habit, type PersistedAppState, type Preferences, type Profile, type TokenTransaction } from './app-state/types';
 
@@ -25,7 +25,6 @@ export { enableWebReminders, getHabitReminderDays, getHabitReminderSchedule, get
 
 type ColorScheme = 'light' | 'dark';
 let nextHabitId = 0;
-const APP_STATE_KEY_PREFIX = 'habitai_app_state:';
 const REMOTE_REFRESH_INTERVAL_MS = 15000;
 
 /** JSON with sorted keys, so two copies of the same state compare equal regardless of key order. */

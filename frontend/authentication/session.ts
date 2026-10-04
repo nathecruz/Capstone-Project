@@ -2,6 +2,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import { forgetAccountOnDevice } from '@/hooks/app-state/sync-storage';
 
 const SESSION_KEY = 'habitai_session';
 const SESSION_TOKEN_KEY = 'habitai_session_token';
@@ -175,6 +176,7 @@ export async function getSessionToken(): Promise<string> {
 
 export async function logoutUser() {
   const webStorage = getWebSessionStorage();
+  const signedOutEmail = (await getCurrentSession().catch(() => null))?.email.trim().toLowerCase() ?? '';
   if (isWebSessionAvailable() && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     try {
       const registration = await navigator.serviceWorker.getRegistration();
@@ -191,6 +193,7 @@ export async function logoutUser() {
   }
 
   const cleanup = [
+    forgetAccountOnDevice(signedOutEmail),
     AsyncStorage.removeItem(SESSION_KEY),
     AsyncStorage.removeItem(SESSION_TOKEN_KEY),
     AsyncStorage.removeItem(REMEMBERED_EMAIL_KEY),

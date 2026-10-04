@@ -31,6 +31,17 @@ export function createApp() {
   const app = express();
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
+  // Security headers: the API only answers with JSON, so nothing may frame it, run scripts from it
+  // or guess its content type, and answers with personal data are never cached.
+  app.use((request, response, next) => {
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.setHeader('X-Frame-Options', 'DENY');
+    response.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+    response.setHeader('Referrer-Policy', 'no-referrer');
+    if (config.isProduction) response.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    if (request.path.startsWith('/api')) response.setHeader('Cache-Control', 'no-store');
+    next();
+  });
   // maxAge lets browsers cache the CORS preflight instead of sending OPTIONS before every poll.
   app.use(cors({ origin: (origin, callback) => callback(null, !origin || config.isAllowedOrigin(origin) || isLocalDevelopmentOrigin(origin)), maxAge: 600 }));
   app.use(express.json({ limit: '2mb' }));

@@ -59,9 +59,18 @@ const SECTIONS: { title: string; items: string[] }[] = [
     ],
   },
   {
+    title: 'Cookies and storage',
+    items: [
+      'HabitAI uses no advertising, analytics or tracking cookies, and does not share your data with other websites.',
+      'On your device it keeps only what the app needs: your sign-in session (on the web, for the open browser tab), a copy of your habits and settings for a quick start, check-ins not yet synced, and, if you turn them on, permission for reminders.',
+      'Signing out removes your session and the copy of your habits from that device. You can see the full list in Settings & Preferences > Cookies and storage.',
+    ],
+  },
+  {
     title: 'How we protect it',
     items: [
       'Encrypted connections (HTTPS), hashed passwords and sign-in tokens, limits on repeated attempts, and access restricted by role.',
+      'Browser security rules stop other websites from showing HabitAI inside their pages or running their code in it, and pages with your data are never cached.',
     ],
   },
 ];
