@@ -1,27 +1,13 @@
 // Reminder schedules and notification permissions (native notifications and Web Push).
 import { Platform } from 'react-native';
 import { getWebPushVapidPublicKey, saveWebPushSubscription, sendTestWebPush } from '@/authentication/authService';
+import { parseReminderTime } from '@/utils/reminder-time';
 import type { Habit } from './types';
 
 export type NotificationsModule = typeof import('expo-notifications');
 let notificationsModule: NotificationsModule | null = null;
 
-export function parseReminderTime(value: string) {
-  const match = /^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i.exec(value.trim());
-  if (!match) return null;
-  let hour = Number(match[1]);
-  const minute = Number(match[2]);
-  const period = match[3]?.toUpperCase();
-  if (!Number.isInteger(minute) || minute > 59) return null;
-  if (period) {
-    if (hour < 1 || hour > 12) return null;
-    if (period === 'PM' && hour !== 12) hour += 12;
-    if (period === 'AM' && hour === 12) hour = 0;
-  } else if (hour > 23) {
-    return null;
-  }
-  return { hour, minute };
-}
+export { parseReminderTime } from '@/utils/reminder-time';
 
 export function getHabitReminderTimes(habit: Pick<Habit, 'reminderTime' | 'reminderTimes'>) {
   const values = habit.reminderTimes?.length ? habit.reminderTimes : [habit.reminderTime];

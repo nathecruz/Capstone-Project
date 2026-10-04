@@ -1,10 +1,12 @@
-// Edits a habit's name, category and schedule in place, so fixing a typo or a category does not
-// mean deleting the habit (and its check-ins) and creating it again. Deleting lives here too.
+// Edits a habit's name, category, schedule and reminder times in place, so fixing a typo or a
+// reminder does not mean deleting the habit (and its check-ins) and creating it again. Deleting
+// lives here too.
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ReminderTimesEditor } from '@/components/reminder-time-sheet';
 import { useAppDialog } from '@/components/ui/app-dialog';
-import { useAppColorScheme } from '@/hooks/color-scheme-context';
+import { requestNotificationAccess, useAppColorScheme } from '@/hooks/color-scheme-context';
 import type { Habit } from '@/hooks/app-state/types';
 import { useHabitCategories } from '@/hooks/use-habit-categories';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
@@ -28,6 +30,10 @@ function EditHabitForm({ habit, onClose }: { habit: Habit; onClose: () => void }
   const [label, setLabel] = useState(habit.label);
   const [category, setCategory] = useState(habit.category);
   const [frequency, setFrequency] = useState(habit.frequency);
+  const savedTimes = (habit.reminderTimes?.length ? habit.reminderTimes : [habit.reminderTime]).filter(Boolean);
+  const [remindersOn, setRemindersOn] = useState(habit.reminderEnabled && savedTimes.length > 0);
+  const [times, setTimes] = useState(savedTimes);
+  const [asking, setAsking] = useState(false);
   // A habit can keep a category or schedule that is no longer offered (e.g. a custom schedule).
   const categoryOptions = categories.some((item) => item.label === habit.category)
     ? categories
@@ -37,8 +43,25 @@ function EditHabitForm({ habit, onClose }: { habit: Habit; onClose: () => void }
 
   const save = () => {
     if (nameMissing) return;
-    updateHabit(habit.id, editedHabitFields(habit, { label, category, frequency }, categories));
+    updateHabit(habit.id, editedHabitFields(habit, { label, category, frequency, reminders: remindersOn ? times : null }, categories));
     onClose();
+  };
+
+  // Turning reminders on asks for notification permission first (the browser's, on the web).
+  const toggleReminders = async () => {
+    if (remindersOn) {
+      setRemindersOn(false);
+      return;
+    }
+    setAsking(true);
+    const allowed = await requestNotificationAccess().catch(() => false);
+    setAsking(false);
+    if (!allowed) {
+      showAlert('Notifications are blocked', Platform.OS === 'web' ? 'Allow notifications for HabitAI in your browser, then try again. On iPhone, open HabitAI from your Home Screen.' : 'Allow notifications for HabitAI in your phone settings, then try again.');
+      return;
+    }
+    if (!times.length) setTimes(['07:00 AM']);
+    setRemindersOn(true);
   };
 
   const confirmDelete = () => {
@@ -115,6 +138,25 @@ function EditHabitForm({ habit, onClose }: { habit: Habit; onClose: () => void }
           </View>
           {frequency !== habit.frequency ? <Text style={styles.hint}>Your check-ins stay; the streak is recounted for the new schedule.</Text> : null}
 
+          <View style={styles.reminderHeader}>
+            <View style={styles.reminderCopy}>
+              <Text style={styles.label}>Reminders</Text>
+              <Text style={styles.hint}>{remindersOn ? 'HabitAI reminds you at these times.' : 'Off. This habit is done any time of day.'}</Text>
+            </View>
+            <Pressable
+              style={[styles.toggle, remindersOn && styles.toggleOn]}
+              onPress={() => void toggleReminders()}
+              disabled={asking}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: remindersOn, busy: asking }}
+              accessibilityLabel="Reminders"
+            >
+              <View style={[styles.knob, remindersOn && styles.knobOn]} />
+            </Pressable>
+          </View>
+          {remindersOn && <ReminderTimesEditor times={times} onChange={setTimes} />}
+          {remindersOn && habit.smartReminderEnabled ? <Text style={styles.hint}>Smart Reminder is on: it may move this time a little based on your check-ins.</Text> : null}
+
           <View style={styles.actions}>
             <Pressable style={styles.secondaryButton} onPress={onClose} accessibilityRole="button">
               <Text style={styles.secondaryButtonText}>Cancel</Text>
@@ -150,6 +192,12 @@ const themedStyles = createThemedStyles({
   chipText: { fontSize: 13, fontWeight: '600', color: '#5E5868' },
   chipTextSelected: { color: '#5B42D8', fontWeight: '800' },
   hint: { fontSize: 12, color: '#777282', fontWeight: '600' },
+  reminderHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 6 },
+  reminderCopy: { flex: 1 },
+  toggle: { width: 48, height: 28, borderRadius: 14, padding: 3, justifyContent: 'center', backgroundColor: '#D8D4DF' },
+  toggleOn: { backgroundColor: '#5B42D8' },
+  knob: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#FFFFFF' },
+  knobOn: { alignSelf: 'flex-end' },
   actions: { flexDirection: 'row', gap: 10, marginTop: 14 },
   secondaryButton: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 13, borderRadius: 14, backgroundColor: '#F1EEF7' },
   secondaryButtonText: { fontSize: 14, fontWeight: '700', color: '#3B3746' },

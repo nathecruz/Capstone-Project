@@ -1,8 +1,16 @@
 import type { HabitCategory } from '@/authentication';
 import type { Habit } from '@/hooks/app-state/types';
+import { metaWithReminders, sortReminderTimes } from '@/utils/reminder-time';
 
-export type HabitEdit = { label: string; category: string; frequency: string };
-export type EditableHabitFields = Pick<Habit, 'label' | 'category' | 'icon' | 'color' | 'frequency' | 'meta'>;
+export type HabitEdit = {
+  label: string;
+  category: string;
+  frequency: string;
+  /** New reminder times; null (or none) turns reminders off; left out, reminders stay as they are. */
+  reminders?: string[] | null;
+};
+export type EditableHabitFields = Pick<Habit, 'label' | 'category' | 'icon' | 'color' | 'frequency' | 'meta'>
+  & Partial<Pick<Habit, 'reminderEnabled' | 'reminderTime' | 'reminderTimes'>>;
 
 export const HABIT_NAME_MAX_LENGTH = 60;
 /** Schedules a habit can switch to when edited; a custom schedule needs its days, so it is set when adding. */
@@ -24,7 +32,7 @@ export function editedHabitFields(habit: Habit, edit: HabitEdit, categories: Hab
     const [, reminders] = habit.meta.split(' • ');
     meta = `${edit.frequency} • ${reminders || 'Anytime'}`;
   }
-  return {
+  const fields = {
     label,
     category: edit.category,
     icon: categoryChanged && category ? (category.icon as Habit['icon']) : habit.icon,
@@ -32,4 +40,10 @@ export function editedHabitFields(habit: Habit, edit: HabitEdit, categories: Hab
     frequency: edit.frequency,
     meta,
   };
+  if (edit.reminders === undefined) return fields;
+  // Reminders: the times (earliest first) go in the meta too, which is what "late" is measured
+  // against; turned off, the habit is "Anytime" and its times are kept for next time.
+  const times = sortReminderTimes(edit.reminders ?? []);
+  if (!times.length) return { ...fields, meta: metaWithReminders(meta, null), reminderEnabled: false };
+  return { ...fields, meta: metaWithReminders(meta, times), reminderEnabled: true, reminderTime: times[0], reminderTimes: times };
 }
