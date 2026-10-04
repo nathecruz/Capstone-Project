@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Appearance, Platform, useColorScheme as useRNColorScheme } from 'react-native';
 import { translate } from '@/constants/i18n';
 import { getCurrentSession, subscribeToAuthChanges, type SessionUser } from '@/authentication/session';
-import { buyStreakFreeze as requestStreakFreeze, getRemoteAppState, getRemoteHabitCompletions, saveRemoteAppState, saveRemoteHabitCompletion, syncStreakFreezes, type AppStateSyncBase, type AppStateSyncPayload } from '@/authentication/authService';
+import { buyStreakFreeze as requestStreakFreeze, getLiveVersions, getRemoteAppState, getRemoteHabitCompletions, saveRemoteAppState, saveRemoteHabitCompletion, syncStreakFreezes, type AppStateSyncBase, type AppStateSyncPayload } from '@/authentication/authService';
 import { normalizeHabitFields } from '@/utils/habit-data';
 import { CHECK_IN_UNDO_MS, canCompleteHabitForDate } from '@/utils/habit-visibility';
 import type { EditableHabitFields } from '@/utils/habit-edit';
@@ -15,8 +15,10 @@ import { weeklyQuests } from '@/utils/quests';
 import { computeStreak } from '@/utils/streaks';
 import { applyRemoteCompletionDates, applyVisibleOrder, getLocalDateKey } from './app-state/habit-progress';
 import { AppThemeContext, DarkModeContext } from './dark-mode-context';
-import { adjustBuddyCheckIns, getCachedBuddy } from './use-buddy';
-import { getKnownChallenges, publishDailyChallenges } from './use-daily-challenges';
+import { adjustBuddyCheckIns, getCachedBuddy, reloadBuddy } from './use-buddy';
+import { loadRewards } from './use-rewards';
+import { emitLive, setUnreadCount } from '@/utils/live-events';
+import { getKnownChallenges, loadDailyChallenges, publishDailyChallenges } from './use-daily-challenges';
 import { isAppTheme } from './use-themed-styles';
 import { APP_STATE_KEY_PREFIX, clearSyncMeta, loadSyncMeta, persistSyncBase, persistUnsaved } from './app-state/sync-storage';
 import { useHabitReminders } from './app-state/use-habit-reminders';
@@ -28,7 +30,11 @@ export { enableWebReminders, getHabitReminderDays, getHabitReminderSchedule, get
 
 type ColorScheme = 'light' | 'dark';
 let nextHabitId = 0;
-const REMOTE_REFRESH_INTERVAL_MS = 15000;
+/**
+ * How often an open tab asks the server what changed (GET /api/live, a few bytes). Only what
+ * changed is fetched again; returning to the tab asks right away.
+ */
+const LIVE_PULSE_MS = 10000;
 
 /** JSON with sorted keys, so two copies of the same state compare equal regardless of key order. */
 function stableStringify(value: unknown): string {
@@ -469,6 +475,52 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     };
 
     refreshAppStateRef.current = refreshRemoteState;
+
+    // Tokens can change without the habits changing (a daily claim, a purchase, the mystery box,
+    // another device or the admin panel): take the wallet from the server's state.
+    const refreshWallet = async () => {
+      const remote = await getRemoteAppState(null);
+      if (cancelled || !remote?.state) return;
+      setPoints(remote.state.points);
+      setTokens(remote.state.tokens);
+      setTokenHistory(remote.state.tokenHistory as TokenTransaction[]);
+    };
+
+    // The live pulse: what changed on the server since the last one, and fetch only that.
+    let lastVersions: Record<string, string> | null = null;
+    let pulseInFlight = false;
+    const pulse = async () => {
+      if (cancelled || !appIsActive || pulseInFlight) return;
+      pulseInFlight = true;
+      try {
+        // Changes that could not be saved (offline) are retried on every pulse.
+        if (unsavedRef.current) void refreshRemoteState();
+        const live = await getLiveVersions();
+        if (cancelled || !live.ok) return;
+        setUnreadCount(live.unread);
+        const before = lastVersions;
+        lastVersions = live.versions;
+        if (!before) return;
+        const changed = (key: string) => before[key] !== live.versions[key];
+        if (changed('state')) void refreshRemoteState();
+        else if (changed('wallet')) void refreshWallet();
+        if (changed('state') || changed('wallet')) void loadDailyChallenges();
+        if (changed('state') || changed('buddy')) void reloadBuddy();
+        if (changed('rewards')) void loadRewards();
+        if (changed('claims')) emitLive('claims');
+        if (changed('notifications')) emitLive('notifications');
+        if (changed('freezes')) {
+          void syncStreakFreezes(getLocalDateKey()).then((result) => {
+            if (!cancelled && result.ok) takeFreezeStatus(result);
+          });
+        }
+      } catch {
+        // The server is unreachable for now: the next pulse tries again.
+      } finally {
+        pulseInFlight = false;
+      }
+    };
+
     const syncThenRefresh = async () => {
       if (remoteReadyRef.current) {
         const result = await syncAppStateRef.current?.();
@@ -478,7 +530,10 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     };
     const handleVisibilityChange = () => {
       appIsActive = !document.hidden;
-      if (appIsActive) void syncThenRefresh();
+      if (appIsActive) {
+        void syncThenRefresh();
+        void pulse();
+      }
     };
     const handleOnline = () => {
       if (appIsActive) void syncThenRefresh();
@@ -496,21 +551,26 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     const workers = Platform.OS === 'web' && typeof navigator !== 'undefined' && 'serviceWorker' in navigator ? navigator.serviceWorker : null;
     workers?.addEventListener('message', handleWorkerMessage);
 
-    // Other devices' changes arrive within this interval; returning to the app refreshes immediately.
+    // Changes from anywhere arrive within one pulse; returning to the app asks right away.
     // (It used to poll every second, which exhausted the API rate limit within minutes.)
-    const refreshTimer = setInterval(() => void refreshRemoteState(), REMOTE_REFRESH_INTERVAL_MS);
+    const refreshTimer = setInterval(() => void pulse(), LIVE_PULSE_MS);
+    const firstPulse = setTimeout(() => void pulse(), 1000);
     // The first refresh waits until this render's effects have run: syncAppStateRef still held the
     // blank startup state here, and sending it replaced the account's habits and check-ins.
     const firstRefresh = setTimeout(() => void refreshRemoteState(), 0);
     const appStateSubscription = AppState.addEventListener('change', (nextState) => {
       appIsActive = nextState === 'active';
-      if (appIsActive) void syncThenRefresh();
+      if (appIsActive) {
+        void syncThenRefresh();
+        void pulse();
+      }
     });
 
     return () => {
       cancelled = true;
       clearInterval(refreshTimer);
       clearTimeout(firstRefresh);
+      clearTimeout(firstPulse);
       appStateSubscription.remove();
       if (Platform.OS === 'web' && typeof document !== 'undefined') {
         document.removeEventListener('visibilitychange', handleVisibilityChange);

@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, act } from '@testing-library/react-native';
 import NotificationsScreen from '@/app/notifications';
+import { emitLive } from '@/utils/live-events';
 
 const mockGetPersistedNotifications = jest.fn();
 const mockMarkPersistedNotification = jest.fn();
@@ -46,7 +47,7 @@ describe('NotificationsScreen live refresh', () => {
     jest.useRealTimers();
   });
 
-  it('polls the backend for new notifications while the screen is open', async () => {
+  it('loads new notifications when the live pulse says they changed, and polls slowly as a fallback', async () => {
     await render(<NotificationsScreen />);
 
     await act(async () => {
@@ -56,9 +57,16 @@ describe('NotificationsScreen live refresh', () => {
     expect(mockGetPersistedNotifications).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      await jest.advanceTimersByTimeAsync(15000);
+      emitLive('notifications');
+      await Promise.resolve();
     });
 
     expect(mockGetPersistedNotifications).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(60000);
+    });
+
+    expect(mockGetPersistedNotifications).toHaveBeenCalledTimes(3);
   });
 });

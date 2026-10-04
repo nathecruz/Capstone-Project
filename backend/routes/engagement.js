@@ -7,6 +7,7 @@ import { setCheckIn } from '../services/check-ins.js';
 import { isOpenCheckInDate } from '../services/completion-date.js';
 import { getDailyChallenges } from '../services/daily-challenges.js';
 import { claimDaily, getDailyClaim } from '../services/daily-claims.js';
+import { getLiveVersions } from '../services/live.js';
 import { openMysteryBox } from '../services/mystery-box.js';
 import { applyStreakFreezes, buyStreakFreeze, getStreakFreezeStatus } from '../services/streak-freeze.js';
 import { getWallet } from '../services/wallet.js';
@@ -43,6 +44,15 @@ export default function registerEngagementRoutes(app) {
     const refused = await saveBuddy({ query }, session.userId, input);
     if (refused) return response.status(refused.status).json({ ok: false, message: refused.message });
     response.json({ ok: true, buddy: await getBuddy({ query }, session.userId) });
+  });
+
+  // Live updates: a version for each kind of data, so an open tab fetches only what changed.
+  app.get('/api/live', async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const live = await getLiveVersions({ query }, session.userId);
+    if (!live) return response.status(404).json({ ok: false, message: 'Account not found.' });
+    response.json({ ok: true, ...live });
   });
 
   // Today's three challenges and their progress (paid by each check-in).

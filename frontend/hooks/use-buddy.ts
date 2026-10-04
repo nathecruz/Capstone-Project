@@ -22,6 +22,12 @@ export function adjustBuddyCheckIns(delta: number) {
   if (cached) publishBuddy({ ...cached, checkIns: Math.max(0, cached.checkIns + delta) });
 }
 
+/** Loads the buddy again (it changed on the server) and shares it with every screen. */
+export async function reloadBuddy() {
+  const result = await getBuddy();
+  if (result.ok) publishBuddy(result.buddy);
+}
+
 export function useBuddy() {
   const [buddy, setBuddy] = useState<Buddy | null>(cached);
   const refresh = useCallback(async () => {

@@ -11,6 +11,7 @@ import { ClassPulseCard } from '@/components/class-pulse-card';
 import { DailyChallengesCard, DailyClaimCard } from '@/components/daily-cards';
 import { FramedAvatar } from '@/components/framed-avatar';
 import { useRewards } from '@/hooks/use-rewards';
+import { useUnreadCount } from '@/utils/live-events';
 import { MysteryBoxCard, NextBadgeCard, StreakRiskBanner, WeeklyQuestsCard, WeeklyRecapCard } from '@/components/engagement-cards';
 import { StreakFreezeSheet } from '@/components/streak-freeze-sheet';
 import { TodayAgenda } from '@/components/today-agenda';
@@ -48,6 +49,7 @@ export default function HomeScreen() {
   const openFreeze = () => setFreezeSheetVisible(true);
   const tiles = <BentoTiles habits={habits} onFreeze={openFreeze} />;
   const { frame } = useRewards();
+  const unread = useUnreadCount();
   const progress = (
     <>
       <SectionTitle title="Your progress" subtitle="How your week is going" />
@@ -79,8 +81,9 @@ export default function HomeScreen() {
             )}
           </View>
           <View style={styles.headerActions}>
-            <Pressable style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]} onPress={() => router.push('/notifications')} accessibilityRole="button" accessibilityLabel="Notifications" hitSlop={6}>
-              <Ionicons name="notifications-outline" size={20} color={themeColor('#2F2D3C')} />
+            <Pressable style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]} onPress={() => router.push('/notifications')} accessibilityRole="button" accessibilityLabel={unread ? `Notifications, ${unread} new` : 'Notifications'} hitSlop={6}>
+              <Ionicons name={unread ? 'notifications' : 'notifications-outline'} size={20} color={themeColor('#2F2D3C')} />
+              {unread > 0 && <View style={styles.bellBadge}><Text style={styles.bellBadgeText}>{unread > 9 ? '9+' : unread}</Text></View>}
             </Pressable>
             <Pressable style={({ pressed }) => pressed && styles.pressed} onPress={() => router.navigate('/(tabs)/profile')} accessibilityRole="button" accessibilityLabel="Open profile">
               <FramedAvatar frame={frame} size={frame ? 36 : 44}>
@@ -131,6 +134,8 @@ const themedStyles = createThemedStyles({
   facultyModeText: { fontSize: 11, fontWeight: '800', color: '#FFFFFF' },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 4 },
   iconButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', shadowColor: '#201444', shadowOpacity: 0.06, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
+  bellBadge: { position: 'absolute', top: -2, right: -2, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E5484D', borderWidth: 2, borderColor: '#F5F4F9' },
+  bellBadgeText: { fontSize: 11, lineHeight: 13, fontWeight: '900', color: '#FFFFFF' },
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#EEE9FF', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderWidth: 2, borderColor: '#FFFFFF' },
   avatarImage: { width: '100%', height: '100%' },
   // Inside a frame: the frame's own rings replace the white border.

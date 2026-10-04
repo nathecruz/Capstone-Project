@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { getPersistedNotifications, markPersistedNotification } from '@/authentication';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
+import { onLive } from '@/utils/live-events';
 import { sectionFor, timeLabel, type Section } from '@/utils/notification-time';
 
 type NotificationCategory = 'Reminders' | 'Achievements' | 'System';
@@ -74,10 +75,13 @@ export default function NotificationsScreen() {
       }
     };
     void refreshNotifications();
-    const poller = setInterval(() => void refreshNotifications(), 15000);
+    // New ones arrive with the live pulse; the slow poll is a fallback.
+    const unsubscribe = onLive('notifications', () => void refreshNotifications());
+    const poller = setInterval(() => void refreshNotifications(), 60000);
     return () => {
       active = false;
       isRefreshingRef.current = false;
+      unsubscribe();
       clearInterval(poller);
     };
   }, []);

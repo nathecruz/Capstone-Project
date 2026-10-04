@@ -692,6 +692,40 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(board.body.leaders.find((leader) => leader.isYou).frame, 'neon');
   });
 
+  await t.test('live versions change only for the data that changed', async () => {
+    const password = 'Harbor!Willow5!Comet8!Pine';
+    await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, firstName: 'Lia', lastName: 'Ramos', username: 'lia_ramos', email: 'lia@example.com', password, privacyConsent: true }) });
+    await db.query('UPDATE users SET email_verified_at = 1 WHERE email = $1', ['lia@example.com']);
+    const login = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'lia@example.com', password }) });
+    const headers = { Authorization: `Bearer ${login.body.token}` };
+    const userId = (await db.query('SELECT id FROM users WHERE email=$1', ['lia@example.com'])).rows[0].id;
+    const live = async () => (await request('/api/live', { headers })).body;
+    assert.equal((await request('/api/live')).response.status, 401, 'signed in only');
+
+    const start = await live();
+    assert.deepEqual(Object.keys(start.versions).sort(), ['buddy', 'claims', 'freezes', 'notifications', 'rewards', 'state', 'wallet']);
+    assert.equal(start.unread, 0);
+
+    // A daily claim (on any device) changes the wallet and the claims, nothing else.
+    await request('/api/daily-claim', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+    const claimed = await live();
+    const changed = (before, after) => Object.keys(after.versions).filter((key) => after.versions[key] !== before.versions[key]).sort();
+    assert.deepEqual(changed(start, claimed), ['claims', 'wallet']);
+
+    // A new notification (e.g. a badge) and reading it.
+    await db.query("INSERT INTO notifications(id,user_id,type,title,body,created_at) VALUES('live-note',$1,'achievement','Badge','You earned a badge',$2)", [userId, Date.now()]);
+    const noted = await live();
+    assert.deepEqual([changed(claimed, noted), noted.unread], [['notifications'], 1]);
+    await db.query("UPDATE notifications SET read_at=$2 WHERE id='live-note' AND user_id=$1", [userId, Date.now()]);
+    const read = await live();
+    assert.deepEqual([changed(noted, read), read.unread], [['notifications'], 0]);
+
+    // Saving habits changes the state (and the first habit earns a badge notification); renaming the buddy changes the buddy.
+    await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify(appState) });
+    await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ name: 'Mochi' }) });
+    assert.deepEqual(changed(read, await live()), ['buddy', 'notifications', 'state']);
+  });
+
   await t.test('issue reports store attachments in the database and validate content', async () => {
     const report = await request('/api/support/reports', { method: 'POST', headers: authHeaders, body: JSON.stringify({ topic: 'Other', timing: 'Today', description: 'The report flow works.' }) });
     assert.equal(report.response.status, 201, JSON.stringify(report.body));

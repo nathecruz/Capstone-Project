@@ -561,6 +561,9 @@ export type StreakFreezeStatus = { available: number; max: number; cost: number;
 const deviceTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 /** Uses held streak freezes for days missed before `date` (the device's today) and returns the status. */
 export const syncStreakFreezes = (date: string) => authedRequest<StreakFreezeStatus>('/api/streak-freezes/sync', { method: 'POST', body: JSON.stringify({ date, timeZone: deviceTimeZone() }) });
+/** A version of each kind of the student's data (changes whenever that data does), and unread notifications. */
+export const getLiveVersions = () => authedRequest<{ versions: Record<string, string>; unread: number }>('/api/live');
+
 export type DailyChallenge = { id: string; title: string; icon: string; target: number; progress: number; reward: number; date: string; complete: boolean };
 export type DailyClaim = { date: string; day: number; claimedToday: boolean; amount: number; rewards: number[]; alreadyClaimed?: boolean };
 const todayQuery = (date: string) => `date=${date}&timeZone=${encodeURIComponent(deviceTimeZone())}`;

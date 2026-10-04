@@ -7,6 +7,7 @@ import { claimDailyReward, getDailyClaim, type DailyClaim } from '@/authenticati
 import { Confetti } from '@/components/confetti';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useDailyChallenges } from '@/hooks/use-daily-challenges';
+import { onLive } from '@/utils/live-events';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 import { getLocalDateKey } from '@/utils/habit-visibility';
 
@@ -23,11 +24,15 @@ export function DailyClaimCard({ style }: { style?: object | false }) {
 
   useEffect(() => {
     let active = true;
-    void getDailyClaim(today).then((result) => {
+    const load = () => void getDailyClaim(today).then((result) => {
       if (active && result.ok) setClaim(result);
     });
+    load();
+    // Claimed on another device: show it here too.
+    const unsubscribe = onLive('claims', load);
     return () => {
       active = false;
+      unsubscribe();
     };
   }, [today]);
 
