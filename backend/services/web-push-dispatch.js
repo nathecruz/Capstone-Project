@@ -26,7 +26,7 @@ export async function loadSubscriptionStates(db) {
            subscription.time_zone AS "timeZone",
            current_state.state_json AS "stateJson"
     FROM web_push_subscriptions AS subscription
-    JOIN users AS account ON account.id = subscription.user_id AND account.status <> 'deactivated'
+    JOIN users AS account ON account.id = subscription.user_id AND account.status <> 'deactivated' AND account.role <> 'admin'
     JOIN LATERAL (
       SELECT state_json
       FROM user_app_state
@@ -97,7 +97,7 @@ export async function dispatchDueSnoozes(db, { webpush, template = null, snoozeU
 
   for (const row of claimed.rows) {
     const subscription = (await db.query(`SELECT s.subscription_json AS "subscriptionJson", s.time_zone AS "timeZone" FROM web_push_subscriptions s
-      JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND u.status <> 'deactivated'`, [row.subscriptionId])).rows[0];
+      JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND u.status <> 'deactivated' AND u.role <> 'admin'`, [row.subscriptionId])).rows[0];
     const appState = (await db.query('SELECT state_json AS "stateJson" FROM user_app_state WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 1', [row.userId])).rows[0]?.stateJson;
     if (!subscription || !appState) {
       await db.query('UPDATE web_push_snooze_queue SET sent_at=$2,attempted_at=0 WHERE id=$1', [row.id, now]);

@@ -155,8 +155,8 @@ export default function registerEngagementRoutes(app) {
     if (!input) return;
     const action = readDoneToken(input.token, doneActionSecret());
     if (!action) return response.status(410).json({ ok: false, message: 'This reminder has expired. Open HabitAI to check in.' });
-    const account = (await query('SELECT status FROM users WHERE id=$1', [action.userId])).rows[0];
-    if (!account || account.status === 'deactivated') return response.status(403).json({ ok: false, message: 'This account cannot check in.' });
+    const account = (await query('SELECT status, role FROM users WHERE id=$1', [action.userId])).rows[0];
+    if (!account || account.status === 'deactivated' || account.role === 'admin') return response.status(403).json({ ok: false, message: 'This account cannot check in.' });
     if (!isOpenCheckInDate(action.date, action.timeZone)) {
       return response.status(409).json({ ok: false, code: 'DAY_CLOSED', message: 'That day is over. A missed day stays missed.' });
     }

@@ -297,6 +297,10 @@ export async function signIn(email: string, password: string) {
     if (!payload.token || !isValidSessionUser(payload.user)) {
       return { ok: false, message: 'The account service returned an incomplete sign-in response.' };
     }
+    // The app is for students and faculty; system admins use the Admin Panel (the server refuses them too).
+    if (payload.user.role === 'admin') {
+      return { ok: false, message: 'System admin accounts cannot sign in to the HabitAI app. Please use the HabitAI Admin Panel.' };
+    }
     await saveSessionToken(payload.token, payload.user);
 
     return { ok: true, message: payload.message || 'Login successful.', user: payload.user };

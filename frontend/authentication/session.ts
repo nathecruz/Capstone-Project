@@ -105,6 +105,10 @@ export async function getCurrentSession(): Promise<SessionUser | null> {
     if (!parsed?.email || !parsed?.fullName) {
       return null;
     }
+    // A system admin session (from before admins were refused) does not open the app.
+    if (parsed.role === 'admin') {
+      return null;
+    }
 
     return {
       id: parsed.id ? String(parsed.id) : undefined,
@@ -119,7 +123,7 @@ export async function getCurrentSession(): Promise<SessionUser | null> {
       about: parsed.about ? String(parsed.about) : '',
       emailVerified: typeof parsed.emailVerified === 'boolean' ? parsed.emailVerified : undefined,
       privacyConsentAt: typeof parsed.privacyConsentAt === 'number' || parsed.privacyConsentAt === null ? parsed.privacyConsentAt : undefined,
-      role: parsed.role === 'faculty' || parsed.role === 'admin' ? parsed.role : 'user',
+      role: parsed.role === 'faculty' ? 'faculty' : 'user',
     };
   } catch {
     return null;

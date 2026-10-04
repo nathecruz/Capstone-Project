@@ -38,7 +38,13 @@ export async function createSession(userId) {
   return token;
 }
 
-/** The signed-in user for a Bearer token, or null. Deactivated accounts have no valid sessions. */
+/**
+ * The HabitAI app is for students and faculty. System admins use the Admin Panel (its own
+ * sign-in and sessions) and cannot sign in to the app.
+ */
+export const ADMIN_APP_MESSAGE = 'System admin accounts cannot sign in to the HabitAI app. Please use the HabitAI Admin Panel.';
+
+/** The signed-in user for a Bearer token, or null. Deactivated and system admin accounts have no valid sessions. */
 export async function currentSession(request) {
   const token = authToken(request);
   if (!token) return null;
@@ -47,7 +53,7 @@ export async function currentSession(request) {
   const result = await query(
     `SELECT s.user_id AS "userId", ${USER_COLUMNS}
        FROM sessions s JOIN users u ON u.id = s.user_id
-      WHERE s.token_hash = $1 AND s.expires_at > $2 AND u.status <> 'deactivated'`,
+      WHERE s.token_hash = $1 AND s.expires_at > $2 AND u.status <> 'deactivated' AND u.role <> 'admin'`,
     [tokenHash, now],
   );
   if (!result.rows[0]) await query('DELETE FROM sessions WHERE token_hash = $1 OR expires_at <= $2', [tokenHash, now]);

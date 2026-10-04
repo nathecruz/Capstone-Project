@@ -5,7 +5,7 @@ import { loginLimiter, registerLimiter, resendVerificationLimiter } from '../htt
 import { authToken, hashToken, normalizeEmail, parse } from '../lib/http.js';
 import { namesFromInput } from '../lib/names.js';
 import { loginSchema, passwordSchema, profileSchema, registerSchema } from '../schemas.js';
-import { createSession, findUser, requireAuth, userFromRow } from '../services/accounts.js';
+import { ADMIN_APP_MESSAGE, createSession, findUser, requireAuth, userFromRow } from '../services/accounts.js';
 import { passwordChangedEmail } from '../services/email-templates.js';
 import { sendVerificationCode, verificationEnabled, verifyCode } from '../services/email-verification.js';
 import { sendEmail } from '../services/mailer.js';
@@ -98,6 +98,8 @@ export default function registerAuthRoutes(app) {
     const passwordOk = await verifyPassword(input.password, user?.passwordHash || timingDummyHash);
     if (!user || !passwordOk) return response.status(401).json({ ok: false, message: 'Incorrect email or password.' });
     if (user.status === 'deactivated') return response.status(403).json({ ok: false, message: 'This account has been deactivated. Please contact the HabitAI administrator.' });
+    // Checked after the password, so the role of an account is not revealed to anyone else.
+    if (user.role === 'admin') return response.status(403).json({ ok: false, code: 'ADMIN_ACCOUNT', message: ADMIN_APP_MESSAGE });
     await query('INSERT INTO login_activity (id,user_id,device,created_at) VALUES ($1,$2,$3,$4)', [crypto.randomUUID(), user.id, deviceLabel(input, request), Date.now()]);
     response.json({ ok: true, message: 'Login successful.', token: await createSession(user.id), user: userFromRow(user) });
   });

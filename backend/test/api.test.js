@@ -495,6 +495,33 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.ok(!JSON.stringify(board.body).includes('Santos'), 'faculty are not on the student leaderboard');
   });
 
+  await t.test('system admins cannot sign in to the app (they use the Admin Panel)', async () => {
+    const password = 'Violet!Canyon6!Brisk4!Oak';
+    const registered = await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, firstName: 'Ada', lastName: 'Reyes', username: 'ada_reyes', email: 'ada@example.com', password, privacyConsent: true }) });
+    await db.query('UPDATE users SET email_verified_at = 1 WHERE email = $1', ['ada@example.com']);
+    // Signed in to the app as a student...
+    const before = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'ada@example.com', password }) });
+    assert.equal(before.response.status, 200, JSON.stringify(before.body));
+    // ...then made a system admin in the Admin Panel: every app session stops working at once.
+    await db.query("UPDATE users SET role = 'admin' WHERE email = $1", ['ada@example.com']);
+    for (const token of [before.body.token, registered.body.token]) {
+      const me = await request('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
+      assert.equal(me.response.status, 401, 'an app session of a system admin is not valid');
+    }
+    const sessions = await db.query('SELECT count(*)::int AS n FROM sessions s JOIN users u ON u.id = s.user_id WHERE u.email = $1', ['ada@example.com']);
+    assert.equal(sessions.rows[0].n, 0, 'and it is removed');
+
+    const login = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'ada@example.com', password }) });
+    assert.equal(login.response.status, 403);
+    assert.equal(login.body.code, 'ADMIN_ACCOUNT');
+    assert.match(login.body.message, /Admin Panel/);
+    assert.equal(login.body.token, undefined, 'no app session is created');
+    // A wrong password gets the usual answer, so the account's role is not revealed.
+    const wrong = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'ada@example.com', password: 'Wrong!Harbor2!Pine9!Lake' }) });
+    assert.equal(wrong.response.status, 401);
+    assert.equal(wrong.body.code, undefined);
+  });
+
   await t.test('weekly quests, the mystery box, the habit buddy and the Done button on reminders', async () => {
     const password = 'Cobalt!River8!Maple3!Stone';
     await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, firstName: 'Quest', lastName: 'Runner', username: 'quest_runner', email: 'quest@example.com', password, privacyConsent: true }) });

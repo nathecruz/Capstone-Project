@@ -138,6 +138,27 @@ describe('auth service offline behavior', () => {
     expect(saveSessionToken).toHaveBeenCalledWith('issued-token', user);
   });
 
+  it('shows the server reason when a system admin tries to sign in to the app', async () => {
+    const message = 'System admin accounts cannot sign in to the HabitAI app. Please use the HabitAI Admin Panel.';
+    fetchMock.mockResolvedValue({ ok: false, status: 403, text: async () => JSON.stringify({ ok: false, code: 'ADMIN_ACCOUNT', message }) });
+
+    await expect(signIn('admin@example.com', 'StrongPass!123')).resolves.toEqual({ ok: false, message });
+    expect(saveSessionToken).not.toHaveBeenCalled();
+  });
+
+  it('does not keep a system admin session even if a server issues one', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ok: true, token: 'issued-token', user: { id: 'admin-1', fullName: 'Site Admin', email: 'admin@example.com', role: 'admin' } }),
+    });
+
+    const result = await signIn('admin@example.com', 'StrongPass!123');
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/Admin Panel/);
+    expect(saveSessionToken).not.toHaveBeenCalled();
+  });
+
   it('rejects a successful response that does not include a server session', async () => {
     fetchMock.mockResolvedValue({
       ok: true,
