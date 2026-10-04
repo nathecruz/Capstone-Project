@@ -12,6 +12,16 @@ export function publishBuddy(buddy: Buddy) {
   for (const listener of listeners) listener(buddy);
 }
 
+/** The buddy last loaded this session, or null. */
+export function getCachedBuddy() {
+  return cached;
+}
+
+/** A check-in (+1) or its undo (-1) changes the count right away; the server's count replaces it on the next load. */
+export function adjustBuddyCheckIns(delta: number) {
+  if (cached) publishBuddy({ ...cached, checkIns: Math.max(0, cached.checkIns + delta) });
+}
+
 export function useBuddy() {
   const [buddy, setBuddy] = useState<Buddy | null>(cached);
   const refresh = useCallback(async () => {

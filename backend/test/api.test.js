@@ -545,6 +545,16 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const renamed = await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ name: 'Bolt', head: '' }) });
     assert.deepEqual({ name: renamed.body.buddy.name, head: renamed.body.buddy.head }, { name: 'Bolt', head: '' });
     assert.equal((await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ hand: 'books' }) })).response.status, 400, 'only bought items can be worn');
+    // Rooms: bought like items, moved into right away, and checked the same way.
+    assert.equal((await request('/api/buddy/items', { method: 'POST', headers, body: JSON.stringify({ itemId: 'space' }) })).response.status, 403, 'space needs the Teen stage');
+    assert.equal((await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ room: 'garden' }) })).response.status, 400, 'a room must be bought first');
+    await db.query("INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,60,'Test tokens',$3,$4)", [`${userId}:token:test-room`, userId, new Date().toISOString(), Date.now()]);
+    const garden = await request('/api/buddy/items', { method: 'POST', headers, body: JSON.stringify({ itemId: 'garden' }) });
+    assert.equal(garden.response.status, 200, JSON.stringify(garden.body));
+    assert.deepEqual({ room: garden.body.buddy.room, head: garden.body.buddy.head }, { room: 'garden', head: '' });
+    const moved = await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ room: '' }) });
+    assert.equal(moved.body.buddy.room, '');
+    assert.equal((await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ room: 'cap' }) })).response.status, 400, 'a hat is not a room');
 
     // Done on a reminder notification checks the habit in, with no session; a forged token cannot.
     await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'read', date: today, completed: false, timeZone: 'UTC' }) });

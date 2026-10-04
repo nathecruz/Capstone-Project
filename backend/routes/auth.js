@@ -195,7 +195,7 @@ export default function registerAuthRoutes(app) {
       query('SELECT preferences_json AS preferences FROM user_preferences WHERE user_id=$1', [id]),
       query('SELECT topic, timing, description, status, attachment_name AS "attachmentName", created_at AS "createdAt" FROM issue_reports WHERE user_id=$1', [id]),
       query('SELECT suggestion, created_at AS "createdAt" FROM feature_suggestions WHERE user_id=$1', [id]),
-      query('SELECT name, head_item AS "head", hand_item AS "hand" FROM user_buddy WHERE user_id=$1', [id]),
+      query('SELECT name, head_item AS "head", hand_item AS "hand", room_item AS "room" FROM user_buddy WHERE user_id=$1', [id]),
       query('SELECT item_id AS "item", bought_at AS "boughtAt" FROM buddy_items WHERE user_id=$1 ORDER BY bought_at', [id]),
       query('SELECT freeze_date::text AS date FROM streak_freeze_days WHERE user_id=$1 ORDER BY freeze_date', [id]),
     ]);

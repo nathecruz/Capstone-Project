@@ -1,5 +1,6 @@
-// Habit Buddy: the mascot that grows with every check-in. Tap it, rename it, and dress it up with
-// items bought with tokens (the server checks prices, stages and the balance).
+// Habit Buddy: the mascot that grows with every check-in. It gives tips from the student's own
+// check-ins, shows how its week went, and wears items and lives in rooms bought with tokens (the
+// server checks prices, stages and the balance). Tap it to hear its tips.
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
@@ -12,9 +13,10 @@ import { useAppDialog } from '@/components/ui/app-dialog';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { publishBuddy, useBuddy } from '@/hooks/use-buddy';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
-import { buddyGrowth, buddyMood, PET_LINES, type BuddyItem } from '@/utils/buddy';
+import { buddyGrowth, buddyMood, buddyTips, buddyWeek, MOOD_FACE, PET_LINES, type BuddyItem, type BuddySlot } from '@/utils/buddy';
 
-type Slot = 'head' | 'hand';
+type Slot = BuddySlot;
+const TABS: { slot: Slot; label: string }[] = [{ slot: 'head', label: 'Hats' }, { slot: 'hand', label: 'To hold' }, { slot: 'room', label: 'Rooms' }];
 
 export default function BuddyScreen() {
   const styles = useThemedStyles(themedStyles);
@@ -26,6 +28,7 @@ export default function BuddyScreen() {
   const [editingName, setEditingName] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [petLine, setPetLine] = useState<string | null>(null);
+  const [pets, setPets] = useState(0);
   const [burst, setBurst] = useState(0);
   const [hearts] = useState(() => new Animated.Value(0));
 
@@ -34,11 +37,15 @@ export default function BuddyScreen() {
   const growth = buddyGrowth(checkIns, buddy?.stages);
   const { mood, line, energy } = buddyMood(habits, name, new Date(), streakFreeze?.frozenDays);
   const stages = buddy?.stages ?? [];
+  const tips = buddyTips(habits, { checkIns, stages: buddy?.stages });
+  const week = buddyWeek(habits, new Date(), streakFreeze?.frozenDays);
   const stageIndex = (id: string) => stages.findIndex((stage) => stage.id === id);
 
-  // Tapping the buddy: hearts float up and it says something nice.
+  // Tapping the buddy: hearts float up and it says its tips in turn, then something nice.
   const pet = () => {
-    setPetLine(PET_LINES[Math.floor(Math.random() * PET_LINES.length)]);
+    const lines = [...tips, ...PET_LINES];
+    setPetLine(lines[pets % lines.length]);
+    setPets((count) => count + 1);
     hearts.setValue(0);
     Animated.timing(hearts, { toValue: 1, duration: 900, useNativeDriver: Platform.OS !== 'web' }).start();
   };
@@ -53,7 +60,7 @@ export default function BuddyScreen() {
   };
 
   const wear = async (item: BuddyItem) => {
-    const current = item.slot === 'head' ? buddy?.head : buddy?.hand;
+    const current = buddy?.[item.slot] ?? '';
     setBusy(true);
     const result = await saveBuddy({ [item.slot]: current === item.id ? '' : item.id });
     setBusy(false);
@@ -77,7 +84,7 @@ export default function BuddyScreen() {
           publishBuddy(result.buddy);
           applyWallet(result);
           setBurst((count) => count + 1);
-          setPetLine(`I love my new ${item.name.toLowerCase()}!`);
+          setPetLine(item.slot === 'room' ? `I love my new ${item.name.toLowerCase()}!` : `I love my new ${item.name.toLowerCase()}!`);
         },
       },
     ]);
@@ -146,13 +153,44 @@ export default function BuddyScreen() {
               </View>
             ))}
           </View>
-          <Text style={styles.hint}>Every check-in feeds {name} and helps it grow. Tokens buy new looks.</Text>
+          <Text style={styles.hint}>Every check-in feeds {name} and helps it grow. Tokens buy new looks and rooms.</Text>
+        </View>
+
+        {tips.length > 0 && (
+          <View style={styles.card}>
+            <View style={styles.cardHead}>
+              <View style={styles.cardIcon}><Ionicons name="bulb" size={16} color="#FFFFFF" /></View>
+              <Text style={styles.cardTitle}>{name}&apos;s tips</Text>
+            </View>
+            {tips.map((tip) => (
+              <View key={tip} style={styles.tipRow}>
+                <Text style={styles.tipDot}>•</Text>
+                <Text style={styles.tipText}>{tip}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        <View style={styles.card}>
+          <View style={styles.cardHead}>
+            <View style={[styles.cardIcon, styles.weekIcon]}><Ionicons name="calendar" size={15} color="#FFFFFF" /></View>
+            <Text style={styles.cardTitle}>{name}&apos;s week</Text>
+          </View>
+          <View style={styles.weekRow}>
+            {week.map((day) => (
+              <View key={day.key} style={[styles.weekDay, day.label === 'Today' && styles.weekToday]} accessible accessibilityLabel={`${day.label}: ${day.due ? `${day.done} of ${day.due} done` : 'nothing due'}`}>
+                <Text style={styles.weekFace}>{MOOD_FACE[day.mood]}</Text>
+                <Text style={[styles.weekLabel, day.label === 'Today' && styles.weekLabelToday]}>{day.label}</Text>
+                <Text style={styles.weekCount}>{day.due ? `${day.done}/${day.due}` : '–'}</Text>
+              </View>
+            ))}
+          </View>
         </View>
 
         <View style={styles.tabs}>
-          {(['head', 'hand'] as const).map((value) => (
-            <Pressable key={value} style={[styles.tab, slot === value && styles.activeTab]} onPress={() => setSlot(value)} accessibilityRole="tab" accessibilityState={{ selected: slot === value }}>
-              <Text style={[styles.tabText, slot === value && styles.activeTabText]}>{value === 'head' ? 'Hats' : 'Things to hold'}</Text>
+          {TABS.map((tab) => (
+            <Pressable key={tab.slot} style={[styles.tab, slot === tab.slot && styles.activeTab]} onPress={() => setSlot(tab.slot)} accessibilityRole="tab" accessibilityState={{ selected: slot === tab.slot }}>
+              <Text style={[styles.tabText, slot === tab.slot && styles.activeTabText]}>{tab.label}</Text>
             </Pressable>
           ))}
         </View>
@@ -161,10 +199,11 @@ export default function BuddyScreen() {
           <View style={styles.grid}>
             {items.map((item) => {
               const owned = buddy.owned.includes(item.id);
-              const wearing = (item.slot === 'head' ? buddy.head : buddy.hand) === item.id;
+              const wearing = buddy[item.slot] === item.id;
               const lockedStage = stageIndex(item.stage) > growth.index ? stages[stageIndex(item.stage)] : null;
               const short = Math.max(0, item.cost - tokens);
-              const action = wearing ? 'Wearing' : owned ? 'Wear' : lockedStage ? `${lockedStage.name} stage` : short ? `${short} more` : `Buy · ${item.cost}`;
+              const isRoom = item.slot === 'room';
+              const action = wearing ? (isRoom ? 'Living here' : 'Wearing') : owned ? (isRoom ? 'Move in' : 'Wear') : lockedStage ? `${lockedStage.name} stage` : short ? `${short} more` : `Buy · ${item.cost}`;
               return (
                 <Pressable
                   key={item.id}
@@ -222,8 +261,23 @@ const themedStyles = createThemedStyles({
   stageChipMin: { fontSize: 9, fontWeight: '700', color: '#8A8492' },
   stageChipTextReached: { color: '#FFFFFF' },
   hint: { marginTop: 12, fontSize: 12, fontWeight: '600', color: '#8A8492', textAlign: 'center' },
+  card: { backgroundColor: '#FFFFFF', borderRadius: 22, padding: 16, marginBottom: 14, gap: 10 },
+  cardHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  cardIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F2A93B' },
+  weekIcon: { backgroundColor: '#5B42D8' },
+  cardTitle: { fontSize: 16, fontWeight: '900', color: '#24212D' },
+  tipRow: { flexDirection: 'row', gap: 8 },
+  tipDot: { fontSize: 15, lineHeight: 20, fontWeight: '900', color: '#F2A93B' },
+  tipText: { flex: 1, fontSize: 14, lineHeight: 20, fontWeight: '600', color: '#3B3647' },
+  weekRow: { flexDirection: 'row', gap: 4 },
+  weekDay: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: 8, borderRadius: 14, backgroundColor: '#F7F5FC' },
+  weekToday: { backgroundColor: '#EEE8FF' },
+  weekFace: { fontSize: 22 },
+  weekLabel: { fontSize: 11, fontWeight: '800', color: '#6A6573' },
+  weekLabelToday: { color: '#5B42D8' },
+  weekCount: { fontSize: 11, fontWeight: '700', color: '#8A8492' },
   tabs: { flexDirection: 'row', backgroundColor: '#ECE9F3', borderRadius: 14, padding: 4, marginBottom: 12 },
-  tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 11 },
+  tab: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 40, borderRadius: 11 },
   activeTab: { backgroundColor: '#5B42D8' },
   tabText: { fontSize: 12, color: '#777283', fontWeight: '700' },
   activeTabText: { color: '#FFFFFF' },

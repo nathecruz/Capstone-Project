@@ -7,7 +7,7 @@ import type { Habit } from '@/hooks/app-state/types';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useBuddy } from '@/hooks/use-buddy';
 import { createThemedStyles, useThemedStyles } from '@/hooks/use-themed-styles';
-import { buddyGrowth, buddyMood, MOOD_FACE, type Buddy, type BuddyMood } from '@/utils/buddy';
+import { buddyGrowth, buddyMood, MOOD_FACE, ROOM_LOOK, type Buddy, type BuddyMood } from '@/utils/buddy';
 
 /** Background and ring per stage: the buddy looks a little grander as it grows. */
 const STAGE_LOOK = [
@@ -20,11 +20,17 @@ const STAGE_LOOK = [
 
 const itemEmoji = (buddy: Buddy | null, id: string) => buddy?.items.find((item) => item.id === id)?.emoji ?? '';
 
-/** The hamster with its stage, outfit and mood; it bobs gently, more when happy, slowly when sleepy. */
+/**
+ * The hamster with its stage, outfit, room and mood; it bobs gently, more when happy, slowly when
+ * sleepy. Champs sparkle and Legends glow gold.
+ */
 export function BuddyAvatar({ buddy, checkIns, mood, size = 120 }: { buddy: Buddy | null; checkIns: number; mood: BuddyMood; size?: number }) {
   const styles = useThemedStyles(themedStyles);
   const { index } = buddyGrowth(checkIns, buddy?.stages);
   const look = STAGE_LOOK[index] ?? STAGE_LOOK[0];
+  const room = buddy?.room ? ROOM_LOOK[buddy.room] : undefined;
+  const legend = index >= 4;
+  const champ = index >= 3;
   const [bob] = useState(() => new Animated.Value(0));
   useEffect(() => {
     if (mood === 'sad') {
@@ -44,7 +50,21 @@ export function BuddyAvatar({ buddy, checkIns, mood, size = 120 }: { buddy: Budd
   const hand = itemEmoji(buddy, buddy?.hand ?? '');
   return (
     <View style={{ width: size, height: size }} accessible accessibilityLabel={`${buddy?.name ?? 'Your buddy'}, feeling ${mood}`}>
-      <View style={[styles.circle, { width: size, height: size, borderRadius: size / 2, backgroundColor: look.background, borderColor: look.ring, borderWidth: Math.max(3, size * 0.035) }]} />
+      {legend && <View style={[styles.circle, styles.glow, { width: size * 1.12, height: size * 1.12, borderRadius: size * 0.56, left: -size * 0.06, top: -size * 0.06 }]} />}
+      <View style={[styles.circle, { width: size, height: size, borderRadius: size / 2, backgroundColor: room?.background ?? look.background, borderColor: legend ? '#E9B526' : look.ring, borderWidth: Math.max(3, size * (legend ? 0.05 : 0.035)) }]}>
+        {room && size >= 60 && (
+          <>
+            <Text style={[styles.decor, { fontSize: size * 0.2, left: size * 0.08, bottom: size * 0.1 }]}>{room.decor[0]}</Text>
+            <Text style={[styles.decor, { fontSize: size * 0.15, right: size * 0.12, top: size * 0.12 }]}>{room.decor[1]}</Text>
+          </>
+        )}
+      </View>
+      {champ && size >= 60 && (
+        <>
+          <Text style={[styles.sparkle, { fontSize: size * 0.14, left: -size * 0.02, top: size * 0.04 }]}>✨</Text>
+          <Text style={[styles.sparkle, { fontSize: size * 0.11, right: -size * 0.04, bottom: size * 0.2 }]}>{legend ? '🌟' : '✨'}</Text>
+        </>
+      )}
       <Animated.View style={[styles.body, { transform: [{ translateY: bob.interpolate({ inputRange: [0, 1], outputRange: [0, lift] }) }, { scale: 0.82 + index * 0.05 }] }]}>
         <Text style={{ fontSize: size * 0.52, lineHeight: size * 0.62 }}>🐹</Text>
         {head ? <Text style={[styles.head, { fontSize: size * 0.26, top: -size * 0.13 }]}>{head}</Text> : null}
@@ -86,6 +106,10 @@ export function BuddyCard({ habits, style }: { habits: Habit[]; style?: object |
 
 const themedStyles = createThemedStyles({
   circle: { position: 'absolute', left: 0, top: 0 },
+  // Legend: a soft gold glow behind the circle.
+  glow: { backgroundColor: '#F9D65C', opacity: 0.45 },
+  decor: { position: 'absolute' },
+  sparkle: { position: 'absolute' },
   body: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   head: { position: 'absolute', alignSelf: 'center' },
   hand: { position: 'absolute' },
@@ -102,4 +126,7 @@ const themedStyles = createThemedStyles({
   energyRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   energyTrack: { flex: 1, height: 7, borderRadius: 4, backgroundColor: '#FFF1DC', overflow: 'hidden' },
   energyFill: { height: '100%', borderRadius: 4, backgroundColor: '#F2A93B' },
+}, {
+  // Dark mode: a fainter glow, so it stays gold instead of turning muddy on the dark card.
+  glow: { backgroundColor: '#F9D65C', opacity: 0.22 },
 });

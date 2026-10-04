@@ -292,6 +292,7 @@ CREATE TABLE IF NOT EXISTS user_buddy (
   name TEXT NOT NULL DEFAULT 'Habi',
   head_item TEXT NOT NULL DEFAULT '',
   hand_item TEXT NOT NULL DEFAULT '',
+  room_item TEXT NOT NULL DEFAULT '',
   updated_at BIGINT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS buddy_items (

@@ -9,11 +9,13 @@ import { CHECK_IN_UNDO_MS, canCompleteHabitForDate } from '@/utils/habit-visibil
 import type { EditableHabitFields } from '@/utils/habit-edit';
 import { namesOf } from '@/utils/names';
 import { badgeProgress } from '@/utils/achievements';
+import { buddyGrowth } from '@/utils/buddy';
 import { dailyChallenge, levelProgress, streakMilestone, todayAgenda } from '@/utils/engagement';
 import { weeklyQuests } from '@/utils/quests';
 import { computeStreak } from '@/utils/streaks';
 import { applyRemoteCompletionDates, applyVisibleOrder, getLocalDateKey } from './app-state/habit-progress';
 import { AppThemeContext, DarkModeContext } from './dark-mode-context';
+import { adjustBuddyCheckIns, getCachedBuddy } from './use-buddy';
 import { isAppTheme } from './use-themed-styles';
 import { APP_STATE_KEY_PREFIX, clearSyncMeta, loadSyncMeta, persistSyncBase, persistUnsaved } from './app-state/sync-storage';
 import { useHabitReminders } from './app-state/use-habit-reminders';
@@ -107,7 +109,7 @@ type ColorSchemeContextValue = {
 
 export type StreakFreeze = { available: number; max: number; cost: number; frozenDays: string[] };
 
-export type Celebration = { id: string; kind: 'streak' | 'freeze' | 'badge' | 'quest' | 'level' | 'challenge' | 'allDone'; icon: string; title: string; message: string; color?: string };
+export type Celebration = { id: string; kind: 'buddy' | 'streak' | 'freeze' | 'badge' | 'quest' | 'level' | 'challenge' | 'allDone'; icon: string; title: string; message: string; color?: string };
 
 const ColorSchemeContext = createContext<ColorSchemeContextValue | undefined>(undefined);
 
@@ -559,7 +561,15 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     const newBadge = badgeProgress(habitsAfter, goals, now, frozen).find((badge) => badge.earned && !earnedBefore.has(badge.id));
     const questsBefore = new Set(weeklyQuests(habits, now).filter((quest) => quest.complete).map((quest) => quest.id));
     const newQuest = weeklyQuests(habitsAfter, now).find((quest) => quest.complete && !questsBefore.has(quest.id));
-    if (milestone) {
+    // The buddy grows up with this check-in (the rarest moment, so it comes first).
+    const buddy = getCachedBuddy();
+    const checkInsBefore = buddy?.checkIns ?? habits.reduce((sum, item) => sum + item.completionDates.length, 0);
+    const grownBefore = buddyGrowth(checkInsBefore, buddy?.stages);
+    const grownAfter = buddyGrowth(checkInsBefore + 1, buddy?.stages);
+    if (grownAfter.index > grownBefore.index) {
+      const name = buddy?.name ?? 'Habi';
+      celebrate({ id: `buddy:${grownAfter.stage.id}`, kind: 'buddy', icon: 'paw', title: `${name} grew into a ${grownAfter.stage.name}!`, message: `${checkInsBefore + 1} check-ins together. New looks are waiting in ${name}'s shop.` });
+    } else if (milestone) {
       celebrate({ id: `streak:${habit.id}:${milestone}:${dateKey}`, kind: 'streak', icon: 'flame', title: `${milestone}-day streak!`, message: `${habit.label}: ${milestone} days in a row. Keep the flame going!` });
     } else if (newBadge) {
       celebrate({ id: `badge:${newBadge.id}`, kind: 'badge', icon: newBadge.icon, color: newBadge.color, title: `Badge unlocked: ${newBadge.title}`, message: `You did it: ${newBadge.goal.charAt(0).toLowerCase()}${newBadge.goal.slice(1)}. See all your badges in Achievements.` });
@@ -610,6 +620,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     });
     applyLocalCheckIn(id, dateKey, completed);
     if (completed) celebrateCheckIn(currentHabit, dateKey);
+    adjustBuddyCheckIns(completed ? 1 : -1);
     void saveRemoteHabitCompletion({ habitId: id, date: dateKey, completed }).then((result) => {
       if (!result) {
         // The server keeps a check-in it would not undo (locked, or unreachable): show it again.

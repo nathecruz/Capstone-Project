@@ -42,10 +42,12 @@ test('quest targets fit the number of habits', () => {
 });
 
 test('the buddy grows with check-ins and the shop has a price and stage for everything', () => {
+  assert.equal(new Set(BUDDY_ITEMS.map((item) => item.id)).size, BUDDY_ITEMS.length, 'item ids are unique');
+  assert.ok(BUDDY_ITEMS.filter((item) => item.slot === 'room').length >= 4, 'rooms are on sale');
   assert.deepEqual([0, 9, 10, 49, 50, 149, 150, 399, 400, 5000].map(buddyStageIndex), [0, 0, 1, 1, 2, 2, 3, 3, 4, 4]);
   assert.deepEqual(BUDDY_STAGES.map((stage) => stage.id), ['baby', 'kid', 'teen', 'champ', 'legend']);
   for (const item of BUDDY_ITEMS) {
-    assert.ok(['head', 'hand'].includes(item.slot) && item.cost > 0 && BUDDY_STAGES.some((stage) => stage.id === item.stage), item.id);
+    assert.ok(['head', 'hand', 'room'].includes(item.slot) && item.cost > 0 && BUDDY_STAGES.some((stage) => stage.id === item.stage), item.id);
   }
 });
 
