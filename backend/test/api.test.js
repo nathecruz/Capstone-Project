@@ -368,6 +368,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(analysis.body.stats.completedDays, 1);
     assert.deepEqual(analysis.body.stats.last7Days, [0, 0, 0, 0, 0, 0, 1]);
     assert.equal(analysis.body.ml.completionProbability, 0.72);
+    assert.equal(analysis.body.mlStatus, 'ready');
     assert.equal(analysis.body.ai, null, 'no AI advice without an API key');
     const unknown = await request('/api/insights/habit-analysis', { method: 'POST', headers: authHeaders, body: JSON.stringify({ habitId: 'missing' }) });
     assert.equal(unknown.response.status, 404);

@@ -258,7 +258,7 @@ export default function InsightsScreen() {
       } catch {
         if (controller.signal.aborted || requestId !== latestRequestId) return;
         setMlPrediction(null);
-        setPredictionError('Live AI forecast is unavailable. Showing your actual progress data instead.');
+        setPredictionError('The forecast service may still be starting up (free server). Showing your recorded progress for now; this updates by itself.');
       } finally {
         if (!controller.signal.aborted && requestId === latestRequestId) setPredictionLoading(false);
       }

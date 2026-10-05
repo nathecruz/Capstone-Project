@@ -8,6 +8,7 @@ import { FACULTY_CONTEXT, buildUserPrompt, cleanAnswer, forAudience, normalizeGo
 import { keepCompletedGoalSteps, sameState, stableStringify } from '../services/app-state-sync.js';
 import { escapeHtml, passwordChangedEmail, passwordResetCodeEmail } from '../services/email-templates.js';
 import { getEmailConfig, sendEmail } from '../services/mailer.js';
+import { createMlWaker } from '../services/ml-wake.js';
 import { passwordStrength } from '../services/passwords.js';
 
 test('recognises template values copied from .env.example', () => {
@@ -108,6 +109,18 @@ test('state comparison ignores key order, as JSONB reorders keys', () => {
   assert.equal(stableStringify({ b: 1, a: [{ d: 2, c: 3 }] }), '{"a":[{"c":3,"d":2}],"b":1}');
   assert.equal(sameState({ a: 1, b: { c: 2 } }, { b: { c: 2 }, a: 1 }), true);
   assert.equal(sameState({ a: 1 }, { a: 2 }), false);
+});
+
+test('the ML service is woken at most once every 10 minutes while the app is used', async () => {
+  const calls = [];
+  const wake = createMlWaker({ enabled: true, url: 'https://ml.example/', fetchImpl: async (url) => { calls.push(url); return { ok: true }; } });
+  const start = 1_000_000;
+  assert.equal(wake(start), true);
+  assert.equal(wake(start + 9 * 60_000), false, 'not again within 10 minutes');
+  assert.equal(wake(start + 10 * 60_000), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ['https://ml.example/healthz', 'https://ml.example/healthz']);
+  assert.equal(createMlWaker({ enabled: false, url: 'https://ml.example', fetchImpl: async () => calls.push('x') })(start), false, 'off outside production');
 });
 
 test('a done goal step stays done, whatever a device sends', () => {

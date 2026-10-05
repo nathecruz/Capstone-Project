@@ -51,9 +51,12 @@ export async function loadAiContext(userId, timeZone = DEFAULT_TIME_ZONE) {
   });
 }
 
-/** The ML service's forecast for one habit, or null when it is not configured or not reachable. */
+/**
+ * The ML service's forecast for one habit. status says why there is none: 'off' (not
+ * configured), 'starting' (it was asleep and did not answer in time) or 'unavailable'.
+ */
 async function mlForecast(signal) {
-  if (!config.ml.key) return null;
+  if (!config.ml.key) return { ml: null, status: 'off' };
   try {
     const result = await fetch(`${config.ml.url.replace(/\/$/, '')}/api/predict/habit`, {
       method: 'POST',
@@ -62,9 +65,9 @@ async function mlForecast(signal) {
       // A sleeping ML service takes up to a minute; the analysis should not wait that long.
       signal: AbortSignal.timeout(Math.min(config.ml.timeoutMs, 20_000)),
     });
-    return result.ok ? mlSummary(await result.json()) : null;
-  } catch {
-    return null;
+    return result.ok ? { ml: mlSummary(await result.json()), status: 'ready' } : { ml: null, status: 'unavailable' };
+  } catch (error) {
+    return { ml: null, status: error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 'starting' : 'unavailable' };
   }
 }
 
@@ -127,7 +130,7 @@ export default function registerAiRoutes(app) {
     if (!row) return response.status(404).json({ ok: false, error: 'Habit not found.' });
     const habit = { ...habitFromRow(row), label: row.label, category: row.category, reminderEnabled: row.reminderEnabled, reminderTime: row.reminderTime };
     const stats = habitStats({ habit, completions: completionResult.rows, timeZone });
-    const ml = await mlForecast(mlSignal(stats));
+    const { ml, status: mlStatus } = await mlForecast(mlSignal(stats));
 
     let ai = null;
     if (isAiConfigured()) {
@@ -161,6 +164,7 @@ export default function registerAiRoutes(app) {
         last7Days: stats.last7Days,
       },
       ml,
+      mlStatus,
       ai,
     });
   });

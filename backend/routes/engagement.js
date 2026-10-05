@@ -10,6 +10,7 @@ import { claimDaily, getDailyClaim } from '../services/daily-claims.js';
 import { getLiveVersions } from '../services/live.js';
 import { openMysteryBox } from '../services/mystery-box.js';
 import { applyStreakFreezes, buyStreakFreeze, getStreakFreezeStatus } from '../services/streak-freeze.js';
+import { wakeMlService } from '../services/ml-wake.js';
 import { getWallet } from '../services/wallet.js';
 import { doneActionSecret, readDoneToken } from '../services/web-push-actions.js';
 
@@ -50,6 +51,8 @@ export default function registerEngagementRoutes(app) {
   app.get('/api/live', async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
+    // Someone is using the app: make sure the (sleeping) ML service is starting.
+    wakeMlService();
     const live = await getLiveVersions({ query }, session.userId);
     if (!live) return response.status(404).json({ ok: false, message: 'Account not found.' });
     response.json({ ok: true, ...live });

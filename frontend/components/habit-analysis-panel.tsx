@@ -1,13 +1,15 @@
 // Insights > Predictions: each habit analysed by the machine-learning model (chance of doing it
 // next time, dropout risk) and the AI (best time, three steps, what to watch out for).
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { analyzeHabit, type HabitAnalysis } from '@/authentication';
 import type { Habit } from '@/hooks/app-state/types';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 const percent = (value: number) => `${Math.round(value * 100)}%`;
+/** How long to wait before analysing again when the ML service was still starting. */
+export const ML_RETRY_MS = 45_000;
 
 export function HabitAnalysisPanel({ habits }: { habits: Habit[] }) {
   const styles = useThemedStyles(themedStyles);
@@ -17,6 +19,8 @@ export function HabitAnalysisPanel({ habits }: { habits: Habit[] }) {
   const [results, setResults] = useState<Record<string, HabitAnalysis>>({});
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [error, setError] = useState<{ id: string; message: string } | null>(null);
+  // Habits already re-analysed once because the ML service was still starting.
+  const retried = useRef(new Set<string>());
   const selected = habits.find((habit) => habit.id === selectedId) ?? habits[0] ?? null;
   const analysis = selected ? results[selected.id] : undefined;
 
@@ -39,6 +43,17 @@ export function HabitAnalysisPanel({ habits }: { habits: Habit[] }) {
     const timer = setTimeout(() => { if (habit) void run(habit); }, 0);
     return () => clearTimeout(timer);
   }, [selectedHabitId, results, loadingId, error, habits, run]);
+
+  // The ML service sleeps on the free server and takes about a minute to start: analyse again
+  // once, by itself, when the first answer came back without its forecast for that reason.
+  const startingHabitId = selectedHabitId && results[selectedHabitId]?.mlStatus === 'starting' ? selectedHabitId : null;
+  useEffect(() => {
+    if (!startingHabitId || retried.current.has(startingHabitId)) return;
+    retried.current.add(startingHabitId);
+    const habit = habits.find((item) => item.id === startingHabitId);
+    const timer = setTimeout(() => { if (habit) void run(habit); }, ML_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [startingHabitId, habits, run]);
 
   if (!selected) {
     return (
@@ -109,7 +124,9 @@ export function HabitAnalysisPanel({ habits }: { habits: Habit[] }) {
           <Text style={styles.source}>
             {analysis.ml
               ? `${analysis.ml.source === 'model' ? 'ML model forecast' : 'ML estimate (rules, until a trained model is approved)'}${analysis.ml.dropoutRisk !== null ? ` · dropout risk ${percent(analysis.ml.dropoutRisk)}` : ''}`
-              : 'The ML forecast is unavailable right now.'}
+              : analysis.mlStatus === 'starting'
+                ? 'The ML service was asleep and is starting up (about a minute on the free server). Checking again shortly…'
+                : 'The ML forecast is unavailable right now.'}
           </Text>
           {(analysis.stats.strongestWeekday || analysis.stats.usualCheckInTime) && (
             <Text style={styles.pattern}>

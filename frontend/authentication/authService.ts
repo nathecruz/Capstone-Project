@@ -725,6 +725,8 @@ export type HabitAnalysis = {
     last7Days: number[];
   };
   ml: { completionProbability: number; dropoutRisk: number | null; recommendedAction: string; suggestedReminderTime: string; source: 'model' | 'rules' } | null;
+  /** Why ml is missing: 'starting' when the ML service was asleep and did not answer in time. */
+  mlStatus?: 'ready' | 'starting' | 'unavailable' | 'off';
   ai: { headline: string; bestTime: string; steps: string[]; watchOut: string } | null;
 };
 
