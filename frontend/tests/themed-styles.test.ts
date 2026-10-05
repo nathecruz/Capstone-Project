@@ -86,4 +86,11 @@ describe('createThemedStyles', () => {
     expect(themed.dark.knob).toEqual({ backgroundColor: '#FFFFFF' });
     expect(themed.dark.badge).toEqual({ backgroundColor: '#123456' });
   });
+
+  it('merges a partial override over the derived dark style, so its text still turns light', () => {
+    const themed = createThemedStyles({
+      input: { backgroundColor: '#FFFFFF', color: '#2D2A3D', borderWidth: 2 },
+    }, { input: { backgroundColor: '#221E2B' } });
+    expect(themed.dark.input).toEqual({ backgroundColor: '#221E2B', color: DARK_PALETTE.ink, borderWidth: 2 });
+  });
 });

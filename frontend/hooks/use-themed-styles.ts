@@ -74,7 +74,8 @@ export function darkColor(value: string, property: string): string {
 
 const COLOR_PROPERTIES = ['backgroundColor', 'color', 'tintColor', 'borderColor', 'borderTopColor', 'borderBottomColor', 'borderLeftColor', 'borderRightColor'];
 
-type StyleOverrides<T> = { [K in keyof T]?: T[K] };
+/** Dark-mode changes per style; each is merged over the derived dark style, so only the changed properties are needed. */
+type StyleOverrides<T> = { [K in keyof T]?: Partial<T[K]> };
 
 /** Switch knobs and slider thumbs stay white on their coloured or grey tracks. */
 const KEEP_LIGHT = /knob|thumb/i;
