@@ -37,12 +37,15 @@ function subscribe(listener: () => void) {
   };
 }
 
-/** Today's challenges; loads them when the day (or the account) changes. */
-export function useDailyChallenges(habitCount: number) {
+/**
+ * Today's challenges; loads them when the day (or the account) changes. With load false it only
+ * reads what another part of the screen loaded (no second request).
+ */
+export function useDailyChallenges(habitCount: number, load = true) {
   const snapshot = useSyncExternalStore(subscribe, () => state, () => state);
   const today = getLocalDateKey();
   useEffect(() => {
-    if (habitCount > 0) void loadDailyChallenges();
-  }, [today, habitCount]);
+    if (load && habitCount > 0) void loadDailyChallenges();
+  }, [today, habitCount, load]);
   return snapshot.date === today ? snapshot.challenges : [];
 }

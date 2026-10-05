@@ -122,13 +122,13 @@ export function BentoTiles({ habits, onFreeze, style }: { habits: Habit[]; onFre
 
 const themedStyles = createThemedStyles({
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  tile: { flexGrow: 1, flexBasis: '45%', minHeight: 124, borderRadius: 22, padding: 14, justifyContent: 'space-between', gap: 6 },
+  tile: { flexGrow: 1, flexBasis: '45%', minHeight: 112, borderRadius: 22, padding: 14, justifyContent: 'space-between', gap: 5 },
   pressed: { opacity: 0.88, transform: [{ scale: 0.98 }] },
   tileTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, minHeight: 32 },
   label: { flexShrink: 1, fontSize: 12, fontWeight: '800', letterSpacing: 0.4, textTransform: 'uppercase' },
   iconBubble: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.75)', alignItems: 'center', justifyContent: 'center' },
   valueRow: { flexDirection: 'row', alignItems: 'baseline', gap: 5 },
-  value: { flexShrink: 1, fontSize: 28, fontWeight: '900', letterSpacing: -0.5 },
+  value: { flexShrink: 1, fontSize: 26, fontWeight: '900', letterSpacing: -0.5 },
   unit: { flexShrink: 1, fontSize: 13, fontWeight: '800' },
   detail: { fontSize: 12, lineHeight: 16, fontWeight: '700' },
   track: { height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.8)', overflow: 'hidden' },

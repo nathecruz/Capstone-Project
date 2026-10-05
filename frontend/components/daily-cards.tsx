@@ -12,7 +12,8 @@ import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-
 import { getLocalDateKey } from '@/utils/habit-visibility';
 
 /** The 7-day reward calendar with today's claim. */
-export function DailyClaimCard({ style }: { style?: object | false }) {
+/** onReadyChange: told whether today's reward is waiting to be claimed (for the Rewards tabs). */
+export function DailyClaimCard({ style, onReadyChange }: { style?: object | false; onReadyChange?: (ready: boolean) => void }) {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const { applyWallet } = useAppColorScheme();
@@ -35,6 +36,10 @@ export function DailyClaimCard({ style }: { style?: object | false }) {
       unsubscribe();
     };
   }, [today]);
+
+  useEffect(() => {
+    if (claim) onReadyChange?.(!claim.claimedToday);
+  }, [claim, onReadyChange]);
 
   if (!claim) return null;
   const { day, claimedToday, rewards } = claim;

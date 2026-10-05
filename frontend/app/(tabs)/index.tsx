@@ -1,5 +1,5 @@
 // Home, as a bento dashboard: a greeting, today's progress and next habit (the hero), tiles for
-// streak, level, tokens and Habi, today's habits, then challenges and progress. On laptops the
+// streak, level, tokens and Habi, today's habits, then the rewards (as tabs) and progress. On laptops the
 // hero, habits and progress sit on the left and the tiles and challenges on the right.
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -8,11 +8,11 @@ import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BentoTiles } from '@/components/bento-tiles';
 import { ClassPulseCard } from '@/components/class-pulse-card';
-import { DailyChallengesCard, DailyClaimCard } from '@/components/daily-cards';
 import { FramedAvatar } from '@/components/framed-avatar';
 import { useRewards } from '@/hooks/use-rewards';
 import { useUnreadCount } from '@/utils/live-events';
-import { MysteryBoxCard, NextBadgeCard, StreakRiskBanner, WeeklyQuestsCard, WeeklyRecapCard } from '@/components/engagement-cards';
+import { MysteryBoxCard, NextBadgeCard, StreakRiskBanner, WeeklyRecapCard } from '@/components/engagement-cards';
+import { RewardsHub } from '@/components/rewards-hub';
 import { StreakFreezeSheet } from '@/components/streak-freeze-sheet';
 import { TodayAgenda } from '@/components/today-agenda';
 import { WeekStrip } from '@/components/week-strip';
@@ -104,11 +104,8 @@ export default function HomeScreen() {
 
           <View style={[styles.column, isDesktop && styles.sideColumn]}>
             {isDesktop && tiles}
-            <SectionTitle title="Rewards and challenges" subtitle="Earn tokens every day" />
-            <DailyClaimCard />
-            <DailyChallengesCard habitCount={habits.length} />
+            <RewardsHub habits={habits} now={now} />
             <MysteryBoxCard habits={habits} tokenHistory={tokenHistory} onWallet={applyWallet} />
-            <WeeklyQuestsCard habits={habits} now={now} />
             {!isDesktop && progress}
           </View>
         </View>
