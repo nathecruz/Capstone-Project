@@ -1,15 +1,13 @@
 // Insights > Predictions: each habit analysed by the machine-learning model (chance of doing it
 // next time, dropout risk) and the AI (best time, three steps, what to watch out for).
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { analyzeHabit, type HabitAnalysis } from '@/authentication';
 import type { Habit } from '@/hooks/app-state/types';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 const percent = (value: number) => `${Math.round(value * 100)}%`;
-/** How long to wait before analysing again when the ML service was still starting. */
-export const ML_RETRY_MS = 45_000;
 
 export function HabitAnalysisPanel({ habits }: { habits: Habit[] }) {
   const styles = useThemedStyles(themedStyles);
@@ -19,8 +17,6 @@ export function HabitAnalysisPanel({ habits }: { habits: Habit[] }) {
   const [results, setResults] = useState<Record<string, HabitAnalysis>>({});
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [error, setError] = useState<{ id: string; message: string } | null>(null);
-  // Habits already re-analysed once because the ML service was still starting.
-  const retried = useRef(new Set<string>());
   const selected = habits.find((habit) => habit.id === selectedId) ?? habits[0] ?? null;
   const analysis = selected ? results[selected.id] : undefined;
 
@@ -43,17 +39,6 @@ export function HabitAnalysisPanel({ habits }: { habits: Habit[] }) {
     const timer = setTimeout(() => { if (habit) void run(habit); }, 0);
     return () => clearTimeout(timer);
   }, [selectedHabitId, results, loadingId, error, habits, run]);
-
-  // The ML service sleeps on the free server and takes about a minute to start: analyse again
-  // once, by itself, when the first answer came back without its forecast for that reason.
-  const startingHabitId = selectedHabitId && results[selectedHabitId]?.mlStatus === 'starting' ? selectedHabitId : null;
-  useEffect(() => {
-    if (!startingHabitId || retried.current.has(startingHabitId)) return;
-    retried.current.add(startingHabitId);
-    const habit = habits.find((item) => item.id === startingHabitId);
-    const timer = setTimeout(() => { if (habit) void run(habit); }, ML_RETRY_MS);
-    return () => clearTimeout(timer);
-  }, [startingHabitId, habits, run]);
 
   if (!selected) {
     return (
@@ -124,9 +109,7 @@ export function HabitAnalysisPanel({ habits }: { habits: Habit[] }) {
           <Text style={styles.source}>
             {analysis.ml
               ? `${analysis.ml.source === 'model' ? 'ML model forecast' : 'ML estimate (rules, until a trained model is approved)'}${analysis.ml.dropoutRisk !== null ? ` · dropout risk ${percent(analysis.ml.dropoutRisk)}` : ''}`
-              : analysis.mlStatus === 'starting'
-                ? 'The ML service was asleep and is starting up (about a minute on the free server). Checking again shortly…'
-                : 'The ML forecast is unavailable right now.'}
+              : 'The ML forecast is unavailable right now.'}
           </Text>
           {(analysis.stats.strongestWeekday || analysis.stats.usualCheckInTime) && (
             <Text style={styles.pattern}>
@@ -153,7 +136,15 @@ export function HabitAnalysisPanel({ habits }: { habits: Habit[] }) {
               </View>
             </View>
           ) : (
-            <Text style={styles.muted}>{analysis.ml?.recommendedAction || 'AI advice is unavailable right now.'}</Text>
+            <View style={styles.noAdvice}>
+              <Text style={styles.muted}>{analysis.ml?.recommendedAction || 'AI advice is unavailable right now.'}</Text>
+              {analysis.aiStatus === 'limited' && (
+                <View style={styles.limitNote}>
+                  <Ionicons name="hourglass-outline" size={14} color={themeColor('#8A5A12')} />
+                  <Text style={styles.limitText}>New AI advice is paused for a few minutes (AI limit). The forecast above is always up to date.</Text>
+                </View>
+              )}
+            </View>
           )}
 
           <Pressable style={styles.refresh} onPress={() => void run(selected)} accessibilityRole="button" accessibilityLabel={`Analyse ${selected.label} again`}>
@@ -173,6 +164,9 @@ const themedStyles = createThemedStyles({
   headerCopy: { flex: 1 },
   title: { fontSize: 17, fontWeight: '800', color: '#2D2A3D' },
   muted: { fontSize: 12, lineHeight: 17, fontWeight: '600', color: '#7A728B' },
+  noAdvice: { gap: 8 },
+  limitNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, padding: 10, borderRadius: 12, backgroundColor: '#FFF6E5' },
+  limitText: { flex: 1, fontSize: 12, lineHeight: 17, fontWeight: '700', color: '#8A5A12' },
   chips: { gap: 8, paddingRight: 4 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: 200, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: '#E4E0EC', backgroundColor: '#FFFFFF' },
   chipActive: { borderColor: '#5B42D8', backgroundColor: '#F1EEFF' },

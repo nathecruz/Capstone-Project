@@ -261,7 +261,12 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
   });
 
   await t.test('ML proxy, AI without keys, and password reset protections', async () => {
-    assert.equal((await request('/api/habit/predict', { method: 'POST', headers: authHeaders, body: JSON.stringify({ habit_name: 'Workout' }) })).response.status, 503);
+    // While the ML service is down (asleep on the free server), the same rules answer, labelled.
+    const asleep = await request('/api/habit/predict', { method: 'POST', headers: authHeaders, body: JSON.stringify({ habit_name: 'Workout', completion_rate: 0.75, streak: 4, last_7_days: [1, 1, 0, 1, 1, 0, 1] }) });
+    assert.equal(asleep.response.status, 200);
+    assert.equal(asleep.body.prediction_source, 'fallback');
+    assert.equal(asleep.body.is_fallback, true);
+    assert.equal(asleep.body.completion_probability, 0.616);
     mlServiceReady = true;
     const prediction = await request('/api/habit/predict', { method: 'POST', headers: authHeaders, body: JSON.stringify({ habit_name: 'Workout' }) });
     assert.equal(prediction.response.status, 200);
@@ -363,6 +368,14 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const still = await request('/api/habit-completions', { headers: authHeaders });
     assert.ok(still.body.completions.some((row) => row.habitId === 'habit-1' && row.date === today), 'the locked check-in is kept');
 
+    // A sleeping ML service still gives a forecast: the same rules, computed by the backend.
+    mlServiceReady = false;
+    const asleepAnalysis = await request('/api/insights/habit-analysis', { method: 'POST', headers: authHeaders, body: JSON.stringify({ habitId: 'habit-1', timeZone: 'UTC' }) });
+    assert.equal(asleepAnalysis.response.status, 200, JSON.stringify(asleepAnalysis.body));
+    assert.equal(asleepAnalysis.body.mlStatus, 'estimate');
+    assert.equal(asleepAnalysis.body.ml.source, 'rules');
+    assert.equal(typeof asleepAnalysis.body.ml.completionProbability, 'number');
+    mlServiceReady = true;
     const analysis = await request('/api/insights/habit-analysis', { method: 'POST', headers: authHeaders, body: JSON.stringify({ habitId: 'habit-1', timeZone: 'UTC' }) });
     assert.equal(analysis.response.status, 200, JSON.stringify(analysis.body));
     assert.equal(analysis.body.stats.completedDays, 1);
@@ -370,6 +383,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(analysis.body.ml.completionProbability, 0.72);
     assert.equal(analysis.body.mlStatus, 'ready');
     assert.equal(analysis.body.ai, null, 'no AI advice without an API key');
+    assert.equal(analysis.body.aiStatus, 'off');
     const unknown = await request('/api/insights/habit-analysis', { method: 'POST', headers: authHeaders, body: JSON.stringify({ habitId: 'missing' }) });
     assert.equal(unknown.response.status, 404);
   });

@@ -725,9 +725,11 @@ export type HabitAnalysis = {
     last7Days: number[];
   };
   ml: { completionProbability: number; dropoutRisk: number | null; recommendedAction: string; suggestedReminderTime: string; source: 'model' | 'rules' } | null;
-  /** Why ml is missing: 'starting' when the ML service was asleep and did not answer in time. */
-  mlStatus?: 'ready' | 'starting' | 'unavailable' | 'off';
+  /** 'ready': from the ML service; 'estimate': it was asleep, so the server used the same rules itself. */
+  mlStatus?: 'ready' | 'estimate';
   ai: { headline: string; bestTime: string; steps: string[]; watchOut: string } | null;
+  /** Why ai is missing: 'limited' (over the AI limit for a few minutes), 'unavailable' (the AI failed) or 'off'. */
+  aiStatus?: 'ready' | 'limited' | 'unavailable' | 'off';
 };
 
 /** One habit analysed on the server: check-in facts, the ML forecast and the AI's advice. */

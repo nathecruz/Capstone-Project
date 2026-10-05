@@ -1,7 +1,7 @@
 import React from 'react';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { analyzeHabit } from '@/authentication';
-import { HabitAnalysisPanel, ML_RETRY_MS } from '@/components/habit-analysis-panel';
+import { HabitAnalysisPanel } from '@/components/habit-analysis-panel';
 import type { Habit } from '@/hooks/app-state/types';
 
 jest.mock('@/authentication', () => ({ analyzeHabit: jest.fn() }));
@@ -54,20 +54,21 @@ describe('HabitAnalysisPanel', () => {
     await waitFor(() => expect(screen.getByText('You are steady on weekdays.')).toBeTruthy());
   });
 
-  it('says the ML service is starting and analyses again once by itself', async () => {
-    jest.useFakeTimers();
-    try {
-      (analyzeHabit as jest.Mock)
-        .mockResolvedValueOnce({ ok: true, analysis: { ...analysis('h1'), ml: null, mlStatus: 'starting' } })
-        .mockResolvedValueOnce({ ok: true, analysis: analysis('h1') });
-      const screen = render(<HabitAnalysisPanel habits={[habit('h1', 'Morning walk')]} />);
-      await waitFor(() => expect(screen.getByText(/starting up/)).toBeTruthy());
-      await act(async () => { jest.advanceTimersByTime(ML_RETRY_MS); });
-      await waitFor(() => expect(screen.getByText('72%')).toBeTruthy());
-      expect(analyzeHabit).toHaveBeenCalledTimes(2);
-    } finally {
-      jest.useRealTimers();
-    }
+  it('shows the rules estimate while the ML service sleeps, without asking again', async () => {
+    const estimate = { ...analysis('h1'), ml: { ...analysis('h1').ml, completionProbability: 0.62, source: 'rules' as const }, mlStatus: 'estimate' as const };
+    (analyzeHabit as jest.Mock).mockResolvedValueOnce({ ok: true, analysis: estimate });
+    const screen = render(<HabitAnalysisPanel habits={[habit('h1', 'Morning walk')]} />);
+    await waitFor(() => expect(screen.getByText('62%')).toBeTruthy());
+    expect(screen.getByText(/ML estimate \(rules, until a trained model is approved\)/)).toBeTruthy();
+    expect(analyzeHabit).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the forecast and says why when the AI limit is reached', async () => {
+    (analyzeHabit as jest.Mock).mockResolvedValueOnce({ ok: true, analysis: { ...analysis('h1'), ai: null, aiStatus: 'limited' } });
+    const screen = render(<HabitAnalysisPanel habits={[habit('h1', 'Morning walk')]} />);
+    await waitFor(() => expect(screen.getByText('72%')).toBeTruthy());
+    expect(screen.getByText('Keep your time.')).toBeTruthy();
+    expect(screen.getByText(/New AI advice is paused for a few minutes/)).toBeTruthy();
   });
 
   it('asks for a habit when there is none', () => {

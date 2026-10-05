@@ -1,6 +1,6 @@
 import { config } from '../config/index.js';
 import { query, withTransaction } from '../db/client.js';
-import { aiLimiter } from '../http/rate-limits.js';
+import { aiLimiter, habitAdviceLimiter, predictionLimiter } from '../http/rate-limits.js';
 import { parse } from '../lib/http.js';
 import { assistantSchema, goalGenerationSchema, goalPlanSchema, habitAnalysisRequestSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
@@ -15,7 +15,9 @@ import {
   normalizeGoalPlan,
   systemPromptFor,
 } from '../services/ai-prompts.js';
+import { adviceKey, habitAdviceCache } from '../services/advice-cache.js';
 import { refreshSnapshot } from '../services/app-state-store.js';
+import { forecastFor } from '../services/forecast-rules.js';
 import { HABIT_ANALYSIS_SYSTEM, habitAnalysisJsonSchema, habitAnalysisPrompt, habitAnalysisSchema, habitStats, mlSignal, mlSummary } from '../services/habit-analysis.js';
 import { generateAiText, isAiConfigured } from '../services/groq.js';
 import { computeStreak, habitFromRow } from '../services/streaks.js';
@@ -52,27 +54,41 @@ export async function loadAiContext(userId, timeZone = DEFAULT_TIME_ZONE) {
 }
 
 /**
- * The ML service's forecast for one habit. status says why there is none: 'off' (not
- * configured), 'starting' (it was asleep and did not answer in time) or 'unavailable'.
+ * The forecast for one habit: from the ML service when it answers in time, otherwise the same
+ * activity-based rules computed here (status 'estimate'), so there is always one to show.
  */
 async function mlForecast(signal) {
-  if (!config.ml.key) return { ml: null, status: 'off' };
-  try {
-    const result = await fetch(`${config.ml.url.replace(/\/$/, '')}/api/predict/habit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-ML-Service-Key': config.ml.key },
-      body: JSON.stringify(signal),
-      // A sleeping ML service takes up to a minute; the analysis should not wait that long.
-      signal: AbortSignal.timeout(Math.min(config.ml.timeoutMs, 20_000)),
-    });
-    return result.ok ? { ml: mlSummary(await result.json()), status: 'ready' } : { ml: null, status: 'unavailable' };
-  } catch (error) {
-    return { ml: null, status: error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 'starting' : 'unavailable' };
-  }
+  const { prediction, source } = await forecastFor(signal, config.ml);
+  return { ml: mlSummary(prediction), status: source === 'ml' ? 'ready' : 'estimate' };
+}
+
+/** Runs the soft AI-advice limiter for this request; true when the student is over it. */
+function overAdviceLimit(request, response) {
+  return new Promise((resolve, reject) => {
+    habitAdviceLimiter(request, response, (error) => (error ? reject(error) : resolve(Boolean(request.aiLimited))));
+  });
 }
 
 function logAiError(feature, error) {
   console.error(`[ai] ${feature} failed: ${error?.status ?? error?.name ?? ''} ${String(error?.message ?? error).slice(0, 200)}`.trim());
+}
+
+/** The AI's advice for one habit (two tries for valid JSON), or null when it cannot give any. */
+async function writeHabitAdvice(stats, ml, role) {
+  try {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const text = await generateAiText(habitAnalysisPrompt(stats, ml), { system: forAudience(HABIT_ANALYSIS_SYSTEM, role), schema: habitAnalysisJsonSchema, maxOutputTokens: 700, temperature: 0.5 });
+      try {
+        const parsed = habitAnalysisSchema.safeParse(JSON.parse(text));
+        if (parsed.success) return parsed.data;
+      } catch {
+        // Not JSON: try once more.
+      }
+    }
+  } catch (error) {
+    logAiError('habit analysis', error);
+  }
+  return null;
 }
 
 export default function registerAiRoutes(app) {
@@ -116,7 +132,8 @@ export default function registerAiRoutes(app) {
   });
 
   // One habit, analysed: check-in facts from the database, the ML forecast and the AI's advice.
-  app.post('/api/insights/habit-analysis', aiLimiter, async (request, response) => {
+  // The forecast and check-in facts are cheap and always answered; only new AI advice is limited.
+  app.post('/api/insights/habit-analysis', predictionLimiter, async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
     const input = parse(habitAnalysisRequestSchema, request, response);
@@ -132,20 +149,18 @@ export default function registerAiRoutes(app) {
     const stats = habitStats({ habit, completions: completionResult.rows, timeZone });
     const { ml, status: mlStatus } = await mlForecast(mlSignal(stats));
 
-    let ai = null;
-    if (isAiConfigured()) {
-      try {
-        for (let attempt = 0; attempt < 2 && !ai; attempt += 1) {
-          const text = await generateAiText(habitAnalysisPrompt(stats, ml), { system: forAudience(HABIT_ANALYSIS_SYSTEM, session.role), schema: habitAnalysisJsonSchema, maxOutputTokens: 700, temperature: 0.5 });
-          try {
-            const parsed = habitAnalysisSchema.safeParse(JSON.parse(text));
-            if (parsed.success) ai = parsed.data;
-          } catch {
-            // Not JSON: try once more.
-          }
-        }
-      } catch (error) {
-        logAiError('habit analysis', error);
+    // The same habit, facts and forecast on the same day get the advice already written.
+    const cacheKey = adviceKey(session.userId, input.habitId, { day: dateKeyInZone(new Date(), timeZone), role: session.role, stats, ml });
+    // aiStatus: 'ready', 'limited' (over the AI limit for now), 'unavailable' (the AI failed) or 'off' (not configured).
+    let ai = habitAdviceCache.get(cacheKey);
+    let aiStatus = ai ? 'ready' : 'off';
+    if (!ai && isAiConfigured()) {
+      if (await overAdviceLimit(request, response)) {
+        aiStatus = 'limited';
+      } else {
+        ai = await writeHabitAdvice(stats, ml, session.role);
+        aiStatus = ai ? 'ready' : 'unavailable';
+        if (ai) habitAdviceCache.set(cacheKey, ai);
       }
     }
 
@@ -166,6 +181,7 @@ export default function registerAiRoutes(app) {
       ml,
       mlStatus,
       ai,
+      aiStatus,
     });
   });
 

@@ -32,4 +32,17 @@ export const resendVerificationLimiter = limiter({ limit: 20, message: 'Too many
 // session must not be able to guess it quickly.
 export const accountChangeLimiter = limiter({ limit: 20, message: 'Too many account changes. Please wait 15 minutes and try again.' });
 export const aiLimiter = limiter({ limit: 30, message: 'You have reached the AI request limit. Please try again in a few minutes.' });
+// Habit analysis: the forecast is always answered; only new AI advice is limited. Over the limit
+// the request is marked (request.aiLimited) instead of refused, and answers without new advice.
+export const habitAdviceLimiter = rateLimit({
+  windowMs: WINDOW,
+  limit: 30,
+  keyGenerator: clientKey,
+  standardHeaders: false,
+  legacyHeaders: false,
+  handler: (request, _response, next) => {
+    request.aiLimited = true;
+    next();
+  },
+});
 export const predictionLimiter = limiter({ limit: 120, message: 'Too many prediction requests. Please try again shortly.' });
