@@ -35,6 +35,36 @@ export function formatReminderTime(hour12: number, minute: number, period: Perio
   return `${String(hour12).padStart(2, '0')}:${String(minute).padStart(2, '0')} ${period}`;
 }
 
+/** The picker's time moved by `minutes` (negative for earlier), round midnight too: 11:59 PM + 1 is 12:00 AM. */
+export function shiftReminderParts(parts: { hour: number; minute: number; period: Period }, minutes: number): { hour: number; minute: number; period: Period } {
+  const total = ((parts.hour % 12) + (parts.period === 'PM' ? 12 : 0)) * 60 + parts.minute;
+  const next = (((total + minutes) % (24 * 60)) + 24 * 60) % (24 * 60);
+  const hour24 = Math.floor(next / 60);
+  return { hour: hour24 % 12 || 12, minute: next % 60, period: hour24 < 12 ? 'AM' : 'PM' };
+}
+
+/**
+ * What an hour or minute field holds after a change: digits only, at most two. Typing into a full
+ * field starts it over with the digits just typed, wherever the cursor was ("75" + 4 → "4").
+ */
+export function nextTimeFieldText(previous: string, input: string) {
+  const digits = input.replace(/\D/g, '');
+  if (digits.length <= 2) return digits;
+  let start = 0;
+  while (start < previous.length && previous[start] === digits[start]) start += 1;
+  let end = 0;
+  while (end < previous.length - start && previous[previous.length - 1 - end] === digits[digits.length - 1 - end]) end += 1;
+  return (digits.slice(start, digits.length - end) || digits).slice(-2);
+}
+
+/** A typed hour (1 to 12) or minute (0 to 59), or null while the text is not one. */
+export function readTimeField(text: string, field: 'hour' | 'minute') {
+  if (!/^\d{1,2}$/.test(text)) return null;
+  const value = Number(text);
+  if (field === 'hour') return value >= 1 && value <= 12 ? value : null;
+  return value <= 59 ? value : null;
+}
+
 /** "07:30 AM" as its parts, for the picker; a time it cannot read becomes 07:00 AM. */
 export function reminderParts(time: string): { hour: number; minute: number; period: Period } {
   const parsed = parseReminderTime(time);

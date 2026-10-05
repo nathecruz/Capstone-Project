@@ -1,14 +1,18 @@
 // Picking a reminder time: quick picks (Morning, Lunch, ...), then the hour, the minute in
 // 5-minute steps and AM/PM as buttons (wheels are hard to use with a mouse or a small screen).
+// Any exact minute can be typed into the time at the top, or set with its - and + (one minute).
 // It shows when the reminder will next ring. Render it only while it is open.
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
-import { formatReminderTime, MAX_REMINDER_TIMES, partOfDay, REMINDER_PRESETS, reminderParts, sortReminderTimes, timeUntil, type Period } from '@/utils/reminder-time';
+import { formatReminderTime, MAX_REMINDER_TIMES, nextTimeFieldText, partOfDay, readTimeField, REMINDER_PRESETS, reminderParts, shiftReminderParts, sortReminderTimes, timeUntil, type Period } from '@/utils/reminder-time';
 
 const HOURS = Array.from({ length: 12 }, (_, index) => index + 1);
 const MINUTES = Array.from({ length: 12 }, (_, index) => index * 5);
+// Web: the time fields show their own focus style instead of the browser's ring.
+const WEB_NO_RING = Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null;
+const pad = (value: number) => String(value).padStart(2, '0');
 
 export function ReminderTimeSheet({ initial, title, taken, onSave, onClose }: {
   initial: string;
@@ -25,13 +29,33 @@ export function ReminderTimeSheet({ initial, title, taken, onSave, onClose }: {
   const [minute, setMinute] = useState(start.minute);
   const [period, setPeriod] = useState<Period>(start.period);
   const [now] = useState(() => new Date());
+  // What is being typed into the hour or minute field; the time keeps its last valid value meanwhile.
+  const [draft, setDraft] = useState<{ field: 'hour' | 'minute'; text: string } | null>(null);
+  const minuteField = useRef<TextInput | null>(null);
   const time = formatReminderTime(hour, minute, period);
   const duplicate = taken.includes(time);
-  const pick = (value: string) => {
-    const parts = reminderParts(value);
+  const draftInvalid = draft !== null && draft.text !== '' && readTimeField(draft.text, draft.field) === null;
+  const setParts = (parts: { hour: number; minute: number; period: Period }) => {
     setHour(parts.hour);
     setMinute(parts.minute);
     setPeriod(parts.period);
+    setDraft(null);
+  };
+  const pick = (value: string) => setParts(reminderParts(value));
+  const nudge = (minutes: number) => setParts(shiftReminderParts({ hour, minute, period }, minutes));
+  const fieldText = (field: 'hour' | 'minute') => (draft?.field === field ? draft.text : pad(field === 'hour' ? hour : minute));
+  const type = (field: 'hour' | 'minute', input: string) => {
+    const text = nextTimeFieldText(fieldText(field), input);
+    setDraft({ field, text });
+    const value = readTimeField(text, field);
+    if (value === null) return;
+    if (field === 'minute') {
+      setMinute(value);
+      return;
+    }
+    setHour(value);
+    // Two digits, or one that no second digit can follow (2 to 9): go on to the minutes.
+    if (text.length === 2 || value >= 2) minuteField.current?.focus();
   };
 
   return (
@@ -41,13 +65,43 @@ export function ReminderTimeSheet({ initial, title, taken, onSave, onClose }: {
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <Text style={styles.title}>{title}</Text>
 
-            <View style={styles.display} accessible accessibilityLabel={`${time}, ${partOfDay(time)}, ${timeUntil(time, now)}`}>
+            <View style={styles.display}>
               <View style={styles.displayRow}>
-                <Text style={styles.displayTime}>{time.slice(0, 5)}</Text>
-                <Text style={styles.displayPeriod}>{period}</Text>
+                <Pressable style={({ pressed }) => [styles.nudge, pressed && styles.pressed]} onPress={() => nudge(-1)} accessibilityRole="button" accessibilityLabel="One minute earlier">
+                  <Ionicons name="remove" size={20} color={themeColor('#5B42D8')} />
+                </Pressable>
+                <View style={styles.timeFields}>
+                  {(['hour', 'minute'] as const).map((field) => (
+                    <React.Fragment key={field}>
+                      {field === 'minute' && <Text style={styles.colon}>:</Text>}
+                      <TextInput
+                        ref={field === 'minute' ? minuteField : undefined}
+                        value={fieldText(field)}
+                        onChangeText={(text) => type(field, text)}
+                        onFocus={() => setDraft({ field, text: pad(field === 'hour' ? hour : minute) })}
+                        onBlur={() => setDraft((current) => (current?.field === field ? null : current))}
+                        keyboardType="number-pad"
+                        inputMode="numeric"
+                        selectTextOnFocus
+                        returnKeyType="done"
+                        style={[styles.timeField, draft?.field === field && styles.timeFieldOn, WEB_NO_RING]}
+                        accessibilityLabel={field === 'hour' ? 'Hour, 1 to 12' : 'Minutes, 00 to 59'}
+                      />
+                    </React.Fragment>
+                  ))}
+                  <Text style={styles.displayPeriod}>{period}</Text>
+                </View>
+                <Pressable style={({ pressed }) => [styles.nudge, pressed && styles.pressed]} onPress={() => nudge(1)} accessibilityRole="button" accessibilityLabel="One minute later">
+                  <Ionicons name="add" size={20} color={themeColor('#5B42D8')} />
+                </Pressable>
               </View>
-              <Text style={styles.displayHint}>{partOfDay(time)} reminder · next {timeUntil(time, now)}</Text>
+              <Text style={[styles.displayHint, draftInvalid && styles.fieldError]} accessibilityLiveRegion="polite">
+                {draftInvalid
+                  ? draft?.field === 'hour' ? 'Type an hour from 1 to 12.' : 'Type minutes from 00 to 59.'
+                  : `${partOfDay(time)} reminder · next ${timeUntil(time, now)}`}
+              </Text>
             </View>
+            <Text style={styles.typeHint}>Tap the hour or minutes to type any time, or use − and + to move one minute.</Text>
 
             <View style={styles.presets}>
               {REMINDER_PRESETS.map((preset) => {
@@ -97,7 +151,7 @@ export function ReminderTimeSheet({ initial, title, taken, onSave, onClose }: {
               <Pressable style={({ pressed }) => [styles.secondary, pressed && styles.pressed]} onPress={onClose} accessibilityRole="button">
                 <Text style={styles.secondaryText}>Cancel</Text>
               </Pressable>
-              <Pressable style={({ pressed }) => [styles.primary, duplicate && styles.primaryOff, pressed && styles.pressed]} onPress={() => onSave(time)} disabled={duplicate} accessibilityRole="button" accessibilityLabel={`Save reminder at ${time}`}>
+              <Pressable style={({ pressed }) => [styles.primary, (duplicate || draftInvalid) && styles.primaryOff, pressed && styles.pressed]} onPress={() => onSave(time)} disabled={duplicate || draftInvalid} accessibilityRole="button" accessibilityState={{ disabled: duplicate || draftInvalid }} accessibilityLabel={`Save reminder at ${time}`}>
                 <Ionicons name="checkmark" size={18} color="#FFFFFF" />
                 <Text style={styles.primaryText}>Save time</Text>
               </Pressable>
@@ -190,10 +244,16 @@ const themedStyles = createThemedStyles({
   pressed: { opacity: 0.85 },
   title: { fontSize: 19, fontWeight: '900', color: '#1F1C26' },
   display: { alignItems: 'center', borderRadius: 20, paddingVertical: 14, backgroundColor: '#F4F0FF' },
-  displayRow: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
-  displayTime: { fontSize: 44, lineHeight: 50, fontWeight: '900', color: '#3E2C9C', letterSpacing: -1 },
-  displayPeriod: { fontSize: 20, fontWeight: '900', color: '#5B42D8' },
+  displayRow: { alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, paddingHorizontal: 12 },
+  nudge: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
+  timeFields: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  timeField: { width: 72, height: 60, borderRadius: 14, borderWidth: 2, borderColor: 'transparent', padding: 0, textAlign: 'center', fontSize: 44, fontWeight: '900', color: '#3E2C9C', letterSpacing: -1 },
+  timeFieldOn: { borderColor: '#8E7AE8', backgroundColor: '#FFFFFF' },
+  colon: { fontSize: 40, fontWeight: '900', color: '#3E2C9C', marginTop: -6 },
+  displayPeriod: { marginLeft: 6, fontSize: 20, fontWeight: '900', color: '#5B42D8' },
   displayHint: { marginTop: 2, fontSize: 13, fontWeight: '700', color: '#5642B8' },
+  fieldError: { color: '#C24456' },
+  typeHint: { fontSize: 12, lineHeight: 17, fontWeight: '600', color: '#736D7D', textAlign: 'center' },
   presets: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   preset: { flexGrow: 1, flexBasis: '30%', flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 48, paddingHorizontal: 10, borderRadius: 14, borderWidth: 1, borderColor: '#E4DDF4', backgroundColor: '#FFFFFF' },
   presetOn: { backgroundColor: '#5B42D8', borderColor: '#5B42D8' },
