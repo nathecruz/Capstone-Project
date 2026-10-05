@@ -2,19 +2,8 @@ import { Link, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { type DateTimePickerChangeEvent } from '@react-native-community/datetimepicker';
 import React, { useEffect, useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Modal,
-  Pressable,
-  ScrollView,
-  StatusBar as RNStatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { AuthField, AuthScreen, authStyles, BRAND, PasswordField, PrimaryButton, SelectField } from '@/components/auth-ui';
 import { supportedRegions } from '@/constants/i18n';
 import { withReadableText } from '@/hooks/use-themed-styles';
 import { joinName } from '@/utils/names';
@@ -56,13 +45,13 @@ export default function RegisterScreen() {
   const [birthDate, setBirthDate] = useState(new Date(1998, 4, 14));
   const [webDateValue, setWebDateValue] = useState('');
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
-  const [isGenderPickerOpen, setIsGenderPickerOpen] = useState(false);
   const isWeb = Platform.OS === 'web';
   const [isRegionPickerOpen, setIsRegionPickerOpen] = useState(false);
+  const [regionSearch, setRegionSearch] = useState('');
+  // Very narrow phones stack first and last name.
+  const compact = useWindowDimensions().width < 360;
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const slowSubmit = useSlowHint(isSubmitting);
   const [privacyConsent, setPrivacyConsent] = useState(false);
@@ -156,285 +145,215 @@ export default function RegisterScreen() {
     }
   };
 
+  const strengthLevel = !password ? 0 : passwordStrength.label.startsWith('Strong') ? 3 : passwordStrength.label.startsWith('Moderate') ? 2 : 1;
+  const regionQuery = regionSearch.trim().toLowerCase();
+  const regionMatches = regionQuery ? supportedRegions.filter((option) => option.toLowerCase().includes(regionQuery)) : supportedRegions;
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <RNStatusBar barStyle="dark-content" backgroundColor="#dff4ff" />
-      <KeyboardAvoidingView
-        style={styles.keyboardAvoidingView}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+    <>
+      <AuthScreen
+        title="Create your account"
+        subtitle="Start your habit journey in under a minute."
+        footer={(
+          <View style={authStyles.trust}>
+            <Ionicons name="shield-checkmark" size={14} color="#2E9D5C" />
+            <Text style={authStyles.trustText}>Protected under the Data Privacy Act of 2012.</Text>
+          </View>
+        )}
       >
-        <ScrollView
-          contentContainerStyle={styles.page}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.decorCircleOne} />
-          <View style={styles.decorCircleTwo} />
-
-          <View style={styles.headlineWrap}>
-            <Text style={styles.brand}>HabitAI</Text>
-            <Text style={styles.subText}>Create your account</Text>
-            <Text style={styles.caption}>Start your healthy habit journey today.</Text>
+        <Section number={1} title="About you" />
+        <View style={[styles.nameRow, compact && styles.nameRowStacked]}>
+          <View style={styles.nameField}>
+            <AuthField label="First Name" icon="person-outline" value={firstName} onChangeText={setFirstName} placeholder="First Name" autoCapitalize="words" autoComplete="given-name" textContentType="givenName" />
           </View>
-
-          <View style={styles.card}>
-          <Text style={styles.label}>First Name</Text>
-          <TextInput
-            value={firstName}
-            onChangeText={setFirstName}
-            placeholder="First Name"
-            autoCapitalize="words"
-            autoComplete="given-name"
-            textContentType="givenName"
-            style={styles.input}
-          />
-
-          <Text style={styles.label}>Last Name</Text>
-          <TextInput
-            value={lastName}
-            onChangeText={setLastName}
-            placeholder="Last Name"
-            autoCapitalize="words"
-            autoComplete="family-name"
-            textContentType="familyName"
-            style={styles.input}
-          />
-
-          <Text style={styles.label}>Username</Text>
-          <TextInput
-            value={username}
-            onChangeText={setUsername}
-            placeholder="Username"
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={styles.input}
-          />
-
-          <Text style={styles.label}>Email Address</Text>
-          <TextInput
-            value={email}
-            onChangeText={setEmail}
-            placeholder="Email Address"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={styles.input}
-          />
-
-          <Text style={styles.label}>Date of Birth</Text>
-          {isWeb ? (
-            <View style={[styles.input, styles.selectorInput, styles.webDateInput]}>
-              <Text style={[styles.selectorText, !dateOfBirth && styles.placeholderText]}>
-                {dateOfBirth || 'Select your birth date'}
-              </Text>
-              <Ionicons name="calendar-outline" size={19} color="#657089" />
-              <input
-                type="date"
-                aria-label="Select date of birth"
-                // The browser keeps what is being typed; the birthday is only taken once the
-                // year is complete (a partial year like "2" used to reset the field).
-                value={webDateValue}
-                min="1900-01-01"
-                max={formatDateInputValue(new Date())}
-                // The field is invisible, so open the calendar wherever it is clicked.
-                onClick={(event) => {
-                  try {
-                    event.currentTarget.showPicker?.();
-                  } catch {
-                    // Older browsers: the focused field still accepts typing.
-                  }
-                }}
-                onChange={(event) => {
-                  const value = event.currentTarget.value;
-                  setWebDateValue(value);
-                  const selectedDate = value ? new Date(`${value}T00:00:00`) : null;
-                  const valid = selectedDate && !Number.isNaN(selectedDate.getTime()) && selectedDate.getFullYear() >= 1900 && selectedDate <= new Date();
-                  if (!valid) {
-                    setDateOfBirth('');
-                    return;
-                  }
-                  setBirthDate(selectedDate);
-                  setDateOfBirth(formatDateOfBirth(selectedDate));
-                }}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  right: 0,
-                  bottom: 0,
-                  left: 0,
-                  width: '100%',
-                  height: '100%',
-                  opacity: 0,
-                  cursor: 'pointer',
-                }}
-              />
-            </View>
-          ) : (
-            <>
-              <Pressable
-                style={[styles.input, styles.selectorInput]}
-                onPress={() => setIsDatePickerOpen(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Select date of birth"
-              >
-                <Text style={[styles.selectorText, !dateOfBirth && styles.placeholderText]}>{dateOfBirth || 'Select your birth date'}</Text>
-                <Ionicons name="calendar-outline" size={19} color="#657089" />
-              </Pressable>
-              {isDatePickerOpen && Platform.OS === 'ios' && (
-                <View style={styles.datePickerContainer}>
-                  <DateTimePicker
-                    value={birthDate}
-                    mode="date"
-                    display="inline"
-                    maximumDate={new Date()}
-                    onChange={handleBirthDateValueChange}
-                  />
-                  <Pressable style={styles.pickerDoneButton} onPress={() => setIsDatePickerOpen(false)}>
-                    <Text style={styles.pickerDoneText}>Done</Text>
-                  </Pressable>
-                </View>
-              )}
-              {isDatePickerOpen && Platform.OS === 'android' && (
-                <DateTimePicker
-                  value={birthDate}
-                  mode="date"
-                  display="calendar"
-                  maximumDate={new Date()}
-                  onChange={handleBirthDateValueChange}
-                />
-              )}
-            </>
-          )}
-
-          <Text style={styles.label}>Gender</Text>
-          <Pressable style={[styles.input, styles.selectorInput]} onPress={() => setIsGenderPickerOpen(true)} accessibilityRole="button" accessibilityLabel="Select gender">
-            <Text style={[styles.selectorText, !gender && styles.placeholderText]}>{gender || 'Select your gender'}</Text>
-            <Ionicons name="chevron-down" size={19} color="#657089" />
-          </Pressable>
-
-          <Text style={styles.label}>Region</Text>
-          <Pressable style={[styles.input, styles.selectorInput]} onPress={() => setIsRegionPickerOpen(true)} accessibilityRole="button" accessibilityLabel="Select region">
-            <Text style={[styles.selectorText, !region && styles.placeholderText]}>{region || 'Select your region'}</Text>
-            <Ionicons name="location-outline" size={19} color="#657089" />
-          </Pressable>
-
-          <Text style={styles.label}>Password</Text>
-          <View style={styles.passwordInputWrap}>
-            <TextInput
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Password"
-              secureTextEntry={!showPassword}
-              style={styles.passwordInput}
-            />
-            <Pressable
-              onPress={() => setShowPassword((current) => !current)}
-              style={styles.passwordToggle}
-              accessibilityRole="button"
-              accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
-            >
-              <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={21} color="#657089" />
-            </Pressable>
-          </View>
-
-          <View style={styles.strengthWrap}>
-            <View style={[styles.strengthBar, { backgroundColor: passwordStrength.color }]} />
-            <Text style={[styles.strengthText, { color: passwordStrength.color }]}>{passwordStrength.label}</Text>
-          </View>
-          <Text style={styles.strengthHint}>{passwordStrength.description}</Text>
-
-          <Text style={styles.label}>Confirm Password</Text>
-          <View style={styles.passwordInputWrap}>
-            <TextInput
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              placeholder="Confirm Password"
-              secureTextEntry={!showConfirmPassword}
-              style={styles.passwordInput}
-            />
-            <Pressable
-              onPress={() => setShowConfirmPassword((current) => !current)}
-              style={styles.passwordToggle}
-              accessibilityRole="button"
-              accessibilityLabel={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
-            >
-              <Ionicons name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'} size={21} color="#657089" />
-            </Pressable>
-          </View>
-
-          <View style={styles.consentRow}>
-            <Pressable
-              onPress={() => setPrivacyConsent((current) => !current)}
-              style={[styles.consentBox, privacyConsent && styles.consentBoxChecked]}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: privacyConsent }}
-              accessibilityLabel="I agree to the Privacy Notice"
-            >
-              {privacyConsent && <Ionicons name="checkmark" size={15} color="#FFFFFF" />}
-            </Pressable>
-            <Text style={styles.consentText}>
-              I have read and agree to the{' '}
-              <Link href="/privacy-notice" style={styles.linkText}>Privacy Notice</Link>
-              {' '}and allow HabitAI to process my data as described there (Data Privacy Act of 2012).
-            </Text>
-          </View>
-
-          <Pressable
-            style={[styles.primaryButton, isSubmitting && styles.primaryButtonDisabled]}
-            onPress={handleRegister}
-            disabled={isSubmitting}
-          >
-            <Text style={styles.primaryButtonText}>{isSubmitting ? 'Creating account...' : 'Create Account'}</Text>
-          </Pressable>
-          {slowSubmit && <Text style={styles.slowHint}>{SLOW_SERVER_HINT}</Text>}
-
-          <Text style={styles.footerText}>Already have an account? <Link href="/login" style={styles.linkText}>Log In</Link></Text>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-      {isGenderPickerOpen && (
-      <Modal visible animationType="fade" transparent onRequestClose={() => setIsGenderPickerOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.genderCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Gender</Text>
-              <Pressable onPress={() => setIsGenderPickerOpen(false)} accessibilityLabel="Close gender picker">
-                <Ionicons name="close" size={24} color="#292633" />
-              </Pressable>
-            </View>
-            {genderOptions.map((option) => (
-              <Pressable key={option} style={styles.genderOption} onPress={() => { setGender(option); setIsGenderPickerOpen(false); }}>
-                <Text style={styles.genderOptionText}>{option}</Text>
-                {gender === option && <Ionicons name="checkmark-circle" size={22} color="#5B42D8" />}
-              </Pressable>
-            ))}
+          <View style={styles.nameField}>
+            <AuthField label="Last Name" icon="person-outline" value={lastName} onChangeText={setLastName} placeholder="Last Name" autoCapitalize="words" autoComplete="family-name" textContentType="familyName" />
           </View>
         </View>
-      </Modal>
-      )}
-      {isRegionPickerOpen && (
-      <Modal visible animationType="fade" transparent onRequestClose={() => setIsRegionPickerOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.genderCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Region</Text>
-              <Pressable onPress={() => setIsRegionPickerOpen(false)} accessibilityLabel="Close region picker">
-                <Ionicons name="close" size={24} color="#292633" />
+        <AuthField
+          label="Username"
+          icon="at-outline"
+          value={username}
+          onChangeText={setUsername}
+          placeholder="Username"
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="username"
+          hint={<Text style={authStyles.hint}>2 to 30 letters, numbers, dots, underscores or hyphens.</Text>}
+        />
+        <AuthField label="Email Address" icon="mail-outline" value={email} onChangeText={setEmail} placeholder="Email Address" keyboardType="email-address" autoCapitalize="none" autoCorrect={false} autoComplete="email" textContentType="emailAddress" hint={<Text style={authStyles.hint}>We will send a code to confirm it.</Text>} />
+
+        <View style={authStyles.divider} />
+        <Section number={2} title="Personal details" />
+        {isWeb ? (
+          <SelectField label="Date of Birth" icon="calendar-outline" value={dateOfBirth} placeholder="Select your birth date" accessibilityLabel="Date of birth">
+            <input
+              type="date"
+              aria-label="Select date of birth"
+              // The browser keeps what is being typed; the birthday is only taken once the
+              // year is complete (a partial year like "2" used to reset the field).
+              value={webDateValue}
+              min="1900-01-01"
+              max={formatDateInputValue(new Date())}
+              // The field is invisible, so open the calendar wherever it is clicked.
+              onClick={(event) => {
+                try {
+                  event.currentTarget.showPicker?.();
+                } catch {
+                  // Older browsers: the focused field still accepts typing.
+                }
+              }}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setWebDateValue(value);
+                const selectedDate = value ? new Date(`${value}T00:00:00`) : null;
+                const valid = selectedDate && !Number.isNaN(selectedDate.getTime()) && selectedDate.getFullYear() >= 1900 && selectedDate <= new Date();
+                if (!valid) {
+                  setDateOfBirth('');
+                  return;
+                }
+                setBirthDate(selectedDate);
+                setDateOfBirth(formatDateOfBirth(selectedDate));
+              }}
+              style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
+            />
+          </SelectField>
+        ) : (
+          <>
+            <SelectField label="Date of Birth" icon="calendar-outline" value={dateOfBirth} placeholder="Select your birth date" onPress={() => setIsDatePickerOpen(true)} accessibilityLabel="Select date of birth" />
+            {isDatePickerOpen && Platform.OS === 'ios' && (
+              <View style={styles.datePickerContainer}>
+                <DateTimePicker value={birthDate} mode="date" display="inline" maximumDate={new Date()} onChange={handleBirthDateValueChange} />
+                <Pressable style={styles.pickerDoneButton} onPress={() => setIsDatePickerOpen(false)} accessibilityRole="button">
+                  <Text style={styles.pickerDoneText}>Done</Text>
+                </Pressable>
+              </View>
+            )}
+            {isDatePickerOpen && Platform.OS === 'android' && (
+              <DateTimePicker value={birthDate} mode="date" display="calendar" maximumDate={new Date()} onChange={handleBirthDateValueChange} />
+            )}
+          </>
+        )}
+
+        <Text style={styles.fieldLabel}>Gender</Text>
+        <View style={styles.choiceRow} accessibilityRole="radiogroup" accessibilityLabel="Gender">
+          {genderOptions.map((option) => {
+            const selected = gender === option;
+            return (
+              <Pressable key={option} style={({ pressed }) => [styles.choice, selected && styles.choiceSelected, pressed && authStyles.pressed]} onPress={() => setGender(option)} accessibilityRole="radio" accessibilityState={{ checked: selected }}>
+                {selected && <Ionicons name="checkmark" size={15} color="#FFFFFF" />}
+                <Text style={[styles.choiceText, selected && styles.choiceTextSelected]}>{option}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <SelectField
+          label="Region"
+          icon="location-outline"
+          value={region}
+          placeholder="Select your region"
+          onPress={() => { setRegionSearch(''); setIsRegionPickerOpen(true); }}
+          accessibilityLabel="Select region"
+          hint={(
+            <View style={styles.regionNote}>
+              <Ionicons name="lock-closed" size={12} color="#8F5A12" />
+              <Text style={styles.regionNoteText}>Choose carefully: your region is set once and cannot be changed later.</Text>
+            </View>
+          )}
+        />
+
+        <View style={authStyles.divider} />
+        <Section number={3} title="Secure your account" />
+        <PasswordField
+          label="Password"
+          value={password}
+          onChangeText={setPassword}
+          placeholder="Password"
+          autoComplete="new-password"
+          textContentType="newPassword"
+          hint={(
+            <View style={styles.strength}>
+              <View style={styles.strengthBars}>
+                {[1, 2, 3].map((level) => <View key={level} style={[styles.strengthBar, level <= strengthLevel && { backgroundColor: passwordStrength.color }]} />)}
+              </View>
+              <Text style={[styles.strengthLabel, { color: strengthLevel ? passwordStrength.color : '#8A8497' }]}>{passwordStrength.label}</Text>
+              <Text style={authStyles.hint}>{passwordStrength.description}</Text>
+            </View>
+          )}
+        />
+        <PasswordField
+          label="Confirm Password"
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          placeholder="Confirm Password"
+          autoComplete="new-password"
+          textContentType="newPassword"
+          returnKeyType="done"
+          onSubmitEditing={() => void handleRegister()}
+          hint={confirmPassword ? (
+            <Text style={[styles.matchText, confirmPassword === password ? styles.matchGood : styles.matchBad]}>
+              {confirmPassword === password ? '✓ Passwords match' : 'Passwords do not match yet'}
+            </Text>
+          ) : null}
+        />
+
+        <Pressable style={styles.consentRow} onPress={() => setPrivacyConsent((current) => !current)} accessibilityRole="checkbox" accessibilityState={{ checked: privacyConsent }} accessibilityLabel="I agree to the Privacy Notice">
+          <View style={[styles.consentBox, privacyConsent && styles.consentBoxChecked]}>
+            {privacyConsent && <Ionicons name="checkmark" size={15} color="#FFFFFF" />}
+          </View>
+          <Text style={styles.consentText}>
+            I have read and agree to the{' '}
+            <Link href="/privacy-notice" style={authStyles.link}>Privacy Notice</Link>
+            {' '}and allow HabitAI to process my data as described there (Data Privacy Act of 2012).
+          </Text>
+        </Pressable>
+
+        <PrimaryButton label="Create Account" busy={isSubmitting} busyLabel="Creating account..." onPress={() => void handleRegister()} icon="checkmark-circle" />
+        {slowSubmit && <Text style={[authStyles.hint, styles.centered]}>{SLOW_SERVER_HINT}</Text>}
+
+        <View style={authStyles.orRow}>
+          <View style={authStyles.orLine} />
+          <Text style={authStyles.orText}>Already have an account?</Text>
+          <View style={authStyles.orLine} />
+        </View>
+        <Link href="/login" asChild>
+          <Pressable style={authStyles.secondary} accessibilityRole="button">
+            <Ionicons name="log-in-outline" size={18} color={BRAND} />
+            <Text style={authStyles.secondaryText}>Log In</Text>
+          </Pressable>
+        </Link>
+      </AuthScreen>
+
+      <Modal visible={isRegionPickerOpen} animationType="slide" transparent onRequestClose={() => setIsRegionPickerOpen(false)}>
+        <View style={styles.sheetBackdrop}>
+          <View style={styles.sheet}>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>Select your region</Text>
+              <Pressable style={styles.closeButton} onPress={() => setIsRegionPickerOpen(false)} accessibilityRole="button" accessibilityLabel="Close region picker">
+                <Ionicons name="close" size={20} color="#6E6887" />
               </Pressable>
             </View>
-            <ScrollView style={styles.regionOptions} showsVerticalScrollIndicator={false}>
-              {supportedRegions.map((option) => (
-                <Pressable key={option} style={styles.genderOption} onPress={() => { setRegion(option); setIsRegionPickerOpen(false); }}>
-                  <Text style={styles.genderOptionText}>{option}</Text>
-                  {region === option && <Ionicons name="checkmark-circle" size={22} color="#5B42D8" />}
-                </Pressable>
-              ))}
+            <View style={styles.regionNoteBox}>
+              <Ionicons name="lock-closed" size={13} color="#8F5A12" />
+              <Text style={styles.regionNoteText}>Your region is set once and cannot be changed later.</Text>
+            </View>
+            <AuthField label="Search" icon="search-outline" value={regionSearch} onChangeText={setRegionSearch} placeholder="Type a province or Metro Manila" autoCapitalize="none" autoCorrect={false} />
+            <ScrollView style={styles.regionOptions} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator>
+              {regionMatches.map((option) => {
+                const selected = region === option;
+                return (
+                  <Pressable key={option} style={({ pressed }) => [styles.regionOption, selected && styles.regionOptionSelected, pressed && authStyles.pressed]} onPress={() => { setRegion(option); setIsRegionPickerOpen(false); }} accessibilityRole="radio" accessibilityState={{ checked: selected }}>
+                    <Text style={[styles.regionOptionText, selected && styles.regionOptionTextSelected]}>{option}</Text>
+                    {selected && <Ionicons name="checkmark-circle" size={21} color={BRAND} />}
+                  </Pressable>
+                );
+              })}
+              {regionMatches.length === 0 && <Text style={[authStyles.hint, styles.centered]}>No region matches &quot;{regionSearch.trim()}&quot;.</Text>}
             </ScrollView>
           </View>
         </View>
       </Modal>
-      )}
       <AppDialog
         visible={dialog !== null}
         title={dialog?.title ?? ''}
@@ -448,290 +367,56 @@ export default function RegisterScreen() {
           }
         }}
       />
-    </SafeAreaView>
+    </>
+  );
+}
+
+/** A numbered section heading inside the form. */
+function Section({ number, title }: { number: number; title: string }) {
+  return (
+    <View style={authStyles.sectionTitle}>
+      <View style={authStyles.sectionNumber}><Text style={authStyles.sectionNumberText}>{number}</Text></View>
+      <Text style={authStyles.sectionText}>{title}</Text>
+    </View>
   );
 }
 
 const styles = StyleSheet.create(withReadableText({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#f4f7ff',
-  },
-  keyboardAvoidingView: {
-    flex: 1,
-  },
-  page: {
-    flexGrow: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f4f7ff',
-    paddingHorizontal: 20,
-    paddingVertical: 28,
-    paddingBottom: 180,
-    position: 'relative',
-  },
-  decorCircleOne: {
-    position: 'absolute',
-    top: -60,
-    opacity: 0.9,
-  },
-  decorCircleTwo: {
-    position: 'absolute',
-    bottom: -80,
-    left: -50,
-    width: 280,
-    height: 280,
-    borderRadius: 140,
-    backgroundColor: '#eae3ff',
-    opacity: 0.9,
-  },
-  headlineWrap: {
-    marginBottom: 18,
-    alignItems: 'center',
-    zIndex: 1,
-  },
-  brand: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#4a3bd5',
-    letterSpacing: 1.2,
-    backgroundColor: '#ebe7ff',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 999,
-    overflow: 'hidden',
-    marginBottom: 12,
-  },
-  subText: {
-    marginTop: 0,
-    fontSize: 30,
-    fontWeight: '800',
-    color: '#141b2d',
-  },
-  caption: {
-    marginTop: 6,
-    fontSize: 13,
-    color: '#5c6478',
-    textAlign: 'center',
-    maxWidth: 270,
-  },
-  card: {
-    width: '100%',
-    maxWidth: 420,
-    backgroundColor: '#ffffff',
-    borderRadius: 28,
-    padding: 24,
-    shadowColor: '#1e2b5b',
-    shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.12,
-    shadowRadius: 24,
-    elevation: 10,
-    borderWidth: 1,
-    borderColor: '#edf2ff',
-    zIndex: 1,
-  },
-  label: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#4a5167',
-    marginBottom: 8,
-    marginTop: 8,
-  },
-  optionalLabel: {
-    fontSize: 10,
-    fontWeight: '500',
-    color: '#8a91a3',
-  },
-  strengthWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: -4,
-    marginBottom: 4,
-  },
-  strengthBar: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  strengthText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  strengthHint: {
-    fontSize: 11,
-    color: '#657089',
-    marginBottom: 10,
-  },
-  input: {
-    backgroundColor: '#f7f9ff',
-    borderWidth: 1,
-    borderColor: '#e3eaff',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    fontSize: 15,
-    color: '#1a1a1e',
-    marginBottom: 12,
-    shadowColor: '#dfe7ff',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-  },
-  selectorInput: {
-    minHeight: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  webDateInput: {
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  selectorText: {
-    fontSize: 15,
-    color: '#1a1a1e',
-  },
-  placeholderText: {
-    color: '#8a91a3',
-  },
-  datePickerContainer: {
-    backgroundColor: '#f7f9ff',
-    borderWidth: 1,
-    borderColor: '#e3eaff',
-    borderRadius: 14,
-    marginBottom: 12,
-    alignItems: 'flex-end',
-    overflow: 'hidden',
-  },
-  pickerDoneButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  pickerDoneText: {
-    color: '#5B42D8',
-    fontWeight: '800',
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(18, 22, 40, 0.42)',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-  },
-  genderCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 20,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  modalTitle: {
-    color: '#292633',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  regionOptions: {
-    maxHeight: 420,
-  },
-  genderOption: {
-    minHeight: 52,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ECE9F0',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  genderOptionText: {
-    color: '#302B3B',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  passwordInputWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: 48,
-    backgroundColor: '#f7f9ff',
-    borderWidth: 1,
-    borderColor: '#e3eaff',
-    borderRadius: 14,
-    marginBottom: 12,
-    shadowColor: '#dfe7ff',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-  },
-  passwordInput: {
-    flex: 1,
-    height: 48,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    fontSize: 15,
-    color: '#1a1a1e',
-    textAlignVertical: 'center',
-    includeFontPadding: false,
-  },
-  passwordToggle: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  primaryButton: {
-    backgroundColor: '#5a42d8',
-    borderRadius: 14,
-    paddingVertical: 15,
-    alignItems: 'center',
-    marginTop: 12,
-    shadowColor: '#5a42d8',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-  },
-  primaryButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  primaryButtonDisabled: {
-    opacity: 0.7,
-  },
-  slowHint: { marginTop: 10, textAlign: 'center', fontSize: 12, lineHeight: 17, color: '#657089' },
-  footerText: {
-    textAlign: 'center',
-    marginTop: 18,
-    color: '#586074',
-    fontSize: 13,
-  },
-  linkText: {
-    color: '#5a42d8',
-    fontWeight: '800',
-  },
-  consentRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    marginTop: 16,
-  },
-  consentBox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#9AA3B8',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 1,
-  },
-  consentBoxChecked: {
-    backgroundColor: '#5a42d8',
-    borderColor: '#5a42d8',
-  },
-  consentText: {
-    flex: 1,
-    color: '#586074',
-    fontSize: 12.5,
-    lineHeight: 18,
-  },
+  nameRow: { flexDirection: 'row', gap: 10 },
+  nameRowStacked: { flexDirection: 'column', gap: 0 },
+  nameField: { flex: 1, minWidth: 0 },
+  fieldLabel: { fontSize: 13, fontWeight: '800', color: '#3B3650', marginBottom: 7 },
+  choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
+  choice: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 42, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1.5, borderColor: '#E6E2F0', backgroundColor: '#FAF9FD' },
+  choiceSelected: { backgroundColor: BRAND, borderColor: BRAND },
+  choiceText: { fontSize: 14, fontWeight: '700', color: '#3B3650' },
+  choiceTextSelected: { color: '#FFFFFF' },
+  regionNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 7 },
+  regionNoteBox: { flexDirection: 'row', alignItems: 'center', gap: 7, padding: 10, borderRadius: 12, backgroundColor: '#FFF6E5', marginBottom: 14 },
+  regionNoteText: { flex: 1, fontSize: 12, lineHeight: 17, fontWeight: '700', color: '#8F5A12' },
+  strength: { marginTop: 8 },
+  strengthBars: { flexDirection: 'row', gap: 6 },
+  strengthBar: { flex: 1, height: 5, borderRadius: 3, backgroundColor: '#ECE8F6' },
+  strengthLabel: { fontSize: 13, fontWeight: '900', marginTop: 7 },
+  matchText: { fontSize: 12, fontWeight: '800', marginTop: 6 },
+  matchGood: { color: '#23774A' },
+  matchBad: { color: '#B5701F' },
+  consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginTop: 4, marginBottom: 20 },
+  consentBox: { width: 24, height: 24, borderRadius: 7, borderWidth: 1.5, borderColor: '#C9C2DE', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  consentBoxChecked: { backgroundColor: BRAND, borderColor: BRAND },
+  consentText: { flex: 1, fontSize: 13, lineHeight: 19, fontWeight: '500', color: '#4A4458' },
+  centered: { textAlign: 'center' },
+  datePickerContainer: { marginTop: -6, marginBottom: 14, borderRadius: 16, backgroundColor: '#FAF9FD', padding: 8 },
+  pickerDoneButton: { alignSelf: 'flex-end', paddingHorizontal: 16, paddingVertical: 9, borderRadius: 12, backgroundColor: BRAND },
+  pickerDoneText: { fontSize: 14, fontWeight: '900', color: '#FFFFFF' },
+  sheetBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(20, 16, 32, 0.5)' },
+  sheet: { width: '100%', maxWidth: 520, maxHeight: '86%', alignSelf: 'center', backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 20 },
+  sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  sheetTitle: { fontSize: 20, fontWeight: '900', color: '#1E1B2E' },
+  closeButton: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F2F0F7' },
+  regionOptions: { flexGrow: 0 },
+  regionOption: { minHeight: 50, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, borderRadius: 12 },
+  regionOptionSelected: { backgroundColor: '#F0EBFF' },
+  regionOptionText: { fontSize: 15, fontWeight: '700', color: '#2D2A3D' },
+  regionOptionTextSelected: { color: BRAND, fontWeight: '900' },
 }));

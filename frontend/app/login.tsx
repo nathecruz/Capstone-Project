@@ -1,5 +1,6 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Link, router } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -15,7 +16,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { AuthField, AuthScreen, authStyles, BRAND, BrandMark, PasswordField, PrimaryButton } from '@/components/auth-ui';
 import { AppDialog, type AppDialogVariant } from '@/components/ui/app-dialog';
+import { withReadableText } from '@/hooks/use-themed-styles';
 import { SLOW_SERVER_HINT, useSlowHint } from '@/hooks/use-slow-hint';
 import {
   getPasswordStrengthStatus,
@@ -48,6 +51,7 @@ export default function LoginScreen() {
   const [resetBusy, setResetBusy] = useState<'send' | 'verify' | 'save' | null>(null);
   const slowReset = useSlowHint(resetBusy !== null);
   const [dialog, setDialog] = useState<{ title: string; message: string; variant: AppDialogVariant } | null>(null);
+  const passwordRef = useRef<TextInput>(null);
   const resetPasswordStrength = getPasswordStrengthStatus(newResetPassword, {
     email: resetEmail,
     serviceWords: ['habitai', 'habit'],
@@ -95,13 +99,11 @@ export default function LoginScreen() {
   if (isCheckingSession || isSubmitting) {
     return (
       <SafeAreaView style={styles.loadingSafeArea}>
-        <RNStatusBar barStyle="dark-content" backgroundColor="#dff4ff" />
+        <RNStatusBar barStyle="dark-content" backgroundColor="#F3F1FB" />
         <View style={styles.loadingPage}>
-          <View style={styles.loadingMark}>
-            <Text style={styles.loadingMarkText}>H</Text>
-          </View>
+          <BrandMark size={64} />
           <Text style={styles.loadingBrand}>HabitAI</Text>
-          <ActivityIndicator size="small" color="#5B42D8" style={styles.loadingIndicator} />
+          <ActivityIndicator size="small" color={BRAND} style={styles.loadingIndicator} />
           <Text style={styles.loadingText}>{isSubmitting ? 'Signing you in...' : 'Preparing your habits...'}</Text>
           {slowSignIn && <Text style={[styles.loadingText, styles.slowHint]}>{SLOW_SERVER_HINT}</Text>}
         </View>
@@ -294,192 +296,206 @@ export default function LoginScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <RNStatusBar barStyle="dark-content" backgroundColor="#dff4ff" />
-      <View style={styles.page}>
-        <View style={styles.decorCircleOne} />
-        <View style={styles.decorCircleTwo} />
-
-        <View style={styles.headlineWrap}>
-          <Text style={styles.brand}>HabitAI</Text>
-          <Text style={styles.subText}>Welcome back</Text>
-          <Text style={styles.caption}>Build habits, track progress, and stay consistent.</Text>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.label}>Email Address</Text>
-          <TextInput
-            value={email}
-            onChangeText={setEmail}
-            placeholder="Email Address"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={styles.input}
-          />
-
-          <Text style={styles.label}>Password</Text>
-          <TextInput
-            value={password}
-            onChangeText={setPassword}
-            onSubmitEditing={() => void handleLogin()}
-            returnKeyType="go"
-            placeholder="Password"
-            secureTextEntry
-            style={styles.input}
-          />
-
-          <View style={styles.rowBetween}>
-            <Pressable
-              style={styles.rememberWrap}
-              onPress={handleRememberToggle}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: rememberMe }}
-              accessibilityLabel="Remember me"
-              hitSlop={8}
-            >
-              <View style={[styles.checkBox, rememberMe && styles.checkBoxActive]}>
-                {rememberMe && <Text style={styles.checkMark}>✓</Text>}
-              </View>
-              <Text style={styles.checkText}>Remember me</Text>
-            </Pressable>
-            <Pressable onPress={handleForgotPassword}>
-              <Text style={styles.forgotText}>Forgot password?</Text>
-            </Pressable>
+    <>
+      <AuthScreen
+        title="Welcome back"
+        subtitle="Sign in to keep your streak going."
+        footer={(
+          <View style={authStyles.trust}>
+            <Ionicons name="shield-checkmark" size={14} color="#2E9D5C" />
+            <Text style={authStyles.trustText}>Secure sign-in. Your data stays private.</Text>
           </View>
+        )}
+      >
+        <AuthField
+          label="Email Address"
+          icon="mail-outline"
+          value={email}
+          onChangeText={setEmail}
+          placeholder="Email Address"
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="email"
+          textContentType="emailAddress"
+          returnKeyType="next"
+          onSubmitEditing={() => passwordRef.current?.focus()}
+        />
+        <PasswordField
+          ref={passwordRef}
+          label="Password"
+          value={password}
+          onChangeText={setPassword}
+          onSubmitEditing={() => void handleLogin()}
+          returnKeyType="go"
+          placeholder="Password"
+          autoComplete="current-password"
+          textContentType="password"
+        />
 
+        <View style={styles.rowBetween}>
           <Pressable
-            style={[styles.loginPrimaryButton, isSubmitting && styles.primaryButtonDisabled]}
-            onPress={handleLogin}
-            disabled={isSubmitting}
+            style={styles.rememberWrap}
+            onPress={handleRememberToggle}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: rememberMe }}
+            accessibilityLabel="Remember me"
+            hitSlop={8}
           >
-            {isSubmitting && <ActivityIndicator size="small" color="#FFFFFF" />}
-            <Text style={styles.primaryButtonText}>{isSubmitting ? 'Signing in...' : 'Log In'}</Text>
+            <View style={[styles.checkBox, rememberMe && styles.checkBoxActive]}>
+              {rememberMe && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
+            </View>
+            <Text style={styles.checkText}>Remember me</Text>
           </Pressable>
-
-          <Text style={styles.footerText}>
-            Don&apos;t have an account? <Link href="/register" style={styles.linkText}>Register</Link>
-          </Text>
+          <Pressable onPress={handleForgotPassword} accessibilityRole="button" hitSlop={8}>
+            <Text style={styles.forgotText}>Forgot password?</Text>
+          </Pressable>
         </View>
-      </View>
+
+        <PrimaryButton label="Log In" busy={isSubmitting} busyLabel="Signing in..." onPress={() => void handleLogin()} />
+
+        <View style={authStyles.orRow}>
+          <View style={authStyles.orLine} />
+          <Text style={authStyles.orText}>New to HabitAI?</Text>
+          <View style={authStyles.orLine} />
+        </View>
+        <Link href="/register" asChild>
+          <Pressable style={authStyles.secondary} accessibilityRole="button">
+            <Ionicons name="person-add-outline" size={18} color={BRAND} />
+            <Text style={authStyles.secondaryText}>Create an account</Text>
+          </Pressable>
+        </Link>
+      </AuthScreen>
 
       <Modal visible={showResetModal} transparent animationType="slide" onRequestClose={cancelResetFlow}>
         <View style={styles.modalBackdrop}>
           <KeyboardAvoidingView style={styles.keyboardModal} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 70 : 0}>
             <ScrollView contentContainerStyle={styles.resetScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <View style={styles.resetModal}>
-            <Text style={styles.resetTitle}>Reset password</Text>
-            {!otpSent ? (
-              <>
-                <Text style={styles.resetSubtitle}>Enter the email connected to your HabitAI account.</Text>
-                <TextInput
-                  value={resetEmail}
-                  onChangeText={setResetEmail}
-                  onSubmitEditing={() => void sendResetCode(false)}
-                  returnKeyType="send"
-                  placeholder="Email address"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  style={styles.resetInput}
-                />
-                <View style={styles.resetActions}>
-                  <Pressable style={styles.secondaryButton} onPress={cancelResetFlow}>
-                    <Text style={styles.secondaryButtonText}>Cancel</Text>
-                  </Pressable>
-                  <Pressable style={[styles.primaryButton, resetBusy !== null && styles.buttonDisabled]} onPress={handleResetRequest} disabled={resetBusy !== null}>
-                    {resetBusy === 'send' && <ActivityIndicator size="small" color="#FFFFFF" />}
-                    <Text style={styles.primaryButtonText}>{resetBusy === 'send' ? 'Sending...' : 'Send code'}</Text>
+                <View style={styles.resetHeader}>
+                  <View style={styles.resetIcon}><Ionicons name={otpVerified ? 'key' : otpSent ? 'mail-open' : 'lock-open'} size={22} color={BRAND} /></View>
+                  <View style={styles.resetHeaderCopy}>
+                    <Text style={styles.resetStep}>Step {otpVerified ? 3 : otpSent ? 2 : 1} of 3</Text>
+                    <Text style={styles.resetTitle}>{otpVerified ? 'Create a new password' : otpSent ? 'Enter the code' : 'Reset password'}</Text>
+                  </View>
+                  <Pressable style={styles.closeButton} onPress={cancelResetFlow} accessibilityRole="button" accessibilityLabel="Close password reset" disabled={resetBusy === 'save'}>
+                    <Ionicons name="close" size={20} color="#6E6887" />
                   </Pressable>
                 </View>
-              </>
-            ) : !otpVerified ? (
-              <>
-                <Text style={styles.resetSubtitle}>Enter the 6-digit code sent to {resetEmail}. It expires in {codeLifetimeMinutes} minutes. If you do not see it, check your Spam folder.</Text>
-                <View style={styles.otpInputWrap}>
-                  <View style={styles.otpBoxes} pointerEvents="none">
-                    {Array.from({ length: 6 }, (_, index) => (
-                      <View key={index} style={[styles.otpBox, index === resetOtp.length && styles.otpBoxActive]}>
-                        <Text style={styles.otpBoxText}>{resetOtp[index] || ''}</Text>
+                <View style={styles.stepBar}>
+                  {[1, 2, 3].map((step) => <View key={step} style={[styles.stepSegment, step <= (otpVerified ? 3 : otpSent ? 2 : 1) && styles.stepSegmentDone]} />)}
+                </View>
+                {!otpSent ? (
+                  <>
+                    <Text style={styles.resetSubtitle}>Enter the email connected to your HabitAI account. We will send you a 6-digit code.</Text>
+                    <AuthField
+                      label="Email address"
+                      icon="mail-outline"
+                      value={resetEmail}
+                      onChangeText={setResetEmail}
+                      onSubmitEditing={() => void sendResetCode(false)}
+                      returnKeyType="send"
+                      placeholder="Email address"
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    <View style={styles.resetActions}>
+                      <Pressable style={styles.secondaryButton} onPress={cancelResetFlow} accessibilityRole="button">
+                        <Text style={styles.secondaryButtonText}>Cancel</Text>
+                      </Pressable>
+                      <Pressable style={[styles.primaryButton, resetBusy !== null && styles.buttonDisabled]} onPress={handleResetRequest} disabled={resetBusy !== null} accessibilityRole="button">
+                        {resetBusy === 'send' && <ActivityIndicator size="small" color="#FFFFFF" />}
+                        <Text style={styles.primaryButtonText}>{resetBusy === 'send' ? 'Sending...' : 'Send code'}</Text>
+                      </Pressable>
+                    </View>
+                  </>
+                ) : !otpVerified ? (
+                  <>
+                    <Text style={styles.resetSubtitle}>We sent a 6-digit code to <Text style={styles.strong}>{resetEmail}</Text>. It expires in {codeLifetimeMinutes} minutes. If you do not see it, check your Spam folder.</Text>
+                    <View style={styles.otpInputWrap}>
+                      <View style={styles.otpBoxes} pointerEvents="none">
+                        {Array.from({ length: 6 }, (_, index) => (
+                          <View key={index} style={[styles.otpBox, index === resetOtp.length && styles.otpBoxActive, index < resetOtp.length && styles.otpBoxFilled]}>
+                            <Text style={styles.otpBoxText}>{resetOtp[index] || ''}</Text>
+                          </View>
+                        ))}
                       </View>
-                    ))}
-                  </View>
-                  <TextInput
-                    value={resetOtp}
-                    onChangeText={handleOtpChange}
-                    keyboardType="number-pad"
-                    textContentType="oneTimeCode"
-                    autoComplete="one-time-code"
-                    maxLength={6}
-                    editable={resetBusy === null}
-                    autoFocus
-                    style={styles.otpTextInput}
-                    accessibilityLabel="Verification code"
-                  />
-                </View>
+                      <TextInput
+                        value={resetOtp}
+                        onChangeText={handleOtpChange}
+                        keyboardType="number-pad"
+                        textContentType="oneTimeCode"
+                        autoComplete="one-time-code"
+                        maxLength={6}
+                        editable={resetBusy === null}
+                        autoFocus
+                        style={styles.otpTextInput}
+                        accessibilityLabel="Verification code"
+                      />
+                    </View>
 
-                <View style={styles.resendRow}>
-                  <Text style={styles.helpText}>Didn’t receive the code?</Text>
-                  <Pressable onPress={handleResendOtp} disabled={resendCountdown > 0 || resetBusy !== null} accessibilityRole="button" accessibilityState={{ disabled: resendCountdown > 0 || resetBusy !== null }}>
-                    <Text style={[styles.resendLink, (resendCountdown > 0 || resetBusy !== null) && styles.resendLinkDisabled]}>
-                      {resetBusy === 'send' ? 'Sending...' : resendCountdown > 0 ? `Resend code (${resendCountdown}s)` : 'Resend code'}
-                    </Text>
-                  </Pressable>
-                </View>
+                    <View style={styles.resendRow}>
+                      <Text style={styles.helpText}>Didn’t receive the code?</Text>
+                      <Pressable onPress={handleResendOtp} disabled={resendCountdown > 0 || resetBusy !== null} accessibilityRole="button" accessibilityState={{ disabled: resendCountdown > 0 || resetBusy !== null }}>
+                        <Text style={[styles.resendLink, (resendCountdown > 0 || resetBusy !== null) && styles.resendLinkDisabled]}>
+                          {resetBusy === 'send' ? 'Sending...' : resendCountdown > 0 ? `Resend code (${resendCountdown}s)` : 'Resend code'}
+                        </Text>
+                      </Pressable>
+                    </View>
 
-                <View style={styles.resetActions}>
-                  <Pressable style={styles.secondaryButton} onPress={cancelResetFlow}>
-                    <Text style={styles.secondaryButtonText}>Back</Text>
-                  </Pressable>
-                  <Pressable style={[styles.primaryButton, resetBusy !== null && styles.buttonDisabled]} onPress={() => void handleVerifyOtp()} disabled={resetBusy !== null}>
-                    {resetBusy === 'verify' && <ActivityIndicator size="small" color="#FFFFFF" />}
-                    <Text style={styles.primaryButtonText}>{resetBusy === 'verify' ? 'Verifying...' : 'Verify code'}</Text>
-                  </Pressable>
-                </View>
-              </>
-            ) : (
-              <>
-                <Text style={styles.resetSubtitle}>Code verified. Create a new password for {resetEmail}. You will be signed out of your other devices.</Text>
-                <Text style={styles.label}>New password</Text>
-                <TextInput
-                  value={newResetPassword}
-                  onChangeText={setNewResetPassword}
-                  placeholder="New password"
-                  secureTextEntry
-                  style={styles.resetInput}
-                />
-
-                {!!newResetPassword && (
-                  <View style={[styles.validationBox, { borderColor: resetPasswordStrength.color }]}>
-                    <Text style={[styles.validationTitle, { color: resetPasswordStrength.color }]}>
-                      {resetPasswordStrength.label}
-                    </Text>
-                    <Text style={styles.validationText}>{resetPasswordStrength.description}</Text>
-                  </View>
+                    <View style={styles.resetActions}>
+                      <Pressable style={styles.secondaryButton} onPress={cancelResetFlow} accessibilityRole="button">
+                        <Text style={styles.secondaryButtonText}>Back</Text>
+                      </Pressable>
+                      <Pressable style={[styles.primaryButton, resetBusy !== null && styles.buttonDisabled]} onPress={() => void handleVerifyOtp()} disabled={resetBusy !== null} accessibilityRole="button">
+                        {resetBusy === 'verify' && <ActivityIndicator size="small" color="#FFFFFF" />}
+                        <Text style={styles.primaryButtonText}>{resetBusy === 'verify' ? 'Verifying...' : 'Verify code'}</Text>
+                      </Pressable>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.resetSubtitle}>Code verified. Create a new password for <Text style={styles.strong}>{resetEmail}</Text>. You will be signed out of your other devices.</Text>
+                    <PasswordField
+                      label="New password"
+                      value={newResetPassword}
+                      onChangeText={setNewResetPassword}
+                      placeholder="New password"
+                      autoComplete="new-password"
+                      hint={newResetPassword ? (
+                        <View style={[styles.validationBox, { borderColor: resetPasswordStrength.color }]}>
+                          <Text style={[styles.validationTitle, { color: resetPasswordStrength.color }]}>{resetPasswordStrength.label}</Text>
+                          <Text style={styles.validationText}>{resetPasswordStrength.description}</Text>
+                        </View>
+                      ) : null}
+                    />
+                    <PasswordField
+                      label="Confirm new password"
+                      value={confirmResetPassword}
+                      onChangeText={setConfirmResetPassword}
+                      onSubmitEditing={() => void handleSetNewPassword()}
+                      returnKeyType="done"
+                      placeholder="Confirm new password"
+                      autoComplete="new-password"
+                      hint={confirmResetPassword ? (
+                        <Text style={[styles.matchText, confirmResetPassword === newResetPassword ? styles.matchGood : styles.matchBad]}>
+                          {confirmResetPassword === newResetPassword ? '✓ Passwords match' : 'Passwords do not match yet'}
+                        </Text>
+                      ) : null}
+                    />
+                    <View style={styles.resetActions}>
+                      <Pressable style={styles.secondaryButton} onPress={cancelResetFlow} disabled={resetBusy !== null} accessibilityRole="button">
+                        <Text style={styles.secondaryButtonText}>Cancel</Text>
+                      </Pressable>
+                      <Pressable style={[styles.primaryButton, resetBusy !== null && styles.buttonDisabled]} onPress={handleSetNewPassword} disabled={resetBusy !== null} accessibilityRole="button">
+                        {resetBusy === 'save' && <ActivityIndicator size="small" color="#FFFFFF" />}
+                        <Text style={styles.primaryButtonText}>{resetBusy === 'save' ? 'Saving...' : 'Set new password'}</Text>
+                      </Pressable>
+                    </View>
+                  </>
                 )}
-
-                <Text style={styles.label}>Confirm new password</Text>
-                <TextInput
-                  value={confirmResetPassword}
-                  onChangeText={setConfirmResetPassword}
-                  onSubmitEditing={() => void handleSetNewPassword()}
-                  returnKeyType="done"
-                  placeholder="Confirm new password"
-                  secureTextEntry
-                  style={styles.resetInput}
-                />
-                <View style={styles.resetActions}>
-                  <Pressable style={styles.secondaryButton} onPress={cancelResetFlow} disabled={resetBusy !== null}>
-                    <Text style={styles.secondaryButtonText}>Cancel</Text>
-                  </Pressable>
-                  <Pressable style={[styles.primaryButton, resetBusy !== null && styles.buttonDisabled]} onPress={handleSetNewPassword} disabled={resetBusy !== null}>
-                    {resetBusy === 'save' && <ActivityIndicator size="small" color="#FFFFFF" />}
-                    <Text style={styles.primaryButtonText}>{resetBusy === 'save' ? 'Saving...' : 'Set new password'}</Text>
-                  </Pressable>
-                </View>
-              </>
-            )}
-            {slowReset && <Text style={[styles.helpText, styles.resetSlowHint]}>{SLOW_SERVER_HINT}</Text>}
+                {slowReset && <Text style={[styles.helpText, styles.resetSlowHint]}>{SLOW_SERVER_HINT}</Text>}
               </View>
             </ScrollView>
           </KeyboardAvoidingView>
@@ -492,392 +508,60 @@ export default function LoginScreen() {
         variant={dialog?.variant}
         onClose={() => setDialog(null)}
       />
-    </SafeAreaView>
+    </>
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#f4f7ff',
-  },
-  loadingSafeArea: {
-    flex: 1,
-    backgroundColor: '#f4f7ff',
-  },
-  loadingPage: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f4f7ff',
-  },
-  loadingMark: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#5B42D8',
-    shadowColor: '#5B42D8',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.22,
-    shadowRadius: 14,
-    elevation: 8,
-  },
-  loadingMarkText: {
-    color: '#FFFFFF',
-    fontSize: 32,
-    fontWeight: '900',
-  },
-  loadingBrand: {
-    marginTop: 16,
-    color: '#24212D',
-    fontSize: 24,
-    fontWeight: '800',
-  },
-  loadingIndicator: {
-    marginTop: 28,
-  },
+const styles = StyleSheet.create(withReadableText({
+  loadingSafeArea: { flex: 1, backgroundColor: '#F3F1FB' },
+  loadingPage: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F3F1FB', paddingHorizontal: 24 },
+  loadingBrand: { marginTop: 16, color: '#24212D', fontSize: 24, fontWeight: '900' },
+  loadingIndicator: { marginTop: 26 },
+  loadingText: { marginTop: 10, color: '#6E6887', fontSize: 13, fontWeight: '600' },
   slowHint: { marginTop: 8, maxWidth: 300, textAlign: 'center' },
   resetSlowHint: { marginTop: 12, textAlign: 'center' },
-  loadingText: {
-    marginTop: 10,
-    color: '#777282',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  page: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f4f7ff',
-    paddingHorizontal: 20,
-    paddingVertical: 28,
-    position: 'relative',
-  },
-  decorCircleOne: {
-    position: 'absolute',
-    top: -60,
-    right: -30,
-    width: 260,
-    height: 260,
-    borderRadius: 130,
-    backgroundColor: '#dff0ff',
-    opacity: 0.9,
-  },
-  decorCircleTwo: {
-    position: 'absolute',
-    bottom: -80,
-    left: -50,
-    width: 280,
-    height: 280,
-    borderRadius: 140,
-    backgroundColor: '#eae3ff',
-    opacity: 0.9,
-  },
-  headlineWrap: {
-    marginBottom: 18,
-    alignItems: 'center',
-    zIndex: 1,
-  },
-  brand: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#4a3bd5',
-    letterSpacing: 1.2,
-    backgroundColor: '#ebe7ff',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 999,
-    overflow: 'hidden',
-    marginBottom: 12,
-  },
-  subText: {
-    marginTop: 0,
-    fontSize: 30,
-    fontWeight: '800',
-    color: '#141b2d',
-  },
-  caption: {
-    marginTop: 6,
-    fontSize: 13,
-    color: '#5c6478',
-    textAlign: 'center',
-    maxWidth: 270,
-  },
-  card: {
-    width: '100%',
-    maxWidth: 420,
-    backgroundColor: '#ffffff',
-    borderRadius: 28,
-    padding: 24,
-    shadowColor: '#1e2b5b',
-    shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.12,
-    shadowRadius: 24,
-    elevation: 10,
-    borderWidth: 1,
-    borderColor: '#edf2ff',
-    zIndex: 1,
-  },
-  label: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#4a5167',
-    marginBottom: 8,
-    marginTop: 8,
-  },
-  resetLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#4a5167',
-    marginBottom: 8,
-    marginTop: 12,
-  },
-  input: {
-    backgroundColor: '#f7f9ff',
-    borderWidth: 1,
-    borderColor: '#e3eaff',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    fontSize: 15,
-    color: '#1a1a1e',
-    marginBottom: 12,
-    shadowColor: '#dfe7ff',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-  },
-  rowBetween: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 18,
-  },
-  rememberWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  checkBox: {
-    width: 18,
-    height: 18,
-    borderRadius: 6,
-    backgroundColor: '#ffffff',
-    borderWidth: 1.5,
-    borderColor: '#7d6ae7',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkBoxActive: {
-    backgroundColor: '#5a42d8',
-    borderColor: '#5a42d8',
-  },
-  checkMark: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '800',
-    lineHeight: 14,
-    textAlign: 'center',
-  },
-  checkText: {
-    color: '#495167',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  forgotText: {
-    color: '#5a42d8',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  modalBackdrop: {
-    flex: 1,
-    justifyContent: 'center',
-    backgroundColor: 'rgba(17, 20, 33, 0.5)',
-    paddingHorizontal: 20,
-  },
-  keyboardModal: {
-    flex: 1,
-    width: '100%',
-    justifyContent: 'center',
-  },
-  resetScroll: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    paddingVertical: 20,
-  },
-  resetModal: {
-    backgroundColor: '#ffffff',
-    borderRadius: 22,
-    padding: 22,
-    borderWidth: 1,
-    borderColor: '#edf1ff',
-    shadowColor: '#1f2a57',
-    shadowOffset: { width: 0, height: 14 },
-    shadowOpacity: 0.14,
-    shadowRadius: 18,
-    elevation: 8,
-  },
-  resetTitle: {
-    color: '#1d2435',
-    fontSize: 24,
-    fontWeight: '800',
-  },
-  resetSubtitle: {
-    color: '#586074',
-    fontSize: 13,
-    marginTop: 8,
-    marginBottom: 16,
-    lineHeight: 20,
-  },
-  resetInput: {
-    backgroundColor: '#f8f9ff',
-    borderWidth: 1,
-    borderColor: '#dfe7ff',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    fontSize: 15,
-    color: '#1a1a1e',
-  },
-  otpInputWrap: {
-    height: 58,
-    marginBottom: 6,
-    position: 'relative',
-  },
-  otpBoxes: {
-    flexDirection: 'row',
-    gap: 7,
-    height: 58,
-  },
-  otpBox: {
-    flex: 1,
-    minWidth: 0,
-    borderWidth: 1,
-    borderColor: '#dfe7ff',
-    borderRadius: 8,
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  otpBoxActive: {
-    borderColor: '#1769ff',
-    borderWidth: 2,
-  },
-  otpBoxText: {
-    color: '#1a1a1e',
-    fontSize: 22,
-    fontWeight: '700',
-  },
-  otpTextInput: {
-    ...StyleSheet.absoluteFill,
-    opacity: 0,
-    color: 'transparent',
-  },
-  resendRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-    marginTop: 6,
-  },
-  helpText: {
-    color: '#586074',
-    fontSize: 12,
-  },
-  resendLink: {
-    color: '#5a42d8',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  resendLinkDisabled: {
-    color: '#9da3b3',
-  },
-  validationBox: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 10,
-    marginTop: 8,
-    marginBottom: 12,
-    backgroundColor: '#f8f9ff',
-  },
-  validationTitle: {
-    fontSize: 12,
-    fontWeight: '800',
-    marginBottom: 4,
-  },
-  validationText: {
-    color: '#4f5b75',
-    fontSize: 11,
-    lineHeight: 16,
-  },
-  resetActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 18,
-    gap: 10,
-  },
-  secondaryButton: {
-    flex: 1,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-    backgroundColor: '#eef1ff',
-  },
-  secondaryButtonText: {
-    color: '#3a466b',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  primaryButton: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#5a42d8',
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
-    shadowColor: '#5a42d8',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-  },
-  loginPrimaryButton: {
-    width: '100%',
-    backgroundColor: '#5a42d8',
-    borderRadius: 16,
-    paddingVertical: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#5a42d8',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.23,
-    shadowRadius: 18,
-    elevation: 6,
-    marginTop: 2,
-  },
-  primaryButtonText: {
-    color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  primaryButtonDisabled: {
-    opacity: 0.72,
-  },
-  footerText: {
-    textAlign: 'center',
-    marginTop: 18,
-    color: '#586074',
-    fontSize: 13,
-  },
-  linkText: {
-    color: '#5a42d8',
-    fontWeight: '800',
-  },
-});
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 2, marginBottom: 20 },
+  rememberWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 32 },
+  checkBox: { width: 22, height: 22, borderRadius: 7, borderWidth: 1.5, borderColor: '#C9C2DE', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  checkBoxActive: { backgroundColor: BRAND, borderColor: BRAND },
+  checkText: { fontSize: 14, fontWeight: '600', color: '#4A4458' },
+  forgotText: { fontSize: 14, fontWeight: '800', color: BRAND },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(20, 16, 32, 0.5)' },
+  keyboardModal: { flex: 1, justifyContent: 'flex-end' },
+  resetScroll: { flexGrow: 1, justifyContent: 'flex-end' },
+  resetModal: { width: '100%', maxWidth: 480, alignSelf: 'center', backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 22, paddingBottom: 28 },
+  resetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  resetIcon: { width: 46, height: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: '#EEE9FF' },
+  resetHeaderCopy: { flex: 1, minWidth: 0 },
+  resetStep: { fontSize: 12, fontWeight: '800', color: BRAND },
+  resetTitle: { fontSize: 20, fontWeight: '900', color: '#1E1B2E', marginTop: 1 },
+  closeButton: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F2F0F7' },
+  stepBar: { flexDirection: 'row', gap: 6, marginTop: 16, marginBottom: 14 },
+  stepSegment: { flex: 1, height: 5, borderRadius: 3, backgroundColor: '#ECE8F6' },
+  stepSegmentDone: { backgroundColor: BRAND },
+  resetSubtitle: { fontSize: 14, lineHeight: 21, fontWeight: '500', color: '#5C5670', marginBottom: 16 },
+  strong: { fontWeight: '800', color: '#24212D' },
+  otpInputWrap: { position: 'relative', marginBottom: 6 },
+  otpBoxes: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
+  otpBox: { flex: 1, maxWidth: 54, aspectRatio: 0.85, borderRadius: 14, borderWidth: 1.5, borderColor: '#E1DCEE', backgroundColor: '#FAF9FD', alignItems: 'center', justifyContent: 'center' },
+  otpBoxActive: { borderColor: BRAND, backgroundColor: '#FFFFFF' },
+  otpBoxFilled: { borderColor: '#C8BDF5', backgroundColor: '#F6F3FF' },
+  otpBoxText: { fontSize: 24, fontWeight: '900', color: '#1E1B2E' },
+  otpTextInput: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, opacity: 0.01, fontSize: 16 },
+  resendRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 14, flexWrap: 'wrap' },
+  helpText: { fontSize: 13, color: '#6E6887', fontWeight: '600' },
+  resendLink: { fontSize: 13, fontWeight: '900', color: BRAND },
+  resendLinkDisabled: { color: '#A69FB8' },
+  validationBox: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, marginTop: 8 },
+  validationTitle: { fontSize: 13, fontWeight: '900' },
+  validationText: { fontSize: 12, lineHeight: 17, color: '#5C5670', marginTop: 2 },
+  matchText: { fontSize: 12, fontWeight: '800', marginTop: 6 },
+  matchGood: { color: '#23774A' },
+  matchBad: { color: '#B5701F' },
+  resetActions: { flexDirection: 'row', gap: 10, marginTop: 18 },
+  secondaryButton: { flex: 1, minHeight: 50, borderRadius: 14, backgroundColor: '#F1EEF8', alignItems: 'center', justifyContent: 'center' },
+  secondaryButtonText: { fontSize: 15, fontWeight: '800', color: '#3B3650' },
+  primaryButton: { flex: 1.4, minHeight: 50, borderRadius: 14, backgroundColor: BRAND, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  primaryButtonText: { fontSize: 15, fontWeight: '900', color: '#FFFFFF' },
+  buttonDisabled: { opacity: 0.6 },
+}));
