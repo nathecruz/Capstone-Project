@@ -6,27 +6,28 @@ import { Image, Modal, Pressable, ScrollView, Text, useWindowDimensions, View } 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getMyLeaderboardRank } from '@/authentication';
 import { AiChatSheet, useAiChat, type ChatAnswer } from '@/components/ai-chat';
-import { BentoTile } from '@/components/bento-tiles';
 import { ClassPulseCard } from '@/components/class-pulse-card';
 import { FramedAvatar } from '@/components/framed-avatar';
 import { FrameSheet, TitleBadge, TitleSheet } from '@/components/reward-sheets';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { badgeProgress, badgeRemaining, historyStats, nextBadge } from '@/utils/achievements';
 import { askAi } from '@/utils/ai-client';
-import { rankSummary } from '@/utils/rank';
+import { levelProgress } from '@/utils/engagement';
 import type { TranslationKey } from '@/constants/i18n';
 import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { CONTENT_MAX_WIDTH } from '@/hooks/use-responsive-layout';
 import { useRewards } from '@/hooks/use-rewards';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
+/** The menu, in two groups: what you have done, and your account. */
 const settings = [
-  { key: 'personalInformation', icon: 'person-outline', route: '/personal-information' },
-  { key: 'statsProgress', icon: 'stats-chart-outline', route: '/stats-progress' },
-  { key: 'leaderboards', icon: 'trophy-outline', route: '/leaderboards' },
-  { key: 'activityHistory', icon: 'time-outline', route: '/activity-history' },
-  { key: 'achievementsBadges', icon: 'ribbon-outline', route: '/achievements' },
-  { key: 'helpSupport', icon: 'help-circle-outline', route: '/help-support' },
+  { key: 'statsProgress', icon: 'stats-chart-outline', route: '/stats-progress', group: 'progress', color: '#3564D8', tint: '#E8EEFF' },
+  { key: 'leaderboards', icon: 'trophy-outline', route: '/leaderboards', group: 'progress', color: '#C98A0E', tint: '#FFF4D9' },
+  { key: 'activityHistory', icon: 'time-outline', route: '/activity-history', group: 'progress', color: '#5B42D8', tint: '#EEE9FF' },
+  { key: 'achievementsBadges', icon: 'ribbon-outline', route: '/achievements', group: 'progress', color: '#C2549B', tint: '#FCE7F1' },
+  { key: 'personalInformation', icon: 'person-outline', route: '/personal-information', group: 'account', color: '#5B42D8', tint: '#EEE9FF' },
+  { key: 'settingsPreferences', icon: 'settings-outline', route: '/settings-preferences', group: 'account', color: '#4A4458', tint: '#F0EEF5' },
+  { key: 'helpSupport', icon: 'help-circle-outline', route: '/help-support', group: 'account', color: '#2E9D5C', tint: '#E3F6EC' },
 ] as const;
 
 /** Tokens one AI Coach answer costs (the server charges it). */
@@ -55,7 +56,6 @@ export default function ProfileScreen() {
       active = false;
     };
   }, [isFaculty, points]);
-  const rankText = rankInfo ? rankSummary(rankInfo.rank, rankInfo.total) : null;
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
   const { maxStreak } = getHabitProgressSummary(habits);
@@ -66,7 +66,6 @@ export default function ProfileScreen() {
   const badgeStrip = [...badges].sort((a, b) => Number(b.earned) - Number(a.earned) || b.share - a.share).slice(0, 6);
   const upcomingBadge = nextBadge(badges);
   const bestStreak = useMemo(() => historyStats(habits, new Date(), frozenDays).bestStreak, [frozenDays, habits]);
-  const level = Math.floor(points / 100) + 1;
   const displayName = profile.fullName?.trim() || 'Your profile';
   const displayUsername = profile.username?.trim() ? `@${profile.username.trim()}` : '';
   // Without a photo the avatar shows the student's initial.
@@ -120,187 +119,202 @@ export default function ProfileScreen() {
     setAvatarModalOpen(false);
   };
 
+  const { level: xpLevel, xp, toNext, share: levelShare } = levelProgress(points);
+  const stats: { label: string; value: string; icon: keyof typeof Ionicons.glyphMap; color: string; onPress: () => void; accessibilityLabel: string }[] = [
+    { label: 'day streak', value: String(maxStreak), icon: 'flame', color: '#E8862A', onPress: () => router.push('/stats-progress'), accessibilityLabel: `${maxStreak}-day streak, best ${bestStreak}. Open stats` },
+    { label: 'points', value: String(points), icon: 'star', color: '#5B42D8', onPress: () => router.push('/achievements'), accessibilityLabel: `${points} points, level ${xpLevel}. Open badges` },
+    isFaculty
+      ? { label: 'goals', value: String(goals.length), icon: 'flag', color: '#C98A0E', onPress: () => router.push('/goals'), accessibilityLabel: `${goals.length} goals. Open goals` }
+      : { label: rankInfo ? `rank of ${rankInfo.total}` : 'rank', value: rankInfo ? `#${rankInfo.rank}` : '—', icon: 'trophy', color: '#C98A0E', onPress: () => router.push('/leaderboards'), accessibilityLabel: rankInfo ? `Rank ${rankInfo.rank} of ${rankInfo.total}. Open leaderboards` : 'Open leaderboards' },
+    { label: 'tokens', value: String(tokens), icon: 'diamond', color: '#2E9D5C', onPress: () => setCoachOpen(true), accessibilityLabel: `${tokens} tokens. Ask your AI Coach` },
+  ];
+  const progressItems = menuItems.filter((item) => item.group === 'progress');
+  const accountItems = menuItems.filter((item) => item.group === 'account');
+  const confirmLogOut = () => showAlert('Log Out?', 'Are you sure you want to log out?', [
+    { text: 'Cancel', style: 'cancel' },
+    { text: 'Log Out', style: 'destructive', onPress: () => router.replace('/logout') },
+  ]);
+  const renderMenu = (items: readonly (typeof settings)[number][]) => items.map((item, index) => (
+    <Pressable
+      key={item.key}
+      style={({ pressed }) => [styles.menuRow, index < items.length - 1 && styles.menuBorder, pressed && styles.pressed]}
+      onPress={() => router.push(item.route)}
+      accessibilityRole="button"
+      accessibilityLabel={t(item.key as TranslationKey)}
+    >
+      <View style={[styles.menuIcon, { backgroundColor: themeColor(item.tint, 'backgroundColor') }]}>
+        <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={18} color={themeColor(item.color)} />
+      </View>
+      <Text style={styles.menuLabel}>{t(item.key as TranslationKey)}</Text>
+      <Ionicons name="chevron-forward" size={16} color={themeColor('#A19CAA')} />
+    </Pressable>
+  ));
+
   return (
     <SafeAreaView style={[styles.screen, isDarkMode && styles.darkScreen]}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={[styles.container, width >= 700 && styles.wideContainer, { paddingHorizontal: compactLayout ? 12 : 20 }]}>
+        <View style={[styles.container, width >= 700 && styles.wideContainer, { paddingHorizontal: compactLayout ? 12 : 18 }]}>
           <View style={styles.headerRow}>
             <Text style={[styles.headerTitle, isDarkMode && styles.darkText]}>{t('profile')}</Text>
-            <Pressable style={styles.headerButton} onPress={() => router.push('/settings-preferences')} accessibilityLabel={t('profileSettings')}>
-              <Ionicons name="options-outline" size={18} color={themeColor('#3B3548')} />
+            <Pressable style={styles.headerButton} onPress={() => router.push('/settings-preferences')} accessibilityRole="button" accessibilityLabel={t('profileSettings')}>
+              <Ionicons name="settings-outline" size={19} color={themeColor('#3B3548')} />
             </Pressable>
           </View>
 
-          <View style={styles.profileHeader}>
-            <Pressable style={styles.avatarPressable} onPress={openAvatarActions} accessibilityLabel="Change profile picture">
-              {rewards.frame ? (
-                <FramedAvatar frame={rewards.frame} size={78}>
-                  <View style={styles.avatarCircle}>
-                    {avatarImage ? <Image source={{ uri: avatarImage }} style={styles.avatarImage} /> : <Text style={styles.avatarEmoji}>{avatarInitial}</Text>}
-                  </View>
-                </FramedAvatar>
-              ) : (
-                <View style={styles.avatarRing}>
-                  <View style={styles.avatarCircle}>
-                    {avatarImage ? <Image source={{ uri: avatarImage }} style={styles.avatarImage} /> : <Text style={styles.avatarEmoji}>{avatarInitial}</Text>}
-                  </View>
+          <View style={styles.profileCard}>
+            <View style={[styles.banner, isDarkMode && styles.bannerDark]}>
+              <View style={styles.bannerCircleOne} />
+              <View style={styles.bannerCircleTwo} />
+              {isFaculty && (
+                <View style={styles.facultyPill}>
+                  <Ionicons name="briefcase" size={11} color="#FFFFFF" />
+                  <Text style={styles.facultyPillText}>PSAU Faculty</Text>
                 </View>
               )}
-              <View style={styles.cameraBadge}>
-                <Ionicons name="camera" size={12} color={themeColor('#FFFFFF')} />
-              </View>
-            </Pressable>
-            <Text style={[styles.name, isDarkMode && styles.darkText]}>{displayName}</Text>
-            {displayUsername ? <Text style={styles.username}>{displayUsername}</Text> : null}
-            {rewards.owns('custom-title') && <TitleBadge title={rewards.title} onPress={() => setTitleOpen(true)} style={styles.titleBadge} />}
-            {rewards.owns('profile-frames') && (
-              <Pressable style={({ pressed }) => [styles.frameChip, pressed && styles.frameChipPressed]} onPress={() => setFrameOpen(true)} accessibilityRole="button" accessibilityLabel="Change profile frame">
-                <Ionicons name="person-circle-outline" size={13} color={themeColor('#8A5A00')} />
-                <Text style={styles.frameChipText}>{rewards.frame ? 'Change frame' : 'Add a frame'}</Text>
-              </Pressable>
-            )}
-            <View style={styles.levelPill}>
-              <Text style={styles.levelText}>Level {level}</Text>
-              <Ionicons name="star" size={11} color={themeColor('#F2B94B')} />
-              <Text style={styles.levelText}>{points ? 'Active' : 'Getting started'}</Text>
             </View>
-            {isFaculty && (
-              <View style={styles.facultyPill}>
-                <Ionicons name="briefcase" size={11} color={themeColor('#FFFFFF')} />
-                <Text style={styles.facultyPillText}>PSAU Faculty</Text>
+            <View style={styles.identityRow}>
+              <Pressable style={styles.avatarPressable} onPress={openAvatarActions} accessibilityRole="button" accessibilityLabel="Change profile picture">
+                {rewards.frame ? (
+                  <FramedAvatar frame={rewards.frame} size={78}>
+                    <View style={styles.avatarCircle}>
+                      {avatarImage ? <Image source={{ uri: avatarImage }} style={styles.avatarImage} /> : <Text style={styles.avatarInitial}>{avatarInitial}</Text>}
+                    </View>
+                  </FramedAvatar>
+                ) : (
+                  <View style={styles.avatarRing}>
+                    <View style={styles.avatarCircle}>
+                      {avatarImage ? <Image source={{ uri: avatarImage }} style={styles.avatarImage} /> : <Text style={styles.avatarInitial}>{avatarInitial}</Text>}
+                    </View>
+                  </View>
+                )}
+                <View style={styles.cameraBadge}>
+                  <Ionicons name="camera" size={12} color={themeColor('#FFFFFF')} />
+                </View>
+              </Pressable>
+              <Pressable style={({ pressed }) => [styles.editButton, pressed && styles.pressed]} onPress={() => router.push('/personal-information')} accessibilityRole="button" accessibilityLabel="Edit profile">
+                <Ionicons name="create-outline" size={15} color={themeColor('#5B42D8')} />
+                <Text style={styles.editButtonText}>Edit profile</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.identityCopy}>
+              <Text style={styles.name} numberOfLines={2}>{displayName}</Text>
+              {displayUsername ? <Text style={styles.username}>{displayUsername}</Text> : null}
+              {(rewards.owns('custom-title') || rewards.owns('profile-frames')) && (
+                <View style={styles.rewardRow}>
+                  {rewards.owns('custom-title') && <TitleBadge title={rewards.title} onPress={() => setTitleOpen(true)} />}
+                  {rewards.owns('profile-frames') && (
+                    <Pressable style={({ pressed }) => [styles.frameChip, pressed && styles.pressed]} onPress={() => setFrameOpen(true)} accessibilityRole="button" accessibilityLabel="Change profile frame">
+                      <Ionicons name="person-circle-outline" size={13} color={themeColor('#8A5A00')} />
+                      <Text style={styles.frameChipText}>{rewards.frame ? 'Change frame' : 'Add a frame'}</Text>
+                    </Pressable>
+                  )}
+                </View>
+              )}
+            </View>
+
+            <Pressable style={({ pressed }) => [styles.levelBox, pressed && styles.pressed]} onPress={() => router.push('/achievements')} accessibilityRole="button" accessibilityLabel={`Level ${xpLevel}, ${xp} of ${xp + toNext} XP. Open badges`}>
+              <View style={styles.levelTop}>
+                <View style={styles.levelBadge}><Ionicons name="star" size={12} color="#FFFFFF" /><Text style={styles.levelBadgeText}>Level {xpLevel}</Text></View>
+                <Text style={styles.levelXp}>{xp}/{xp + toNext} XP</Text>
               </View>
-            )}
+              <View style={styles.levelTrack}><View style={[styles.levelFill, { width: `${Math.round(levelShare * 100)}%` }]} /></View>
+              <Text style={styles.levelHint}>{toNext} XP to level {xpLevel + 1} · 20 XP for each check-in</Text>
+            </Pressable>
+
+            <View style={styles.statsRow}>
+              {stats.map((stat, index) => (
+                <Pressable key={stat.label + index} style={({ pressed }) => [styles.stat, index > 0 && styles.statDivider, pressed && styles.pressed]} onPress={stat.onPress} accessibilityRole="button" accessibilityLabel={stat.accessibilityLabel}>
+                  <View style={styles.statTop}>
+                    <Ionicons name={stat.icon} size={14} color={themeColor(stat.color)} />
+                    <Text style={styles.statValue} numberOfLines={1}>{stat.value}</Text>
+                  </View>
+                  <Text style={styles.statLabel} numberOfLines={1}>{stat.label}</Text>
+                </Pressable>
+              ))}
+            </View>
           </View>
 
-          <View style={styles.bentoGrid}>
-            <BentoTile
-              tone="streak"
-              label="Streak"
-              value={String(maxStreak)}
-              unit={maxStreak === 1 ? 'day' : 'days'}
-              detail={`Best ${bestStreak} ${bestStreak === 1 ? 'day' : 'days'}`}
-              onPress={() => router.push('/stats-progress')}
-              accessibilityLabel={`${maxStreak}-day streak, best ${bestStreak}. Open stats`}
-            />
-            <BentoTile
-              tone="level"
-              label="Points"
-              value={String(points)}
-              detail={`Level ${level} · ${100 - (points % 100)} XP to next`}
-              onPress={() => router.push('/achievements')}
-              accessibilityLabel={`${points} points, level ${level}. Open badges`}
-            />
-            {isFaculty ? (
-              <BentoTile
-                tone="rank"
-                label="Goals"
-                value={String(goals.length)}
-                detail={goals.length ? 'Plans in progress' : 'Turn an idea into a plan'}
-                onPress={() => router.push('/goals')}
-                accessibilityLabel={`${goals.length} goals. Open goals`}
-              />
-            ) : (
-              <BentoTile
-                tone="rank"
-                label="Rank"
-                value={rankInfo ? `#${rankInfo.rank}` : '—'}
-                detail={rankText ? `${rankText.title} · ${rankText.of}` : 'Earn points to join the leaderboard'}
-                onPress={() => router.push('/leaderboards')}
-                accessibilityLabel={rankInfo ? `Rank ${rankInfo.rank} of ${rankInfo.total}. Open leaderboards` : 'Open leaderboards'}
-              />
-            )}
-            <BentoTile
-              tone="tokens"
-              label="Tokens"
-              value={String(tokens)}
-              detail="Ask your AI Coach"
-              onPress={() => setCoachOpen(true)}
-              accessibilityLabel={`${tokens} tokens. Ask your AI Coach`}
-            />
-          </View>
+          <Pressable style={({ pressed }) => [styles.coachCard, isDarkMode && styles.coachCardDark, pressed && styles.pressed]} onPress={() => setCoachOpen(true)} accessibilityRole="button" accessibilityLabel={`Ask your AI Coach. ${COACH_COST} tokens per answer, ${tokens} tokens left`}>
+            <View style={styles.coachIcon}><Ionicons name="sparkles" size={20} color="#FFFFFF" /></View>
+            <View style={styles.coachCopy}>
+              <Text style={styles.coachTitle}>{t('aiCoach')}</Text>
+              <Text style={styles.coachText}>One specific next step from your habits · {COACH_COST} tokens per answer</Text>
+            </View>
+            <View style={styles.coachButton}><Text style={styles.coachButtonText}>Ask</Text></View>
+          </Pressable>
 
-          <Pressable style={styles.badgeStrip} onPress={() => router.push('/achievements')} accessibilityRole="button" accessibilityLabel={`Badges: ${earnedBadges} of ${badges.length} earned. Open achievements`}>
-            <View style={styles.badgeStripHeader}>
-              <Text style={styles.badgeStripTitle}>Badges</Text>
-              <View style={styles.badgeStripCountRow}>
-                <Text style={styles.badgeStripCount}>{earnedBadges}/{badges.length} earned</Text>
+          <Pressable style={({ pressed }) => [styles.card, pressed && styles.pressed]} onPress={() => router.push('/achievements')} accessibilityRole="button" accessibilityLabel={`Badges: ${earnedBadges} of ${badges.length} earned. Open achievements`}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardTitle}>Badges</Text>
+              <View style={styles.cardLink}>
+                <Text style={styles.cardLinkText}>{earnedBadges}/{badges.length} earned</Text>
                 <Ionicons name="chevron-forward" size={14} color={themeColor('#5B42D8')} />
               </View>
             </View>
-            <View style={styles.badgeStripRow}>
+            <View style={styles.badgeRow}>
               {badgeStrip.map((badge) => (
-                <View key={badge.id} style={[styles.badgeStripIcon, { backgroundColor: themeColor(badge.earned ? badge.background : '#EEF0F4', 'backgroundColor') }]}>
-                  <Ionicons name={badge.icon as keyof typeof Ionicons.glyphMap} size={18} color={badge.earned ? badge.color : themeColor('#A3A8B5')} />
+                <View key={badge.id} style={[styles.badgeIcon, { backgroundColor: themeColor(badge.earned ? badge.background : '#EEF0F4', 'backgroundColor') }]}>
+                  <Ionicons name={badge.icon as keyof typeof Ionicons.glyphMap} size={19} color={badge.earned ? badge.color : themeColor('#A3A8B5')} />
                 </View>
               ))}
             </View>
-            {upcomingBadge && <Text style={styles.badgeStripNext}>Next: {upcomingBadge.title} · {badgeRemaining(upcomingBadge)}</Text>}
+            {upcomingBadge && (
+              <View style={styles.nextBadge}>
+                <Ionicons name="ribbon-outline" size={14} color={themeColor('#5B42D8')} />
+                <Text style={styles.nextBadgeText} numberOfLines={1}>Next: {upcomingBadge.title} · {badgeRemaining(upcomingBadge)}</Text>
+              </View>
+            )}
           </Pressable>
 
-          <View style={styles.profileGoalsSection}>
-            <View style={styles.profileGoalsHeader}>
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
               <View>
-                <Text style={[styles.profileGoalsTitle, isDarkMode && styles.darkText]}>My Goals</Text>
-                <Text style={[styles.profileGoalsSubtitle, isDarkMode && styles.darkMutedText]}>{goals.length ? 'Your plans and next steps.' : 'Turn an intention into a plan.'}</Text>
+                <Text style={styles.cardTitle}>My Goals</Text>
+                <Text style={styles.cardSubtitle}>{goals.length ? 'Your plans and next steps' : 'Turn an intention into a plan'}</Text>
               </View>
-              <Pressable onPress={() => router.push('/goals')} accessibilityRole="button" accessibilityLabel="View all goals">
-                <View style={styles.profileGoalsViewAll}>
-                  <Text style={styles.profileGoalsViewAllText}>View all</Text>
-                  <Ionicons name="chevron-forward" size={15} color={themeColor('#5B42D8')} />
+              <Pressable onPress={() => router.push('/goals')} accessibilityRole="button" accessibilityLabel="View all goals" hitSlop={8}>
+                <View style={styles.cardLink}>
+                  <Text style={styles.cardLinkText}>View all</Text>
+                  <Ionicons name="chevron-forward" size={14} color={themeColor('#5B42D8')} />
                 </View>
               </Pressable>
             </View>
-            {goals.length ? goals.slice(0, 2).map((goal) => (
-              <Pressable
-                key={goal.id}
-                style={[styles.profileGoalCard, isDarkMode && styles.darkCard]}
-                onPress={() => router.push('/goals')}
-                accessibilityRole="button"
-                accessibilityLabel={`Open goal ${goal.title}`}
-              >
-                <View style={styles.profileGoalHeader}>
-                  <View style={styles.profileGoalCopy}>
-                    <Text style={[styles.profileGoalCategory, isDarkMode && styles.darkMutedText]}>{goal.category}</Text>
-                    <Text style={[styles.profileGoalTitle, isDarkMode && styles.darkText]} numberOfLines={2}>{goal.title}</Text>
+            {goals.length ? goals.slice(0, 2).map((goal) => {
+              const progress = Math.max(0, Math.min(100, goal.progress));
+              return (
+                <Pressable key={goal.id} style={({ pressed }) => [styles.goalRow, pressed && styles.pressed]} onPress={() => router.push('/goals')} accessibilityRole="button" accessibilityLabel={`Open goal ${goal.title}, ${progress}% done`}>
+                  <View style={styles.goalTop}>
+                    <Text style={styles.goalTitle} numberOfLines={2}>{goal.title}</Text>
+                    <Text style={styles.goalPercent}>{progress}%</Text>
                   </View>
-                  <Text style={styles.profileGoalPercent}>{Math.max(0, Math.min(100, goal.progress))}%</Text>
-                </View>
-                <View style={styles.profileGoalTrack}>
-                  <View style={[styles.profileGoalFill, { width: `${Math.max(0, Math.min(100, goal.progress))}%` }]} />
-                </View>
-                <Text style={[styles.profileGoalStatus, isDarkMode && styles.darkMutedText]}>{goal.status}</Text>
-              </Pressable>
-            )) : (
-              <Pressable
-                style={[styles.profileGoalsEmpty, isDarkMode && styles.darkCard]}
-                onPress={() => router.push('/goals')}
-                accessibilityRole="button"
-                accessibilityLabel="Create your first goal"
-              >
-                <View style={styles.profileGoalsEmptyIcon}><Ionicons name="flag-outline" size={19} color={themeColor('#5B42D8')} /></View>
-                <Text style={[styles.profileGoalsEmptyText, isDarkMode && styles.darkText]}>Create your first goal</Text>
-                <Ionicons name="chevron-forward" size={17} color={themeColor('#8C8498')} />
+                  <View style={styles.goalTrack}><View style={[styles.goalFill, progress >= 100 && styles.goalFillDone, { width: `${progress}%` }]} /></View>
+                  <Text style={styles.goalMeta}>{goal.category} · {goal.status}</Text>
+                </Pressable>
+              );
+            }) : (
+              <Pressable style={({ pressed }) => [styles.goalEmpty, pressed && styles.pressed]} onPress={() => router.push('/goals')} accessibilityRole="button" accessibilityLabel="Create your first goal">
+                <View style={styles.goalEmptyIcon}><Ionicons name="flag-outline" size={18} color={themeColor('#5B42D8')} /></View>
+                <Text style={styles.goalEmptyText}>Create your first goal</Text>
+                <Ionicons name="chevron-forward" size={16} color={themeColor('#8C8498')} />
               </Pressable>
             )}
           </View>
 
           {isFaculty && <ClassPulseCard style={styles.facultyClassCard} />}
 
-          <Text style={styles.sectionLabel}>{t('account')} &amp; {t('preferences')}</Text>
-          <View style={[styles.settingsCard, isDarkMode && styles.darkCard]}>
-            {menuItems.map((item, index) => (
-              <Pressable
-                key={item.key}
-                style={[styles.settingRow, index < menuItems.length - 1 && styles.settingBorder]}
-                onPress={() => router.push(item.route)}
-              >
-                <View style={styles.settingIcon}>
-                  <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={17} color={themeColor('#5B42D8')} />
-                </View>
-                <Text style={styles.settingLabel}>{t(item.key as TranslationKey)}</Text>
-                <Ionicons name="chevron-forward" size={16} color={themeColor('#A19CAA')} />
-              </Pressable>
-            ))}
+          <Text style={styles.groupLabel}>Your progress</Text>
+          <View style={styles.menuCard}>{renderMenu(progressItems)}</View>
+
+          <Text style={styles.groupLabel}>{t('account')}</Text>
+          <View style={styles.menuCard}>
+            {renderMenu(accountItems)}
+            <Pressable style={({ pressed }) => [styles.menuRow, styles.menuBorderTop, pressed && styles.pressed]} onPress={confirmLogOut} accessibilityRole="button" accessibilityLabel={t('logOut')}>
+              <View style={[styles.menuIcon, { backgroundColor: themeColor('#FFECEF', 'backgroundColor') }]}>
+                <Ionicons name="log-out-outline" size={18} color={themeColor('#D94868')} />
+              </View>
+              <Text style={[styles.menuLabel, styles.logOutText]}>{t('logOut')}</Text>
+            </Pressable>
           </View>
         </View>
       </ScrollView>
@@ -439,8 +453,6 @@ const themedStyles = createThemedStyles({
   cancelOptionText: {
     color: '#2F2B3B',
   },
-  darkInput: { borderColor: '#3B3647', color: '#F2EFF8', backgroundColor: '#25212E' },
-  primaryButtonDisabled: { opacity: 0.75 },
   content: {
     paddingBottom: 110,
   },
@@ -475,434 +487,80 @@ const themedStyles = createThemedStyles({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  profileHeader: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  avatarPressable: {
-    position: 'relative',
-    marginBottom: 10,
-  },
-  avatarRing: {
-    width: 94,
-    height: 94,
-    borderRadius: 47,
-    backgroundColor: '#E5D9FC',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 4,
-    borderColor: '#FFFFFF',
-  },
-  avatarCircle: {
-    width: 78,
-    height: 78,
-    borderRadius: 39,
-    backgroundColor: '#F3DAD5',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarEmoji: {
-    fontSize: 42,
-    fontWeight: '800',
-    color: '#5B42D8',
-  },
-  avatarImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 39,
-  },
-  cameraBadge: {
-    position: 'absolute',
-    right: 0,
-    bottom: 5,
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: '#5B42D8',
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  name: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#24212D',
-  },
-  username: {
-    fontSize: 11,
-    color: '#817B89',
-    fontWeight: '600',
-    marginTop: 3,
-  },
-  titleBadge: { alignSelf: 'center', marginTop: 7 },
-  frameChip: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'center', marginTop: 6, minHeight: 30, paddingHorizontal: 10, borderRadius: 999, backgroundColor: '#FFF4D6' },
-  frameChipPressed: { opacity: 0.85 },
-  frameChipText: { fontSize: 11, fontWeight: '800', color: '#8A5A00' },
-  bentoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
-  facultyPill: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: '#5B42D8' },
-  facultyPillText: { fontSize: 10, fontWeight: '800', color: '#FFFFFF' },
   facultyClassCard: { marginTop: 16 },
-  levelPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: '#EDE6FF',
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    marginTop: 8,
-  },
-  levelText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#5639B8',
-  },
-  statsCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    paddingVertical: 14,
-    marginBottom: 14,
-  },
-  statCell: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 2,
-  },
-  statDivider: {
-    width: 1,
-    height: 42,
-    backgroundColor: '#ECE9F0',
-  },
-  statValue: {
-    fontSize: 19,
-    fontWeight: '800',
-    color: '#292531',
-  },
-  statLabel: {
-    fontSize: 10,
-    color: '#5F596B',
-    fontWeight: '600',
-  },
-  badgeStrip: { width: '100%', backgroundColor: '#FFFFFF', borderRadius: 20, padding: 14, marginBottom: 14, shadowColor: '#201444', shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
-  badgeStripHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  badgeStripTitle: { fontSize: 15, fontWeight: '800', color: '#2F2D3C' },
-  badgeStripCountRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  badgeStripCount: { fontSize: 12, fontWeight: '800', color: '#5B42D8' },
-  badgeStripRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  badgeStripIcon: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  badgeStripNext: { marginTop: 10, fontSize: 12, fontWeight: '700', color: '#6A6573' },
-  firstActionCard: { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: '#DDD4F7' },
-  firstActionIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: '#EEE8FF', alignItems: 'center', justifyContent: 'center', marginBottom: 11 },
-  firstActionCopy: { marginBottom: 14 },
-  profileGoalsSection: { marginBottom: 14 },
-  profileGoalsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-  profileGoalsTitle: { color: '#292531', fontSize: 15, fontWeight: '800' },
-  profileGoalsSubtitle: { color: '#777180', fontSize: 10, lineHeight: 15, marginTop: 2 },
-  profileGoalsViewAll: { flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: 40, paddingLeft: 10 },
-  profileGoalsViewAllText: { color: '#5B42D8', fontSize: 11, fontWeight: '800' },
-  profileGoalCard: { backgroundColor: '#FFFFFF', borderRadius: 14, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: '#E8E4EF' },
-  profileGoalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
-  profileGoalCopy: { flex: 1 },
-  profileGoalCategory: { color: '#777180', fontSize: 9, fontWeight: '800', textTransform: 'uppercase' },
-  profileGoalTitle: { color: '#292531', fontSize: 12, fontWeight: '800', lineHeight: 17, marginTop: 3 },
-  profileGoalPercent: { color: '#5B42D8', fontSize: 13, fontWeight: '800' },
-  profileGoalTrack: { height: 6, backgroundColor: '#E9E3F7', borderRadius: 3, overflow: 'hidden', marginTop: 10 },
-  profileGoalFill: { height: '100%', backgroundColor: '#5B42D8', borderRadius: 3 },
-  profileGoalStatus: { color: '#777180', fontSize: 9, fontWeight: '700', marginTop: 6 },
-  profileGoalsEmpty: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 14, padding: 12, borderWidth: 1, borderColor: '#E8E4EF' },
-  profileGoalsEmptyIcon: { width: 36, height: 36, borderRadius: 11, backgroundColor: '#EEE8FF', alignItems: 'center', justifyContent: 'center', marginRight: 10 },
-  profileGoalsEmptyText: { flex: 1, color: '#292531', fontSize: 12, fontWeight: '800' },
-  firstActionEyebrow: { color: '#7A6AE7', fontSize: 9, fontWeight: '900', letterSpacing: 1.2, marginBottom: 4 },
-  firstActionTitle: { color: '#292531', fontSize: 16, fontWeight: '800', lineHeight: 21 },
-  firstActionBody: { color: '#6E6878', fontSize: 11.5, lineHeight: 17, marginTop: 4 },
-  firstActionButton: { minHeight: 46, borderRadius: 12, backgroundColor: '#5B42D8', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
-  firstActionButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900' },
-  dailyWinCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFBF0', borderRadius: 16, padding: 12, marginBottom: 20, borderWidth: 1, borderColor: '#F3E4B6' },
-  dailyWinIcon: { width: 30, height: 30, borderRadius: 10, backgroundColor: '#FFF0C2', alignItems: 'center', justifyContent: 'center', marginRight: 9 },
-  dailyWinCopy: { flex: 1 },
-  dailyWinTitle: { color: '#463A1B', fontSize: 12, fontWeight: '900' },
-  dailyWinBody: { color: '#786A43', fontSize: 10.5, lineHeight: 15, marginTop: 2 },
-  dailyWinPoints: { color: '#B27A0B', fontSize: 11, fontWeight: '900', marginLeft: 7 },
-  progressCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 20,
-  },
-  progressHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  cardTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#302B3B',
-  },
-  cardSubtitle: {
-    fontSize: 10,
-    color: '#827C8C',
-    fontWeight: '600',
-    marginTop: 3,
-  },
-  progressPercent: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#5B42D8',
-  },
-  progressTrack: {
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#EAE4FB',
-    marginTop: 14,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    width: '75%',
-    height: '100%',
-    borderRadius: 5,
-    backgroundColor: '#5B42D8',
-  },
-  progressMeta: {
-    fontSize: 10,
-    color: '#777181',
-    fontWeight: '600',
-    marginTop: 8,
-  },
-  sectionLabel: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#4A4553',
-    marginBottom: 8,
-  },
-  leaderboardSection: {
-    marginBottom: 18,
-  },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#2A2634',
-  },
-  linkText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#5B42D8',
-  },
-  leaderboardCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  leaderboardEmptyCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 18, padding: 16, borderWidth: 1, borderColor: '#E2DCF2' },
-  leaderboardEmptyIcon: { width: 40, height: 40, borderRadius: 13, backgroundColor: '#F0EBFF', alignItems: 'center', justifyContent: 'center', marginRight: 11 },
-  leaderboardEmptyCopy: { flex: 1 },
-  leaderboardEmptyTitle: { color: '#302B3B', fontSize: 12, fontWeight: '800' },
-  leaderboardEmptyBody: { color: '#756F80', fontSize: 10.5, lineHeight: 15, marginTop: 3 },
-  leaderboardColumn: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  leaderboardLabel: {
-    fontSize: 12,
-    color: '#5C5667',
-    fontWeight: '700',
-    alignSelf: 'flex-start',
-    width: '100%',
-  },
-  rankRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-    justifyContent: 'center',
-  },
-  rankValue: {
-    fontSize: 24,
-    color: '#2D2A38',
-    fontWeight: '800',
-    marginRight: 10,
-  },
-  badgeCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#F7E3A8',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  trophyImage: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-  },
-  scoreValue: {
-    fontSize: 22,
-    color: '#2D2A38',
-    fontWeight: '800',
-    marginTop: 8,
-  },
-  risingStarText: {
-    fontSize: 10,
-    color: '#5B42D8',
-    fontWeight: '700',
-    textAlign: 'center',
-    marginTop: 4,
-  },
-  rankMeta: {
-    fontSize: 10,
-    color: '#7B7585',
-    fontWeight: '600',
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  leagueText: {
-    fontSize: 10,
-    color: '#7B7585',
-    fontWeight: '600',
-    textAlign: 'center',
-    marginTop: 2,
-  },
-  leaderboardDivider: {
-    width: 1,
-    height: 60,
-    backgroundColor: '#EEEAF5',
-    marginHorizontal: 18,
-  },
-  primaryButton: {
-    backgroundColor: '#7657E8',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginTop: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  primaryButtonPressed: {
-    backgroundColor: '#5B3BC7',
-    transform: [{ scale: 0.98 }],
-  },
-  secondaryButton: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#7657E8', borderRadius: 12, paddingVertical: 11, paddingHorizontal: 16, marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
-  secondaryButtonPressed: { backgroundColor: '#F0EBFF', transform: [{ scale: 0.98 }] },
-  secondaryButtonText: { fontSize: 12, color: '#5B42D8', fontWeight: '800' },
-  primaryButtonText: {
-    fontSize: 12,
-    color: '#FFFFFF',
-    fontWeight: '800',
-  },
-  tokenCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 18,
-  },
-  tokenLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  tokenIconWrap: {
-    width: 58,
-    height: 58,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-    overflow: 'hidden',
-    backgroundColor: '#E9E5F8',
-  },
-  coachImage: {
-    width: 58,
-    height: 58,
-    borderRadius: 18,
-  },
-  tokenTextWrap: {
-    flex: 1,
-    marginRight: 12,
-  },
-  tokenTitle: {
-    fontSize: 12,
-    color: '#2A2634',
-    fontWeight: '800',
-    marginBottom: 4,
-  },
-  tokenDescription: {
-    fontSize: 10,
-    color: '#7A7586',
-    fontWeight: '600',
-    lineHeight: 15,
-  },
-  tokenMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    marginBottom: 12,
-    gap: 8,
-  },
-  tokenValueWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  tokenBadgeImage: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#F5F0E8',
-  },
-  tokenValueLarge: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: '#2D2A38',
-  },
-  tokenLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#6E6579',
-  },
-  settingsCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    paddingHorizontal: 14,
-  },
-  settingRow: {
-    minHeight: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  settingBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0EEF3',
-  },
-  settingIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 10,
-    backgroundColor: '#F1ECFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 11,
-  },
-  settingLabel: {
-    flex: 1,
-    fontSize: 12,
-    color: '#393440',
-    fontWeight: '700',
-  },
+  banner: { height: 92, backgroundColor: '#5B42D8', overflow: 'hidden', alignItems: 'flex-end', padding: 12 },
+  bannerDark: { backgroundColor: '#30215A' },
+  bannerCircleOne: { position: 'absolute', width: 180, height: 180, borderRadius: 90, right: -40, top: -90, backgroundColor: 'rgba(255,255,255,0.12)' },
+  bannerCircleTwo: { position: 'absolute', width: 120, height: 120, borderRadius: 60, left: -30, bottom: -70, backgroundColor: 'rgba(255,255,255,0.08)' },
+  profileCard: { backgroundColor: '#FFFFFF', borderRadius: 26, overflow: 'hidden', marginBottom: 14, shadowColor: '#292047', shadowOpacity: 0.06, shadowRadius: 14, shadowOffset: { width: 0, height: 5 }, elevation: 3 },
+  identityRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', paddingHorizontal: 18, marginTop: -44 },
+  avatarPressable: { position: 'relative' },
+  avatarRing: { width: 88, height: 88, borderRadius: 44, padding: 4, backgroundColor: '#FFFFFF' },
+  avatarCircle: { width: '100%', height: '100%', borderRadius: 999, backgroundColor: '#EEE9FF', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  avatarImage: { width: '100%', height: '100%' },
+  avatarInitial: { fontSize: 32, fontWeight: '900', color: '#5B42D8' },
+  cameraBadge: { position: 'absolute', right: 2, bottom: 2, width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: '#5B42D8', borderWidth: 2, borderColor: '#FFFFFF' },
+  editButton: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 38, paddingHorizontal: 14, borderRadius: 999, backgroundColor: '#F1EDFF', marginBottom: 6 },
+  editButtonText: { fontSize: 13, fontWeight: '900', color: '#5B42D8' },
+  identityCopy: { paddingHorizontal: 18, paddingTop: 10 },
+  name: { fontSize: 22, lineHeight: 27, fontWeight: '900', color: '#1F1C26' },
+  username: { fontSize: 13, fontWeight: '700', color: '#7A7488', marginTop: 2 },
+  rewardRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 10 },
+  frameChip: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 30, paddingHorizontal: 10, borderRadius: 999, backgroundColor: '#FFF4D9' },
+  frameChipText: { fontSize: 12, fontWeight: '800', color: '#8A5A00' },
+  facultyPill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.2)' },
+  facultyPillText: { fontSize: 11, fontWeight: '900', color: '#FFFFFF' },
+  levelBox: { marginHorizontal: 18, marginTop: 14, padding: 12, borderRadius: 16, backgroundColor: '#F6F3FF' },
+  levelTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  levelBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999, backgroundColor: '#5B42D8' },
+  levelBadgeText: { fontSize: 12, fontWeight: '900', color: '#FFFFFF' },
+  levelXp: { fontSize: 13, fontWeight: '900', color: '#3B3650' },
+  levelTrack: { height: 8, borderRadius: 4, overflow: 'hidden', backgroundColor: '#E4DEF7', marginTop: 10 },
+  levelFill: { height: '100%', borderRadius: 4, backgroundColor: '#5B42D8' },
+  levelHint: { fontSize: 12, fontWeight: '600', color: '#6E6887', marginTop: 7 },
+  statsRow: { flexDirection: 'row', marginTop: 14, borderTopWidth: 1, borderTopColor: '#F0EEF5' },
+  stat: { flex: 1, minWidth: 0, alignItems: 'center', paddingVertical: 14, paddingHorizontal: 4 },
+  statDivider: { borderLeftWidth: 1, borderLeftColor: '#F0EEF5' },
+  statTop: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  statValue: { fontSize: 18, fontWeight: '900', color: '#1F1C26' },
+  statLabel: { fontSize: 11, fontWeight: '700', color: '#7A7488', marginTop: 2 },
+  coachCard: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 22, marginBottom: 14, backgroundColor: '#F1EDFF', borderWidth: 1, borderColor: '#E1D9FB' },
+  coachCardDark: { backgroundColor: '#241D3A', borderColor: '#352C52' },
+  coachIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: '#5B42D8' },
+  coachCopy: { flex: 1, minWidth: 0 },
+  coachTitle: { fontSize: 16, fontWeight: '900', color: '#24212D' },
+  coachText: { fontSize: 12, lineHeight: 17, fontWeight: '600', color: '#6E6887', marginTop: 2 },
+  coachButton: { minHeight: 38, paddingHorizontal: 16, borderRadius: 999, alignItems: 'center', justifyContent: 'center', backgroundColor: '#5B42D8' },
+  coachButtonText: { fontSize: 14, fontWeight: '900', color: '#FFFFFF' },
+  card: { backgroundColor: '#FFFFFF', borderRadius: 22, padding: 16, marginBottom: 14, shadowColor: '#292047', shadowOpacity: 0.04, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
+  cardHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 12 },
+  cardTitle: { fontSize: 17, fontWeight: '900', color: '#1F1C26' },
+  cardSubtitle: { fontSize: 12, fontWeight: '600', color: '#7A7488', marginTop: 2 },
+  cardLink: { flexDirection: 'row', alignItems: 'center', gap: 3, minHeight: 24 },
+  cardLinkText: { fontSize: 13, fontWeight: '800', color: '#5B42D8' },
+  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  badgeIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  nextBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, backgroundColor: '#F6F3FF' },
+  nextBadgeText: { flex: 1, fontSize: 12, fontWeight: '700', color: '#4A4458' },
+  goalRow: { paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#F0EEF5' },
+  goalTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  goalTitle: { flex: 1, fontSize: 14, lineHeight: 19, fontWeight: '800', color: '#2D2A3D' },
+  goalPercent: { fontSize: 14, fontWeight: '900', color: '#5B42D8' },
+  goalTrack: { height: 7, borderRadius: 4, overflow: 'hidden', backgroundColor: '#EEEAF6', marginTop: 8 },
+  goalFill: { height: '100%', borderRadius: 4, backgroundColor: '#5B42D8' },
+  goalFillDone: { backgroundColor: '#2E9D5C' },
+  goalMeta: { fontSize: 12, fontWeight: '600', color: '#7A7488', marginTop: 6 },
+  goalEmpty: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 52, paddingHorizontal: 12, borderRadius: 14, backgroundColor: '#F6F3FF' },
+  goalEmptyIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
+  goalEmptyText: { flex: 1, fontSize: 14, fontWeight: '800', color: '#2D2A3D' },
+  groupLabel: { fontSize: 12, fontWeight: '900', letterSpacing: 0.8, textTransform: 'uppercase', color: '#7A7488', marginTop: 6, marginBottom: 8, marginLeft: 4 },
+  menuCard: { backgroundColor: '#FFFFFF', borderRadius: 22, paddingHorizontal: 14, marginBottom: 14, shadowColor: '#292047', shadowOpacity: 0.04, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
+  menuRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 58 },
+  menuBorder: { borderBottomWidth: 1, borderBottomColor: '#F0EEF5' },
+  menuBorderTop: { borderTopWidth: 1, borderTopColor: '#F0EEF5' },
+  menuIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  menuLabel: { flex: 1, fontSize: 15, fontWeight: '700', color: '#2D2A3D' },
+  logOutText: { color: '#D94868', fontWeight: '800' },
+  pressed: { opacity: 0.8 },
 });
 
