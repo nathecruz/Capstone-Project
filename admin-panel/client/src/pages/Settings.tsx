@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Database, KeyRound, Server, ShieldCheck } from 'lucide-react';
+import { ChevronDown, Database, KeyRound, Server, ShieldCheck } from 'lucide-react';
 import { Alert, Badge, Button, Card, Field, Input, PageHeader, Spinner, Table, Td, Th, useToast } from '../components/ui';
 import { post, put } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -107,14 +107,20 @@ function SystemHealth() {
         <div className="rounded-lg bg-surface-2 p-3"><p className="text-xs text-muted">Server</p><p className="mt-0.5 text-sm font-semibold text-ink">Node {data.server.node} · up {uptime > 3600 ? `${Math.floor(uptime / 3600)} h` : `${Math.floor(uptime / 60)} min`}</p></div>
       </div>
       <p className="flex items-center gap-2 text-xs text-muted"><Database className="size-3.5" /> {data.database.database} on {data.database.host}</p>
-      <div className="-mx-5">
-        <Table>
-          <thead><tr><Th>Table</Th><Th align="right">Rows (approx.)</Th><Th align="right">Size</Th></tr></thead>
-          <tbody>
-            {data.tables.map((table) => <tr key={table.name}><Td className="font-mono text-xs">{table.name}</Td><Td align="right">{formatNumber(table.rows)}</Td><Td align="right">{formatBytes(table.bytes)}</Td></tr>)}
-          </tbody>
-        </Table>
-      </div>
+      <details className="group rounded-lg border border-line">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm font-medium text-ink hover:bg-surface-hover [&::-webkit-details-marker]:hidden">
+          <span>Database tables <span className="font-normal text-muted">({data.tables.length} · {formatNumber(data.tables.reduce((total, table) => total + table.rows, 0))} rows)</span></span>
+          <ChevronDown className="size-4 text-muted transition-transform group-open:rotate-180" aria-hidden />
+        </summary>
+        <div className="border-t border-line">
+          <Table>
+            <thead><tr><Th>Table</Th><Th align="right">Rows (approx.)</Th><Th align="right">Size</Th></tr></thead>
+            <tbody>
+              {data.tables.map((table) => <tr key={table.name}><Td className="font-mono text-xs">{table.name}</Td><Td align="right">{formatNumber(table.rows)}</Td><Td align="right">{formatBytes(table.bytes)}</Td></tr>)}
+            </tbody>
+          </Table>
+        </div>
+      </details>
       <div><Button size="sm" loading={loading} onClick={reload}>Refresh</Button></div>
     </div>
   );

@@ -101,7 +101,7 @@ export function ChartCard<T>({ title, subtitle, children, rows, columns, actions
       actions={(
         <>
           {actions}
-          <IconButton label={view === 'chart' ? 'Show as table' : 'Show as chart'} onClick={() => setView(view === 'chart' ? 'table' : 'chart')}>
+          <IconButton className="print-hidden" label={view === 'chart' ? 'Show as table' : 'Show as chart'} onClick={() => setView(view === 'chart' ? 'table' : 'chart')}>
             {view === 'chart' ? <Table2 className="size-4" /> : <BarChart3 className="size-4" />}
           </IconButton>
         </>

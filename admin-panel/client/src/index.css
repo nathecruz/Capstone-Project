@@ -238,3 +238,50 @@ body {
 .animate-fade-in {
   animation: fade-in 160ms ease-out;
 }
+
+/* Printing a report (for example Class Pulse): only the page, in the light palette, with its colours. */
+.print-only {
+  display: none;
+}
+
+@media print {
+  :root,
+  :root[data-theme] {
+    color-scheme: light;
+    --page: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #f3f3f0;
+    --surface-hover: #efeeea;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #6b6a65;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.12);
+    --border-strong: rgba(11, 11, 11, 0.2);
+    --accent: #5b42d8;
+    --accent-soft: #eeebfc;
+    --accent-ink: #4a33c2;
+    --good-ink: #006300;
+    --good-soft: #e5f5e5;
+    --warning-ink: #7a5200;
+    --warning-soft: #fdf3dc;
+    --critical-ink: #b02a2a;
+    --critical-soft: #fbe9e9;
+    --shadow: none;
+    --shadow-lg: none;
+  }
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .print-hidden {
+    display: none !important;
+  }
+  .print-only {
+    display: block;
+  }
+  .print-avoid-break {
+    break-inside: avoid;
+  }
+}

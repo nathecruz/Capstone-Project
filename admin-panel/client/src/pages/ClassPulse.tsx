@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Activity, Brain, CalendarCheck, Clock, RefreshCw, ShieldCheck, Sparkles, Users } from 'lucide-react';
+import { Activity, CalendarCheck, Clock, Lightbulb, Printer, RefreshCw, ShieldCheck, Sparkles, Users } from 'lucide-react';
 import { BarList, ChartCard, TrendChart } from '../components/charts';
 import { Alert, Button, Card, cx, EmptyState, PageHeader, Spinner } from '../components/ui';
 import { post } from '../lib/api';
@@ -29,6 +29,32 @@ const RISK_SOURCE: Record<Pulse['risk']['source'], string> = {
   rules: 'Estimated from missed check-ins in the last 7 days (the ML service was not reachable).',
 };
 
+const DAY_NAMES: Record<string, string> = { Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday', Sun: 'Sunday' };
+
+/** Up to three suggestions for the week, worked out from the numbers on the page (no AI needed). */
+export function classTips(pulse: Pick<Pulse, 'weekdays' | 'categories' | 'risk' | 'peakHours'>): string[] {
+  const tips: string[] = [];
+  const days = pulse.weekdays.filter((day) => day.rate !== null && day.scheduled > 0) as { weekday: string; rate: number }[];
+  if (days.length >= 2) {
+    const hardest = days.reduce((low, day) => (day.rate < low.rate ? day : low));
+    const best = days.reduce((high, day) => (day.rate > high.rate ? day : high));
+    if (best.rate - hardest.rate >= 0.05) {
+      tips.push(`${DAY_NAMES[hardest.weekday] ?? hardest.weekday} is the hardest day (${formatPercent(hardest.rate)} done). A short reminder to the class the evening before can help.`);
+    }
+  }
+  const categories = pulse.categories.filter((category) => category.rate !== null) as { category: string; rate: number }[];
+  if (categories.length >= 2) {
+    const lowest = categories.reduce((low, category) => (category.rate < low.rate ? category : low));
+    tips.push(`${lowest.category} habits are the hardest to keep (${formatPercent(lowest.rate)}). Suggest a smaller version, such as 10 minutes a day.`);
+  }
+  const needSupport = pulse.risk.high + pulse.risk.medium;
+  tips.push(needSupport > 0
+    ? `${needSupport} student${needSupport === 1 ? '' : 's'} may need support. A friendly reminder to the whole class works better than singling anyone out.`
+    : 'No student is at risk right now. Recognize the class for keeping its habits going.');
+  if (pulse.peakHours && tips.length < 3) tips.push(`Most check-ins happen ${pulse.peakHours.from}–${pulse.peakHours.to}. Post class reminders just before then.`);
+  return tips.slice(0, 3);
+}
+
 function greeting(date = new Date()) {
   const hour = date.getHours();
   return hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -55,12 +81,27 @@ function ConsistencyRing({ value }: { value: number | null }) {
 
 function Tile({ icon, label, value, hint }: { icon: React.ReactNode; label: string; value: string; hint: string }) {
   return (
-    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
-      <div className="mb-3 flex size-9 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-ink)]">{icon}</div>
-      <div className="text-sm font-semibold text-[var(--ink-2)]">{label}</div>
-      <div className="mt-1 text-2xl font-extrabold text-[var(--ink)]">{value}</div>
+    <div className="print-avoid-break rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 sm:p-4">
+      <div className="flex items-center gap-2 sm:block">
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent-ink)] sm:mb-3 sm:size-9 sm:rounded-xl">{icon}</div>
+        <div className="text-[13px] font-semibold leading-tight text-[var(--ink-2)] sm:text-sm">{label}</div>
+      </div>
+      <div className="tabular mt-2 text-xl font-extrabold text-[var(--ink)] sm:mt-1 sm:text-2xl">{value}</div>
       <div className="mt-1 text-xs text-[var(--muted)]">{hint}</div>
     </div>
+  );
+}
+
+function TipList({ tips }: { tips: string[] }) {
+  return (
+    <ol className="flex flex-col gap-2">
+      {tips.map((tip, index) => (
+        <li key={tip} className="flex gap-3 rounded-xl bg-[var(--accent-soft)] p-3 text-sm text-[var(--ink)]">
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-xs font-bold text-[var(--on-accent)]">{index + 1}</span>
+          {tip}
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -120,8 +161,14 @@ export function ClassPulsePage() {
       <PageHeader
         title="Class Pulse"
         description="How your students are doing with their habits, as a group. Anonymized: no student is named or listed."
-        actions={<Button icon={<RefreshCw className="size-4" />} onClick={() => setRefreshKey((value) => value + 1)} loading={loading && Boolean(pulse)}>Refresh</Button>}
+        actions={(
+          <div className="print-hidden flex flex-wrap gap-2">
+            <Button icon={<Printer className="size-4" />} onClick={() => window.print()} disabled={!pulse}>Print report</Button>
+            <Button icon={<RefreshCw className="size-4" />} onClick={() => setRefreshKey((value) => value + 1)} loading={loading && Boolean(pulse)}>Refresh</Button>
+          </div>
+        )}
       />
+      <p className="print-only mb-4 text-xs text-[var(--muted)]">Printed {new Date().toLocaleString('en-PH', { dateStyle: 'long', timeStyle: 'short' })} by {admin?.fullName} ({admin?.roleLabel}). Anonymized class-level figures from the HabitAI Admin Panel.</p>
       {error && <div className="mb-4"><Alert tone="critical" title="Could not load the class pulse">{error}</Alert></div>}
       {!pulse ? (loading && <Spinner label="Reading check-ins and asking the ML service" />) : (
         <div className={cx('flex flex-col gap-5 transition-opacity', loading && 'opacity-60')}>
@@ -139,7 +186,7 @@ export function ClassPulsePage() {
             <ConsistencyRing value={pulse.kpis.consistency} />
           </section>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
             <Tile icon={<Users className="size-4" />} label="Active this week" value={formatNumber(pulse.kpis.activeThisWeek)} hint={`of ${formatNumber(pulse.kpis.students)} students`} />
             <Tile icon={<CalendarCheck className="size-4" />} label="Check-ins today" value={formatNumber(pulse.kpis.checkInsToday)} hint={`by ${formatNumber(pulse.kpis.studentsCheckedInToday)} students`} />
             <Tile icon={<Activity className="size-4" />} label="Students with habits" value={formatNumber(pulse.kpis.studentsWithHabits)} hint={`${formatNumber(pulse.kpis.habits)} habits tracked`} />
@@ -152,31 +199,32 @@ export function ClassPulsePage() {
             </Card>
 
             <Card
-              title="AI class summary"
-              subtitle="Written by the AI from the class numbers on this page"
-              className="xl:col-span-2"
-              actions={pulse.aiAvailable && summary ? <Button size="sm" icon={<RefreshCw className="size-3.5" />} onClick={() => void generateSummary(true)} loading={summaryLoading}>Regenerate</Button> : undefined}
+              title={pulse.aiAvailable ? 'AI class summary' : 'What you can do this week'}
+              subtitle={pulse.aiAvailable ? 'Written by the AI from the class numbers on this page' : 'Worked out from the class numbers on this page'}
+              className="print-avoid-break xl:col-span-2"
+              actions={pulse.aiAvailable && summary ? <span className="print-hidden"><Button size="sm" icon={<RefreshCw className="size-3.5" />} onClick={() => void generateSummary(true)} loading={summaryLoading}>Regenerate</Button></span> : undefined}
             >
               {!pulse.aiAvailable ? (
-                <EmptyState icon={<Brain className="size-5" />} title="AI is not configured">Add GROQ_API_KEY to the Admin Panel service to get an AI summary.</EmptyState>
+                <div className="flex flex-col gap-3">
+                  <TipList tips={classTips(pulse)} />
+                  <p className="flex items-center gap-1.5 text-xs text-[var(--muted)]"><Lightbulb className="size-3.5" aria-hidden /> The AI summary is off on this server; these tips come from the numbers above.</p>
+                </div>
               ) : summary ? (
                 <div className="flex flex-col gap-3">
                   <p className="text-sm leading-6 text-[var(--ink)]">{summary.summary}</p>
-                  <ol className="flex flex-col gap-2">
-                    {summary.suggestions.map((suggestion, index) => (
-                      <li key={suggestion} className="flex gap-3 rounded-xl bg-[var(--accent-soft)] p-3 text-sm text-[var(--ink)]">
-                        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-xs font-bold text-[var(--on-accent)]">{index + 1}</span>
-                        {suggestion}
-                      </li>
-                    ))}
-                  </ol>
+                  <TipList tips={summary.suggestions} />
                   <p className="text-xs text-[var(--muted)]">Generated {formatRelative(summary.generatedAt)}. Suggestions are for the whole class, not individual students.</p>
                 </div>
               ) : (
                 <div className="flex flex-col items-start gap-3">
                   <p className="text-sm text-[var(--ink-2)]">Get a short summary of how the class is doing and three things you can do this week.</p>
-                  {summaryError && <Alert tone="warning">{summaryError}</Alert>}
-                  <Button variant="primary" icon={<Sparkles className="size-4" />} onClick={() => void generateSummary(false)} loading={summaryLoading}>Generate AI summary</Button>
+                  {summaryError && (
+                    <>
+                      <Alert tone="warning">{summaryError}</Alert>
+                      <div className="w-full"><TipList tips={classTips(pulse)} /></div>
+                    </>
+                  )}
+                  <span className="print-hidden"><Button variant="primary" icon={<Sparkles className="size-4" />} onClick={() => void generateSummary(false)} loading={summaryLoading}>Generate AI summary</Button></span>
                 </div>
               )}
             </Card>

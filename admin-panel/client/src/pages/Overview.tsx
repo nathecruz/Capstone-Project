@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, LifeBuoy, Lightbulb } from 'lucide-react';
+import { ArrowRight, CircleCheck, HeartPulse, LifeBuoy, Lightbulb, UserPlus, type LucideIcon } from 'lucide-react';
+import { usePendingAccessRequests } from '../components/AccessRequests';
 import { ActivityHeatmap, BarList, ChartCard, Funnel, heatmapRows, seriesColor, StatTile, TrendChart } from '../components/charts';
 import { Alert, Card, cx, EmptyState, PageHeader, Segmented, Spinner } from '../components/ui';
+import { useAuth } from '../lib/auth';
 import { formatDate, formatNumber, formatPercent, formatRelative, formatShortDay } from '../lib/format';
 import { useApi } from '../lib/useApi';
 
@@ -37,6 +39,54 @@ interface OverviewData {
   recentActivity?: { id: string; actorEmail: string; action: string; summary: string; createdAt: number }[];
 }
 
+interface AttentionItem { to: string; icon: LucideIcon; count: number; label: string; hint: string }
+
+/** What an administrator should look at first: requests, reports, ideas and students who may need support. */
+function NeedsAttention({ support }: { support?: OverviewData['support'] }) {
+  const { can } = useAuth();
+  const pending = usePendingAccessRequests(can('users:manage'), 'overview');
+  const { data: pulse } = useApi<{ pulse: { risk: { high: number; medium: number } } }>(can('class:view') ? '/class-pulse' : null);
+  const risk = pulse?.pulse.risk;
+  const items: AttentionItem[] = [
+    ...(can('users:manage') ? [{ to: '/users', icon: UserPlus, count: pending, label: 'Access requests', hint: 'Waiting for approval' }] : []),
+    ...(support ? [
+      { to: '/support', icon: LifeBuoy, count: support.openIssues, label: 'Open issue reports', hint: 'Open or in progress' },
+      { to: '/support?tab=suggestions', icon: Lightbulb, count: support.newSuggestions, label: 'Feature suggestions', hint: 'Waiting for review' },
+    ] : []),
+    ...(risk ? [{ to: '/class-pulse', icon: HeartPulse, count: risk.high + risk.medium, label: 'Students who may need support', hint: `${risk.high} at risk · ${risk.medium} to watch` }] : []),
+  ];
+  // Faculty start on Class Pulse; a single tile here would only repeat it.
+  if (items.length < 2) return null;
+  const waiting = items.reduce((total, item) => total + item.count, 0);
+  return (
+    <Card
+      title="Needs your attention"
+      subtitle={waiting ? 'Start here: each card opens the page where it is handled.' : 'All clear. Nothing is waiting right now.'}
+      actions={!waiting ? <CircleCheck className="size-5 text-good-ink" aria-hidden /> : undefined}
+    >
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+        {items.map((item) => (
+          <Link
+            key={item.label}
+            to={item.to}
+            className={cx('group flex items-center gap-3 rounded-xl border p-3 transition-colors hover:bg-surface-hover', item.count ? 'border-accent/40 bg-accent-soft/40' : 'border-line')}
+          >
+            <span className={cx('flex size-10 shrink-0 items-center justify-center rounded-lg', item.count ? 'bg-accent text-on-accent' : 'bg-surface-2 text-muted')}>
+              <item.icon className="size-5" aria-hidden />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium leading-snug text-ink">{item.label}</span>
+              <span className="block text-xs text-muted">{item.hint}</span>
+            </span>
+            <span className={cx('tabular text-2xl font-semibold', item.count ? 'text-ink' : 'text-muted')}>{formatNumber(item.count)}</span>
+            <ArrowRight className="size-4 shrink-0 text-muted transition-transform group-hover:translate-x-0.5" aria-hidden />
+          </Link>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 const METRICS = [
   { value: 'activeUsers', label: 'Active students' },
   { value: 'completions', label: 'Check-ins' },
@@ -60,6 +110,7 @@ export function OverviewPage() {
       {error && <div className="mb-4"><Alert tone="critical" title="Could not load the overview">{error}</Alert></div>}
       {!data ? (loading && <Spinner />) : (
         <div className={cx('flex flex-col gap-5 transition-opacity', loading && 'opacity-60')}>
+          <NeedsAttention support={data.support} />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatTile label="Active students" value={formatNumber(data.kpis.activeStudents)} current={data.kpis.activeStudents} previous={data.kpis.activeStudentsPrev} period={period} />
             <StatTile label="Habit check-ins" value={formatNumber(data.kpis.completions)} current={data.kpis.completions} previous={data.kpis.completionsPrev} period={period} />
@@ -144,48 +195,22 @@ export function OverviewPage() {
             </ChartCard>
           </div>
 
-          {(data.recentActivity || data.support) && (
-            <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
-              {data.recentActivity && (
-                <Card className="xl:col-span-2" title="Recent admin activity" actions={<Link to="/audit" className="inline-flex items-center gap-1 text-[13px] font-medium text-accent-ink hover:underline">Audit log <ArrowRight className="size-3.5" /></Link>}>
-                  {data.recentActivity.length ? (
-                    <ul className="-my-2 divide-y divide-[var(--border)]">
-                      {data.recentActivity.map((entry) => (
-                        <li key={entry.id} className="flex items-start justify-between gap-4 py-2.5 text-[13px]">
-                          <div className="min-w-0">
-                            <p className="text-ink">{entry.summary}</p>
-                            <p className="text-xs text-muted">{entry.actorEmail}</p>
-                          </div>
-                          <span className="shrink-0 text-xs text-muted">{formatRelative(entry.createdAt)}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : <EmptyState title="No admin actions yet" />}
-                </Card>
-              )}
-              {data.support && (
-                <Card title="Support queue">
-                  <div className="flex flex-col gap-3">
-                    <Link to="/support" className="flex items-center gap-3 rounded-lg border border-line p-3 hover:bg-surface-hover">
-                      <LifeBuoy className="size-5 text-muted" aria-hidden />
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-ink">{data.support.openIssues} open issue report{data.support.openIssues === 1 ? '' : 's'}</p>
-                        <p className="text-xs text-muted">Open or in progress</p>
+          {data.recentActivity && (
+            <Card title="Recent admin activity" actions={<Link to="/audit" className="inline-flex items-center gap-1 text-[13px] font-medium text-accent-ink hover:underline">Audit log <ArrowRight className="size-3.5" /></Link>}>
+              {data.recentActivity.length ? (
+                <ul className="-my-2 divide-y divide-[var(--border)]">
+                  {data.recentActivity.map((entry) => (
+                    <li key={entry.id} className="flex items-start justify-between gap-4 py-2.5 text-[13px]">
+                      <div className="min-w-0">
+                        <p className="text-ink">{entry.summary}</p>
+                        <p className="text-xs text-muted">{entry.actorEmail}</p>
                       </div>
-                      <ArrowRight className="size-4 text-muted" aria-hidden />
-                    </Link>
-                    <Link to="/support?tab=suggestions" className="flex items-center gap-3 rounded-lg border border-line p-3 hover:bg-surface-hover">
-                      <Lightbulb className="size-5 text-muted" aria-hidden />
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-ink">{data.support.newSuggestions} new feature suggestion{data.support.newSuggestions === 1 ? '' : 's'}</p>
-                        <p className="text-xs text-muted">Waiting for review</p>
-                      </div>
-                      <ArrowRight className="size-4 text-muted" aria-hidden />
-                    </Link>
-                  </div>
-                </Card>
-              )}
-            </div>
+                      <span className="shrink-0 text-xs text-muted">{formatRelative(entry.createdAt)}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : <EmptyState title="No admin actions yet" />}
+            </Card>
           )}
         </div>
       )}
