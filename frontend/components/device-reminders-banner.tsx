@@ -1,5 +1,6 @@
 // Home: asks to turn on habit reminders on this browser when the student has reminders but this
-// phone or laptop does not get them yet (each device has to allow notifications once).
+// phone or laptop does not get them yet (each device has to allow notifications once). An iPhone
+// in a browser tab is left to the Install card, since reminders there need the Home Screen app.
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
@@ -30,10 +31,6 @@ const COPY: Partial<Record<WebReminderStatus, { title: string; text: string }>> 
   off: {
     title: 'Get reminders on this device',
     text: 'Reminders arrive on every phone and laptop where you turn them on, right at the time you set.',
-  },
-  'needs-home-screen': {
-    title: 'Get reminders on this iPhone',
-    text: 'Tap Share, then Add to Home Screen, and open HabitAI from the Home Screen. Then turn reminders on there.',
   },
   blocked: {
     title: 'Reminders are blocked here',

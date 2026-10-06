@@ -17,6 +17,8 @@ import { PageSidebar } from '@/components/desktop-sidebar';
 import { ServerStatusBanner } from '@/components/server-status-banner';
 import { CONTENT_MAX_WIDTH, pageBackground, useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { canonicalRedirect } from '@/utils/canonical-host';
+// Keeps the browser's install prompt as soon as it fires, for HabitAI's own Install button.
+import '@/utils/install-app';
 
 // A per-deploy Vercel address keeps an old version of the app forever: go to the main address.
 if (Platform.OS === 'web' && typeof window !== 'undefined') {

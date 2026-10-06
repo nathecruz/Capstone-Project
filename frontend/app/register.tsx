@@ -4,6 +4,7 @@ import DateTimePicker, { type DateTimePickerChangeEvent } from '@react-native-co
 import React, { useEffect, useState } from 'react';
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { AuthField, AuthScreen, authStyles, BRAND, PasswordField, PrimaryButton, SelectField } from '@/components/auth-ui';
+import { InstallAppCard } from '@/components/install-app';
 import { supportedRegions } from '@/constants/i18n';
 import { withReadableText } from '@/hooks/use-themed-styles';
 import { joinName } from '@/utils/names';
@@ -155,10 +156,13 @@ export default function RegisterScreen() {
         title="Create your account"
         subtitle="Start your habit journey in under a minute."
         footer={(
-          <View style={authStyles.trust}>
-            <Ionicons name="shield-checkmark" size={14} color="#2E9D5C" />
-            <Text style={authStyles.trustText}>Protected under the Data Privacy Act of 2012.</Text>
-          </View>
+          <>
+            <View style={authStyles.trust}>
+              <Ionicons name="shield-checkmark" size={14} color="#2E9D5C" />
+              <Text style={authStyles.trustText}>Protected under the Data Privacy Act of 2012.</Text>
+            </View>
+            <InstallAppCard variant="auth" />
+          </>
         )}
       >
         <Section number={1} title="About you" />

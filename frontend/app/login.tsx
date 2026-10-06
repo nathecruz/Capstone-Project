@@ -17,6 +17,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AuthField, AuthScreen, authStyles, BRAND, BrandMark, PasswordField, PrimaryButton } from '@/components/auth-ui';
+import { InstallAppCard } from '@/components/install-app';
 import { AppDialog, type AppDialogVariant } from '@/components/ui/app-dialog';
 import { withReadableText } from '@/hooks/use-themed-styles';
 import { SLOW_SERVER_HINT, useSlowHint } from '@/hooks/use-slow-hint';
@@ -301,10 +302,13 @@ export default function LoginScreen() {
         title="Welcome back"
         subtitle="Sign in to keep your streak going."
         footer={(
-          <View style={authStyles.trust}>
-            <Ionicons name="shield-checkmark" size={14} color="#2E9D5C" />
-            <Text style={authStyles.trustText}>Secure sign-in. Your data stays private.</Text>
-          </View>
+          <>
+            <View style={authStyles.trust}>
+              <Ionicons name="shield-checkmark" size={14} color="#2E9D5C" />
+              <Text style={authStyles.trustText}>Secure sign-in. Your data stays private.</Text>
+            </View>
+            <InstallAppCard variant="auth" />
+          </>
         )}
       >
         <AuthField

@@ -9,6 +9,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { BentoTiles } from '@/components/bento-tiles';
 import { ClassPulseCard } from '@/components/class-pulse-card';
 import { DeviceRemindersBanner } from '@/components/device-reminders-banner';
+import { InstallAppCard } from '@/components/install-app';
 import { FramedAvatar } from '@/components/framed-avatar';
 import { useRewards } from '@/hooks/use-rewards';
 import { useUnreadCount } from '@/utils/live-events';
@@ -98,6 +99,7 @@ export default function HomeScreen() {
 
         <View style={isDesktop ? styles.columns : styles.column}>
           <View style={[styles.column, isDesktop && styles.mainColumn]}>
+            <InstallAppCard variant="home" />
             <DeviceRemindersBanner habits={habits} notificationsEnabled={preferences.notificationsEnabled} />
             <StreakRiskBanner habits={habits} now={now} onFreeze={openFreeze} />
             <TodayAgenda habits={habits} now={now} onCheck={(habit) => toggleHabit(habit.id)} middle={isDesktop ? undefined : tiles} />
