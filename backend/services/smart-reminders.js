@@ -1,13 +1,14 @@
-// Smart reminders over Web Push: the reminder time moves with the habit's recent record, like the
-// app's smart reminders (frontend/hooks/app-state/smart-reminders.ts). A habit at risk of being
-// skipped is reminded 30 minutes before its set time, one going well a little later, and the
-// message matches. The record is the 7 days before today, which no longer change during the day,
-// so the time stays the same all day.
+// Smart reminders over Web Push, like the app's (frontend/hooks/app-state/smart-reminders.ts).
+// The student is always reminded at the times they set; Smart Reminder adds a message that fits
+// the habit's recent record and, for a habit at risk of being skipped, an extra nudge 30 minutes
+// before the earliest set time. (It used to move the reminder itself, so a new habit, always "at
+// risk", was reminded 30 minutes early, often before it even existed, and never at its time.)
+// The record is the 7 days before today, which no longer change during the day.
 import { computeStreak, habitSchedule, isScheduledDay } from './streaks.js';
 import { getHabitReminderTimes } from './web-push-reminders.js';
 
 const DEFAULT_TIME = { hour: 9, minute: 0 };
-const OFFSET_MINUTES = { high: -30, medium: 15, low: 45 };
+const EARLY_NUDGE_MINUTES = 30;
 
 function shiftDay(dateKey, days) {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -32,12 +33,20 @@ export function smartReminderRisk(habit, date) {
   return rate < 0.4 || streak <= 1 ? 'high' : rate < 0.7 ? 'medium' : 'low';
 }
 
-/** The smart reminder's time on `date`: the habit's earliest set time (9:00 AM without one), moved by risk. */
-export function getSmartReminderTime(habit, date) {
-  const base = getHabitReminderTimes(habit).sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute))[0] ?? DEFAULT_TIME;
+/**
+ * The smart reminder times on `date`: every set time (9:00 AM without one), plus, when the habit is
+ * at risk, a nudge 30 minutes before the earliest one (not before midnight). Each carries the risk.
+ */
+export function getSmartReminderTimes(habit, date) {
+  const set = getHabitReminderTimes(habit).sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
+  const times = set.length ? set : [DEFAULT_TIME];
   const riskLevel = smartReminderRisk(habit, date);
-  const minutes = Math.min(23 * 60 + 59, Math.max(0, base.hour * 60 + base.minute + OFFSET_MINUTES[riskLevel]));
-  return { hour: Math.floor(minutes / 60), minute: minutes % 60, riskLevel };
+  const result = times.map((time) => ({ hour: time.hour, minute: time.minute, riskLevel }));
+  if (riskLevel === 'high') {
+    const early = Math.max(0, times[0].hour * 60 + times[0].minute - EARLY_NUDGE_MINUTES);
+    if (!result.some((time) => time.hour * 60 + time.minute === early)) result.unshift({ hour: Math.floor(early / 60), minute: early % 60, riskLevel, early: true });
+  }
+  return result;
 }
 
 export function getSmartReminderText(habit, riskLevel) {

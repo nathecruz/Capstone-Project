@@ -155,7 +155,7 @@ function EditHabitForm({ habit, onClose }: { habit: Habit; onClose: () => void }
             </Pressable>
           </View>
           {remindersOn && <ReminderTimesEditor times={times} onChange={setTimes} />}
-          {remindersOn && habit.smartReminderEnabled ? <Text style={styles.hint}>Smart Reminder is on: it may move this time a little based on your check-ins.</Text> : null}
+          {remindersOn && habit.smartReminderEnabled ? <Text style={styles.hint}>Smart Reminder is on: you are reminded at this time with a tip from your check-ins, and 30 minutes earlier on days the habit is at risk.</Text> : null}
 
           <View style={styles.actions}>
             <Pressable style={styles.secondaryButton} onPress={onClose} accessibilityRole="button">

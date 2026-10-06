@@ -1,4 +1,6 @@
-// Smart reminders: pick a reminder time and message from recent check-ins and the ML risk estimate.
+// Smart reminders: the habit's own reminder times with a message from recent check-ins and the ML
+// risk estimate, plus a nudge 30 minutes earlier when the habit is at risk (as on the server,
+// backend/services/smart-reminders.js). Smart Reminder never moves the time the student set.
 import { getApiBaseUrl, getAuthenticatedHeaders } from '@/authentication/authService';
 import { computeStreak, isHabitScheduledOn } from '@/utils/streaks';
 import { getLocalDateKey } from './habit-progress';
@@ -62,23 +64,24 @@ export function heuristicRisk(habit: Habit, now = new Date()): 'low' | 'medium' 
   return rate < 0.4 || streak <= 1 ? 'high' : rate < 0.7 ? 'medium' : 'low';
 }
 
-export function computeSmartReminderTime(habit: Habit, now = new Date(), modelRisk?: { dropoutRisk: number; completionProbability: number }) {
-  // The earliest set time (9:00 AM without one), as on the server.
-  const fallbackTime = getHabitReminderTimes(habit).sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute))[0] ?? { hour: 9, minute: 0 };
+export type SmartReminderTime = { hour: number; minute: number; early?: boolean };
+
+/**
+ * Today's smart reminder times: every set time (9:00 AM without one) and, when the habit is at
+ * risk, a nudge 30 minutes before the earliest one (not before midnight), with the risk level.
+ */
+export function computeSmartReminderTimes(habit: Habit, now = new Date(), modelRisk?: { dropoutRisk: number; completionProbability: number }) {
+  const set = getHabitReminderTimes(habit).sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
+  const base = set.length ? set : [{ hour: 9, minute: 0 }];
   const riskLevel = modelRisk
     ? getRiskLevel(modelRisk.dropoutRisk, modelRisk.completionProbability)
     : heuristicRisk(habit, now);
-
-  const target = new Date(now);
-  const minuteOffset = riskLevel === 'high' ? -30 : riskLevel === 'medium' ? 15 : 45;
-  const baseMinutes = Math.min(23 * 60 + 59, Math.max(0, fallbackTime.hour * 60 + fallbackTime.minute + minuteOffset));
-
-  target.setHours(Math.floor(baseMinutes / 60), baseMinutes % 60, 0, 0);
-  if (target <= now) {
-    target.setDate(target.getDate() + 1);
+  const times: SmartReminderTime[] = base.map((time) => ({ hour: time.hour, minute: time.minute }));
+  if (riskLevel === 'high') {
+    const early = Math.max(0, base[0].hour * 60 + base[0].minute - 30);
+    if (!times.some((time) => time.hour * 60 + time.minute === early)) times.unshift({ hour: Math.floor(early / 60), minute: early % 60, early: true });
   }
-
-  return { target, riskLevel };
+  return { times, riskLevel };
 }
 
 export async function requestHabitPrediction(habit: Habit): Promise<HabitPrediction | null> {

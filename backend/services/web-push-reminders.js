@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { getSmartReminderTime } from './smart-reminders.js';
+import { getSmartReminderTimes } from './smart-reminders.js';
 
 const reminderDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -122,8 +122,8 @@ function getLocalParts(date, timeZone) {
 
 /**
  * Reminders due in the last `lookbackMinutes` (covers a late or skipped dispatcher run). A habit
- * with Smart Reminder on gets one reminder a day at its smart time instead of its set times;
- * those entries carry `smart: { riskLevel }`.
+ * with Smart Reminder on is still reminded at its set times, plus an early nudge when it is at
+ * risk; those entries carry `smart: { riskLevel }` for the smart message.
  */
 export function getDueHabitReminders(habit, timeZone, now = new Date(), lookbackMinutes = 5) {
   const smart = habit?.smartReminderEnabled === true;
@@ -133,7 +133,7 @@ export function getDueHabitReminders(habit, timeZone, now = new Date(), lookback
   const smartTimes = new Map();
   const timesOn = (date) => {
     if (!smart) return times;
-    if (!smartTimes.has(date)) smartTimes.set(date, [getSmartReminderTime(habit, date)]);
+    if (!smartTimes.has(date)) smartTimes.set(date, getSmartReminderTimes(habit, date));
     return smartTimes.get(date);
   };
   const due = new Map();

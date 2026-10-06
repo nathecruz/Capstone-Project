@@ -172,24 +172,31 @@ test('a run stays up for the reminders in its window and sends each at its minut
   assert.equal(nextWakeWithin(null, now), null);
 });
 
-test('smart reminders move with the recent record and replace the set times', async () => {
-  const { getSmartReminderText, getSmartReminderTime } = await import('../services/smart-reminders.js');
+test('smart reminders keep the set times and add an early nudge when the habit is at risk', async () => {
+  const { getSmartReminderText, getSmartReminderTimes } = await import('../services/smart-reminders.js');
   const { getReminderWakeTimes } = await import('../services/web-push-reminders.js');
   const habit = { label: 'Read', frequency: 'Daily', startDate: '2026-09-01', reminderTime: '08:00 AM', reminderTimes: ['08:00 AM'], reminderEnabled: false, smartReminderEnabled: true, completionDates: [] };
   const october = (...days) => days.map((day) => `2026-10-${String(day).padStart(2, '0')}`);
 
-  // The 7 days before October 8: all done is going well (later), 4 with a 2-day streak is medium, none is at risk (earlier).
-  assert.deepEqual(getSmartReminderTime({ ...habit, completionDates: october(1, 2, 3, 4, 5, 6, 7) }, '2026-10-08'), { hour: 8, minute: 45, riskLevel: 'low' });
-  assert.deepEqual(getSmartReminderTime({ ...habit, completionDates: october(1, 3, 6, 7) }, '2026-10-08'), { hour: 8, minute: 15, riskLevel: 'medium' });
-  assert.deepEqual(getSmartReminderTime(habit, '2026-10-08'), { hour: 7, minute: 30, riskLevel: 'high' });
-  assert.deepEqual(getSmartReminderTime({ ...habit, reminderTimes: ['12:10 AM'], reminderTime: '12:10 AM' }, '2026-10-08'), { hour: 0, minute: 0, riskLevel: 'high' }, 'never before midnight');
+  // The 7 days before October 8: all done is going well, 4 with a 2-day streak is medium: the set time only.
+  assert.deepEqual(getSmartReminderTimes({ ...habit, completionDates: october(1, 2, 3, 4, 5, 6, 7) }, '2026-10-08'), [{ hour: 8, minute: 0, riskLevel: 'low' }]);
+  assert.deepEqual(getSmartReminderTimes({ ...habit, completionDates: october(1, 3, 6, 7) }, '2026-10-08'), [{ hour: 8, minute: 0, riskLevel: 'medium' }]);
+  // None done (or a brand-new habit) is at risk: a nudge 30 minutes early, and still the set time.
+  assert.deepEqual(getSmartReminderTimes(habit, '2026-10-08'), [{ hour: 7, minute: 30, riskLevel: 'high', early: true }, { hour: 8, minute: 0, riskLevel: 'high' }]);
+  assert.deepEqual(getSmartReminderTimes({ ...habit, reminderTimes: ['12:10 AM'], reminderTime: '12:10 AM' }, '2026-10-08')[0], { hour: 0, minute: 0, riskLevel: 'high', early: true }, 'never before midnight');
+  assert.deepEqual(getSmartReminderTimes({ ...habit, reminderTimes: ['12:00 AM'], reminderTime: '12:00 AM' }, '2026-10-08'), [{ hour: 0, minute: 0, riskLevel: 'high' }], 'no nudge on top of the same minute');
 
-  // 7:30 AM in Manila on October 8; works even with the plain reminder off.
-  const smartMinute = new Date('2026-10-07T23:30:00.000Z');
-  assert.deepEqual(getDueHabitReminders(habit, 'Asia/Manila', smartMinute), [{ date: '2026-10-08', time: '07:30', smart: { riskLevel: 'high' } }]);
-  assert.deepEqual(getDueHabitReminders({ ...habit, reminderEnabled: true }, 'Asia/Manila', new Date('2026-10-08T00:00:00.000Z')), [], 'the set 8:00 AM time is replaced');
-  assert.deepEqual(getDueHabitReminders({ ...habit, completionDates: ['2026-10-08'] }, 'Asia/Manila', smartMinute), [], 'not once done today');
-  assert.deepEqual(getReminderWakeTimes([{ timeZone: 'Asia/Manila', state: { habits: [habit] } }], new Date('2026-10-07T23:00:00.000Z'), 60), [smartMinute.getTime()]);
+  // A habit made at 2:18 PM with a 2:19 PM reminder (the bug): reminded at 2:19 PM, Manila time.
+  const fresh = { ...habit, startDate: '2026-10-06', reminderEnabled: true, reminderTime: '02:19 PM', reminderTimes: ['02:19 PM'] };
+  assert.deepEqual(getDueHabitReminders(fresh, 'Asia/Manila', new Date('2026-10-06T06:19:00.000Z'), 0), [{ date: '2026-10-06', time: '14:19', smart: { riskLevel: 'high' } }]);
+
+  // 7:30 AM and 8:00 AM in Manila on October 8; works even with the plain reminder off.
+  const nudgeMinute = new Date('2026-10-07T23:30:00.000Z');
+  const setMinute = new Date('2026-10-08T00:00:00.000Z');
+  assert.deepEqual(getDueHabitReminders(habit, 'Asia/Manila', nudgeMinute), [{ date: '2026-10-08', time: '07:30', smart: { riskLevel: 'high' } }]);
+  assert.deepEqual(getDueHabitReminders({ ...habit, reminderEnabled: true }, 'Asia/Manila', setMinute, 0), [{ date: '2026-10-08', time: '08:00', smart: { riskLevel: 'high' } }], 'the set 8:00 AM time is kept');
+  assert.deepEqual(getDueHabitReminders({ ...habit, completionDates: ['2026-10-08'] }, 'Asia/Manila', setMinute), [], 'not once done today');
+  assert.deepEqual(getReminderWakeTimes([{ timeZone: 'Asia/Manila', state: { habits: [habit] } }], new Date('2026-10-07T23:00:00.000Z'), 60), [nudgeMinute.getTime(), setMinute.getTime()]);
   assert.ok(getWebPushSnoozeSettings({ habits: [{ ...habit, id: 'read' }] }, 'read', 0), 'smart reminders can be snoozed');
 
   assert.equal(getSmartReminderText(habit, 'high').title, 'Smart reminder: Read');

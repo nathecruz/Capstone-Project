@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import { getLocalDateKey } from './habit-progress';
 import { enableWebReminders, getBrowserNotificationRegistration, getHabitReminderSchedule, getHabitReminderTimes, getNotificationsModule, getSnoozeLimit, isHabitReminderDay, playReminderSound, reminderDayNumbers, type NotificationsModule } from './reminders';
-import { computeSmartReminderTime, getSmartReminderMessage, requestHabitPrediction } from './smart-reminders';
+import { computeSmartReminderTimes, getSmartReminderMessage, requestHabitPrediction } from './smart-reminders';
 import type { Habit, Preferences } from './types';
 
 export function useHabitReminders({ habits, preferences, ringInterval, snoozeFrequency }: {
@@ -92,8 +92,8 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
           }
           for (const habit of reminders) {
             if ((habit.startDate && habit.startDate > today) || !isHabitReminderDay(habit, now) || habit.completionDates.includes(today)) continue;
-            const smart = habit.smartReminderEnabled ? computeSmartReminderTime(habit, now) : null;
-            const times = smart ? [{ hour: smart.target.getHours(), minute: smart.target.getMinutes() }] : getHabitReminderTimes(habit);
+            const smart = habit.smartReminderEnabled ? computeSmartReminderTimes(habit, now) : null;
+            const times = smart ? smart.times : getHabitReminderTimes(habit);
             for (const time of times) {
               // Due this minute or a few minutes ago: a tab in the background may run its timers
               // only once a minute, so an exact-minute check could skip the reminder.
@@ -213,21 +213,31 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
         const modelRisk = prediction && typeof prediction.dropout_risk === 'number' && typeof prediction.completion_probability === 'number'
           ? { dropoutRisk: prediction.dropout_risk, completionProbability: prediction.completion_probability }
           : undefined;
-        const { target, riskLevel } = computeSmartReminderTime(habit, new Date(), modelRisk);
+        const now = new Date();
+        const { times, riskLevel } = computeSmartReminderTimes(habit, now, modelRisk);
         const soundEnabled = habit.reminderSoundEnabled !== false;
         const channel = Platform.OS === 'android'
           ? { channelId: soundEnabled ? 'habit-reminders-sound-v2' : 'habit-reminders-silent-v2' }
           : {};
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: `Smart reminder: ${habit.label}`,
-            body: prediction?.recommended_action || getSmartReminderMessage(habit, riskLevel),
-            sound: soundEnabled ? 'reminder_sound.mp3' : false,
-            data: { habitId: habit.id, type: 'smart-reminder', riskLevel, snoozeCount: 0 },
-            categoryIdentifier: 'habit-reminder-snooze',
-          },
-          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: target, ...channel },
-        });
+        // The next time of each (today if still ahead, else tomorrow); rescheduled at midnight and
+        // whenever the app opens, so the message follows the latest record.
+        for (const time of times) {
+          if (cancelled) return;
+          const target = new Date(now);
+          target.setHours(time.hour, time.minute, 0, 0);
+          if (target <= now) target.setDate(target.getDate() + 1);
+          if (!isHabitReminderDay(habit, target)) continue;
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: `Smart reminder: ${habit.label}`,
+              body: prediction?.recommended_action || getSmartReminderMessage(habit, riskLevel),
+              sound: soundEnabled ? 'reminder_sound.mp3' : false,
+              data: { habitId: habit.id, type: 'smart-reminder', riskLevel, snoozeCount: 0 },
+              categoryIdentifier: 'habit-reminder-snooze',
+            },
+            trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: target, ...channel },
+          });
+        }
       }
     };
     void scheduleReminders().catch(() => undefined);
