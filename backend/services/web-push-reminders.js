@@ -27,6 +27,8 @@ export function isAllowedWebPushEndpoint(value) {
       || hostname === 'web.push.apple.com'
       || hostname === 'updates.push.services.mozilla.com'
       || hostname.endsWith('.push.services.mozilla.com')
+      // Microsoft Edge on Windows (Windows Push Notification Services).
+      || hostname.endsWith('.notify.windows.com')
     );
   } catch {
     return false;
@@ -84,18 +86,27 @@ function isScheduledReminderDay(habit, local, days) {
   return true;
 }
 
+// Creating a formatter is far slower than using one, and planning reminders formats thousands of
+// minutes, so each time zone's formatter is made once.
+const localFormatters = new Map();
+
 function getLocalParts(date, timeZone) {
   try {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      weekday: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-      hourCycle: 'h23',
-    }).formatToParts(date);
+    let formatter = localFormatters.get(timeZone);
+    if (!formatter) {
+      formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        weekday: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+      });
+      if (localFormatters.size < 500) localFormatters.set(timeZone, formatter);
+    }
+    const parts = formatter.formatToParts(date);
     const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
     return {
       date: `${values.year}-${values.month}-${values.day}`,

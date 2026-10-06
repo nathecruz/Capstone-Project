@@ -7,7 +7,8 @@ share one Neon PostgreSQL database:
 | --- | --- | --- | --- |
 | Student app (`frontend/`) | Expo, React Native, Expo Router, TypeScript | Vercel / Render static site (web), Android/iOS builds | Habits, streaks, goals, AI coach, rewards, notifications |
 | App API (`backend/`) | Node.js, Express 5, Zod, bcrypt, `pg` | Render web service | Accounts, sync, AI prompts, email, reminders |
-| Reminder scheduler (`backend/scripts/web-push-scheduler.js`) | Node.js, Web Push (VAPID) | GitHub Actions, every 5 minutes (free) | Sends due habit reminders and snoozes; wakes the database only when something is due |
+| Reminder clock (`backend/services/web-push-clock.js`) | Node.js, Web Push (VAPID) | Inside the App API, while it is awake | Sends habit reminders and snoozes on their exact minute; picks up changed reminder times within seconds |
+| Reminder scheduler (`backend/scripts/web-push-scheduler.js`) | Node.js, Web Push (VAPID) | GitHub Actions, every 5 minutes (free) | Covers the hours the API sleeps; wakes the database only when something is due |
 | ML service (`ml-service/`) | Python, FastAPI, scikit-learn, XGBoost | Render (Docker) | Habit completion / drop-out predictions |
 | Admin Panel (`admin-panel/`) | React + Vite, Express, `pg` | Render web service (Docker) | User, category and notification management; anonymized analytics |
 
@@ -27,8 +28,9 @@ flowchart LR
   api -- prompts with DB context --> groq[Groq]
   api -- X-ML-Service-Key --> ml[ML service<br/>FastAPI]
   api -- SMTP --> mail[SMTP provider]
+  api -- reminder clock, VAPID Web Push --> push[Browser push services]
   cron[Reminder scheduler<br/>GitHub Actions] --> db
-  cron -- VAPID Web Push --> push[Browser push services]
+  cron -- VAPID Web Push --> push
   push --> app
   mail --> student
 ```
@@ -297,7 +299,13 @@ sequenceDiagram
   participant P as Push service
   A->>API: POST /api/web-push/subscriptions {subscription, timeZone}
   API->>DB: upsert web_push_subscriptions
-  loop every 5 minutes
+  A->>API: PUT /api/app-state (new or changed reminder times)
+  API->>API: reminder clock reloads this student's plan within seconds
+  opt while the API is awake: a planned reminder minute starts
+    API->>DB: claim delivery (idempotent), send push, record notification
+    API->>P: encrypted push
+  end
+  loop every 5 minutes (covers the hours the API sleeps)
     C->>C: read cached plan of reminder times (no database)
   end
   opt hourly, or a planned reminder / snooze follow-up is due
@@ -311,6 +319,12 @@ sequenceDiagram
   A->>API: POST /api/web-push/snooze {one-time token}
   API->>DB: queue the snoozed reminder
 ```
+
+The App API's reminder clock and the GitHub scheduler claim each delivery in
+`web_push_deliveries`, so a reminder reaches each device once even when both run. Every
+browser that allows notifications has its own subscription (Chrome, Edge, Firefox, Safari and
+installed iPhone apps), so a reminder arrives on all of a student's devices; Home asks to turn
+reminders on for a device that does not get them yet.
 
 Native Android/iOS builds also schedule local notifications on the device.
 

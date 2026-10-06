@@ -1,6 +1,7 @@
-// Sends due habit reminders and snoozes over Web Push. Used by the every-minute dispatcher
-// (scripts/send-web-push-reminders.js) and by the GitHub Actions scheduler
-// (scripts/web-push-scheduler.js). `db` is anything with pg's `query(text, values)`.
+// Sends due habit reminders and snoozes over Web Push. Used by the API's reminder clock while it
+// is awake (services/web-push-clock.js), by the GitHub Actions scheduler while it sleeps
+// (scripts/web-push-scheduler.js), and by the every-minute dispatcher for a paid cron job
+// (scripts/send-web-push-reminders.js). `db` is anything with pg's `query(text, values)`.
 import crypto from 'node:crypto';
 import { getSmartReminderText } from './smart-reminders.js';
 import { doneActionSecret, getWebPushDoneUrl, localDateIn, makeDoneToken } from './web-push-actions.js';
@@ -17,8 +18,8 @@ export async function loadReminderTemplate(db) {
   }
 }
 
-/** Push subscriptions of active accounts with each account's latest app state. */
-export async function loadSubscriptionStates(db) {
+/** Push subscriptions of active accounts with each account's latest app state (only `userIds`, when given). */
+export async function loadSubscriptionStates(db, userIds = null) {
   const result = await db.query(`
     SELECT subscription.id AS "subscriptionId",
            subscription.user_id AS "userId",
@@ -34,14 +35,24 @@ export async function loadSubscriptionStates(db) {
       ORDER BY updated_at DESC
       LIMIT 1
     ) AS current_state ON TRUE
-  `);
+    ${userIds ? 'WHERE subscription.user_id = ANY($1::text[])' : ''}
+  `, userIds ? [userIds] : []);
   return result.rows.map((row) => ({ ...row, state: typeof row.stateJson === 'string' ? JSON.parse(row.stateJson) : (row.stateJson || {}) }));
+}
+
+/** Snoozes that are queued but not sent yet, due up to `until` (only `userIds`, when given). */
+export async function pendingSnoozes(db, until, userIds = null) {
+  const result = await db.query(
+    `SELECT user_id AS "userId", scheduled_at AS "scheduledAt" FROM web_push_snooze_queue
+     WHERE sent_at=0 AND scheduled_at<=$1${userIds ? ' AND user_id = ANY($2::text[])' : ''}`,
+    userIds ? [until, userIds] : [until],
+  );
+  return result.rows.map((row) => ({ userId: row.userId, scheduledAt: Number(row.scheduledAt) }));
 }
 
 /** Times (epoch ms) of snoozes that are queued but not sent yet, up to `until`. */
 export async function pendingSnoozeTimes(db, until) {
-  const result = await db.query('SELECT scheduled_at AS "scheduledAt" FROM web_push_snooze_queue WHERE sent_at=0 AND scheduled_at<=$1', [until]);
-  return result.rows.map((row) => Number(row.scheduledAt));
+  return (await pendingSnoozes(db, until)).map((snooze) => snooze.scheduledAt);
 }
 
 /** Done (check in from the notification) and Snooze buttons, and the data the service worker needs for them. */

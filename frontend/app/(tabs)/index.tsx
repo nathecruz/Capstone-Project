@@ -8,6 +8,7 @@ import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BentoTiles } from '@/components/bento-tiles';
 import { ClassPulseCard } from '@/components/class-pulse-card';
+import { DeviceRemindersBanner } from '@/components/device-reminders-banner';
 import { FramedAvatar } from '@/components/framed-avatar';
 import { useRewards } from '@/hooks/use-rewards';
 import { useUnreadCount } from '@/utils/live-events';
@@ -34,7 +35,7 @@ function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) 
 export default function HomeScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
-  const { avatarImage, habits, profile, toggleHabit, isFaculty, goals, tokenHistory, applyWallet } = useAppColorScheme();
+  const { avatarImage, habits, profile, toggleHabit, isFaculty, goals, tokenHistory, applyWallet, preferences } = useAppColorScheme();
   const [freezeSheetVisible, setFreezeSheetVisible] = React.useState(false);
   const insets = useSafeAreaInsets();
   const { isDesktop } = useResponsiveLayout();
@@ -97,6 +98,7 @@ export default function HomeScreen() {
 
         <View style={isDesktop ? styles.columns : styles.column}>
           <View style={[styles.column, isDesktop && styles.mainColumn]}>
+            <DeviceRemindersBanner habits={habits} notificationsEnabled={preferences.notificationsEnabled} />
             <StreakRiskBanner habits={habits} now={now} onFreeze={openFreeze} />
             <TodayAgenda habits={habits} now={now} onCheck={(habit) => toggleHabit(habit.id)} middle={isDesktop ? undefined : tiles} />
             {isDesktop && progress}

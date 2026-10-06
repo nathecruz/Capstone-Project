@@ -73,6 +73,7 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
           if (cancelled) return;
           const now = new Date();
           const today = getLocalDateKey(now);
+          const nowMinutes = now.getHours() * 60 + now.getMinutes();
           for (const key of sentBrowserRemindersRef.current) {
             if (key.split('|')[1] !== today) sentBrowserRemindersRef.current.delete(key);
           }
@@ -81,7 +82,10 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
             const smart = habit.smartReminderEnabled ? computeSmartReminderTime(habit, now) : null;
             const times = smart ? [{ hour: smart.target.getHours(), minute: smart.target.getMinutes() }] : getHabitReminderTimes(habit);
             for (const time of times) {
-              if (now.getHours() !== time.hour || now.getMinutes() !== time.minute) continue;
+              // Due this minute or a few minutes ago: a tab in the background may run its timers
+              // only once a minute, so an exact-minute check could skip the reminder.
+              const minutesLate = nowMinutes - (time.hour * 60 + time.minute);
+              if (minutesLate < 0 || minutesLate > 3) continue;
               const key = `${habit.id}|${today}|${time.hour}:${time.minute}`;
               if (sentBrowserRemindersRef.current.has(key)) continue;
               sentBrowserRemindersRef.current.add(key);

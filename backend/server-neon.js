@@ -14,6 +14,7 @@ import { createApp } from './http/app.js';
 import { verifyAi } from './services/groq.js';
 import { verifyMailer } from './services/mailer.js';
 import { scheduleMaintenance } from './services/maintenance.js';
+import { startReminderClock, stopReminderClock } from './services/web-push-clock.js';
 
 assertProductionConfig();
 await ensureNeonSchema({ log: console.log });
@@ -22,6 +23,8 @@ void verifyAi();
 const maintenance = scheduleMaintenance();
 
 const server = createApp().listen(config.port, '0.0.0.0', () => console.log(`Neon Insights API listening on http://0.0.0.0:${config.port}`));
+// Habit reminders on their exact minute while the API is awake (GitHub Actions covers the rest).
+if (startReminderClock()) console.log('Reminder clock on: Web Push reminders are sent on their minute while the API is awake.');
 
 // Free Render instances sleep when idle. This API starts when a student opens the app, so it
 // wakes the ML service too; its forecast is then ready by the time Insights asks for it.
@@ -31,6 +34,7 @@ if (config.ml.key) {
 
 async function shutdown() {
   clearInterval(maintenance);
+  stopReminderClock();
   server.close();
   await closeDatabase();
 }

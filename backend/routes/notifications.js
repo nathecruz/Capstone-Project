@@ -4,6 +4,7 @@ import { query, withTransaction } from '../db/client.js';
 import { parse } from '../lib/http.js';
 import { notificationReadSchema, webPushSnoozeRequestSchema, webPushSubscriptionRequestSchema, webPushTestSchema, webPushUnsubscribeSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
+import { notifyReminderChange } from '../services/web-push-clock.js';
 import { getConfiguredVapidDetails, getConfiguredVapidPublicKey, getWebPushSnoozeSettings, hashWebPushSnoozeToken, isAllowedWebPushEndpoint } from '../services/web-push-reminders.js';
 
 const TEST_PUSH_COOLDOWN_MS = 15_000;
@@ -52,6 +53,7 @@ export default function registerNotificationRoutes(app) {
        ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id,subscription_json=excluded.subscription_json,time_zone=excluded.time_zone,updated_at=excluded.updated_at`,
       [crypto.randomUUID(), session.userId, input.subscription.endpoint, input.subscription, input.timeZone, now],
     );
+    notifyReminderChange(session.userId);
     response.json({ ok: true });
   });
 
@@ -106,6 +108,7 @@ export default function registerNotificationRoutes(app) {
     const input = parse(webPushUnsubscribeSchema, request, response);
     if (!input) return;
     await query('DELETE FROM web_push_subscriptions WHERE user_id=$1 AND endpoint=$2', [session.userId, input.endpoint]);
+    notifyReminderChange(session.userId);
     response.json({ ok: true });
   });
 
@@ -140,9 +143,11 @@ export default function registerNotificationRoutes(app) {
         'INSERT INTO web_push_snooze_queue(id,subscription_id,user_id,habit_id,snooze_count,scheduled_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',
         [crypto.randomUUID(), token.subscriptionId, token.userId, token.habitId, settings.nextSnoozeCount, now + settings.intervalMinutes * 60_000, now],
       );
-      return true;
+      return token.userId;
     });
     if (!enqueued) return response.status(410).json({ ok: false, message: 'This snooze action is no longer available.' });
+    // The snoozed reminder comes back on its minute when the API is still awake then.
+    notifyReminderChange(enqueued);
     response.json({ ok: true });
   });
 }

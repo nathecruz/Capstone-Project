@@ -58,8 +58,10 @@ test('skips completed, future-start, disabled, and invalid-timezone reminders', 
 test('allows browser push-provider endpoints and rejects arbitrary URLs', () => {
   assert.equal(isAllowedWebPushEndpoint('https://fcm.googleapis.com/fcm/send/test'), true);
   assert.equal(isAllowedWebPushEndpoint('https://web.push.apple.com/push/test'), true);
+  assert.equal(isAllowedWebPushEndpoint('https://wns2-sg2p.notify.windows.com/w/?token=test'), true);
   assert.equal(isAllowedWebPushEndpoint('http://localhost:8787/private'), false);
   assert.equal(isAllowedWebPushEndpoint('https://attacker.example/private'), false);
+  assert.equal(isAllowedWebPushEndpoint('https://notify.windows.com.attacker.example/w'), false);
 });
 
 test('validates a web push subscription payload', () => {

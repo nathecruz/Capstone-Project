@@ -1,10 +1,13 @@
 name: Web Push reminders
 
-# Free replacement for the paid Render cron job. Scheduled every 5 minutes (GitHub actually starts
-# runs every 15-25), it only connects to Neon when a reminder or snooze is due or every 30 minutes
-# to refresh the reminder plan, so the free database can still scale to zero in between (see
-# backend/services/web-push-schedule.js). A run stays up to 28 minutes and sends each reminder in
-# that window at its minute; the next run, queued meanwhile, takes over after it.
+# Free replacement for the paid Render cron job. While the backend is awake (students using the
+# app) its own reminder clock sends reminders on their minute (backend/services/web-push-clock.js);
+# this workflow covers the hours it sleeps. Scheduled every 5 minutes (GitHub actually starts runs
+# every 11-30), it only connects to Neon when a reminder or snooze is due or every 30 minutes to
+# refresh the reminder plan, so the free database can still scale to zero in between (see
+# backend/services/web-push-schedule.js). A run stays up to 35 minutes and sends each reminder in
+# that window at its minute; the next run, queued meanwhile, takes over after it. Both claim each
+# delivery in the database, so a reminder is never sent twice.
 #
 # Setup: add the repository secrets DATABASE_URL, WEB_PUSH_VAPID_PUBLIC_KEY,
 # WEB_PUSH_VAPID_PRIVATE_KEY and WEB_PUSH_VAPID_SUBJECT (the same values as the Render backend).
@@ -29,7 +32,7 @@ permissions:
 jobs:
   dispatch:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 50
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       WEB_PUSH_VAPID_PUBLIC_KEY: ${{ secrets.WEB_PUSH_VAPID_PUBLIC_KEY }}
@@ -40,7 +43,7 @@ jobs:
       WEB_PUSH_PLAN_FILE: ${{ github.workspace }}/.web-push/plan.json
       WEB_PUSH_FORCE_REFRESH: ${{ inputs.refresh || 'false' }}
       WEB_PUSH_REFRESH_MINUTES: ${{ vars.WEB_PUSH_REFRESH_MINUTES || '30' }}
-      WEB_PUSH_WINDOW_MINUTES: ${{ vars.WEB_PUSH_WINDOW_MINUTES || '28' }}
+      WEB_PUSH_WINDOW_MINUTES: ${{ vars.WEB_PUSH_WINDOW_MINUTES || '35' }}
       NODE_ENV: production
     steps:
       - name: Check configuration

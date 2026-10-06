@@ -17,6 +17,7 @@ import {
 import { setCheckIn } from '../services/check-ins.js';
 import { isOpenCheckInDate } from '../services/completion-date.js';
 import { applyWallet, getWallet } from '../services/wallet.js';
+import { notifyReminderChange } from '../services/web-push-clock.js';
 
 /** The app's blank startup state: sent before an account's state loaded, it has no email and no habits. */
 const isBlankStartupState = (state, storedState) =>
@@ -81,6 +82,8 @@ export default function registerAppStateRoutes(app) {
       return { state: serverState, updatedAt: savedUpdatedAt, merged, unchanged: false };
     });
     if (result.rejected) return response.status(409).json({ ok: false, code: 'STATE_NOT_LOADED', error: 'This device has not loaded your data yet. Nothing was changed.' });
+    // New or changed reminder times are sent on their minute, not after the next plan refresh.
+    if (!result.unchanged) notifyReminderChange(session.userId);
     response.json({ ok: true, ...result });
   });
 

@@ -6,15 +6,17 @@
 // The plan (reminder times only, no personal data) lives in WEB_PUSH_PLAN_FILE, which the
 // workflow keeps in the Actions cache between runs. See services/web-push-schedule.js.
 //
-// GitHub starts scheduled runs every 15-25 minutes in practice, not every 5. So a run stays up
-// for WEB_PUSH_WINDOW_MINUTES and sends each reminder due in that window at its minute, sleeping
-// (with no database connection) in between; the next run, queued meanwhile, takes over after it.
+// GitHub starts scheduled runs every 11-30 minutes in practice, not every 5. So a run stays up
+// for WEB_PUSH_WINDOW_MINUTES (longer than the longest gap) and sends each reminder due in that
+// window at its minute, sleeping (with no database connection) in between; the next run, queued
+// meanwhile, takes over after it. While the API is awake its reminder clock
+// (services/web-push-clock.js) sends them too; the delivery claims keep each one to a single send.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { decideWake, lookbackMinutes, nextPlan, nextWakeWithin, parsePlan } from '../services/web-push-schedule.js';
 
 const REFRESH_MINUTES = Number(process.env.WEB_PUSH_REFRESH_MINUTES || 60);
-const WINDOW_MINUTES = Number(process.env.WEB_PUSH_WINDOW_MINUTES || 28);
+const WINDOW_MINUTES = Number(process.env.WEB_PUSH_WINDOW_MINUTES || 35);
 // A snooze tapped a few minutes after the reminder is still picked up by its follow-up check.
 const SNOOZE_SLACK_MS = 5 * 60_000;
 const planFile = path.resolve(process.env.WEB_PUSH_PLAN_FILE || '.web-push/plan.json');
