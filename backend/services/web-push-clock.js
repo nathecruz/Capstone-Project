@@ -13,7 +13,6 @@
 // work small on a 0.1-CPU instance. Its timers do not keep the instance awake: Render only counts
 // incoming requests.
 import webpush from 'web-push';
-import { query } from '../db/client.js';
 import { dispatchDueReminders, dispatchDueSnoozes, loadReminderTemplate, loadSubscriptionStates, pendingSnoozes } from './web-push-dispatch.js';
 import { getConfiguredVapidDetails, getReminderWakeTimes, getWebPushSnoozeUrl } from './web-push-reminders.js';
 
@@ -194,10 +193,13 @@ export function createReminderClock({
 
 let activeClock = null;
 
-/** Starts the clock on this API when Web Push is configured (WEB_PUSH_CLOCK=off turns it off). */
-export function startReminderClock({ log = console.log, environment = process.env } = {}) {
+/**
+ * Starts the clock on this API when Web Push is configured (WEB_PUSH_CLOCK=off turns it off).
+ * `query` is the database's (passed in, so importing this module never needs a database).
+ */
+export function startReminderClock({ query, log = console.log, environment = process.env }) {
   const vapid = getConfiguredVapidDetails(environment);
-  if (!vapid || environment.WEB_PUSH_CLOCK === 'off') return null;
+  if (!query || !vapid || environment.WEB_PUSH_CLOCK === 'off') return null;
   try {
     webpush.setVapidDetails(vapid.subject, vapid.publicKey, vapid.privateKey);
   } catch (error) {
