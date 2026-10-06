@@ -1,5 +1,5 @@
-// Schedules habit reminders (native notifications, or in-tab reminders on web without Web Push)
-// and handles the Snooze action. Rescheduled at midnight and whenever the app returns to the foreground.
+// Schedules habit reminders (native notifications; on web, reminders shown by an open HabitAI tab
+// alongside Web Push) and handles the Snooze action. Rescheduled at midnight and whenever the app returns to the foreground.
 import { useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import { getLocalDateKey } from './habit-progress';
@@ -44,11 +44,14 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
     void enableWebReminders({ prompt: false });
   }, [hasHabits, preferences.notificationsEnabled]);
 
-  // Web: a reminder arriving while HabitAI is open also plays the HabitAI reminder sound.
+  // Web: a reminder arriving while HabitAI is open also plays the HabitAI reminder sound, and this
+  // tab then does not show that reminder again itself.
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
     const onMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'habitai-reminder' && event.data.soundEnabled !== false) playReminderSound();
+      if (event.data?.type !== 'habitai-reminder') return;
+      if (typeof event.data.tag === 'string') sentBrowserRemindersRef.current.add(event.data.tag);
+      if (event.data.soundEnabled !== false) playReminderSound();
     };
     navigator.serviceWorker.addEventListener('message', onMessage);
     return () => navigator.serviceWorker.removeEventListener('message', onMessage);
@@ -63,19 +66,29 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
         if (!preferences.notificationsEnabled || typeof window === 'undefined' || typeof window.Notification === 'undefined' || window.Notification.permission !== 'granted') return;
         const registration = await getBrowserNotificationRegistration();
         if (!registration) return;
-        if (await registration.pushManager.getSubscription()) return;
         const reminders = habits.filter((habit) => habit.smartReminderEnabled || (habit.reminderEnabled && getHabitReminderTimes(habit).length > 0));
         if (!reminders.length) return;
 
-        // Without Web Push (e.g. a browser that does not support it) reminders come from this tab
-        // while it is open, with the same timing and Smart Reminder rules as the server.
-        const notifyDueReminders = () => {
-          if (cancelled) return;
+        // While HabitAI is open, this tab shows each reminder on its minute itself, with the same
+        // timing and Smart Reminder rules as the server, so it is on time even when the server is
+        // asleep or a push is slow. It uses the server's tag: the Web Push for the same reminder
+        // then quietly replaces it (adding Done and Snooze) instead of alerting twice.
+        let checking = false;
+        const notifyDueReminders = async () => {
+          if (cancelled || checking) return;
+          checking = true;
+          try {
+            await showDueReminders();
+          } finally {
+            checking = false;
+          }
+        };
+        const showDueReminders = async () => {
           const now = new Date();
           const today = getLocalDateKey(now);
           const nowMinutes = now.getHours() * 60 + now.getMinutes();
           for (const key of sentBrowserRemindersRef.current) {
-            if (key.split('|')[1] !== today) sentBrowserRemindersRef.current.delete(key);
+            if (!key.includes(`-${today}-`)) sentBrowserRemindersRef.current.delete(key);
           }
           for (const habit of reminders) {
             if ((habit.startDate && habit.startDate > today) || !isHabitReminderDay(habit, now) || habit.completionDates.includes(today)) continue;
@@ -86,9 +99,13 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
               // only once a minute, so an exact-minute check could skip the reminder.
               const minutesLate = nowMinutes - (time.hour * 60 + time.minute);
               if (minutesLate < 0 || minutesLate > 3) continue;
-              const key = `${habit.id}|${today}|${time.hour}:${time.minute}`;
+              // The server's tag for this reminder (habit, local date, 24-hour time).
+              const key = `${habit.id}-${today}-${String(time.hour).padStart(2, '0')}:${String(time.minute).padStart(2, '0')}`;
               if (sentBrowserRemindersRef.current.has(key)) continue;
               sentBrowserRemindersRef.current.add(key);
+              // The push for it may already be on screen.
+              const shown = await registration.getNotifications({ tag: key }).catch(() => []);
+              if (shown.length) continue;
               const soundEnabled = habit.reminderSoundEnabled !== false;
               void registration.showNotification(smart ? `Smart reminder: ${habit.label}` : `${habit.label} reminder`, {
                 body: smart ? getSmartReminderMessage(habit, smart.riskLevel) : 'A small step today keeps your streak moving.',
@@ -103,8 +120,8 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
           }
         };
 
-        notifyDueReminders();
-        browserReminderTimer = setInterval(notifyDueReminders, 15000);
+        void notifyDueReminders();
+        browserReminderTimer = setInterval(() => void notifyDueReminders(), 5000);
         return;
       }
       const Notifications = await getNotificationsModule();

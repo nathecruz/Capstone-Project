@@ -192,6 +192,8 @@ export function createReminderClock({
 }
 
 let activeClock = null;
+// For /health: whether the clock runs and how its last send went (counts only, no personal data).
+const lastSend = { at: null, sent: 0, failed: 0 };
 
 /**
  * Starts the clock on this API when Web Push is configured (WEB_PUSH_CLOCK=off turns it off).
@@ -233,6 +235,7 @@ export function startReminderClock({ query, log = console.log, environment = pro
       const snoozes = await dispatchDueSnoozes(db, options);
       const sent = reminders.sent + snoozes.sent;
       const failed = reminders.failed + snoozes.failed;
+      if (sent || failed) Object.assign(lastSend, { at: new Date().toISOString(), sent, failed });
       if (sent || failed) log(`[reminders] sent ${sent}, expired ${reminders.expired + snoozes.expired}, failed ${failed}`);
     },
   });
@@ -244,6 +247,10 @@ export function startReminderClock({ query, log = console.log, environment = pro
 /** Called by the API after a change that can move a student's reminders (no-op when the clock is off). */
 export function notifyReminderChange(userId) {
   activeClock?.notifyChange(userId);
+}
+
+export function reminderClockStatus() {
+  return { on: Boolean(activeClock), lastSendAt: lastSend.at, lastSent: lastSend.sent, lastFailed: lastSend.failed };
 }
 
 export function stopReminderClock() {

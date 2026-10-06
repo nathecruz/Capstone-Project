@@ -9,9 +9,12 @@ self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim(
 const ICON = '/icons/icon-192.png';
 const BADGE = '/icons/badge-96.png';
 
-/** Shows a reminder so it alerts: sound (unless turned off for the habit), vibration, and it stays until seen. */
+/**
+ * Shows a reminder so it alerts: sound (unless turned off for the habit), vibration, and it stays
+ * until seen. `quiet`: it replaces the same reminder already on screen without alerting again.
+ */
 function showReminder(title, options) {
-  const silent = options.soundEnabled === false;
+  const silent = options.soundEnabled === false || options.quiet === true;
   return self.registration.showNotification(title, {
     body: options.body,
     tag: options.tag,
@@ -21,7 +24,7 @@ function showReminder(title, options) {
     badge: BADGE,
     silent,
     vibrate: silent ? undefined : [250, 120, 250],
-    renotify: Boolean(options.tag),
+    renotify: Boolean(options.tag) && options.quiet !== true,
     requireInteraction: true,
     timestamp: Date.now(),
   });
@@ -42,14 +45,19 @@ self.addEventListener('push', (event) => {
       payload = { body: event.data?.text() ?? '' };
     }
     const title = payload.title || 'Habit reminder';
+    // An open HabitAI tab may have shown this reminder on its minute already (same tag): replace
+    // it quietly, adding the Done and Snooze buttons, instead of alerting twice.
+    const onScreen = payload.tag ? await self.registration.getNotifications({ tag: payload.tag }).catch(() => []) : [];
+    const quiet = onScreen.length > 0;
     await showReminder(title, {
       body: payload.body || 'A small step today keeps your streak moving.',
       tag: payload.tag,
       data: payload.data,
       actions: payload.actions,
       soundEnabled: payload.soundEnabled,
+      quiet,
     });
-    await tellOpenWindows({ type: 'habitai-reminder', title, soundEnabled: payload.soundEnabled !== false });
+    await tellOpenWindows({ type: 'habitai-reminder', title, tag: payload.tag, soundEnabled: !quiet && payload.soundEnabled !== false });
   })());
 });
 

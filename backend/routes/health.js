@@ -2,6 +2,8 @@ import { config, isConfiguredSecret } from '../config/index.js';
 import { query } from '../db/client.js';
 import { getAiModel, isAiConfigured } from '../services/groq.js';
 import { getEmailConfig } from '../services/mailer.js';
+import { reminderClockStatus } from '../services/web-push-clock.js';
+import { getConfiguredVapidDetails } from '../services/web-push-reminders.js';
 
 async function isMlServiceReady() {
   try {
@@ -15,9 +17,9 @@ async function isMlServiceReady() {
 }
 
 export default function registerHealthRoutes(app) {
-  // Liveness for Render/Docker: the process is up.
+  // Liveness for Render/Docker: the process is up. `version` is the deployed commit (Render sets it).
   app.get('/healthz', (_request, response) => {
-    response.json({ ok: true });
+    response.json({ ok: true, version: process.env.RENDER_GIT_COMMIT?.slice(0, 7) || null });
   });
 
   // Readiness: database, AI, email and ML dependencies.
@@ -28,7 +30,7 @@ export default function registerHealthRoutes(app) {
       const mlConfigured = isConfiguredSecret(config.ml.key, !config.isProduction);
       const mlServiceReady = !config.isProduction || await isMlServiceReady();
       const ready = !config.isProduction || (aiConfigured && mlConfigured && mlServiceReady);
-      response.status(ready ? 200 : 503).json({ ok: ready, database: 'neon', aiConfigured, aiProvider: 'groq', aiModel: getAiModel(), emailConfigured: getEmailConfig().configured, mlConfigured, mlServiceReady, mlServiceUrl: config.ml.url });
+      response.status(ready ? 200 : 503).json({ ok: ready, database: 'neon', aiConfigured, aiProvider: 'groq', aiModel: getAiModel(), emailConfigured: getEmailConfig().configured, webPushConfigured: Boolean(getConfiguredVapidDetails()), reminderClock: reminderClockStatus(), mlConfigured, mlServiceReady, mlServiceUrl: config.ml.url });
     } catch {
       response.status(503).json({ ok: false, database: 'neon' });
     }

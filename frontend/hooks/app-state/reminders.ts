@@ -91,6 +91,15 @@ function decodeVapidPublicKey(value: string) {
   return Uint8Array.from(window.atob(base64), (character) => character.charCodeAt(0));
 }
 
+/** Whether a push subscription was made with this server key (unknown on older browsers: assume yes). */
+function sameServerKey(subscription: PushSubscription, publicKey: string) {
+  const used = subscription.options?.applicationServerKey;
+  if (!used) return true;
+  const current = decodeVapidPublicKey(publicKey);
+  const bytes = new Uint8Array(used);
+  return bytes.length === current.length && bytes.every((value, index) => value === current[index]);
+}
+
 /** iPhone or iPad (iPadOS reports a Mac with touch). */
 function isAppleMobile() {
   if (typeof navigator === 'undefined') return false;
@@ -154,6 +163,11 @@ export async function enableWebReminders({ prompt }: { prompt: boolean }) {
     const publicKey = await getWebPushVapidPublicKey();
     if (!publicKey) return false;
     let subscription = await registration.pushManager.getSubscription();
+    // A subscription made with an older server key no longer receives anything: replace it.
+    if (subscription && !sameServerKey(subscription, publicKey)) {
+      await subscription.unsubscribe().catch(() => false);
+      subscription = null;
+    }
     if (!subscription) {
       subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
