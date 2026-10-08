@@ -45,6 +45,11 @@ describe('editedHabitFields', () => {
     expect(editedHabitFields(custom, { label: 'Drink water', category: 'Health', frequency: 'Custom' }, DEFAULT_HABIT_CATEGORIES).meta).toBe(custom.meta);
   });
 
+  it('keeps a chosen start date when editing a habit', () => {
+    expect(editedHabitFields(habit(), { label: 'Drink water', category: 'Health', frequency: 'Daily', startDate: '2026-10-12' }, DEFAULT_HABIT_CATEGORIES))
+      .toMatchObject({ startDate: '2026-10-12' });
+  });
+
   it('never saves an empty or overlong name', () => {
     expect(editedHabitFields(habit(), { label: '   ', category: 'Health', frequency: 'Daily' }, DEFAULT_HABIT_CATEGORIES).label).toBe('Drink water');
     expect(editedHabitFields(habit(), { label: 'x'.repeat(80), category: 'Health', frequency: 'Daily' }, DEFAULT_HABIT_CATEGORIES).label).toHaveLength(60);

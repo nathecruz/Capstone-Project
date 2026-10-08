@@ -2,6 +2,7 @@
 // reminder does not mean deleting the habit (and its check-ins) and creating it again. Deleting
 // lives here too.
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import React, { useState } from 'react';
 import { Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { ReminderTimesEditor } from '@/components/reminder-time-sheet';
@@ -30,6 +31,8 @@ function EditHabitForm({ habit, onClose }: { habit: Habit; onClose: () => void }
   const [label, setLabel] = useState(habit.label);
   const [category, setCategory] = useState(habit.category);
   const [frequency, setFrequency] = useState(habit.frequency);
+  const [startDate, setStartDate] = useState(habit.startDate || new Date().toISOString().slice(0, 10));
+  const [startDatePickerVisible, setStartDatePickerVisible] = useState(false);
   const savedTimes = (habit.reminderTimes?.length ? habit.reminderTimes : [habit.reminderTime]).filter(Boolean);
   const [remindersOn, setRemindersOn] = useState(habit.reminderEnabled && savedTimes.length > 0);
   const [times, setTimes] = useState(savedTimes);
@@ -43,7 +46,7 @@ function EditHabitForm({ habit, onClose }: { habit: Habit; onClose: () => void }
 
   const save = () => {
     if (nameMissing) return;
-    updateHabit(habit.id, editedHabitFields(habit, { label, category, frequency, reminders: remindersOn ? times : null }, categories));
+    updateHabit(habit.id, editedHabitFields(habit, { label, category, frequency, startDate, reminders: remindersOn ? times : null }, categories));
     onClose();
   };
 
@@ -138,6 +141,23 @@ function EditHabitForm({ habit, onClose }: { habit: Habit; onClose: () => void }
           </View>
           {frequency !== habit.frequency ? <Text style={styles.hint}>Your check-ins stay; the streak is recounted for the new schedule.</Text> : null}
 
+          <Text style={styles.label}>Start date</Text>
+          <Pressable style={styles.startDateButton} onPress={() => setStartDatePickerVisible(true)} accessibilityRole="button" accessibilityLabel={`Start date ${new Date(`${startDate}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}. Change`}>
+            <Text style={styles.startDateText}>{new Date(`${startDate}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
+            <Ionicons name="calendar-outline" size={16} color={themeColor('#5B42D8')} />
+          </Pressable>
+          {startDatePickerVisible && (
+            <DateTimePicker
+              value={new Date(`${startDate}T00:00:00`)}
+              mode="date"
+              display={Platform.OS === 'ios' ? 'inline' : 'default'}
+              onChange={(_event, date) => {
+                setStartDatePickerVisible(false);
+                if (date) setStartDate(date.toISOString().slice(0, 10));
+              }}
+            />
+          )}
+
           <View style={styles.reminderHeader}>
             <View style={styles.reminderCopy}>
               <Text style={styles.label}>Reminders</Text>
@@ -192,6 +212,8 @@ const themedStyles = createThemedStyles({
   chipText: { fontSize: 13, fontWeight: '600', color: '#5E5868' },
   chipTextSelected: { color: '#5B42D8', fontWeight: '800' },
   hint: { fontSize: 12, color: '#777282', fontWeight: '600' },
+  startDateButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderWidth: 1, borderColor: '#E4E0EC', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, backgroundColor: '#FAF9FD' },
+  startDateText: { fontSize: 15, fontWeight: '700', color: '#1D1C26' },
   reminderHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 6 },
   reminderCopy: { flex: 1 },
   toggle: { width: 48, height: 28, borderRadius: 14, padding: 3, justifyContent: 'center', backgroundColor: '#D8D4DF' },

@@ -6,10 +6,11 @@ export type HabitEdit = {
   label: string;
   category: string;
   frequency: string;
+  startDate?: string;
   /** New reminder times; null (or none) turns reminders off; left out, reminders stay as they are. */
   reminders?: string[] | null;
 };
-export type EditableHabitFields = Pick<Habit, 'label' | 'category' | 'icon' | 'color' | 'frequency' | 'meta'>
+export type EditableHabitFields = Pick<Habit, 'label' | 'category' | 'icon' | 'color' | 'frequency' | 'meta' | 'startDate'>
   & Partial<Pick<Habit, 'reminderEnabled' | 'reminderTime' | 'reminderTimes'>>;
 
 export const HABIT_NAME_MAX_LENGTH = 60;
@@ -39,6 +40,7 @@ export function editedHabitFields(habit: Habit, edit: HabitEdit, categories: Hab
     color: categoryChanged && category ? category.color : habit.color,
     frequency: edit.frequency,
     meta,
+    startDate: edit.startDate || habit.startDate,
   };
   if (edit.reminders === undefined) return fields;
   // Reminders: the times (earliest first) go in the meta too, which is what "late" is measured

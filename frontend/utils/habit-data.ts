@@ -1,11 +1,13 @@
 const habitFrequencies = ['Daily', 'Weekly', 'Monthly', 'Custom'] as const;
-const habitCategories = ['Health', 'Mind', 'Productivity', 'Lifestyle', 'Academics', 'Study', 'Finance', 'Creativity', 'Other', 'Others'] as const;
+const habitCategories = ['Health', 'Mind', 'Productivity', 'Lifestyle', 'Academics', 'Study', 'Finance', 'Creativity', 'Other', 'Others', 'Bad Habit'] as const;
 
 type HabitFields = {
   category: string;
   frequency?: string;
   icon?: string;
   meta?: string;
+  isBadHabit?: boolean;
+  badHabitReason?: string;
 };
 
 function isFrequency(value: string | undefined): value is typeof habitFrequencies[number] {
@@ -20,6 +22,7 @@ function inferCategoryFromIcon(icon: string | undefined) {
   if (icon === 'school-outline' || icon === 'school') return 'Academics';
   if (icon === 'wallet') return 'Finance';
   if (icon === 'brush') return 'Creativity';
+  if (icon === 'warning-outline' || icon === 'warning') return 'Bad Habit';
   return 'Other';
 }
 
@@ -33,7 +36,7 @@ export function normalizeHabitFields<T extends HabitFields>(habit: T) {
     ? habit.category
     : inferCategoryFromIcon(habit.icon);
 
-  return { ...habit, category, frequency };
+  return { ...habit, category, frequency, isBadHabit: Boolean(habit.isBadHabit), badHabitReason: habit.badHabitReason || undefined };
 }
 
 export function filterHabitsByStatus<T extends { done: boolean }>(habits: T[], mode: 'all' | 'active' | 'done') {

@@ -59,6 +59,8 @@ export type Habit = {
   reminderDays?: string[];
   reminderSoundEnabled?: boolean;
   smartReminderEnabled?: boolean;
+  isBadHabit?: boolean;
+  badHabitReason?: string;
 };
 
 export type Profile = {

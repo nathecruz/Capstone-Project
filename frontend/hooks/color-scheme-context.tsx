@@ -611,6 +611,8 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       reminderDays: habit.reminderDays ?? [],
       reminderSoundEnabled: habit.reminderSoundEnabled ?? true,
       smartReminderEnabled: habit.smartReminderEnabled ?? false,
+      isBadHabit: Boolean(habit.isBadHabit),
+      badHabitReason: habit.badHabitReason || undefined,
     }]);
   };
 

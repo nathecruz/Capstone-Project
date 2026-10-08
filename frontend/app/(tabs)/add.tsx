@@ -12,6 +12,7 @@ import { DEFAULT_HABIT_CATEGORIES } from '@/constants/habit-categories';
 import { requestNotificationAccess, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useAppTheme } from '@/hooks/dark-mode-context';
 import { themeSheet, themedColor, withReadableText } from '@/hooks/use-themed-styles';
+import { detectBadHabit } from '@/utils/habit-detection';
 
 const frequencies = ['Daily', 'Weekly', 'Monthly', 'Custom'];
 const popularHabits = ['Drink Water', 'Exercise / Workout', 'Read a Book', 'Sleep Early', 'Meditate', 'Eat Healthy'];
@@ -52,6 +53,7 @@ export default function AddScreen() {
   const [name, setName] = useState(selectedHabit ?? '');
   const [categories, setCategories] = useState<HabitCategory[]>(DEFAULT_HABIT_CATEGORIES);
   const [category, setCategory] = useState('Health');
+  const detectedHabitRisk = detectBadHabit(name);
   const [frequency, setFrequency] = useState('Daily');
   const [startDate, setStartDate] = useState(() => formatDate(new Date()));
   const [startDatePickerVisible, setStartDatePickerVisible] = useState(false);
@@ -123,12 +125,17 @@ export default function AddScreen() {
   const addHabit = () => {
     if (!name.trim()) { showMessage('Habit name required', 'Give your new habit a name first.'); return; }
     if ((frequency === 'Custom' || frequency === 'Weekly') && !repeatDays.length) { showMessage('Choose repeat days', 'Select at least one day for this schedule.'); return; }
-    const selectedCategory = categories.find((item) => item.label === category);
+    const detected = detectBadHabit(name);
+    const resolvedCategory = detected.isBadHabit ? 'Bad Habit' : category;
+    const selectedCategory = categories.find((item) => item.label === resolvedCategory) ?? categories[0];
+    if (detected.isBadHabit) {
+      showMessage('Bad habit detected', `${detected.reason}`);
+    }
     createHabit({
       startDate,
       label: name.trim(),
       meta: `${frequency === 'Custom' ? customFrequency : frequency} • ${reminder ? reminderTimes.join(', ') : 'Anytime'}${frequency === 'Custom' ? ` • ${repeatDays.join(', ')}` : ''}`,
-      category,
+      category: resolvedCategory,
       frequency,
       icon: (selectedCategory?.icon || 'ellipse-outline') as keyof typeof Ionicons.glyphMap,
       color: selectedCategory?.color || '#57B991',
@@ -139,6 +146,8 @@ export default function AddScreen() {
       reminderDays: frequency === 'Custom' || frequency === 'Weekly' ? repeatDays : [],
       reminderSoundEnabled,
       smartReminderEnabled: smartReminder,
+      isBadHabit: detected.isBadHabit,
+      badHabitReason: detected.reason,
     });
     setAddedHabitSummary({
       name: name.trim(),

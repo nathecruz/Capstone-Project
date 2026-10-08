@@ -26,6 +26,8 @@ export default function registerHabitRoutes(app) {
     if (!parsed) return;
     const habitName = parsed.habit_name || parsed.name || '';
     if (!habitName) return response.status(400).json({ error: 'habit_name is required.' });
+    const lowerHabitName = habitName.toLowerCase();
+    const isBadHabit = /(smoke|smoking|vape|nicotine|cigarette|skip workout|skip exercise|sleep late|stay up late|doomscroll|scroll all night|binge watch|video games all day|skip meals|junk food|procrastinate|skip assignments|skip class|delay study)/i.test(lowerHabitName);
     const payload = {
       habit_name: habitName,
       streak: parsed.streak ?? 0,
@@ -37,6 +39,10 @@ export default function registerHabitRoutes(app) {
       goal_type: parsed.goal_type || 'health',
     };
     const { prediction } = await forecastFor(payload, config.ml);
-    response.json(prediction);
+    response.json({
+      ...prediction,
+      is_bad_habit: isBadHabit,
+      bad_habit_reason: isBadHabit ? 'This habit looks like a bad habit because it reflects unhealthy or avoidant routines.' : undefined,
+    });
   });
 }

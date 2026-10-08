@@ -8,6 +8,9 @@ import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { getLocalDateKey, isHabitMissedYesterday } from '@/utils/habit-visibility';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 import { habitIcon } from '@/utils/habit-icons';
+import { BAD_HABIT_PRESETS } from '@/utils/habit-detection';
+
+const BAD_HABIT_GROUP = { name: 'Bad Habits', description: 'Spot risky patterns so you can replace them with healthier routines.', icon: 'warning', color: '#E8595A', items: BAD_HABIT_PRESETS };
 
 const HABIT_GROUPS = [
   { name: 'Health', description: 'Build habits for a stronger body and healthier life.', icon: 'heart', color: '#4B9FE8', items: ['Drink Water', 'Exercise / Workout', 'Eat Healthy', 'Sleep Early', 'Walk 10,000 Steps', 'No Sugar / Junk Food', 'Meditate', 'Stretch'] },
@@ -30,7 +33,7 @@ export default function AllHabitsScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const { isDarkMode, habits, isFaculty } = useAppColorScheme();
-  const groups = useMemo(() => (isFaculty ? [FACULTY_GROUP, ...HABIT_GROUPS] : HABIT_GROUPS), [isFaculty]);
+  const groups = useMemo(() => (isFaculty ? [FACULTY_GROUP, BAD_HABIT_GROUP, ...HABIT_GROUPS] : [BAD_HABIT_GROUP, ...HABIT_GROUPS]), [isFaculty]);
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');
   const [currentTime, setCurrentTime] = useState(() => Date.now());
