@@ -128,8 +128,11 @@ export function getApiBaseUrl() {
   return 'http://localhost:8787';
 }
 
-function isValidEmailFormat(email: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function isValidEmailFormat(email: string) {
+  const trimmed = email.trim();
+  return emailPattern.test(trimmed) && trimmed.toLowerCase().endsWith('@psau.edu.ph');
 }
 
 function isValidSessionUser(value: unknown): value is SessionUser {

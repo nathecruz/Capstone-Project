@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { getCurrentSession, resendEmailVerification, updateAuthenticatedProfile, verifyEmailCode, type SessionUser } from '@/authentication';
+import { getCurrentSession, isValidEmailFormat, resendEmailVerification, updateAuthenticatedProfile, verifyEmailCode, type SessionUser } from '@/authentication';
 import { AppDialog, type AppDialogVariant } from '@/components/ui/app-dialog';
 import { namesOf } from '@/utils/names';
 
@@ -67,7 +67,7 @@ export default function VerifyEmailScreen() {
   const changeEmail = async () => {
     if (busy || !user) return;
     const email = newEmail.trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!isValidEmailFormat(email)) {
       showDialog('Invalid email', 'Please enter a valid email address.');
       return;
     }

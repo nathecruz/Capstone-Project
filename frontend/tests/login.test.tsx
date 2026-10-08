@@ -11,6 +11,7 @@ jest.mock('@/authentication', () => ({
   getPasswordStrengthStatus: () => ({ label: 'Strong', description: '', color: '#238a70' }),
   getSession: jest.fn().mockResolvedValue(null),
   getRememberedEmail: jest.fn().mockResolvedValue(''),
+  isValidEmailFormat: (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && email.trim().toLowerCase().endsWith('@psau.edu.ph'),
   rememberEmail: jest.fn().mockResolvedValue(undefined),
   resetPassword: jest.fn(),
   signIn: jest.fn(),
@@ -57,26 +58,36 @@ describe('LoginScreen', () => {
       expect(getByPlaceholderText('Email Address')).toBeTruthy();
     });
 
-    await fireEvent.changeText(getByPlaceholderText('Email Address'), 'newuser@example.com');
+    await fireEvent.changeText(getByPlaceholderText('Email Address'), 'newuser@psau.edu.ph');
     await fireEvent.changeText(getByPlaceholderText('Password'), 'ValidPassword!234');
     await fireEvent.press(getByText('Log In'));
 
     await waitFor(() => {
-      expect(signIn).toHaveBeenCalledWith('newuser@example.com', 'ValidPassword!234');
+      expect(signIn).toHaveBeenCalledWith('newuser@psau.edu.ph', 'ValidPassword!234');
       expect(router.replace).toHaveBeenCalledWith('/(tabs)');
     });
     expect(queryByText('Legacy account migration required')).toBeNull();
   });
 
-  it('shows a custom validation dialog for an invalid email', async () => {
-    const { getByPlaceholderText, getByText } = render(<LoginScreen />);
+  it('accepts a valid PSAU email and rejects non-PSAU addresses', async () => {
+    const { getByPlaceholderText, getByText, queryByText } = render(<LoginScreen />);
 
     await waitFor(() => {
       expect(getByPlaceholderText('Email Address')).toBeTruthy();
       expect(getByPlaceholderText('Password')).toBeTruthy();
     });
 
-    await fireEvent.changeText(getByPlaceholderText('Email Address'), 'not-an-email');
+    await fireEvent.changeText(getByPlaceholderText('Email Address'), 'student@psau.edu.ph');
+    await fireEvent.changeText(getByPlaceholderText('Password'), 'ValidPassword!234');
+    await fireEvent.press(getByText('Log In'));
+
+    await waitFor(() => {
+      expect(jest.requireMock('@/authentication').signIn).toHaveBeenCalledWith('student@psau.edu.ph', 'ValidPassword!234');
+    });
+    expect(queryByText('Invalid email')).toBeNull();
+
+    jest.clearAllMocks();
+    await fireEvent.changeText(getByPlaceholderText('Email Address'), 'student@gmail.com');
     await fireEvent.changeText(getByPlaceholderText('Password'), 'some-password');
     await fireEvent.press(getByText('Log In'));
 

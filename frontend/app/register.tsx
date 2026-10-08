@@ -14,6 +14,7 @@ import { SLOW_SERVER_HINT, useSlowHint } from '@/hooks/use-slow-hint';
 import {
   getPasswordStrengthStatus,
   getSession,
+  isValidEmailFormat,
   signUp,
   validatePasswordStrength,
   warmUpServer,
@@ -103,7 +104,7 @@ export default function RegisterScreen() {
       return;
     }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    if (!isValidEmailFormat(email)) {
       showDialog('Invalid email', 'Please enter a valid email address.');
       return;
     }

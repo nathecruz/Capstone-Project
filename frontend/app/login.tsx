@@ -25,6 +25,7 @@ import {
   getPasswordStrengthStatus,
   getSession,
   getRememberedEmail,
+  isValidEmailFormat,
   rememberEmail,
   resetPassword,
   signIn,
@@ -134,7 +135,7 @@ export default function LoginScreen() {
       return;
     }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    if (!isValidEmailFormat(email)) {
       showDialog('Invalid email', 'Please enter a valid email address.');
       return;
     }
