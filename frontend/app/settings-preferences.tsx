@@ -8,7 +8,7 @@ import { InstallStepsSheet } from '@/components/install-app';
 import { StorageDetailsSheet } from '@/components/storage-notice';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { supportedLanguages, type TranslationKey } from '@/constants/i18n';
-import { enableWebReminders, getWebReminderStatus, sendTestReminder, useAppColorScheme, type WebReminderStatus } from '@/hooks/color-scheme-context';
+import { enableWebReminders, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { exportMyData, changePassword, deleteAccount, getLoginActivity, getPasswordStrengthStatus, signOutOtherDevices, validatePasswordStrength, type LoginActivity } from '@/authentication';
 import { useAppTheme } from '@/hooks/dark-mode-context';
 import { useRewards } from '@/hooks/use-rewards';
@@ -31,15 +31,6 @@ function SettingRow({ icon, iconColor, title, subtitle, value, onPress, trailing
     {trailing || (onPress && <Ionicons name="chevron-forward" size={19} color={isDarkMode ? '#AAA4B7' : '#778099'} />)}
   </Pressable>;
 }
-
-/** What the "Reminders on this device" row says for each state of the browser. */
-const WEB_REMINDER_TEXT: Record<WebReminderStatus, string> = {
-  on: 'On. Reminders arrive with your phone\'s notification sound.',
-  off: 'Not set up on this device yet. Turn on to get habit reminders here.',
-  blocked: 'Blocked by the browser. Allow notifications for this site in its settings, then reopen HabitAI.',
-  'needs-home-screen': 'On iPhone: tap Share, then Add to Home Screen, and open HabitAI from the Home Screen.',
-  unsupported: 'This browser cannot show reminders. Use Chrome, or HabitAI from the Home Screen.',
-};
 
 function SectionHeader({ icon, title, subtitle, isDarkMode }: { icon: keyof typeof Ionicons.glyphMap; title: string; subtitle: string; isDarkMode: boolean }) {
   const styles: Record<string, any> = useThemedStyles(themedStyles);
@@ -100,34 +91,6 @@ export default function SettingsPreferencesScreen() {
   const [storageOpen, setStorageOpen] = useState(false);
   const themeCost = rewards.rewards.find((reward) => reward.id === 'premium-theme')?.cost ?? 200;
   const [option, setOption] = useState<'language' | null>(null);
-  // Web: whether this browser gets reminders (Web Push), with Turn on and Send test.
-  const [webReminders, setWebReminders] = useState<WebReminderStatus | null>(null);
-  const [webReminderBusy, setWebReminderBusy] = useState(false);
-  useEffect(() => {
-    if (Platform.OS !== 'web') return;
-    let active = true;
-    void getWebReminderStatus().then((status) => { if (active) setWebReminders(status); });
-    return () => { active = false; };
-  }, []);
-  const turnOnWebReminders = async () => {
-    setWebReminderBusy(true);
-    const enabled = await enableWebReminders({ prompt: true });
-    const status = await getWebReminderStatus();
-    setWebReminders(status);
-    setWebReminderBusy(false);
-    if (enabled) {
-      if (!preferences.notificationsEnabled) updatePreferences({ notificationsEnabled: true });
-      showAlert('Reminders are on', 'This device will get your habit reminders. Tap Send test to check the sound.');
-    } else {
-      showAlert('Reminders are not on', status === 'off' ? 'Allow notifications when your browser asks, then try again.' : WEB_REMINDER_TEXT[status]);
-    }
-  };
-  const testWebReminder = async () => {
-    setWebReminderBusy(true);
-    const result = await sendTestReminder();
-    setWebReminderBusy(false);
-    showAlert(result.ok ? 'Test reminder sent' : 'Test reminder failed', result.message);
-  };
   // Web in a browser tab: install HabitAI as an app (Install button, or the steps on iPhone).
   const install = useInstallApp();
   const [installStepsOpen, setInstallStepsOpen] = useState(false);
@@ -138,7 +101,7 @@ export default function SettingsPreferencesScreen() {
     const enabled = !preferences.notificationsEnabled;
     updatePreferences({ notificationsEnabled: enabled });
     // Turning notifications on from a tap is when the browser may ask for permission.
-    if (enabled && Platform.OS === 'web') void enableWebReminders({ prompt: true }).then(() => getWebReminderStatus()).then(setWebReminders);
+    if (enabled && Platform.OS === 'web') void enableWebReminders({ prompt: true });
   };
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [infoPage, setInfoPage] = useState<'login' | 'privacy' | 'terms' | 'about' | null>(null);
@@ -298,7 +261,6 @@ export default function SettingsPreferencesScreen() {
     <Pressable style={[styles.progressBanner, isDarkMode && styles.darkBanner]} onPress={() => router.push('/progress')} accessibilityRole="button"><View style={styles.bannerIcon}><Ionicons name="trending-up" size={23} color={themeColor('#6844D8')} /></View><View style={styles.bannerCopy}><Text style={[styles.bannerTitle, isDarkMode && styles.darkText]}>Your Progress &amp; Goals</Text><Text style={[styles.bannerSubtitle, isDarkMode && styles.darkMutedText]}>Stay consistent. Build a better you.</Text></View><Ionicons name="chevron-forward" size={20} color={themeColor('#5E6178')} /></Pressable>
     <SectionHeader icon="options-outline" title={t('preferences')} subtitle={t('setHowAppWorks')} isDarkMode={isDarkMode} /><View style={[styles.card, isDarkMode && styles.darkCard]}>
       <SettingRow icon="notifications" iconColor="#6C51DC" title={t('notifications')} subtitle={t('receiveUpdates')} trailing={<Toggle enabled={preferences.notificationsEnabled} onPress={toggleNotifications} label={t('notifications')} isDarkMode={isDarkMode} />} isDarkMode={isDarkMode} />
-      {Platform.OS === 'web' && <SettingRow icon="phone-portrait" iconColor="#2F9E6E" title="Reminders on this device" subtitle={webReminders ? WEB_REMINDER_TEXT[webReminders] : 'Checking this device...'} trailing={webReminders === 'on' || webReminders === 'off' ? <Pressable style={[styles.smallButton, webReminderBusy && styles.disabledButton]} onPress={webReminders === 'on' ? testWebReminder : turnOnWebReminders} disabled={webReminderBusy} accessibilityRole="button" accessibilityLabel={webReminders === 'on' ? 'Send a test reminder' : 'Turn on reminders on this device'}><Text style={styles.smallButtonText}>{webReminderBusy ? '...' : webReminders === 'on' ? 'Send test' : 'Turn on'}</Text></Pressable> : undefined} isDarkMode={isDarkMode} />}
       {Platform.OS === 'web' && !install.installed && <SettingRow icon="download" iconColor="#5B42D8" title="Install the HabitAI app" subtitle={install.platform === 'ios' ? 'Add it to your Home Screen to use it like an app. On iPhone, reminders need it.' : 'Open HabitAI from your home screen or desktop like any app.'} trailing={<Pressable style={styles.smallButton} onPress={() => void installApp()} accessibilityRole="button" accessibilityLabel={install.canPrompt ? 'Install HabitAI' : 'How to install HabitAI'}><Text style={styles.smallButtonText}>{install.canPrompt ? 'Install' : 'How'}</Text></Pressable>} isDarkMode={isDarkMode} />}
       <SettingRow icon="trophy" iconColor="#E0A21B" title="Show me on leaderboards" subtitle="Others see only your first name and last initial" trailing={<Toggle enabled={preferences.showOnLeaderboard !== false} onPress={() => updatePreferences({ showOnLeaderboard: preferences.showOnLeaderboard === false })} label="Show me on leaderboards" isDarkMode={isDarkMode} />} isDarkMode={isDarkMode} />
       <SettingRow icon="moon" iconColor="#3564D8" title={t('darkMode')} subtitle={t('switchTheme')} trailing={<Toggle enabled={isDarkMode} onPress={() => setDarkMode(!isDarkMode)} label={t('darkMode')} isDarkMode={isDarkMode} />} last={!ownsThemes && isFaculty} isDarkMode={isDarkMode} />
