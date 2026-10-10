@@ -129,10 +129,11 @@ export function getApiBaseUrl() {
 }
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ALLOWED_EMAIL_DOMAINS = ['@psau.edu.ph', '@gmail.com'];
 
 export function isValidEmailFormat(email: string) {
-  const trimmed = email.trim();
-  return emailPattern.test(trimmed) && trimmed.toLowerCase().endsWith('@psau.edu.ph');
+  const trimmed = email.trim().toLowerCase();
+  return emailPattern.test(trimmed) && ALLOWED_EMAIL_DOMAINS.some((domain) => trimmed.endsWith(domain));
 }
 
 function isValidSessionUser(value: unknown): value is SessionUser {

@@ -11,7 +11,7 @@ jest.mock('@/authentication', () => ({
   getPasswordStrengthStatus: () => ({ label: 'Strong', description: '', color: '#238a70' }),
   getSession: jest.fn().mockResolvedValue(null),
   getRememberedEmail: jest.fn().mockResolvedValue(''),
-  isValidEmailFormat: (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && email.trim().toLowerCase().endsWith('@psau.edu.ph'),
+  isValidEmailFormat: (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && ['@psau.edu.ph', '@gmail.com'].some((domain) => email.trim().toLowerCase().endsWith(domain)),
   rememberEmail: jest.fn().mockResolvedValue(undefined),
   resetPassword: jest.fn(),
   signIn: jest.fn(),
@@ -69,7 +69,7 @@ describe('LoginScreen', () => {
     expect(queryByText('Legacy account migration required')).toBeNull();
   });
 
-  it('accepts a valid PSAU email and rejects non-PSAU addresses', async () => {
+  it('accepts PSAU and Gmail addresses and rejects other domains', async () => {
     const { getByPlaceholderText, getByText, queryByText } = render(<LoginScreen />);
 
     await waitFor(() => {
@@ -88,6 +88,16 @@ describe('LoginScreen', () => {
 
     jest.clearAllMocks();
     await fireEvent.changeText(getByPlaceholderText('Email Address'), 'student@gmail.com');
+    await fireEvent.changeText(getByPlaceholderText('Password'), 'ValidPassword!234');
+    await fireEvent.press(getByText('Log In'));
+
+    await waitFor(() => {
+      expect(jest.requireMock('@/authentication').signIn).toHaveBeenCalledWith('student@gmail.com', 'ValidPassword!234');
+    });
+    expect(queryByText('Invalid email')).toBeNull();
+
+    jest.clearAllMocks();
+    await fireEvent.changeText(getByPlaceholderText('Email Address'), 'student@yahoo.com');
     await fireEvent.changeText(getByPlaceholderText('Password'), 'some-password');
     await fireEvent.press(getByText('Log In'));
 
