@@ -327,12 +327,29 @@ export default function AddScreen() {
             <Text style={[styles.startDateHint, dark.startDateHint]}>Tracking begins on this day</Text>
           </View>
         </View>
-        <Pressable style={[styles.startDateButton, dark.startDateButton]} onPress={() => setStartDatePickerVisible(true)} accessibilityRole="button" accessibilityLabel={`Start date ${displayDate(startDate)}. Change`}>
-          <Text style={[styles.startDateButtonText, dark.startDateButtonText]}>{displayDate(startDate)}</Text>
-          <Ionicons name="chevron-down" size={15} color={accent} />
-        </Pressable>
+        {Platform.OS === 'web' ? (
+          // The browser's own date picker: an invisible native input over the button opens it on click.
+          <View style={[styles.startDateButton, dark.startDateButton, styles.startDateWebButton]}>
+            <Text style={[styles.startDateButtonText, dark.startDateButtonText]}>{displayDate(startDate)}</Text>
+            <Ionicons name="chevron-down" size={15} color={accent} />
+            <input
+              type="date"
+              aria-label={`Start date ${displayDate(startDate)}. Change`}
+              value={startDate}
+              min={formatDate(new Date())}
+              onClick={(event) => { try { event.currentTarget.showPicker?.(); } catch { /* older browsers still allow typing */ } }}
+              onChange={(event) => { const value = event.currentTarget.value; if (value) setStartDate(value); }}
+              style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
+            />
+          </View>
+        ) : (
+          <Pressable style={[styles.startDateButton, dark.startDateButton]} onPress={() => setStartDatePickerVisible(true)} accessibilityRole="button" accessibilityLabel={`Start date ${displayDate(startDate)}. Change`}>
+            <Text style={[styles.startDateButtonText, dark.startDateButtonText]}>{displayDate(startDate)}</Text>
+            <Ionicons name="chevron-down" size={15} color={accent} />
+          </Pressable>
+        )}
       </View>
-      {startDatePickerVisible && <DateTimePicker value={new Date(`${startDate}T00:00:00`)} mode="date" minimumDate={new Date()} onChange={(_event, date) => { setStartDatePickerVisible(false); if (date) setStartDate(formatDate(date)); }} />}
+      {startDatePickerVisible && Platform.OS !== 'web' && <DateTimePicker value={new Date(`${startDate}T00:00:00`)} mode="date" minimumDate={new Date()} onChange={(_event, date) => { setStartDatePickerVisible(false); if (date) setStartDate(formatDate(date)); }} />}
     </View>
 
     {section(3, 'Reminders', 'Get a nudge at the times you choose.')}
@@ -504,6 +521,7 @@ const baseStyles = StyleSheet.create(withReadableText({
   startDateTitle: { fontSize: 14, fontWeight: '800', color: '#2D2A3D' },
   startDateHint: { fontSize: 12, fontWeight: '600', color: '#7A7488', marginTop: 2 },
   startDateButton: { minHeight: 38, borderRadius: 12, backgroundColor: '#FFFFFF', paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  startDateWebButton: { position: 'relative' },
   startDateButtonText: { fontSize: 13, color: '#5B42D8', fontWeight: '900' },
   reminderSection: { backgroundColor: '#FFFFFF', borderRadius: 22, padding: 16, marginBottom: 8, shadowColor: '#292047', shadowOpacity: 0.04, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
   reminderTitle: { fontSize: 15, fontWeight: '900', color: '#2D2A3D' },
