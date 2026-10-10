@@ -53,7 +53,6 @@ export default function AddScreen() {
   const [name, setName] = useState(selectedHabit ?? '');
   const [categories, setCategories] = useState<HabitCategory[]>(DEFAULT_HABIT_CATEGORIES);
   const [category, setCategory] = useState('Health');
-  const detectedHabitRisk = detectBadHabit(name);
   const [frequency, setFrequency] = useState('Daily');
   const [startDate, setStartDate] = useState(() => formatDate(new Date()));
   const [startDatePickerVisible, setStartDatePickerVisible] = useState(false);
