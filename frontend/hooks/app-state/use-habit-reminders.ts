@@ -190,7 +190,8 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
         const lastReminderTime = times.reduce((latest, time) => time.hour * 60 + time.minute > latest.hour * 60 + latest.minute ? time : latest);
         const missedAt = new Date();
         missedAt.setHours(lastReminderTime.hour, lastReminderTime.minute + 1, 0, 0);
-        if (missedAt <= new Date()) missedAt.setDate(missedAt.getDate() + 1);
+        // Done for today: skip the "still open for today" nudge and aim it at the next day instead.
+        if (missedAt <= new Date() || habit.completionDates.includes(getLocalDateKey())) missedAt.setDate(missedAt.getDate() + 1);
         await Notifications.scheduleNotificationAsync({
           content: {
             title: 'Smart Reminder',
@@ -219,13 +220,15 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
         const channel = Platform.OS === 'android'
           ? { channelId: soundEnabled ? 'habit-reminders-sound-v2' : 'habit-reminders-silent-v2' }
           : {};
-        // The next time of each (today if still ahead, else tomorrow); rescheduled at midnight and
-        // whenever the app opens, so the message follows the latest record.
+        // Once the habit is checked off for today, its smart reminder is done until the next day.
+        const completedToday = habit.completionDates.includes(getLocalDateKey(now));
+        // The next time of each (today if still ahead and not yet done, else tomorrow); rescheduled
+        // at midnight and whenever the app opens, so the message follows the latest record.
         for (const time of times) {
           if (cancelled) return;
           const target = new Date(now);
           target.setHours(time.hour, time.minute, 0, 0);
-          if (target <= now) target.setDate(target.getDate() + 1);
+          if (target <= now || completedToday) target.setDate(target.getDate() + 1);
           if (!isHabitReminderDay(habit, target)) continue;
           await Notifications.scheduleNotificationAsync({
             content: {
