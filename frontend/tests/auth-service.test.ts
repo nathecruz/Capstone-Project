@@ -55,7 +55,7 @@ describe('auth service offline behavior', () => {
   });
 
   it('keeps the cached session while the backend is unreachable (offline or waking up)', async () => {
-    const cachedUser = { id: 'user-1', fullName: 'Test User', email: 'test@example.com' };
+    const cachedUser = { id: 'user-1', fullName: 'Test User', email: 'test@psau.edu.ph' };
     jest.mocked(getCurrentSession).mockResolvedValue(cachedUser);
     jest.mocked(getSessionToken).mockResolvedValue('session-token');
     fetchMock.mockRejectedValue(new TypeError('Network request failed'));
@@ -65,7 +65,7 @@ describe('auth service offline behavior', () => {
   });
 
   it('requires the backend to confirm the stored session', async () => {
-    jest.mocked(getCurrentSession).mockResolvedValue({ fullName: 'Test User', email: 'test@example.com' });
+    jest.mocked(getCurrentSession).mockResolvedValue({ fullName: 'Test User', email: 'test@psau.edu.ph' });
     jest.mocked(getSessionToken).mockResolvedValue('session-token');
     fetchMock.mockResolvedValue({
       ok: false,
@@ -78,7 +78,7 @@ describe('auth service offline behavior', () => {
   });
 
   it('stores a role the server changed, so Faculty mode turns on without signing out', async () => {
-    const stored = { id: 'u1', fullName: 'Jose Reyes', email: 'jose@example.com' };
+    const stored = { id: 'u1', fullName: 'Jose Reyes', email: 'jose@psau.edu.ph' };
     const fromServer = { ...stored, role: 'faculty' as const };
     jest.mocked(getCurrentSession).mockResolvedValue(stored);
     jest.mocked(getSessionToken).mockResolvedValue('session-token');
@@ -116,21 +116,21 @@ describe('auth service offline behavior', () => {
   it('returns an actionable message when sign-in is attempted offline', async () => {
     fetchMock.mockRejectedValue(new TypeError('Network request failed'));
 
-    await expect(signIn('test@example.com', 'password')).resolves.toEqual({
+    await expect(signIn('test@psau.edu.ph', 'password')).resolves.toEqual({
       ok: false,
       message: 'Unable to reach the account service. Connect to the internet and try again.',
     });
   });
 
   it('stores a server-issued session after successful sign-in', async () => {
-    const user = { id: 'user-1', fullName: 'Test User', email: 'test@example.com' };
+    const user = { id: 'user-1', fullName: 'Test User', email: 'test@psau.edu.ph' };
     fetchMock.mockResolvedValue({
       ok: true,
       status: 200,
       text: async () => JSON.stringify({ ok: true, token: 'issued-token', user }),
     });
 
-    await expect(signIn('test@example.com', 'StrongPass!123')).resolves.toEqual({
+    await expect(signIn('test@psau.edu.ph', 'StrongPass!123')).resolves.toEqual({
       ok: true,
       message: 'Login successful.',
       user,
@@ -142,7 +142,7 @@ describe('auth service offline behavior', () => {
     const message = 'System admin accounts cannot sign in to the HabitAI app. Please use the HabitAI Admin Panel.';
     fetchMock.mockResolvedValue({ ok: false, status: 403, text: async () => JSON.stringify({ ok: false, code: 'ADMIN_ACCOUNT', message }) });
 
-    await expect(signIn('admin@example.com', 'StrongPass!123')).resolves.toEqual({ ok: false, message });
+    await expect(signIn('admin@psau.edu.ph', 'StrongPass!123')).resolves.toEqual({ ok: false, message });
     expect(saveSessionToken).not.toHaveBeenCalled();
   });
 
@@ -150,10 +150,10 @@ describe('auth service offline behavior', () => {
     fetchMock.mockResolvedValue({
       ok: true,
       status: 200,
-      text: async () => JSON.stringify({ ok: true, token: 'issued-token', user: { id: 'admin-1', fullName: 'Site Admin', email: 'admin@example.com', role: 'admin' } }),
+      text: async () => JSON.stringify({ ok: true, token: 'issued-token', user: { id: 'admin-1', fullName: 'Site Admin', email: 'admin@psau.edu.ph', role: 'admin' } }),
     });
 
-    const result = await signIn('admin@example.com', 'StrongPass!123');
+    const result = await signIn('admin@psau.edu.ph', 'StrongPass!123');
     expect(result.ok).toBe(false);
     expect(result.message).toMatch(/Admin Panel/);
     expect(saveSessionToken).not.toHaveBeenCalled();
@@ -166,11 +166,11 @@ describe('auth service offline behavior', () => {
       text: async () => JSON.stringify({
         ok: true,
         token: 'issued-token',
-        user: { fullName: 'Test User', email: 'test@example.com' },
+        user: { fullName: 'Test User', email: 'test@psau.edu.ph' },
       }),
     });
 
-    await expect(signIn('test@example.com', 'StrongPass!123')).resolves.toEqual({
+    await expect(signIn('test@psau.edu.ph', 'StrongPass!123')).resolves.toEqual({
       ok: false,
       message: 'The account service returned an incomplete sign-in response.',
     });
@@ -191,7 +191,7 @@ describe('auth service offline behavior', () => {
       firstName: 'Test',
       lastName: 'User',
       username: 'testuser',
-      email: 'test@example.com',
+      email: 'test@psau.edu.ph',
       password: 'StrongPass!123',
       dateOfBirth: 'April 2, 2005',
       gender: 'Prefer not to say',
@@ -205,7 +205,7 @@ describe('auth service offline behavior', () => {
 
   it('registers with a separate first and last name', async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 400, text: async () => JSON.stringify({ ok: false, message: 'stop' }) });
-    await signUp({ firstName: ' Juan ', lastName: 'Dela Cruz', username: 'juan', email: 'juan@example.com', password: 'StrongPass!123', dateOfBirth: 'April 2, 2005', gender: 'Male', region: 'Philippines', privacyConsent: true });
+    await signUp({ firstName: ' Juan ', lastName: 'Dela Cruz', username: 'juan', email: 'juan@psau.edu.ph', password: 'StrongPass!123', dateOfBirth: 'April 2, 2005', gender: 'Male', region: 'Philippines', privacyConsent: true });
     const body = JSON.parse(fetchMock.mock.calls.at(-1)[1].body);
     expect(body).toMatchObject({ firstName: 'Juan', lastName: 'Dela Cruz' });
     expect(body.fullName).toBeUndefined();
@@ -219,7 +219,7 @@ describe('auth service offline behavior', () => {
       json: async () => ({ ok: false, message: 'The OTP is incorrect. Please check the code and try again.' }),
     });
 
-    await expect(updatePasswordWithOtp('test@example.com', '123456', 'StrongPass!123')).resolves.toEqual({
+    await expect(updatePasswordWithOtp('test@psau.edu.ph', '123456', 'StrongPass!123')).resolves.toEqual({
       ok: false,
       message: 'The OTP is incorrect. Please check the code and try again.',
     });
@@ -236,7 +236,7 @@ describe('auth service offline behavior', () => {
     process.env.EXPO_PUBLIC_AUTH_URL = 'https://your-production-auth.example.com';
 
     try {
-      await expect(signIn('test@example.com', 'StrongPass!123')).resolves.toEqual({
+      await expect(signIn('test@psau.edu.ph', 'StrongPass!123')).resolves.toEqual({
         ok: false,
         message: expect.stringContaining('Production API is not configured'),
       });

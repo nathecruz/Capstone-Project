@@ -28,7 +28,7 @@ function habit(overrides: Partial<Habit> = {}): Habit {
 describe('editedHabitFields', () => {
   it('renames a habit and keeps its look when the category stays', () => {
     expect(editedHabitFields(habit({ color: '#123456' }), { label: '  Drink 8 glasses  ', category: 'Health', frequency: 'Daily' }, DEFAULT_HABIT_CATEGORIES))
-      .toEqual({ label: 'Drink 8 glasses', category: 'Health', icon: 'heart-outline', color: '#123456', frequency: 'Daily', meta: 'Daily • 07:00 AM' });
+      .toEqual({ label: 'Drink 8 glasses', category: 'Health', icon: 'heart-outline', color: '#123456', frequency: 'Daily', meta: 'Daily • 07:00 AM', startDate: '2026-09-01' });
   });
 
   it('takes the icon and color of a new category', () => {
