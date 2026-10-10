@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import { getLocalDateKey } from './habit-progress';
-import { enableWebReminders, getBrowserNotificationRegistration, getHabitReminderSchedule, getHabitReminderTimes, getNotificationsModule, getSnoozeLimit, isHabitReminderDay, playReminderSound, reminderDayNumbers, type NotificationsModule } from './reminders';
+import { enableWebReminders, getBrowserNotificationRegistration, getHabitReminderTimes, getNotificationsModule, getSnoozeLimit, isHabitReminderDay, nextReminderOccurrence, playReminderSound, type NotificationsModule } from './reminders';
 import { computeSmartReminderTimes, getSmartReminderMessage, requestHabitPrediction } from './smart-reminders';
 import type { Habit, Preferences } from './types';
 
@@ -152,46 +152,37 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
       }
       const smartReminders = reminders.filter(({ habit }) => habit.smartReminderEnabled);
       for (const { habit, times } of reminders.filter(({ habit }) => !habit.smartReminderEnabled)) {
+        const now = new Date();
         const soundEnabled = habit.reminderSoundEnabled !== false;
         const channel = Platform.OS === 'android'
           ? { channelId: soundEnabled ? 'habit-reminders-sound-v2' : 'habit-reminders-silent-v2' }
           : {};
+        // Once the habit is checked off for today, skip today's reminder and aim at the next day.
+        // Scheduled as the next occurrence (not a repeating trigger) and refreshed at midnight and
+        // whenever the app opens, so a completed habit no longer nudges for the rest of the day.
+        const completedToday = habit.completionDates.includes(getLocalDateKey(now));
         for (const time of times) {
           if (cancelled) return;
-          const schedule = getHabitReminderSchedule(habit);
-          const content = {
-            title: `${habit.label} reminder`,
-            body: 'A small step today keeps your streak moving.',
-            sound: soundEnabled ? 'reminder_sound.mp3' : false,
-            data: { habitId: habit.id, snoozeCount: 0 },
-            categoryIdentifier: 'habit-reminder-snooze',
-          };
-          if (schedule.type === 'weekly') {
-            for (const day of schedule.days) {
-              await Notifications.scheduleNotificationAsync({
-                content,
-                trigger: { type: Notifications.SchedulableTriggerInputTypes.WEEKLY, weekday: reminderDayNumbers[day], hour: time.hour, minute: time.minute, ...channel },
-              });
-            }
-          } else if (schedule.type === 'monthly') {
-            await Notifications.scheduleNotificationAsync({
-              content,
-              trigger: { type: Notifications.SchedulableTriggerInputTypes.CALENDAR, day: schedule.day, hour: time.hour, minute: time.minute, repeats: true, ...channel },
-            });
-          } else {
-            await Notifications.scheduleNotificationAsync({
-              content,
-              trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: time.hour, minute: time.minute, ...channel },
-            });
-          }
+          const target = nextReminderOccurrence(habit, time, now, completedToday);
+          if (!target) continue;
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: `${habit.label} reminder`,
+              body: 'A small step today keeps your streak moving.',
+              sound: soundEnabled ? 'reminder_sound.mp3' : false,
+              data: { habitId: habit.id, snoozeCount: 0 },
+              categoryIdentifier: 'habit-reminder-snooze',
+            },
+            trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: target, ...channel },
+          });
         }
 
         if (habit.frequency === 'Custom') continue;
         const lastReminderTime = times.reduce((latest, time) => time.hour * 60 + time.minute > latest.hour * 60 + latest.minute ? time : latest);
-        const missedAt = new Date();
+        const missedAt = new Date(now);
         missedAt.setHours(lastReminderTime.hour, lastReminderTime.minute + 1, 0, 0);
         // Done for today: skip the "still open for today" nudge and aim it at the next day instead.
-        if (missedAt <= new Date() || habit.completionDates.includes(getLocalDateKey())) missedAt.setDate(missedAt.getDate() + 1);
+        if (missedAt <= now || completedToday) missedAt.setDate(missedAt.getDate() + 1);
         await Notifications.scheduleNotificationAsync({
           content: {
             title: 'Smart Reminder',

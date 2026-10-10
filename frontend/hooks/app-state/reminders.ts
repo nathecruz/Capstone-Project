@@ -51,6 +51,28 @@ export function isHabitReminderDay(habit: Pick<Habit, 'frequency' | 'meta' | 're
   return true;
 }
 
+/**
+ * The next day/time a habit's reminder should fire, at or after `now`. A time already passed today
+ * moves to the next scheduled day; `skipToday` (used once the habit is done for the day) always
+ * starts from tomorrow. Returns null if no scheduled day falls within the search window.
+ */
+export function nextReminderOccurrence(
+  habit: Pick<Habit, 'frequency' | 'meta' | 'reminderDays' | 'startDate'>,
+  time: { hour: number; minute: number },
+  now: Date,
+  skipToday = false,
+) {
+  const target = new Date(now);
+  target.setHours(time.hour, time.minute, 0, 0);
+  if (target <= now || skipToday) target.setDate(target.getDate() + 1);
+  // 62 days covers monthly habits whose day is skipped by a short month (e.g. the 31st).
+  for (let step = 0; step < 62; step += 1) {
+    if (isHabitReminderDay(habit, target)) return target;
+    target.setDate(target.getDate() + 1);
+  }
+  return null;
+}
+
 export function getSnoozeLimit(frequency: string) {
   if (frequency === 'Once') return 1;
   const count = Number.parseInt(frequency, 10);
