@@ -107,6 +107,7 @@ export default function registerAppStateRoutes(app) {
       userId: session.userId, habitId: input.habitId, date: input.date, timeZone: input.timeZone, completed: input.completed,
     }));
     if (!result) return response.status(404).json({ ok: false, message: 'Habit not found.' });
+    if (result.pastDeadline) return response.status(409).json({ ok: false, code: 'PAST_DEADLINE', message: 'This habit passed its reminder time for today, so it is missed. It opens again on its next scheduled day.' });
     if (result.locked) return response.status(409).json({ ok: false, code: 'CHECK_IN_LOCKED', message: 'This check-in is locked. A check-in can only be undone right after it is made.' });
 
     const { serverState, updatedAt } = result;

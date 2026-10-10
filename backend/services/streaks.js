@@ -49,11 +49,12 @@ export function habitFromRow(row) {
 
 /**
  * Consecutive scheduled days completed, counting back from `today`.
- * Today only extends the streak once done; an unfinished today never breaks it.
+ * Today only extends the streak once done; an unfinished today never breaks it unless `todayMissed`
+ * is set (its last reminder time passed with no check-in).
  * Unscheduled days are skipped, so a Mon/Wed/Fri habit is not broken on Tuesday, and so are days
  * covered by a streak freeze (`frozenDays`): they neither count nor break the streak.
  */
-export function computeStreak(habit, completionDates, today, frozenDays = []) {
+export function computeStreak(habit, completionDates, today, frozenDays = [], todayMissed = false) {
   const done = new Set((completionDates || []).filter((date) => typeof date === 'string'));
   if (!done.size) return 0;
   const frozen = new Set(frozenDays);
@@ -67,7 +68,7 @@ export function computeStreak(habit, completionDates, today, frozenDays = []) {
     if (!isScheduledDay(schedule, day)) continue;
     if (frozen.has(day) && !done.has(day)) continue;
     if (done.has(day)) streak += 1;
-    else if (day !== today) break;
+    else if (day !== today || todayMissed) break;
   }
   return streak;
 }

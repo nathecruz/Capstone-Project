@@ -14,7 +14,7 @@ import { config } from '../config/index.js';
 import { query, withTransaction } from '../db/client.js';
 import { runAll } from '../db/run-all.js';
 import { sameState } from './app-state-sync.js';
-import { getDateKeyInTimeZone } from './completion-date.js';
+import { getDateKeyInTimeZone, isPastHabitDeadline } from './completion-date.js';
 import { computeStreak } from './streaks.js';
 import { getFrozenDays } from './streak-freeze.js';
 import { applyWallet, awardCheckIn, getWallet, POINTS_PER_CHECK_IN } from './wallet.js';
@@ -67,13 +67,15 @@ export function withServerProgress(habit, completionDates, frozenDays = []) {
   const today = todayFor(habit.completionTimeZone);
   const done = completionDates.includes(today);
   const goal = Math.max(1, Number(habit.goal) || 1);
+  // Once today's last reminder time passes with no check-in, the habit is missed and the streak breaks.
+  const todayMissed = !done && isPastHabitDeadline(habit, today, habit.completionTimeZone || 'UTC');
   return {
     ...habit,
     completionDates,
     done,
     progress: done ? 100 : 0,
     total: `${done ? goal : 0}/${goal}`,
-    streak: computeStreak(habit, completionDates, today, frozenDays),
+    streak: computeStreak(habit, completionDates, today, frozenDays, todayMissed),
   };
 }
 

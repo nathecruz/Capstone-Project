@@ -10,7 +10,7 @@ import type { EditableHabitFields } from '@/utils/habit-edit';
 import { namesOf } from '@/utils/names';
 import { badgeProgress } from '@/utils/achievements';
 import { buddyGrowth } from '@/utils/buddy';
-import { levelProgress, streakMilestone, todayAgenda } from '@/utils/engagement';
+import { isHabitLockedMissed, levelProgress, streakMilestone, todayAgenda } from '@/utils/engagement';
 import { weeklyQuests } from '@/utils/quests';
 import { computeStreak } from '@/utils/streaks';
 import { applyRemoteCompletionDates, applyVisibleOrder, getLocalDateKey } from './app-state/habit-progress';
@@ -663,8 +663,10 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       const completionDates = completed ? [...others, dateKey] : others;
       const goal = habit.goal || 1;
       const done = completionDates.includes(getLocalDateKey());
-      // Streaks come from the check-in dates and schedule (a missed day resets them).
-      const streak = computeStreak(habit, completionDates, getLocalDateKey(), frozenDaysRef.current);
+      // Streaks come from the check-in dates and schedule (a missed day, including today once its
+      // deadline has passed, resets them).
+      const nextHabit = { ...habit, completionDates };
+      const streak = computeStreak(habit, completionDates, getLocalDateKey(), frozenDaysRef.current, isHabitLockedMissed(nextHabit, new Date()));
       return { ...habit, done, completionDates, streak, completionTimeZone, progress: done ? 100 : 0, total: `${done ? goal : 0}/${goal}` };
     }));
   };
@@ -677,6 +679,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     if (!currentHabit) return;
     // The same intent goes to the screen and the server, so a quick double tap cannot leave them disagreeing.
     const completed = !currentHabit.completionDates.includes(dateKey);
+    // Past its last reminder time and still not done: the check-in is closed for the day (the server
+    // enforces the same rule), so a missed habit cannot be checked in late.
+    if (completed && isHabitLockedMissed(currentHabit, new Date())) return;
     // A check-in can be undone only right after the tap; then it is locked for the day.
     if (!completed && !canUndoCheckIn(id)) return;
     setUndoUntil((current) => {
@@ -728,7 +733,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     setHabits((current) => current.map((habit) => {
       if (habit.id !== id) return habit;
       const next = { ...habit, ...changes };
-      return { ...next, streak: computeStreak(next, next.completionDates, getLocalDateKey(), frozenDaysRef.current) };
+      return { ...next, streak: computeStreak(next, next.completionDates, getLocalDateKey(), frozenDaysRef.current, isHabitLockedMissed(next, new Date())) };
     }));
   };
 

@@ -40,6 +40,14 @@ export function plannedMinutes(habit: Pick<Habit, 'meta'>): number | null {
   return times.length ? Math.min(...times) : null;
 }
 
+/** The habit's deadline for the day: its latest reminder time, or null when it has no set time. */
+export function deadlineMinutes(habit: Pick<Habit, 'meta'>): number | null {
+  const [, when = ''] = habit.meta.split(' • ');
+  if (/anytime/i.test(when)) return null;
+  const times = when.split(',').map((part) => minutesOfDay(part)).filter((minutes): minutes is number => minutes !== null);
+  return times.length ? Math.max(...times) : null;
+}
+
 const KEYWORDS: [TimeOfDay, RegExp][] = [
   ['morning', /\b(morning|breakfast|wake|sunrise)\b/i],
   ['afternoon', /\b(afternoon|lunch|noon|after class)\b/i],
@@ -65,6 +73,18 @@ export function isHabitLate(habit: Habit, now = new Date()) {
   if (planned === null) return false;
   const today = getLocalDateKey(now);
   return scheduledOn(habit, today) && !habit.completionDates.includes(today) && minutesNow(now) > planned;
+}
+
+/**
+ * Locked as missed: a habit scheduled for today, not done, whose last reminder time has passed.
+ * The check-in is then closed for the day and the streak is broken (the server enforces the same
+ * rule). A habit with no set reminder time has no deadline and can still be done until midnight.
+ */
+export function isHabitLockedMissed(habit: Habit, now = new Date()) {
+  const deadline = deadlineMinutes(habit);
+  if (deadline === null) return false;
+  const today = getLocalDateKey(now);
+  return scheduledOn(habit, today) && !habit.completionDates.includes(today) && minutesNow(now) > deadline;
 }
 
 export const LATE_SECTION = { label: 'Late', icon: 'alarm-outline' };

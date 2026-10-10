@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { EditHabitSheet } from '@/components/edit-habit-sheet';
 import { ProgressRing } from '@/components/progress-ring';
 import { openFocus } from '@/components/today-agenda';
-import { isHabitLate } from '@/utils/engagement';
+import { isHabitLate, isHabitLockedMissed } from '@/utils/engagement';
 import { FACULTY_HABIT_IDEAS } from '@/constants/faculty';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { isHabitMissedYesterday, useAppColorScheme } from '@/hooks/color-scheme-context';
@@ -85,6 +85,8 @@ export default function HabitsScreen() {
   const pressCheck = (item: (typeof habitList)[number]) => {
     // Done and past its Undo: locked for the day, so explain instead of doing nothing.
     if (item.done && !canUndoCheckIn(item.id)) showAlert('Already done today', 'A check-in locks a few seconds after you tap it, so streaks and tokens stay fair. This habit opens again tomorrow.');
+    // Past its last reminder time without a check-in: missed for today, so it can no longer be checked in.
+    else if (!item.done && isHabitLockedMissed(item, new Date())) showAlert('Missed today', 'This habit passed its reminder time without a check-in, so it is missed for today. It opens again on its next scheduled day.');
     else toggleHabit(item.id);
   };
 
@@ -106,8 +108,9 @@ export default function HabitsScreen() {
           setSortMode('custom');
         }}
         renderItem={({ item, drag, isActive }) => {
-          const late = !item.done && isHabitLate(item, currentTime);
-          const missed = !item.done && !late && isHabitMissedYesterday(item, currentTime);
+          const lockedMissed = !item.done && isHabitLockedMissed(item, currentTime);
+          const late = !item.done && !lockedMissed && isHabitLate(item, currentTime);
+          const missed = !item.done && !late && !lockedMissed && isHabitMissedYesterday(item, currentTime);
           const undoable = item.done && canUndoCheckIn(item.id);
           return (
             <ScaleDecorator>
@@ -150,6 +153,11 @@ export default function HabitsScreen() {
                         <Ionicons name="checkmark-circle" size={13} color={themeColor('#23774A')} />
                         <Text style={[styles.chipText, styles.chipTextDone]}>{undoable ? 'Done · tap ✓ to undo' : 'Done today'}</Text>
                       </View>
+                    ) : lockedMissed ? (
+                      <View style={[styles.chip, styles.chipMissed]}>
+                        <Ionicons name="close-circle" size={13} color={themeColor('#A0661A')} />
+                        <Text style={[styles.chipText, styles.chipTextMissed]}>Missed today</Text>
+                      </View>
                     ) : late ? (
                       <View style={[styles.chip, styles.chipLate]}>
                         <Ionicons name="time" size={13} color={themeColor('#C2541E')} />
@@ -166,7 +174,7 @@ export default function HabitsScreen() {
                         <Text style={styles.chipText}>To do</Text>
                       </View>
                     )}
-                    {item.streak > 0 && (
+                    {!lockedMissed && item.streak > 0 && (
                       <View style={[styles.chip, styles.chipStreak]}>
                         <Ionicons name="flame" size={13} color={themeColor('#E07B1F')} />
                         <Text style={[styles.chipText, styles.chipTextStreak]}>{item.streak}-day streak</Text>

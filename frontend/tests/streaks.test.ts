@@ -23,4 +23,14 @@ describe('computeStreak', () => {
     expect(computeStreak({ frequency: 'Weekly', startDate: '2026-09-02' }, ['2026-09-16', '2026-09-23', '2026-09-30'], today)).toBe(3);
     expect(computeStreak({ frequency: 'Monthly', startDate: '2026-07-30' }, ['2026-08-30', '2026-09-30'], today)).toBe(2);
   });
+
+  it('breaks the streak when today is missed (its deadline passed)', () => {
+    const daily = { frequency: 'Daily', startDate: '2026-09-01' };
+    // Yesterday and the day before are done; an unfinished today normally keeps the streak.
+    expect(computeStreak(daily, ['2026-09-28', '2026-09-29'], today)).toBe(2);
+    // Once today is missed, the streak resets.
+    expect(computeStreak(daily, ['2026-09-28', '2026-09-29'], today, [], true)).toBe(0);
+    // A done today is unaffected by the flag.
+    expect(computeStreak(daily, ['2026-09-28', '2026-09-29', '2026-09-30'], today, [], true)).toBe(3);
+  });
 });

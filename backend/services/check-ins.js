@@ -3,6 +3,7 @@
 // the Done button on reminder notifications.
 import { config } from '../config/index.js';
 import { buildServerState, getLatestAppState, saveUserAppState, syncNormalizedState } from './app-state-store.js';
+import { isPastHabitDeadline } from './completion-date.js';
 import { syncWeeklyQuests } from './quests.js';
 import { syncDailyChallenges } from './daily-challenges.js';
 import { awardCheckIn, revokeCheckIn } from './wallet.js';
@@ -18,6 +19,10 @@ export async function setCheckIn(connection, { userId, habitId, date, timeZone, 
   const saved = await getLatestAppState(userId, connection);
   const habit = saved?.state?.habits?.find((entry) => entry.id === habitId);
   if (!habit) return null;
+
+  // A new check-in is closed once the habit's last reminder time has passed for today; an undo
+  // still follows the undo-window rule below.
+  if (completed && isPastHabitDeadline(habit, date, timeZone, new Date(now))) return { pastDeadline: true };
 
   if (!completed) {
     const existing = await connection.query('SELECT completed_at AS "completedAt" FROM habit_completions WHERE user_id=$1 AND habit_id=$2 AND completed_date=$3', [userId, habitId, date]);

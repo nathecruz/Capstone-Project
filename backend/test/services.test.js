@@ -213,6 +213,24 @@ test('streaks follow the habit schedule and reset after a missed scheduled day',
   const monthly = { frequency: 'Monthly', startDate: '2026-07-30' };
   assert.equal(computeStreak(monthly, ['2026-07-30', '2026-08-30', '2026-09-30'], today), 3);
   assert.equal(computeStreak(daily, [], today), 0);
+
+  // A missed today (its deadline passed with no check-in) breaks the streak immediately.
+  assert.equal(computeStreak(daily, ['2026-09-28', '2026-09-29'], today, [], true), 0, 'a missed today resets it');
+  assert.equal(computeStreak(daily, ['2026-09-28', '2026-09-29', '2026-09-30'], today, [], true), 3, 'a done today is unaffected');
+});
+
+test('a habit is past its deadline once its last reminder time has passed in the user time zone', async () => {
+  const { isPastHabitDeadline, habitDeadlineMinutes } = await import('../services/completion-date.js');
+  const habit = { reminderEnabled: true, reminderTimes: ['07:00 AM', '08:30 PM'] };
+  assert.equal(habitDeadlineMinutes(habit), 20 * 60 + 30, 'the latest reminder is the deadline');
+  // 2026-09-30, 21:00 UTC: past 8:30 PM.
+  assert.equal(isPastHabitDeadline(habit, '2026-09-30', 'UTC', new Date('2026-09-30T21:00:00Z')), true);
+  // 20:00 UTC: before 8:30 PM.
+  assert.equal(isPastHabitDeadline(habit, '2026-09-30', 'UTC', new Date('2026-09-30T20:00:00Z')), false);
+  // Reminders off: no deadline.
+  assert.equal(isPastHabitDeadline({ reminderEnabled: false, reminderTimes: ['07:00 AM'] }, '2026-09-30', 'UTC', new Date('2026-09-30T23:00:00Z')), false);
+  // A different day than today-in-tz: not evaluated here.
+  assert.equal(isPastHabitDeadline(habit, '2026-09-29', 'UTC', new Date('2026-09-30T21:00:00Z')), false);
 });
 
 test('leaderboards show first name and last initial only', async () => {

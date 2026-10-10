@@ -1,5 +1,5 @@
 import type { Habit } from '@/hooks/app-state/types';
-import { dailyChallenge, focusMinutesFor, habitsAtRisk, isHabitLate, levelProgress, plannedMinutes, streakMilestone, timeOfDayFor, todayAgenda, weeklyRecap } from '@/utils/engagement';
+import { dailyChallenge, deadlineMinutes, focusMinutesFor, habitsAtRisk, isHabitLate, isHabitLockedMissed, levelProgress, plannedMinutes, streakMilestone, timeOfDayFor, todayAgenda, weeklyRecap } from '@/utils/engagement';
 
 function habit(id: string, overrides: Partial<Habit> = {}): Habit {
   return {
@@ -58,6 +58,28 @@ describe('late habits', () => {
     expect(isHabitLate(habit('anytime'), at(23))).toBe(false);
     // Not due on a Saturday, so not late either.
     expect(isHabitLate({ ...walk, frequency: 'Weekly', reminderDays: ['Mon'] }, at(9))).toBe(false);
+  });
+
+  it('uses the latest reminder time as the deadline', () => {
+    expect(deadlineMinutes({ meta: 'Daily • 07:00 AM' })).toBe(7 * 60);
+    expect(deadlineMinutes({ meta: 'Daily • 07:00 AM, 08:30 PM' })).toBe(20 * 60 + 30);
+    expect(deadlineMinutes({ meta: 'Daily • Anytime' })).toBeNull();
+  });
+
+  it('locks a habit as missed once its last reminder time has passed', () => {
+    const single = habit('walk', { meta: 'Daily • 07:00 AM' });
+    expect(isHabitLockedMissed(single, at(7, 0))).toBe(false);
+    expect(isHabitLockedMissed(single, at(7, 1))).toBe(true);
+    // Done, so never missed.
+    expect(isHabitLockedMissed({ ...single, completionDates: ['2026-10-03'] }, at(9))).toBe(false);
+    // No set time: no deadline, so it can still be done late in the day.
+    expect(isHabitLockedMissed(habit('anytime'), at(23))).toBe(false);
+    // Two reminders: still open after the first, missed only after the last.
+    const twice = habit('water', { meta: 'Daily • 07:00 AM, 08:00 PM' });
+    expect(isHabitLockedMissed(twice, at(7, 1))).toBe(false);
+    expect(isHabitLockedMissed(twice, at(20, 1))).toBe(true);
+    // Not due on a Saturday, so not missed either.
+    expect(isHabitLockedMissed({ ...single, frequency: 'Weekly', reminderDays: ['Mon'] }, at(9))).toBe(false);
   });
 
   it('use the earliest of two reminder times', () => {
