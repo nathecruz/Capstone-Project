@@ -11,7 +11,7 @@ jest.mock('@/authentication', () => ({
   getPasswordStrengthStatus: () => ({ label: 'Strong', description: '', color: '#238a70' }),
   getSession: jest.fn().mockResolvedValue(null),
   getRememberedEmail: jest.fn().mockResolvedValue(''),
-  isValidEmailFormat: (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && ['@psau.edu.ph', '@gmail.com'].some((domain) => email.trim().toLowerCase().endsWith(domain)),
+  isValidEmailFormat: (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && ['@psau.edu.ph', '@gmail.com', '@yahoo.com', '@outlook.com'].some((domain) => email.trim().toLowerCase().endsWith(domain)),
   rememberEmail: jest.fn().mockResolvedValue(undefined),
   resetPassword: jest.fn(),
   signIn: jest.fn(),
@@ -97,7 +97,7 @@ describe('LoginScreen', () => {
     expect(queryByText('Invalid email')).toBeNull();
 
     jest.clearAllMocks();
-    await fireEvent.changeText(getByPlaceholderText('Email Address'), 'student@yahoo.com');
+    await fireEvent.changeText(getByPlaceholderText('Email Address'), 'student@example.com');
     await fireEvent.changeText(getByPlaceholderText('Password'), 'some-password');
     await fireEvent.press(getByText('Log In'));
 

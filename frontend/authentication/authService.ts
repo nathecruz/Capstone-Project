@@ -129,7 +129,7 @@ export function getApiBaseUrl() {
 }
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const ALLOWED_EMAIL_DOMAINS = ['@psau.edu.ph', '@gmail.com'];
+const ALLOWED_EMAIL_DOMAINS = ['@psau.edu.ph', '@gmail.com', '@yahoo.com', '@outlook.com'];
 
 export function isValidEmailFormat(email: string) {
   const trimmed = email.trim().toLowerCase();
