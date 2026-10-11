@@ -9,7 +9,11 @@
     "userInterfaceStyle": "automatic",
     "platforms": ["ios", "android", "web"],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.habitmind.app"
+    },
+    "android": {
+      "package": "com.habitmind.app"
     },
     "web": {
       "output": "single",
@@ -44,7 +48,25 @@
         }
       ],
       "expo-localization",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "react-native-android-widget",
+        {
+          "widgets": [
+            {
+              "name": "HabitProgress",
+              "label": "HabitAI Progress",
+              "description": "Today's habit progress and your best streak.",
+              "minWidth": "180dp",
+              "minHeight": "110dp",
+              "targetCellWidth": 3,
+              "targetCellHeight": 2,
+              "previewImage": "./assets/images/icon.png",
+              "updatePeriodMillis": 1800000
+            }
+          ]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

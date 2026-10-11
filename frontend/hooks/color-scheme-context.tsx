@@ -22,6 +22,7 @@ import { getKnownChallenges, loadDailyChallenges, publishDailyChallenges } from 
 import { isAppTheme } from './use-themed-styles';
 import { APP_STATE_KEY_PREFIX, clearSyncMeta, loadSyncMeta, persistSyncBase, persistUnsaved } from './app-state/sync-storage';
 import { useHabitReminders } from './app-state/use-habit-reminders';
+import { useAndroidWidget } from '@/widgets/use-android-widget';
 import { initialPreferences, initialProfile, type Goal, type Habit, type PersistedAppState, type Preferences, type Profile, type TokenTransaction } from './app-state/types';
 
 export * from './app-state/types';
@@ -203,6 +204,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   // Saves scheduled or in flight; a poll must not replace the state while one is pending.
   const pendingSavesRef = useRef(0);
   useHabitReminders({ habits, preferences, ringInterval, snoozeFrequency });
+  useAndroidWidget(habits);
 
   /** The last state the server confirmed; kept on the device so later saves merge correctly. */
   const setSyncBase = useCallback((base: AppStateSyncBase | null) => {
