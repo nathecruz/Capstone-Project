@@ -55,8 +55,8 @@ test('the ML input and output are mapped both ways', () => {
 });
 
 test('the AI analysis is validated and trimmed', () => {
-  const parsed = habitAnalysisSchema.parse({ headline: 'Strong start', bestTime: 'After class at 6 PM', steps: ['One', 'Two', 'Three', 'Four'], watchOut: 'x'.repeat(300) });
-  assert.deepEqual(parsed.steps, ['One', 'Two', 'Three']);
+  const parsed = habitAnalysisSchema.parse({ headline: 'Strong start', strength: 'You never miss a Monday', bestTime: 'After class at 6 PM', steps: ['One', 'Two', 'Three', 'Four', 'Five'], watchOut: 'x'.repeat(300), encouragement: 'Keep it up' });
+  assert.deepEqual(parsed.steps, ['One', 'Two', 'Three', 'Four']);
   assert.equal(parsed.watchOut.length, 200);
   assert.equal(habitAnalysisSchema.safeParse({ headline: 'Only a headline' }).success, false);
 });

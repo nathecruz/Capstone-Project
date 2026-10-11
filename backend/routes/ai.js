@@ -114,7 +114,7 @@ export default function registerAiRoutes(app) {
         : await loadAiContext(session.userId, input.timeZone || DEFAULT_TIME_ZONE);
       const text = await generateAiText(buildUserPrompt({ question: input.question, context }), {
         system: systemPromptFor(mode, session.role),
-        maxOutputTokens: 400,
+        maxOutputTokens: 800,
         temperature: 0.6,
       });
       const answer = cleanAnswer(text);

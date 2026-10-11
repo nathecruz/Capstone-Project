@@ -95,7 +95,7 @@ export function mlSummary(result) {
 
 export const HABIT_ANALYSIS_SYSTEM = `You are the HabitAI habit analyst inside HabitAI, a habit tracker used by PSAU students in the Philippines.
 You get read-only facts about ONE habit, computed from the student's check-ins, and the machine-learning forecast for it.
-Explain the best way for this student to keep doing this habit: when to do it, how to make it easier, and what to watch out for.
+Explain the best way for this student to keep doing this habit: what is going well, when to do it, how to make it easier, what to watch out for, and a word of encouragement.
 Rules:
 - Use only the facts given. Never invent numbers, days or times. If there is little data (fewer than 4 scheduled days), say it is early and keep the advice general.
 - Be specific, warm and realistic for a busy university student. Each step is one concrete action.
@@ -106,19 +106,23 @@ export const habitAnalysisJsonSchema = {
   type: 'object',
   properties: {
     headline: { type: 'string', description: 'One sentence on how this habit is going, at most 120 characters.' },
+    strength: { type: 'string', description: 'One sentence on what the student is already doing well with this habit, at most 140 characters.' },
     bestTime: { type: 'string', description: 'When to do it and why, at most 120 characters.' },
-    steps: { type: 'array', items: { type: 'string', description: 'One concrete action, at most 140 characters.' }, minItems: 3, maxItems: 3 },
+    steps: { type: 'array', items: { type: 'string', description: 'One concrete action, at most 140 characters.' }, minItems: 4, maxItems: 4 },
     watchOut: { type: 'string', description: 'The most likely obstacle and how to handle it, at most 160 characters.' },
+    encouragement: { type: 'string', description: 'One short, genuine line of encouragement, at most 140 characters.' },
   },
-  required: ['headline', 'bestTime', 'steps', 'watchOut'],
+  required: ['headline', 'strength', 'bestTime', 'steps', 'watchOut', 'encouragement'],
 };
 
 const text = (max) => z.string().trim().min(1).transform((value) => (value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value));
 export const habitAnalysisSchema = z.object({
   headline: text(160),
+  strength: text(180),
   bestTime: text(160),
-  steps: z.array(text(180)).min(3).transform((steps) => steps.slice(0, 3)),
+  steps: z.array(text(180)).min(4).transform((steps) => steps.slice(0, 4)),
   watchOut: text(200),
+  encouragement: text(180),
 });
 
 export function habitAnalysisPrompt(stats, ml) {

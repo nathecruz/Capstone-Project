@@ -120,6 +120,12 @@ export function HabitAnalysisPanel({ habits }: { habits: Habit[] }) {
           {analysis.ai ? (
             <View style={styles.advice}>
               <Text style={styles.headline}>{analysis.ai.headline}</Text>
+              {analysis.ai.strength ? (
+                <View style={styles.strength}>
+                  <Ionicons name="checkmark-circle-outline" size={15} color={themeColor('#2E9D5C')} />
+                  <Text style={styles.strengthText}>{analysis.ai.strength}</Text>
+                </View>
+              ) : null}
               <View style={styles.bestTime}>
                 <Ionicons name="time-outline" size={15} color={themeColor('#5B42D8')} />
                 <Text style={styles.bestTimeText}>{analysis.ai.bestTime}</Text>
@@ -134,6 +140,12 @@ export function HabitAnalysisPanel({ habits }: { habits: Habit[] }) {
                 <Ionicons name="alert-circle-outline" size={15} color={themeColor('#C27A1A')} />
                 <Text style={styles.watchOutText}>{analysis.ai.watchOut}</Text>
               </View>
+              {analysis.ai.encouragement ? (
+                <View style={styles.encouragement}>
+                  <Ionicons name="heart" size={14} color={themeColor('#C2549B')} />
+                  <Text style={styles.encouragementText}>{analysis.ai.encouragement}</Text>
+                </View>
+              ) : null}
             </View>
           ) : (
             <View style={styles.noAdvice}>
@@ -185,6 +197,8 @@ const themedStyles = createThemedStyles({
   pattern: { fontSize: 12, fontWeight: '700', color: '#4B4558' },
   advice: { gap: 8, padding: 12, borderRadius: 16, backgroundColor: '#F7F5FC' },
   headline: { fontSize: 14, lineHeight: 20, fontWeight: '800', color: '#2D2A3D' },
+  strength: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+  strengthText: { flex: 1, fontSize: 12, lineHeight: 17, color: '#237A4D', fontWeight: '700' },
   bestTime: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   bestTimeText: { flex: 1, fontSize: 13, lineHeight: 18, fontWeight: '700', color: '#4B3BB0' },
   step: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
@@ -192,6 +206,8 @@ const themedStyles = createThemedStyles({
   stepText: { flex: 1, fontSize: 13, lineHeight: 19, color: '#3B3746', fontWeight: '600' },
   watchOut: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, paddingTop: 4 },
   watchOutText: { flex: 1, fontSize: 12, lineHeight: 17, color: '#7A5A1A', fontWeight: '600' },
+  encouragement: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 4 },
+  encouragementText: { flex: 1, fontSize: 12, lineHeight: 17, color: '#8A3A6B', fontWeight: '700' },
   refresh: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 5, paddingVertical: 4 },
   refreshText: { fontSize: 12, fontWeight: '800', color: '#5B42D8' },
 });
