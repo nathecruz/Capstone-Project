@@ -207,6 +207,11 @@ export default function registerAiRoutes(app) {
         } catch {
           continue;
         }
+        // An impossible, fantastical or nonsensical goal gets no plan, just a short reason.
+        if (raw?.isAchievable === false) {
+          const feedback = (typeof raw.feedback === 'string' && raw.feedback.trim()) || 'That does not look like a goal we can plan for. Try a real, achievable goal.';
+          return response.status(422).json({ ok: false, code: 'UNACHIEVABLE_GOAL', error: feedback.slice(0, 300), message: feedback.slice(0, 300) });
+        }
         const plan = goalPlanSchema.safeParse(normalizeGoalPlan(raw, { timeline, timeZone: input.timeZone || DEFAULT_TIME_ZONE }));
         if (plan.success) return response.json({ ok: true, plan: plan.data });
       }

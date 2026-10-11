@@ -56,7 +56,7 @@ export async function classifyHabit(name: string): Promise<{ ok: true; isHabit: 
   }
 }
 
-export async function generateGoalPlan<Plan>(request: { goal: string; focusTarget: string; timeline: string }): Promise<{ ok: true; plan: Plan } | AiFailure> {
+export async function generateGoalPlan<Plan>(request: { goal: string; focusTarget: string; timeline: string }): Promise<{ ok: true; plan: Plan } | (AiFailure & { unachievable?: boolean })> {
   try {
     const result = await apiRequest<{ plan?: Plan }>('/api/goals/generate', {
       method: 'POST',
@@ -66,6 +66,12 @@ export async function generateGoalPlan<Plan>(request: { goal: string; focusTarge
     });
     return result.plan ? { ok: true, plan: result.plan } : { ok: false, status: 502, message: 'The AI planner returned an empty plan. Please try again.' };
   } catch (error) {
+    // An impossible or nonsensical goal: surface the AI's short reason instead of a generic error.
+    if (error instanceof ApiRequestError && error.status === 422) {
+      const payload = error.payload as { error?: string } | undefined;
+      const message = (typeof payload?.error === 'string' && payload.error) || 'That does not look like a goal we can plan for. Try a real, achievable goal.';
+      return { ok: false, status: 422, message, unachievable: true };
+    }
     return toFailure(error);
   }
 }

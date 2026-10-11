@@ -195,6 +195,12 @@ test('model goal plans are normalised into the stored shape', () => {
   assert.equal(normalizeGoalPlan({ actionPlan: ['one'] }, { timeline: '90 days' }), null);
 });
 
+test('the goal planner first judges whether a goal is achievable', async () => {
+  const { goalPlanJsonSchema, GOAL_PLANNER_SYSTEM } = await import('../services/ai-prompts.js');
+  assert.ok(goalPlanJsonSchema.required.includes('isAchievable'), 'isAchievable is a required field');
+  assert.match(GOAL_PLANNER_SYSTEM, /achievable/i);
+});
+
 test('streaks follow the habit schedule and reset after a missed scheduled day', async () => {
   const { computeStreak } = await import('../services/streaks.js');
   const today = '2026-09-30'; // Wednesday

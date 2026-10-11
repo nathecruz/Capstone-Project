@@ -99,6 +99,8 @@ export const GOAL_TIMELINES = ['7-14 days', '30-60 days', '90 days'];
 export const goalPlanJsonSchema = {
   type: 'object',
   properties: {
+    isAchievable: { type: 'boolean', description: 'true when the goal is a real, achievable personal goal; false for impossible, fantastical, nonsensical or non-goal text.' },
+    feedback: { type: 'string', description: 'When isAchievable is false, one short, kind sentence asking for a real goal; otherwise an empty string.' },
     category: { type: 'string', enum: GOAL_CATEGORIES },
     summary: { type: 'string', description: 'Two sentences on why this plan fits the goal.' },
     intensity: { type: 'string', enum: GOAL_INTENSITIES },
@@ -108,11 +110,12 @@ export const goalPlanJsonSchema = {
     risk: { type: 'string', description: 'The most likely obstacle.' },
     riskAction: { type: 'string', description: 'What to do when that obstacle happens.' },
   },
-  required: ['category', 'summary', 'intensity', 'focusAreas', 'actionPlan', 'nextMilestone', 'risk', 'riskAction'],
+  required: ['isAchievable', 'feedback', 'category', 'summary', 'intensity', 'focusAreas', 'actionPlan', 'nextMilestone', 'risk', 'riskAction'],
 };
 
 export const GOAL_PLANNER_SYSTEM = `You are the HabitAI goal planner for university students in the Philippines.
-Turn the student's goal into a practical plan that fits their chosen timeline and number of habits to focus on.
+First decide if the goal is achievable. If it is impossible or fantastical (for example "fly to heaven", "become invisible", "live forever", "time travel"), nonsensical, random text, or not a real personal goal, set isAchievable to false and put one short, kind sentence in feedback asking the student for a real, achievable goal; you may leave the plan fields as short placeholders. Otherwise set isAchievable to true, feedback to "", and fill a full plan.
+Turn an achievable goal into a practical plan that fits their chosen timeline and number of habits to focus on.
 - actionPlan has exactly 4 steps in the order they should be done. Each step starts with a verb, is specific to this goal, measurable (a count, duration or deliverable) and at most 70 characters.
 - focusAreas has exactly 3 short themes (2 to 4 words each).
 - category, intensity must be one of the allowed values. Choose "High focus" for urgent or demanding goals, "Quick win" for small goals, otherwise "Balanced".

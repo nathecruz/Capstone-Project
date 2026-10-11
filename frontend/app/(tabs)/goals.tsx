@@ -211,7 +211,8 @@ export default function GoalsScreen() {
     try {
       const result = await generateGoalPlan<Partial<GoalInsight>>({ goal: input, focusTarget, timeline: timelineOption });
       if (!result.ok) {
-        showAlert('AI planner unavailable', `${result.message} Nothing was saved.`);
+        if (result.unachievable) showAlert('Let’s refine that goal', result.message);
+        else showAlert('AI planner unavailable', `${result.message} Nothing was saved.`);
         return;
       }
       const plan = result.plan;
