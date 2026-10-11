@@ -47,7 +47,7 @@ export async function classifyHabit(name: string, options: { category?: string; 
       method: 'POST',
       headers: await getAuthenticatedHeaders(),
       body: JSON.stringify({ name: name.trim().slice(0, 100), category: options.category, categories: options.categories?.slice(0, 20) }),
-      timeoutMs: 8000,
+      timeoutMs: 5000,
     });
     const isHabit = result.isHabit !== false;
     return {

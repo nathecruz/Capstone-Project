@@ -145,24 +145,19 @@ export default function AddScreen() {
     } finally {
       setAdding(false);
     }
-    // Random text or something that is not an activity: ask for a real habit instead of adding it.
-    if (!detected.isHabit) {
-      showMessage('That doesn’t look like a habit', detected.reason || 'Try a real habit like “Drink water”, “Read 20 minutes” or “Sleep early”.');
-      return;
-    }
-    // A good habit filed under a category that does not relate to it cannot be created as is.
-    if (!detected.isBadHabit && !detected.categoryFits) {
+    // The AI only advises; it never blocks the habit. A bad habit goes to the Bad Habit category; a
+    // good habit under a clearly wrong category is filed under the fitting one the AI suggests.
+    let resolvedCategory = category;
+    if (detected.isBadHabit) {
+      resolvedCategory = 'Bad Habit';
+    } else if (!detected.categoryFits && detected.suggestedCategory) {
       const suggestion = categories.find((item) => item.label === detected.suggestedCategory);
-      if (suggestion && suggestion.label !== category) setCategory(suggestion.label);
-      showMessage('Category doesn’t match', suggestion && suggestion.label !== category
-        ? `“${name.trim()}” fits ${suggestion.label} better than ${category}. We switched it — tap Add habit again.`
-        : `“${name.trim()}” does not fit the ${category} category. Choose a category that matches it.`);
-      return;
+      if (suggestion) resolvedCategory = suggestion.label;
     }
-    const resolvedCategory = detected.isBadHabit ? 'Bad Habit' : category;
+    if (resolvedCategory !== category) setCategory(resolvedCategory);
     const selectedCategory = categories.find((item) => item.label === resolvedCategory) ?? categories[0];
     if (detected.isBadHabit) {
-      showMessage('Bad habit detected', detected.reason || 'This habit can harm your daily routine or productivity.');
+      showMessage('Bad habit detected', detected.reason || 'This habit can harm your daily routine or productivity. We filed it under Bad Habit so you can work on it.');
     }
     createHabit({
       startDate,
