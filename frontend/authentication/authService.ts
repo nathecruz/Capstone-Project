@@ -694,7 +694,10 @@ export async function saveRemoteHabitCompletion(completion: HabitCompletion & { 
       headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({ ...completion, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }),
     });
-  } catch {
+  } catch (error) {
+    // A definitive client rejection (the day is closed, the habit is missed, or an undo is locked)
+    // must undo the optimistic change; a network error keeps it so it can sync later.
+    if (error instanceof ApiRequestError && error.status >= 400 && error.status < 500) return { rejected: true };
     return null;
   }
 }

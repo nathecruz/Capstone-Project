@@ -60,22 +60,23 @@ describe('late habits', () => {
     expect(isHabitLate({ ...walk, frequency: 'Weekly', reminderDays: ['Mon'] }, at(9))).toBe(false);
   });
 
-  it('uses the latest reminder time as the deadline', () => {
-    expect(deadlineMinutes({ meta: 'Daily • 07:00 AM' })).toBe(7 * 60);
-    expect(deadlineMinutes({ meta: 'Daily • 07:00 AM, 08:30 PM' })).toBe(20 * 60 + 30);
-    expect(deadlineMinutes({ meta: 'Daily • Anytime' })).toBeNull();
+  it('uses the latest active reminder time as the deadline', () => {
+    expect(deadlineMinutes({ reminderEnabled: true, reminderTime: '07:00 AM', reminderTimes: ['07:00 AM'] })).toBe(7 * 60);
+    expect(deadlineMinutes({ reminderEnabled: true, reminderTime: '07:00 AM', reminderTimes: ['07:00 AM', '08:30 PM'] })).toBe(20 * 60 + 30);
+    // Reminders off: no deadline.
+    expect(deadlineMinutes({ reminderEnabled: false, reminderTime: '07:00 AM', reminderTimes: ['07:00 AM'] })).toBeNull();
   });
 
   it('locks a habit as missed once its last reminder time has passed', () => {
-    const single = habit('walk', { meta: 'Daily • 07:00 AM' });
+    const single = habit('walk', { reminderEnabled: true, reminderTime: '07:00 AM', reminderTimes: ['07:00 AM'] });
     expect(isHabitLockedMissed(single, at(7, 0))).toBe(false);
     expect(isHabitLockedMissed(single, at(7, 1))).toBe(true);
     // Done, so never missed.
     expect(isHabitLockedMissed({ ...single, completionDates: ['2026-10-03'] }, at(9))).toBe(false);
-    // No set time: no deadline, so it can still be done late in the day.
+    // Reminders off: no deadline, so it can still be done late in the day.
     expect(isHabitLockedMissed(habit('anytime'), at(23))).toBe(false);
     // Two reminders: still open after the first, missed only after the last.
-    const twice = habit('water', { meta: 'Daily • 07:00 AM, 08:00 PM' });
+    const twice = habit('water', { reminderEnabled: true, reminderTime: '07:00 AM', reminderTimes: ['07:00 AM', '08:00 PM'] });
     expect(isHabitLockedMissed(twice, at(7, 1))).toBe(false);
     expect(isHabitLockedMissed(twice, at(20, 1))).toBe(true);
     // Not due on a Saturday, so not missed either.

@@ -694,6 +694,13 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     if (completed) celebrateCheckIn(currentHabit, dateKey);
     adjustBuddyCheckIns(completed ? 1 : -1);
     void saveRemoteHabitCompletion({ habitId: id, date: dateKey, completed }).then((result) => {
+      if (result && 'rejected' in result) {
+        // The server refused this check-in (day closed, habit missed, or undo locked): undo the
+        // optimistic change so the screen matches the server instead of silently reverting on sync.
+        applyLocalCheckIn(id, dateKey, !completed);
+        setUndoUntil((current) => { const next = { ...current }; delete next[id]; return next; });
+        return;
+      }
       if (!result) {
         // The server keeps a check-in it would not undo (locked, or unreachable): show it again.
         if (!completed) applyLocalCheckIn(id, dateKey, true);

@@ -40,11 +40,16 @@ export function plannedMinutes(habit: Pick<Habit, 'meta'>): number | null {
   return times.length ? Math.min(...times) : null;
 }
 
-/** The habit's deadline for the day: its latest reminder time, or null when it has no set time. */
-export function deadlineMinutes(habit: Pick<Habit, 'meta'>): number | null {
-  const [, when = ''] = habit.meta.split(' • ');
-  if (/anytime/i.test(when)) return null;
-  const times = when.split(',').map((part) => minutesOfDay(part)).filter((minutes): minutes is number => minutes !== null);
+/**
+ * The habit's deadline for the day: its latest reminder time, or null when it has no active
+ * reminder. Read from reminderEnabled + reminderTimes so it matches the server's deadline exactly
+ * (backend/services/completion-date.js habitDeadlineMinutes); otherwise a check-in the app allowed
+ * could be rejected by the server and quietly revert.
+ */
+export function deadlineMinutes(habit: Pick<Habit, 'reminderEnabled' | 'reminderTime' | 'reminderTimes'>): number | null {
+  if (!habit.reminderEnabled) return null;
+  const values = habit.reminderTimes?.length ? habit.reminderTimes : (habit.reminderTime ? [habit.reminderTime] : []);
+  const times = values.map((value) => minutesOfDay(value)).filter((minutes): minutes is number => minutes !== null);
   return times.length ? Math.max(...times) : null;
 }
 
