@@ -235,7 +235,8 @@ export default function registerAiRoutes(app) {
         return response.status(502).json({ ok: false, error: 'The AI returned an invalid classification. Please try again.' });
       }
       const reason = typeof raw?.reason === 'string' ? raw.reason.trim().slice(0, 300) : '';
-      response.json({ ok: true, isBadHabit: raw?.isBadHabit === true, reason });
+      const isHabit = raw?.isHabit !== false;
+      response.json({ ok: true, isHabit, isBadHabit: isHabit && raw?.isBadHabit === true, reason });
     } catch (error) {
       logAiError('habit classification', error);
       response.status(502).json({ ok: false, error: 'The AI classifier is temporarily unavailable.' });

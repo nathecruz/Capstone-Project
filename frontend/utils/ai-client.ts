@@ -41,15 +41,16 @@ export async function askAi(mode: AiMode, question: string): Promise<AiAnswer> {
   }
 }
 
-export async function classifyHabit(name: string): Promise<{ ok: true; isBadHabit: boolean; reason: string } | AiFailure> {
+export async function classifyHabit(name: string): Promise<{ ok: true; isHabit: boolean; isBadHabit: boolean; reason: string } | AiFailure> {
   try {
-    const result = await apiRequest<{ isBadHabit?: boolean; reason?: string }>('/api/habit/classify', {
+    const result = await apiRequest<{ isHabit?: boolean; isBadHabit?: boolean; reason?: string }>('/api/habit/classify', {
       method: 'POST',
       headers: await getAuthenticatedHeaders(),
       body: JSON.stringify({ name: name.trim().slice(0, 100) }),
       timeoutMs: 8000,
     });
-    return { ok: true, isBadHabit: result.isBadHabit === true, reason: typeof result.reason === 'string' ? result.reason : '' };
+    const isHabit = result.isHabit !== false;
+    return { ok: true, isHabit, isBadHabit: isHabit && result.isBadHabit === true, reason: typeof result.reason === 'string' ? result.reason : '' };
   } catch (error) {
     return toFailure(error);
   }
