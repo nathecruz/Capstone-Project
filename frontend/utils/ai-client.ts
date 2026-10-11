@@ -41,6 +41,20 @@ export async function askAi(mode: AiMode, question: string): Promise<AiAnswer> {
   }
 }
 
+export async function classifyHabit(name: string): Promise<{ ok: true; isBadHabit: boolean; reason: string } | AiFailure> {
+  try {
+    const result = await apiRequest<{ isBadHabit?: boolean; reason?: string }>('/api/habit/classify', {
+      method: 'POST',
+      headers: await getAuthenticatedHeaders(),
+      body: JSON.stringify({ name: name.trim().slice(0, 100) }),
+      timeoutMs: 8000,
+    });
+    return { ok: true, isBadHabit: result.isBadHabit === true, reason: typeof result.reason === 'string' ? result.reason : '' };
+  } catch (error) {
+    return toFailure(error);
+  }
+}
+
 export async function generateGoalPlan<Plan>(request: { goal: string; focusTarget: string; timeline: string }): Promise<{ ok: true; plan: Plan } | AiFailure> {
   try {
     const result = await apiRequest<{ plan?: Plan }>('/api/goals/generate', {

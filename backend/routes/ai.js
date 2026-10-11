@@ -2,11 +2,14 @@ import { config } from '../config/index.js';
 import { query, withTransaction } from '../db/client.js';
 import { aiLimiter, habitAdviceLimiter, predictionLimiter } from '../http/rate-limits.js';
 import { parse } from '../lib/http.js';
-import { assistantSchema, goalGenerationSchema, goalPlanSchema, habitAnalysisRequestSchema } from '../schemas.js';
+import { assistantSchema, goalGenerationSchema, goalPlanSchema, habitAnalysisRequestSchema, habitClassificationSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
 import { buildHabitContext, dateKeyInZone, shiftDay } from '../services/ai-context.js';
 import {
+  BAD_HABIT_SYSTEM,
   GOAL_PLANNER_SYSTEM,
+  badHabitJsonSchema,
+  badHabitPrompt,
   buildUserPrompt,
   forAudience,
   cleanAnswer,
@@ -211,6 +214,31 @@ export default function registerAiRoutes(app) {
     } catch (error) {
       logAiError('goals', error);
       response.status(502).json({ ok: false, error: 'The AI goal planner is temporarily unavailable.' });
+    }
+  });
+
+  // Classifies a habit the student is about to add as healthy or a bad habit (harmful to daily
+  // life or productivity). The app falls back to its own keyword check when this is unavailable.
+  app.post('/api/habit/classify', predictionLimiter, async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    if (!isAiConfigured()) return response.status(503).json({ ok: false, error: 'The AI service is not configured on the server.' });
+    const input = parse(habitClassificationSchema, request, response);
+    if (!input) return;
+
+    try {
+      const text = await generateAiText(badHabitPrompt(input.name), { system: BAD_HABIT_SYSTEM, schema: badHabitJsonSchema, maxOutputTokens: 200, temperature: 0 });
+      let raw;
+      try {
+        raw = JSON.parse(text);
+      } catch {
+        return response.status(502).json({ ok: false, error: 'The AI returned an invalid classification. Please try again.' });
+      }
+      const reason = typeof raw?.reason === 'string' ? raw.reason.trim().slice(0, 300) : '';
+      response.json({ ok: true, isBadHabit: raw?.isBadHabit === true, reason });
+    } catch (error) {
+      logAiError('habit classification', error);
+      response.status(502).json({ ok: false, error: 'The AI classifier is temporarily unavailable.' });
     }
   });
 }

@@ -13,6 +13,7 @@ import { requestNotificationAccess, useAppColorScheme } from '@/hooks/color-sche
 import { useAppTheme } from '@/hooks/dark-mode-context';
 import { themeSheet, themedColor, withReadableText } from '@/hooks/use-themed-styles';
 import { detectBadHabit } from '@/utils/habit-detection';
+import { classifyHabit } from '@/utils/ai-client';
 
 const frequencies = ['Daily', 'Weekly', 'Monthly', 'Custom'];
 const popularHabits = ['Drink Water', 'Exercise / Workout', 'Read a Book', 'Sleep Early', 'Meditate', 'Eat Healthy'];
@@ -67,6 +68,7 @@ export default function AddScreen() {
   const [popularVisible, setPopularVisible] = useState(false);
   const [smartInfoVisible, setSmartInfoVisible] = useState(false);
   const [habitAddedVisible, setHabitAddedVisible] = useState(false);
+  const [adding, setAdding] = useState(false);
   const [addedHabitSummary, setAddedHabitSummary] = useState({ name: '', schedule: '', reminder: '' });
   const [messageVisible, setMessageVisible] = useState(false);
   const [messageContent, setMessageContent] = useState({ title: '', body: '' });
@@ -121,10 +123,25 @@ export default function AddScreen() {
     setReminder(nextReminder);
   };
 
-  const addHabit = () => {
+  // The AI flags habits that harm daily life or productivity; the on-device keyword check is the
+  // fallback when the AI is offline or unavailable.
+  const classifyHabitRisk = async (habitName: string): Promise<{ isBadHabit: boolean; reason: string }> => {
+    const ai = await classifyHabit(habitName);
+    if (ai.ok) return { isBadHabit: ai.isBadHabit, reason: ai.isBadHabit ? (ai.reason || 'This habit can harm your daily routine or productivity.') : '' };
+    return detectBadHabit(habitName);
+  };
+
+  const addHabit = async () => {
+    if (adding) return;
     if (!name.trim()) { showMessage('Habit name required', 'Give your new habit a name first.'); return; }
     if ((frequency === 'Custom' || frequency === 'Weekly') && !repeatDays.length) { showMessage('Choose repeat days', 'Select at least one day for this schedule.'); return; }
-    const detected = detectBadHabit(name);
+    setAdding(true);
+    let detected: { isBadHabit: boolean; reason: string };
+    try {
+      detected = await classifyHabitRisk(name);
+    } finally {
+      setAdding(false);
+    }
     const resolvedCategory = detected.isBadHabit ? 'Bad Habit' : category;
     const selectedCategory = categories.find((item) => item.label === resolvedCategory) ?? categories[0];
     if (detected.isBadHabit) {
@@ -378,7 +395,7 @@ export default function AddScreen() {
     <Modal visible={habitAddedVisible} transparent animationType="fade" onRequestClose={() => setHabitAddedVisible(false)}><View style={styles.successModalBackdrop}><View style={[styles.successModalCard, dark.successModalCard]}><View style={styles.successModalIcon}><Ionicons name="checkmark" size={28} color="#FFFFFF" /></View><Text style={[styles.successModalTitle, dark.successModalTitle]}>Habit added successfully</Text><Text style={[styles.successModalBody, dark.successModalBody]}>Your new habit is ready to track.</Text><View style={[styles.successSummary, dark.successSummary]}><Text style={[styles.successHabitName, dark.successHabitName]}>{addedHabitSummary.name}</Text><View style={styles.successSummaryRow}><Ionicons name="calendar-outline" size={16} color={accent} /><Text style={[styles.successSummaryText, dark.successSummaryText]}>{addedHabitSummary.schedule}</Text></View><View style={styles.successSummaryRow}><Ionicons name="notifications-outline" size={16} color={accent} /><Text style={[styles.successSummaryText, dark.successSummaryText]}>{addedHabitSummary.reminder}</Text></View></View><Pressable style={styles.successModalButton} onPress={() => { setHabitAddedVisible(false); router.replace('/(tabs)/habits'); }} accessibilityRole="button"><Text style={styles.successModalButtonText}>View My Habits</Text><Ionicons name="arrow-forward" size={17} color="#FFFFFF" /></Pressable></View></View></Modal>
     <Modal visible={messageVisible} transparent animationType="fade" onRequestClose={() => setMessageVisible(false)}><View style={styles.messageModalBackdrop}><View style={[styles.messageModalCard, dark.messageModalCard]}><View style={[styles.messageModalIcon, dark.messageModalIcon]}><Ionicons name="alert-circle" size={27} color="#D98932" /></View><Text style={[styles.messageModalTitle, dark.messageModalTitle]}>{messageContent.title}</Text><Text style={[styles.messageModalBody, dark.messageModalBody]}>{messageContent.body}</Text><Pressable style={styles.messageModalButton} onPress={() => setMessageVisible(false)} accessibilityRole="button"><Text style={styles.messageModalButtonText}>OK</Text></Pressable></View></View></Modal>
     <Modal visible={cancelVisible} transparent animationType="fade" onRequestClose={() => setCancelVisible(false)}><View style={styles.cancelModalBackdrop}><View style={[styles.cancelModalCard, dark.cancelModalCard]}><View style={[styles.cancelModalIcon, dark.cancelModalIcon]}><Ionicons name="refresh-outline" size={27} color={accent} /></View><Text style={[styles.cancelModalTitle, dark.cancelModalTitle]}>Clear this habit?</Text><Text style={[styles.cancelModalBody, dark.cancelModalBody]}>Your current inputs will be cleared and you&apos;ll return to My Habits.</Text><View style={styles.cancelModalActions}><Pressable style={[styles.keepEditingButton, dark.keepEditingButton]} onPress={() => setCancelVisible(false)} accessibilityRole="button"><Text style={[styles.keepEditingText, dark.keepEditingText]}>Keep Editing</Text></Pressable><Pressable style={styles.clearExitButton} onPress={cancelHabitForm} accessibilityRole="button"><Text style={styles.clearExitText}>Clear &amp; Exit</Text></Pressable></View></View></View></Modal>
-    <Pressable style={({ pressed }) => [styles.addHabitButton, pressed && styles.pressed]} onPress={addHabit} accessibilityRole="button"><Ionicons name="add" size={21} color="#FFFFFF" /><Text style={styles.addHabitText}>Add habit</Text></Pressable>
+    <Pressable style={({ pressed }) => [styles.addHabitButton, (pressed || adding) && styles.pressed]} onPress={addHabit} disabled={adding} accessibilityRole="button" accessibilityState={{ disabled: adding, busy: adding }}><Ionicons name={adding ? 'sparkles' : 'add'} size={21} color="#FFFFFF" /><Text style={styles.addHabitText}>{adding ? 'Checking habit…' : 'Add habit'}</Text></Pressable>
     <Pressable style={({ pressed }) => [styles.cancelButton, pressed && styles.pressed]} onPress={() => setCancelVisible(true)} accessibilityRole="button"><Ionicons name="refresh-outline" size={17} color={accent} /><Text style={[styles.cancelText, dark.cancelText]}>Clear form</Text></Pressable>
   </View></ScrollView><Modal visible={popularVisible} transparent animationType="slide" onRequestClose={() => setPopularVisible(false)}><View style={styles.modalBackdrop}><View style={[styles.modalCard, dark.modalCard]}><View style={styles.modalHeader}><View><Text style={[styles.modalTitle, dark.modalTitle]}>Popular Habits</Text><Text style={[styles.modalSubtitle, dark.modalSubtitle]}>Choose a habit to add to your form.</Text></View><Pressable onPress={() => setPopularVisible(false)} accessibilityLabel="Close popular habits"><Ionicons name="close" size={22} color={iconInk} /></Pressable></View><ScrollView showsVerticalScrollIndicator={false}>{allHabitIdeas.map((habit) => <Pressable key={habit} style={[styles.modalHabit, dark.modalHabit]} onPress={() => { setName(habit); setPopularVisible(false); }}><View style={[styles.modalHabitIcon, dark.modalHabitIcon]}><Ionicons name="add" size={18} color={accent} /></View><Text style={[styles.modalHabitText, dark.modalHabitText]}>{habit}</Text><Ionicons name="chevron-forward" size={17} color="#A19AAA" /></Pressable>)}</ScrollView></View></View></Modal></SafeAreaView>;
 }

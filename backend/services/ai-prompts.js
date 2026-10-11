@@ -129,6 +129,25 @@ export function goalPlannerPrompt({ goal, focusTarget, timeline }) {
   ].join('\n');
 }
 
+export const BAD_HABIT_SYSTEM = `You classify a habit a Filipino university student wants to track as either healthy or a bad habit.
+A bad habit is one that, done regularly, harms the student's health, well-being, sleep, studies, work or daily productivity — for example smoking, vaping, drinking to excess, gambling, doomscrolling or late-night phone use, procrastinating, skipping meals or sleep, excessive gaming, or eating junk food.
+A habit phrased as cutting down, quitting or avoiding a vice (for example "No smoking", "Quit vaping", "Less screen time") is a GOOD habit, not a bad one.
+Set isBadHabit to true only when the habit itself is the harmful behaviour. Keep reason to one short, plain sentence a student would understand.`;
+
+export const badHabitJsonSchema = {
+  type: 'object',
+  properties: {
+    isBadHabit: { type: 'boolean', description: 'true when the habit harms health, well-being or productivity.' },
+    reason: { type: 'string', description: 'One short sentence explaining the classification.' },
+  },
+  required: ['isBadHabit', 'reason'],
+  additionalProperties: false,
+};
+
+export function badHabitPrompt(name) {
+  return `Classify this habit the student wants to track:\n"""${String(name).trim().slice(0, 100).replace(/"""/g, '"')}"""`;
+}
+
 const DUE_OFFSETS = { '7-14 days': [1, 3, 7, 14], '30-60 days': [3, 10, 21, 45], '90 days': [7, 21, 45, 90] };
 
 function formatDay(date, timeZone, withYear = false) {
