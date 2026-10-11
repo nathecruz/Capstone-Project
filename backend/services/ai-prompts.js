@@ -136,21 +136,28 @@ export const BAD_HABIT_SYSTEM = `You check a habit a Filipino university student
 First decide if the text actually names a habit — a real activity a person could choose to do regularly, like "Drink water", "Jog", "Study", "Pray", "Smoke" or "Scroll social media". If it is random letters, gibberish, nonsense, emoji only, a single unrelated word that is not an activity (like "chair" or "blue"), or clearly not something you do, set isHabit to false, isBadHabit to false, and in reason say it does not look like a habit and suggest giving a real one.
 When it IS a habit, decide if it is a bad habit: one that, done regularly, harms the student's health, well-being, sleep, studies, work or daily productivity — for example smoking, vaping, drinking to excess, gambling, doomscrolling or late-night phone use, procrastinating, skipping meals or sleep, excessive gaming, or eating junk food.
 A habit phrased as cutting down, quitting or avoiding a vice (for example "No smoking", "Quit vaping", "Less screen time") is a GOOD habit, not a bad one.
-Set isBadHabit to true only when the habit itself is the harmful behaviour. Keep reason to one short, plain sentence a student would understand.`;
+Set isBadHabit to true only when the habit itself is the harmful behaviour.
+You are also given the category the student chose and the list of available categories. Decide if the chosen category is a reasonable home for the habit. Be lenient: accept any sensible fit, and "Other" always fits. Only when the chosen category clearly does not relate to the habit (for example "Drink water" under "Academics") set categoryFits to false and set suggestedCategory to the best-fitting category from the list. Otherwise categoryFits is true and suggestedCategory repeats the chosen category. If no category is given, categoryFits is true.
+Keep reason to one short, plain sentence a student would understand.`;
 
 export const badHabitJsonSchema = {
   type: 'object',
   properties: {
     isHabit: { type: 'boolean', description: 'true when the text names a real activity a person could do regularly; false for random text, gibberish or something that is not an activity.' },
     isBadHabit: { type: 'boolean', description: 'true when the habit harms health, well-being or productivity; always false when isHabit is false.' },
+    categoryFits: { type: 'boolean', description: 'true when the chosen category reasonably fits the habit (or no category was given); false only for a clear mismatch.' },
+    suggestedCategory: { type: 'string', description: 'The best-fitting category from the provided list; repeats the chosen category when it already fits.' },
     reason: { type: 'string', description: 'One short sentence explaining the classification.' },
   },
-  required: ['isHabit', 'isBadHabit', 'reason'],
+  required: ['isHabit', 'isBadHabit', 'categoryFits', 'suggestedCategory', 'reason'],
   additionalProperties: false,
 };
 
-export function badHabitPrompt(name) {
-  return `Classify this habit the student wants to track:\n"""${String(name).trim().slice(0, 100).replace(/"""/g, '"')}"""`;
+export function badHabitPrompt(name, { category, categories } = {}) {
+  const lines = [`Classify this habit the student wants to track:\n"""${String(name).trim().slice(0, 100).replace(/"""/g, '"')}"""`];
+  if (Array.isArray(categories) && categories.length) lines.push(`Available categories: ${categories.map((item) => String(item).slice(0, 60)).join(', ')}`);
+  if (category) lines.push(`Chosen category: ${String(category).slice(0, 60)}`);
+  return lines.join('\n');
 }
 
 const DUE_OFFSETS = { '7-14 days': [1, 3, 7, 14], '30-60 days': [3, 10, 21, 45], '90 days': [7, 21, 45, 90] };

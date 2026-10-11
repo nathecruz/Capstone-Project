@@ -232,7 +232,7 @@ export default function registerAiRoutes(app) {
     if (!input) return;
 
     try {
-      const text = await generateAiText(badHabitPrompt(input.name), { system: BAD_HABIT_SYSTEM, schema: badHabitJsonSchema, maxOutputTokens: 200, temperature: 0 });
+      const text = await generateAiText(badHabitPrompt(input.name, { category: input.category, categories: input.categories }), { system: BAD_HABIT_SYSTEM, schema: badHabitJsonSchema, maxOutputTokens: 200, temperature: 0 });
       let raw;
       try {
         raw = JSON.parse(text);
@@ -241,7 +241,10 @@ export default function registerAiRoutes(app) {
       }
       const reason = typeof raw?.reason === 'string' ? raw.reason.trim().slice(0, 300) : '';
       const isHabit = raw?.isHabit !== false;
-      response.json({ ok: true, isHabit, isBadHabit: isHabit && raw?.isBadHabit === true, reason });
+      const suggestedCategory = typeof raw?.suggestedCategory === 'string' ? raw.suggestedCategory.trim().slice(0, 60) : '';
+      // Only judge the category for a genuine, non-bad habit; a clear mismatch needs an explicit false.
+      const categoryFits = !isHabit || raw?.isBadHabit === true || !input.category || raw?.categoryFits !== false;
+      response.json({ ok: true, isHabit, isBadHabit: isHabit && raw?.isBadHabit === true, categoryFits, suggestedCategory, reason });
     } catch (error) {
       logAiError('habit classification', error);
       response.status(502).json({ ok: false, error: 'The AI classifier is temporarily unavailable.' });

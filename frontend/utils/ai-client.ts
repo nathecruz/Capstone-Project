@@ -41,16 +41,23 @@ export async function askAi(mode: AiMode, question: string): Promise<AiAnswer> {
   }
 }
 
-export async function classifyHabit(name: string): Promise<{ ok: true; isHabit: boolean; isBadHabit: boolean; reason: string } | AiFailure> {
+export async function classifyHabit(name: string, options: { category?: string; categories?: string[] } = {}): Promise<{ ok: true; isHabit: boolean; isBadHabit: boolean; categoryFits: boolean; suggestedCategory: string; reason: string } | AiFailure> {
   try {
-    const result = await apiRequest<{ isHabit?: boolean; isBadHabit?: boolean; reason?: string }>('/api/habit/classify', {
+    const result = await apiRequest<{ isHabit?: boolean; isBadHabit?: boolean; categoryFits?: boolean; suggestedCategory?: string; reason?: string }>('/api/habit/classify', {
       method: 'POST',
       headers: await getAuthenticatedHeaders(),
-      body: JSON.stringify({ name: name.trim().slice(0, 100) }),
+      body: JSON.stringify({ name: name.trim().slice(0, 100), category: options.category, categories: options.categories?.slice(0, 20) }),
       timeoutMs: 8000,
     });
     const isHabit = result.isHabit !== false;
-    return { ok: true, isHabit, isBadHabit: isHabit && result.isBadHabit === true, reason: typeof result.reason === 'string' ? result.reason : '' };
+    return {
+      ok: true,
+      isHabit,
+      isBadHabit: isHabit && result.isBadHabit === true,
+      categoryFits: result.categoryFits !== false,
+      suggestedCategory: typeof result.suggestedCategory === 'string' ? result.suggestedCategory : '',
+      reason: typeof result.reason === 'string' ? result.reason : '',
+    };
   } catch (error) {
     return toFailure(error);
   }

@@ -123,14 +123,15 @@ export default function AddScreen() {
     setReminder(nextReminder);
   };
 
-  // The AI checks the text is a real habit and flags ones that harm daily life or productivity; the
-  // on-device keyword check is the fallback when the AI is offline or unavailable.
-  const classifyHabitRisk = async (habitName: string): Promise<{ isHabit: boolean; isBadHabit: boolean; reason: string }> => {
-    const ai = await classifyHabit(habitName);
-    if (ai.ok) return { isHabit: ai.isHabit, isBadHabit: ai.isBadHabit, reason: ai.reason };
+  // The AI checks the text is a real habit, flags ones that harm daily life or productivity, and
+  // whether the chosen category fits; the on-device keyword check is the fallback when the AI is
+  // offline or unavailable.
+  const classifyHabitRisk = async (habitName: string): Promise<{ isHabit: boolean; isBadHabit: boolean; categoryFits: boolean; suggestedCategory: string; reason: string }> => {
+    const ai = await classifyHabit(habitName, { category, categories: categories.map((item) => item.label) });
+    if (ai.ok) return { isHabit: ai.isHabit, isBadHabit: ai.isBadHabit, categoryFits: ai.categoryFits, suggestedCategory: ai.suggestedCategory, reason: ai.reason };
     // Offline fallback: the keyword check only knows good vs bad, so let the habit through.
     const detected = detectBadHabit(habitName);
-    return { isHabit: true, isBadHabit: detected.isBadHabit, reason: detected.reason };
+    return { isHabit: true, isBadHabit: detected.isBadHabit, categoryFits: true, suggestedCategory: category, reason: detected.reason };
   };
 
   const addHabit = async () => {
@@ -138,7 +139,7 @@ export default function AddScreen() {
     if (!name.trim()) { showMessage('Habit name required', 'Give your new habit a name first.'); return; }
     if ((frequency === 'Custom' || frequency === 'Weekly') && !repeatDays.length) { showMessage('Choose repeat days', 'Select at least one day for this schedule.'); return; }
     setAdding(true);
-    let detected: { isHabit: boolean; isBadHabit: boolean; reason: string };
+    let detected: { isHabit: boolean; isBadHabit: boolean; categoryFits: boolean; suggestedCategory: string; reason: string };
     try {
       detected = await classifyHabitRisk(name);
     } finally {
@@ -147,6 +148,15 @@ export default function AddScreen() {
     // Random text or something that is not an activity: ask for a real habit instead of adding it.
     if (!detected.isHabit) {
       showMessage('That doesn’t look like a habit', detected.reason || 'Try a real habit like “Drink water”, “Read 20 minutes” or “Sleep early”.');
+      return;
+    }
+    // A good habit filed under a category that does not relate to it cannot be created as is.
+    if (!detected.isBadHabit && !detected.categoryFits) {
+      const suggestion = categories.find((item) => item.label === detected.suggestedCategory);
+      if (suggestion && suggestion.label !== category) setCategory(suggestion.label);
+      showMessage('Category doesn’t match', suggestion && suggestion.label !== category
+        ? `“${name.trim()}” fits ${suggestion.label} better than ${category}. We switched it — tap Add habit again.`
+        : `“${name.trim()}” does not fit the ${category} category. Choose a category that matches it.`);
       return;
     }
     const resolvedCategory = detected.isBadHabit ? 'Bad Habit' : category;
