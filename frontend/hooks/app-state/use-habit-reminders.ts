@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import { getLocalDateKey } from './habit-progress';
-import { enableWebReminders, getBrowserNotificationRegistration, getHabitReminderTimes, getNotificationsModule, getSnoozeLimit, isHabitReminderDay, nextReminderOccurrence, playReminderSound, type NotificationsModule } from './reminders';
+import { enableWebReminders, getBrowserNotificationRegistration, getHabitReminderTimes, getNotificationsModule, getSnoozeLimit, isHabitReminderDay, nextReminderOccurrence, playReminderSound, requestWebNotificationPermission, type NotificationsModule } from './reminders';
 import { computeSmartReminderTimes, getSmartReminderMessage, requestHabitPrediction } from './smart-reminders';
 import type { Habit, Preferences } from './types';
 
@@ -43,6 +43,21 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
     if (Platform.OS !== 'web' || !preferences.notificationsEnabled || !hasHabits) return;
     void enableWebReminders({ prompt: false });
   }, [hasHabits, preferences.notificationsEnabled]);
+
+  // Web: a browser only grants notification permission from a tap. When reminders are on but this
+  // browser has never been asked (e.g. the habits came from another device), ask on the next tap so
+  // an open tab can start alerting — no settings trip or extra control needed.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !preferences.notificationsEnabled) return;
+    if (typeof window === 'undefined' || typeof window.Notification === 'undefined' || window.Notification.permission !== 'default') return;
+    const hasReminderHabits = habits.some((habit) => habit.smartReminderEnabled || (habit.reminderEnabled && getHabitReminderTimes(habit).length > 0));
+    if (!hasReminderHabits) return;
+    const ask = () => {
+      void requestWebNotificationPermission().then((granted) => { if (granted) setReminderScheduleRevision((revision) => revision + 1); });
+    };
+    window.addEventListener('pointerdown', ask, { once: true });
+    return () => window.removeEventListener('pointerdown', ask);
+  }, [habits, preferences.notificationsEnabled]);
 
   // Web: a reminder arriving while HabitAI is open also plays the HabitAI reminder sound, and this
   // tab then does not show that reminder again itself.

@@ -209,8 +209,33 @@ export async function enableWebReminders({ prompt }: { prompt: boolean }) {
   }
 }
 
+/**
+ * Web: notification permission on this browser is all an open HabitAI tab needs to show reminders
+ * on their minute. Request it (must be from a tap), register the service worker, and report whether
+ * it is granted — independent of Web Push, which only matters while the tab is closed.
+ */
+export async function requestWebNotificationPermission() {
+  try {
+    if (typeof window === 'undefined' || typeof window.Notification === 'undefined') return false;
+    let permission = window.Notification.permission;
+    if (permission === 'default') permission = await window.Notification.requestPermission();
+    if (permission !== 'granted') return false;
+    await getBrowserNotificationRegistration();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function requestNotificationAccess() {
-  if (Platform.OS === 'web') return enableWebReminders({ prompt: true });
+  if (Platform.OS === 'web') {
+    // Open-tab reminders only need permission; the Web Push subscription (for reminders while the
+    // tab is closed) is a best-effort extra that must not block reminders when Web Push is not
+    // configured on the server.
+    const granted = await requestWebNotificationPermission();
+    if (granted) void enableWebReminders({ prompt: false });
+    return granted;
+  }
   const Notifications = await getNotificationsModule();
   if (!Notifications) return false;
   const permission = await Notifications.getPermissionsAsync();
