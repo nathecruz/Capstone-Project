@@ -15,6 +15,7 @@
     "test:watch": "jest --watch"
   },
   "dependencies": {
+    "@bacons/apple-targets": "^5.0.0",
     "@better-auth/expo": "^1.7.6",
     "@expo-google-fonts/material-symbols": "0.4.45",
     "@expo/vector-icons": "^15.0.3",

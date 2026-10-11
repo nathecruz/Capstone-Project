@@ -6,6 +6,8 @@ import { isHabitScheduledOn } from '@/utils/streaks';
 
 export const WIDGET_STORAGE_KEY = 'habitai.widget.v1';
 export const WIDGET_NAME = 'HabitProgress';
+/** iOS App Group that the app and the WidgetKit extension both read/write. */
+export const APP_GROUP = 'group.com.habitmind.app';
 
 export type WidgetData = {
   doneToday: number;

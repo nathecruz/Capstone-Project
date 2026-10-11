@@ -10,7 +10,10 @@
     "platforms": ["ios", "android", "web"],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.habitmind.app"
+      "bundleIdentifier": "com.habitmind.app",
+      "entitlements": {
+        "com.apple.security.application-groups": ["group.com.habitmind.app"]
+      }
     },
     "android": {
       "package": "com.habitmind.app"
@@ -49,6 +52,7 @@
       ],
       "expo-localization",
       "expo-secure-store",
+      "@bacons/apple-targets",
       [
         "react-native-android-widget",
         {
