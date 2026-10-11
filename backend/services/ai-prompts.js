@@ -102,22 +102,31 @@ export const goalPlanJsonSchema = {
     isAchievable: { type: 'boolean', description: 'true when the goal is a real, achievable personal goal; false for impossible, fantastical, nonsensical or non-goal text.' },
     feedback: { type: 'string', description: 'When isAchievable is false, one short, kind sentence asking for a real goal; otherwise an empty string.' },
     category: { type: 'string', enum: GOAL_CATEGORIES },
-    summary: { type: 'string', description: 'Two sentences on why this plan fits the goal.' },
+    summary: { type: 'string', description: 'Two or three sentences on why this plan fits the goal and what success looks like.' },
     intensity: { type: 'string', enum: GOAL_INTENSITIES },
     focusAreas: { type: 'array', items: { type: 'string', description: 'Two to four words.' }, minItems: 3, maxItems: 3 },
-    actionPlan: { type: 'array', items: { type: 'string', description: 'One concrete, measurable action of at most 70 characters.' }, minItems: 4, maxItems: 4 },
+    actionPlan: { type: 'array', items: { type: 'string', description: 'One concrete, measurable action of at most 70 characters.' }, minItems: 6, maxItems: 6 },
+    habitSuggestions: { type: 'array', items: { type: 'string', description: 'A short habit name (at most 40 characters) to track for this goal.' }, minItems: 3, maxItems: 3 },
+    weeklyRoadmap: { type: 'array', items: { type: 'string', description: 'A phase of the plan, e.g. "Weeks 1-2: build the base" (at most 90 characters).' }, minItems: 3, maxItems: 3 },
     nextMilestone: { type: 'string' },
+    successMetric: { type: 'string', description: 'How the student will measure success, in one sentence.' },
+    motivation: { type: 'string', description: 'One short, encouraging sentence tailored to the goal.' },
     risk: { type: 'string', description: 'The most likely obstacle.' },
     riskAction: { type: 'string', description: 'What to do when that obstacle happens.' },
   },
-  required: ['isAchievable', 'feedback', 'category', 'summary', 'intensity', 'focusAreas', 'actionPlan', 'nextMilestone', 'risk', 'riskAction'],
+  required: ['isAchievable', 'feedback', 'category', 'summary', 'intensity', 'focusAreas', 'actionPlan', 'habitSuggestions', 'weeklyRoadmap', 'nextMilestone', 'successMetric', 'motivation', 'risk', 'riskAction'],
 };
 
 export const GOAL_PLANNER_SYSTEM = `You are the HabitAI goal planner for university students in the Philippines.
 First decide if the goal is achievable. If it is impossible or fantastical (for example "fly to heaven", "become invisible", "live forever", "time travel"), nonsensical, random text, or not a real personal goal, set isAchievable to false and put one short, kind sentence in feedback asking the student for a real, achievable goal; you may leave the plan fields as short placeholders. Otherwise set isAchievable to true, feedback to "", and fill a full plan.
-Turn an achievable goal into a practical plan that fits their chosen timeline and number of habits to focus on.
-- actionPlan has exactly 4 steps in the order they should be done. Each step starts with a verb, is specific to this goal, measurable (a count, duration or deliverable) and at most 70 characters.
+Turn an achievable goal into a rich, practical plan that fits their chosen timeline and number of habits to focus on.
+- summary: two or three sentences on why this plan fits the goal and what success looks like.
+- actionPlan has exactly 6 steps in the order they should be done. Each step starts with a verb, is specific to this goal, measurable (a count, duration or deliverable) and at most 70 characters.
 - focusAreas has exactly 3 short themes (2 to 4 words each).
+- habitSuggestions has exactly 3 specific habits the student could track in the app for this goal (short names, at most 40 characters, e.g. "Study 1 hour", "Sleep by 11 PM").
+- weeklyRoadmap has exactly 3 phases that split the timeline into stages, each at most 90 characters, e.g. "Weeks 1-2: build the base", "Weeks 3-4: ramp up", "Final stretch: polish and review".
+- successMetric: one sentence on how the student will measure success.
+- motivation: one short, encouraging sentence tailored to this goal.
 - category, intensity must be one of the allowed values. Choose "High focus" for urgent or demanding goals, "Quick win" for small goals, otherwise "Balanced".
 - Do not include numeric scores, probabilities or confidence claims. Do not give medical, legal or financial advice beyond everyday habits.
 - Write in the same language as the goal (English, Filipino or Taglish).
@@ -160,7 +169,7 @@ export function badHabitPrompt(name, { category, categories } = {}) {
   return lines.join('\n');
 }
 
-const DUE_OFFSETS = { '7-14 days': [1, 3, 7, 14], '30-60 days': [3, 10, 21, 45], '90 days': [7, 21, 45, 90] };
+const DUE_OFFSETS = { '7-14 days': [1, 3, 5, 8, 11, 14], '30-60 days': [3, 10, 20, 30, 45, 60], '90 days': [7, 21, 40, 60, 75, 90] };
 
 function formatDay(date, timeZone, withYear = false) {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', ...(withYear ? { year: 'numeric' } : {}), timeZone }).format(date);
@@ -181,12 +190,14 @@ function clip(text, max) {
 export function normalizeGoalPlan(raw, { timeline, now = new Date(), timeZone = 'Asia/Manila' }) {
   if (!raw || typeof raw !== 'object') return null;
   const strings = (value) => (Array.isArray(value) ? value.map((item) => String(item ?? '').trim()).filter(Boolean) : []);
-  const actions = strings(raw.actionPlan).slice(0, 4).map((action) => clip(action, 70));
+  const actions = strings(raw.actionPlan).slice(0, 6).map((action) => clip(action, 70));
   const focusAreas = strings(raw.focusAreas).slice(0, 3).map((area) => clip(area, 120));
-  if (actions.length < 4 || focusAreas.length < 3) return null;
+  if (actions.length < 6 || focusAreas.length < 3) return null;
   const chosenTimeline = GOAL_TIMELINES.includes(timeline) ? timeline : '30-60 days';
   const day = (offset) => new Date(now.getTime() + offset * 86_400_000);
   const text = (value, max, fallback) => clip(value, max) || fallback;
+  const habitSuggestions = strings(raw.habitSuggestions).slice(0, 3).map((habit) => clip(habit, 40));
+  const weeklyRoadmap = strings(raw.weeklyRoadmap).slice(0, 3).map((phase) => clip(phase, 90));
 
   return {
     category: GOAL_CATEGORIES.includes(raw.category) ? raw.category : 'Personal Growth',
@@ -195,7 +206,11 @@ export function normalizeGoalPlan(raw, { timeline, now = new Date(), timeZone = 
     focusAreas,
     actionPlan: actions,
     actionDueDates: DUE_OFFSETS[chosenTimeline].map((offset) => formatDay(day(offset), timeZone)),
+    habitSuggestions: habitSuggestions.length ? habitSuggestions : ['Daily focused session', 'Weekly progress review', 'Prepare for tomorrow'],
+    weeklyRoadmap: weeklyRoadmap.length ? weeklyRoadmap : ['Start: set up and build the base.', 'Middle: keep a steady pace.', 'Final stretch: review and finish strong.'],
     nextMilestone: text(raw.nextMilestone, 500, 'Complete the first two steps.'),
+    successMetric: text(raw.successMetric, 300, 'You keep up your planned sessions most weeks.'),
+    motivation: text(raw.motivation, 300, 'Small, steady steps compound into real progress.'),
     risk: text(raw.risk, 500, 'Losing momentum when schoolwork piles up.'),
     riskAction: text(raw.riskAction, 500, 'Do only the smallest next step, then reschedule the rest.'),
     timeline: chosenTimeline,

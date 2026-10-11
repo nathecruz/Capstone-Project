@@ -26,7 +26,11 @@ export type Goal = {
   focusAreas: string[];
   actionPlan: string[];
   actionDueDates: string[];
+  habitSuggestions?: string[];
+  weeklyRoadmap?: string[];
   nextMilestone: string;
+  successMetric?: string;
+  motivation?: string;
   risk: string;
   riskAction: string;
   timeline: string;

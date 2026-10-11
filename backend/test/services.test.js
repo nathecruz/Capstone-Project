@@ -180,8 +180,12 @@ test('model goal plans are normalised into the stored shape', () => {
     summary: 'Build a study rhythm.',
     intensity: 'Extreme',
     focusAreas: ['Daily practice', 'Active recall', 'Sleep', 'Extra'],
-    actionPlan: ['Solve ten calculus problems every weekday evening before 9 PM without skipping', 'Review notes', 'Take a timed mock quiz', 'Ask the instructor one question'],
+    actionPlan: ['Solve ten calculus problems every weekday evening before 9 PM without skipping', 'Review notes', 'Take a timed mock quiz', 'Ask the instructor one question', 'Summarise each chapter', 'Redo every mistake'],
+    habitSuggestions: ['Study 1 hour', 'Sleep by 11 PM', 'Review notes'],
+    weeklyRoadmap: ['Weeks 1-2: build the base', 'Weeks 3-4: ramp up', 'Final stretch: review'],
     nextMilestone: 'Finish chapter 3 exercises.',
+    successMetric: 'You pass every weekly quiz.',
+    motivation: 'Each solved problem makes the next easier.',
     risk: 'Cramming before exams.',
     riskAction: 'Schedule two short sessions instead.',
   };
@@ -189,9 +193,14 @@ test('model goal plans are normalised into the stored shape', () => {
   assert.equal(goalPlanSchema.safeParse(plan).success, true, JSON.stringify(plan));
   assert.equal(plan.intensity, 'Balanced');
   assert.equal(plan.focusAreas.length, 3);
+  assert.equal(plan.actionPlan.length, 6);
   assert.ok(plan.actionPlan[0].length <= 70);
-  assert.deepEqual(plan.actionDueDates, ['Oct 1', 'Oct 3', 'Oct 7', 'Oct 14']);
+  assert.equal(plan.habitSuggestions.length, 3);
+  assert.equal(plan.weeklyRoadmap.length, 3);
+  assert.deepEqual(plan.actionDueDates, ['Oct 1', 'Oct 3', 'Oct 5', 'Oct 8', 'Oct 11', 'Oct 14']);
   assert.equal(plan.nextCheckIn, 'Oct 7, 2026');
+  // Falls back for the new sections when the model omits them.
+  assert.ok(normalizeGoalPlan({ ...raw, habitSuggestions: [], weeklyRoadmap: [] }, { timeline: '7-14 days', now: new Date('2026-09-30T04:00:00Z') }).habitSuggestions.length >= 1);
   assert.equal(normalizeGoalPlan({ actionPlan: ['one'] }, { timeline: '90 days' }), null);
 });
 

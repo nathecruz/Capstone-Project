@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
@@ -83,7 +84,7 @@ const buildGoalInsight = (input: string, timeline = '30-60 days', focusTarget = 
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 46);
-  const dueDates = [0, 1, 3, 7].map((days) => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+  const dueDates = [0, 1, 3, 5, 7, 10].map((days) => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
 
   return {
     id: `${Date.now()}`,
@@ -94,24 +95,30 @@ const buildGoalInsight = (input: string, timeline = '30-60 days', focusTarget = 
     focusAreas: focusFromInput,
     actionPlan: [
       `Choose one measurable ${subject} outcome for this week.`,
+      `Break it into a first concrete step you can start today.`,
       `Complete one focused 20-minute ${subject} session.`,
       `Review what helped or blocked your ${subject} progress.`,
+      `Adjust your plan and schedule the next two sessions.`,
       `Set a reminder for your next ${subject} session.`,
     ],
     actionDueDates: dueDates,
+    habitSuggestions: ['Daily focused session', 'Weekly progress review', 'Prepare for tomorrow'],
+    weeklyRoadmap: ['Start: set up and build the base.', 'Middle: keep a steady pace.', 'Final stretch: review and finish strong.'],
     nextMilestone: `Finish one meaningful milestone this week for ${lower}.`,
+    successMetric: `You keep up your planned ${subject} sessions most weeks.`,
+    motivation: 'Small, steady steps compound into real progress.',
     risk: 'Losing focus when tasks pile up or motivation drops for a few days.',
     riskAction: `If tasks pile up, do only the smallest next action for ${lower} before rescheduling the rest.`,
     timeline,
     focusTarget,
     nextCheckIn,
-    completedSteps: [false, false, false, false],
+    completedSteps: [false, false, false, false, false, false],
     progress: 0,
     status: 'Fresh plan',
   };
 };
 
-const getProgressFromSteps = (completedSteps: boolean[]) => Math.round((completedSteps.filter(Boolean).length / 4) * 100);
+const getProgressFromSteps = (completedSteps: boolean[]) => (completedSteps.length ? Math.round((completedSteps.filter(Boolean).length / completedSteps.length) * 100) : 0);
 const getGoalStatus = (progress: number) => progress >= 100 ? 'Completed' : progress >= 67 ? 'On track' : progress > 0 ? 'In progress' : 'Fresh plan';
 
 /** A row of choices for a plan setting. */
@@ -224,7 +231,7 @@ export default function GoalsScreen() {
         title: goalTitle(input),
         focusTarget,
         timeline: timelineOption,
-        completedSteps: [false, false, false, false],
+        completedSteps: new Array((plan.actionPlan ?? fallback.actionPlan).length).fill(false),
         actionDueDates: plan.actionDueDates ?? fallback.actionDueDates,
         progress: 0,
         status: 'Fresh plan',
@@ -453,8 +460,20 @@ export default function GoalsScreen() {
                       {activeGoal.focusAreas.map((focus) => <View key={focus} style={styles.pill}><Text style={styles.pillText}>{focus}</Text></View>)}
                     </View>
 
+                    {activeGoal.weeklyRoadmap && activeGoal.weeklyRoadmap.length > 0 && (
+                      <>
+                        <Text style={styles.subheading}>Roadmap</Text>
+                        {activeGoal.weeklyRoadmap.map((phase, index) => (
+                          <View key={`${activeGoal.id}-phase-${index}`} style={styles.roadmapRow}>
+                            <View style={styles.roadmapDot}><Text style={styles.roadmapDotText}>{index + 1}</Text></View>
+                            <Text style={styles.roadmapText}>{phase}</Text>
+                          </View>
+                        ))}
+                      </>
+                    )}
+
                     <View style={styles.sectionRow}>
-                      <Text style={styles.subheading}>Your 4 steps</Text>
+                      <Text style={styles.subheading}>Your {activeGoal.actionPlan.length} steps</Text>
                       <Text style={styles.sectionHint}>Tap a step when you finish it</Text>
                     </View>
                     {activeGoal.actionPlan.map((step, index) => (
@@ -468,6 +487,15 @@ export default function GoalsScreen() {
                         <Text style={styles.calloutText}>{activeGoal.nextMilestone}</Text>
                       </View>
                     </View>
+                    {activeGoal.successMetric ? (
+                      <View style={styles.milestone}>
+                        <View style={styles.calloutIcon}><Ionicons name="trophy" size={15} color={themeColor('#5B42D8')} /></View>
+                        <View style={styles.calloutCopy}>
+                          <Text style={styles.calloutLabel}>SUCCESS LOOKS LIKE</Text>
+                          <Text style={styles.calloutText}>{activeGoal.successMetric}</Text>
+                        </View>
+                      </View>
+                    ) : null}
                     <View style={styles.watchOut}>
                       <View style={[styles.calloutIcon, styles.watchOutIcon]}><Ionicons name="alert" size={15} color={themeColor('#B7791F')} /></View>
                       <View style={styles.calloutCopy}>
@@ -476,6 +504,29 @@ export default function GoalsScreen() {
                         <Text style={styles.watchOutAction}><Text style={styles.watchOutActionStrong}>If it happens: </Text>{activeGoal.riskAction}</Text>
                       </View>
                     </View>
+
+                    {activeGoal.habitSuggestions && activeGoal.habitSuggestions.length > 0 && (
+                      <>
+                        <View style={styles.sectionRow}>
+                          <Text style={styles.subheading}>Habits to build</Text>
+                          <Text style={styles.sectionHint}>Tap to add one</Text>
+                        </View>
+                        <View style={styles.pillRow}>
+                          {activeGoal.habitSuggestions.map((habit) => (
+                            <Pressable key={habit} style={({ pressed }) => [styles.habitPill, pressed && styles.pressed]} onPress={() => router.push({ pathname: '/(tabs)/add', params: { habit } })} accessibilityRole="button" accessibilityLabel={`Add the habit ${habit}`}>
+                              <Ionicons name="add" size={13} color={themeColor('#5B42D8')} />
+                              <Text style={styles.pillText}>{habit}</Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      </>
+                    )}
+                    {activeGoal.motivation ? (
+                      <View style={styles.motivation}>
+                        <Ionicons name="heart" size={14} color={themeColor('#C2549B')} />
+                        <Text style={styles.motivationText}>{activeGoal.motivation}</Text>
+                      </View>
+                    ) : null}
 
                     {activeGoalSaved ? (
                       <Pressable style={({ pressed }) => [styles.savedRow, pressed && styles.pressed]} onPress={() => setActiveTab('My Goals')} accessibilityRole="button">
@@ -659,6 +710,13 @@ const themedStyles = createThemedStyles({
   pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   pill: { backgroundColor: '#EEE8FF', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
   pillText: { color: '#5B42D8', fontWeight: '800', fontSize: 12 },
+  habitPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#EEE8FF', borderRadius: 999, paddingHorizontal: 11, paddingVertical: 7 },
+  roadmapRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 8 },
+  roadmapDot: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#EEE8FF', alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  roadmapDotText: { color: '#5B42D8', fontWeight: '900', fontSize: 11 },
+  roadmapText: { flex: 1, color: '#3B3650', fontSize: 13, lineHeight: 19, fontWeight: '600' },
+  motivation: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, padding: 12, borderRadius: 16, backgroundColor: '#FBEEF6' },
+  motivationText: { flex: 1, color: '#8A3A6B', fontSize: 12, fontWeight: '700', lineHeight: 17 },
   sectionRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
   sectionHint: { fontSize: 11, color: '#8A8294', fontWeight: '600' },
   stepRow: { flexDirection: 'row', alignItems: 'stretch', gap: 12 },
