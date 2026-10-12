@@ -38,6 +38,8 @@ export default function TabLayout() {
         tabBar={isDesktop ? (props) => <DesktopSidebar {...props} /> : undefined}
         screenOptions={{
           headerShown: false,
+          // A gentle cross-fade when switching tabs — subtle, not disorienting.
+          animation: 'fade',
           tabBarPosition: isDesktop ? 'left' : 'bottom',
           sceneStyle: centered,
           tabBarShowLabel: false,

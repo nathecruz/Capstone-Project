@@ -18,6 +18,7 @@ import { RewardsHub } from '@/components/rewards-hub';
 import { StreakFreezeSheet } from '@/components/streak-freeze-sheet';
 import { TodayAgenda } from '@/components/today-agenda';
 import { WeekStrip } from '@/components/week-strip';
+import { FadeIn } from '@/components/fade-in';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
@@ -69,6 +70,7 @@ export default function HomeScreen() {
   return (
     <SafeAreaView edges={['left', 'right']} style={styles.screen}>
       {/* The page itself does not scroll on the web (overflow hidden), so Home scrolls here. */}
+      <FadeIn style={{ flex: 1 }}>
       <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + 18, paddingBottom: 112 + insets.bottom }]} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <View style={styles.headerCopy}>
@@ -114,6 +116,7 @@ export default function HomeScreen() {
           </View>
         </View>
       </ScrollView>
+      </FadeIn>
       <StreakFreezeSheet visible={freezeSheetVisible} onClose={() => setFreezeSheetVisible(false)} />
     </SafeAreaView>
   );

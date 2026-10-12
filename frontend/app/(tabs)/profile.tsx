@@ -6,6 +6,7 @@ import { Image, Modal, Pressable, ScrollView, Text, useWindowDimensions, View } 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getMyLeaderboardRank } from '@/authentication';
 import { AiChatSheet, useAiChat, type ChatAnswer } from '@/components/ai-chat';
+import { FadeIn } from '@/components/fade-in';
 import { ClassPulseCard } from '@/components/class-pulse-card';
 import { FramedAvatar } from '@/components/framed-avatar';
 import { FrameSheet, TitleBadge, TitleSheet } from '@/components/reward-sheets';
@@ -152,6 +153,7 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={[styles.screen, isDarkMode && styles.darkScreen]}>
+      <FadeIn style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={[styles.container, width >= 700 && styles.wideContainer, { paddingHorizontal: compactLayout ? 12 : 18 }]}>
           <View style={styles.headerRow}>
@@ -318,6 +320,7 @@ export default function ProfileScreen() {
           </View>
         </View>
       </ScrollView>
+      </FadeIn>
       <Modal visible={avatarModalOpen} transparent animationType="fade" onRequestClose={closeAvatarActions}>
         <View style={styles.avatarModalBackdrop}>
           <View style={[styles.avatarModalCard, isDarkMode && styles.darkCard]}>

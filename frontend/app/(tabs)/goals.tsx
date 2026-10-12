@@ -8,6 +8,7 @@ import { TypingDots } from '@/components/ai-chat';
 import { ProgressRing } from '@/components/progress-ring';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { generateGoalPlan } from '@/utils/ai-client';
+import { FadeIn } from '@/components/fade-in';
 import { useAppColorScheme, type Goal } from '@/hooks/color-scheme-context';
 import { useAppTheme } from '@/hooks/dark-mode-context';
 import { CONTENT_MAX_WIDTH } from '@/hooks/use-responsive-layout';
@@ -313,6 +314,7 @@ export default function GoalsScreen() {
     <>
       <StatusBar style={isDarkMode ? 'light' : 'dark'} />
       <SafeAreaView style={styles.screen}>
+        <FadeIn style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <View style={[styles.container, { paddingHorizontal: width < 420 ? 16 : 22 }]}>
             <View style={styles.headerRow}>
@@ -622,6 +624,7 @@ export default function GoalsScreen() {
             )}
           </View>
         </ScrollView>
+        </FadeIn>
       </SafeAreaView>
       {clearUndoText ? (
         <View style={styles.snackbar} accessibilityLiveRegion="polite">

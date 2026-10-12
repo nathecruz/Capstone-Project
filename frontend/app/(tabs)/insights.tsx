@@ -4,6 +4,7 @@ import { AppState, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getApiBaseUrl, getAuthenticatedHeaders } from '@/authentication';
 import { AiChatSheet, AskAiCard, useAiChat, type ChatAnswer } from '@/components/ai-chat';
+import { FadeIn } from '@/components/fade-in';
 import { HabitAnalysisPanel } from '@/components/habit-analysis-panel';
 import { ProgressRing } from '@/components/progress-ring';
 import { getHabitProgressSummary, getRecentCompletionHistory, useAppColorScheme } from '@/hooks/color-scheme-context';
@@ -296,6 +297,7 @@ export default function InsightsScreen() {
   return (
     <>
       <SafeAreaView style={[styles.screen, isDarkMode && styles.darkScreen]}>
+        <FadeIn style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.container}>
             <View style={styles.headerRow}>
@@ -635,6 +637,7 @@ export default function InsightsScreen() {
             </View>
           </View>
         </ScrollView>
+        </FadeIn>
       </SafeAreaView>
       <AiChatSheet
         chat={assistantChat}
