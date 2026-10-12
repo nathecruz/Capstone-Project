@@ -75,8 +75,9 @@ export async function ensureNeonSchema({ log = () => {} } = {}) {
   await withTransaction(seedCatalog);
 
   // Accounts created before email verification existed are treated as verified (once only).
-  // Token rewards that did nothing are retired and refunded; Premium Themes and Custom Title now work.
-  await runOnce('token-rewards-real-2026-10', () => withTransaction((connection) => retireRewards(connection)));
+  // Token rewards that did nothing are retired and refunded; the real rewards' descriptions are kept
+  // current (now more themes and frames), so a new key re-syncs them.
+  await runOnce('token-rewards-real-2026-11', () => withTransaction((connection) => retireRewards(connection)));
   await runOnce('email-verification-backfill', () => query('UPDATE users SET email_verified_at = created_at WHERE email_verified_at IS NULL'));
 
   // Accounts created with a single full name get a first and last name once; students can correct them in the app.

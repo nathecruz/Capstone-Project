@@ -13,9 +13,15 @@ export type Buddy = { name: string; head: string; hand: string; room?: string; o
 /** How each room looks behind the buddy: its colour and two things in it. */
 export const ROOM_LOOK: Record<string, { background: string; decor: [string, string] }> = {
   garden: { background: '#DDF3D2', decor: ['🌳', '🌼'] },
+  bedroom: { background: '#FFE4E1', decor: ['🛏️', '🪴'] },
   library: { background: '#F3E6D4', decor: ['📚', '🕯️'] },
+  gym: { background: '#E2ECF5', decor: ['🏋️', '💪'] },
   beach: { background: '#FFEFC2', decor: ['🌴', '🐚'] },
+  cafe: { background: '#F3E3CE', decor: ['☕', '🧁'] },
+  mountains: { background: '#DCEBF7', decor: ['🏔️', '🌲'] },
   space: { background: '#2B2463', decor: ['🪐', '⭐'] },
+  city: { background: '#2E2A52', decor: ['🏙️', '🌃'] },
+  underwater: { background: '#C8EEF3', decor: ['🐠', '🪸'] },
   castle: { background: '#ECE4FF', decor: ['🏰', '🚩'] },
 };
 

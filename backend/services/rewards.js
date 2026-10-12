@@ -5,13 +5,13 @@
 export const RETIRED_REWARDS = ['plant-buddy', 'kindness-boost', 'habit-swap', 'mystery-box', 'xp-booster', 'grace-day'];
 
 export const REAL_REWARDS = {
-  'premium-theme': { name: 'Premium Themes', cost: 200, description: 'Four app colour themes: Ocean, Sunset, Forest and Midnight' },
+  'premium-theme': { name: 'Premium Themes', cost: 200, description: 'Seven app colour themes: Ocean, Sunset, Forest, Midnight, Rose, Amber and Berry' },
   'custom-title': { name: 'Custom Title', cost: 250, description: 'Your own title under your name on your profile and the leaderboard' },
-  'profile-frames': { name: 'Profile Frames', cost: 180, description: 'Four frames for your photo: Gold, Neon, Leaf and Fire' },
+  'profile-frames': { name: 'Profile Frames', cost: 180, description: 'Eight frames for your photo: Gold, Neon, Leaf, Fire, Aqua, Galaxy, Blossom and Royal' },
 };
 
 /** The frames the Profile Frames reward unlocks ('' is no frame). */
-export const PROFILE_FRAMES = ['gold', 'neon', 'leaf', 'fire'];
+export const PROFILE_FRAMES = ['gold', 'neon', 'leaf', 'fire', 'aqua', 'galaxy', 'blossom', 'royal'];
 
 /** Rewards bought once and kept. */
 export const PERMANENT_REWARDS = new Set(Object.keys(REAL_REWARDS));

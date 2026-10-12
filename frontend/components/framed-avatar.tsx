@@ -8,6 +8,10 @@ export const PROFILE_FRAMES = [
   { id: 'neon', name: 'Neon', outer: '#D946EF', inner: '#22D3EE', emblem: '⚡' },
   { id: 'leaf', name: 'Leaf', outer: '#2E9D5C', inner: '#BDE8C9', emblem: '🌿' },
   { id: 'fire', name: 'Fire', outer: '#F0612D', inner: '#FBC24B', emblem: '🔥' },
+  { id: 'aqua', name: 'Aqua', outer: '#1CA7C4', inner: '#BFEFF7', emblem: '🌊' },
+  { id: 'galaxy', name: 'Galaxy', outer: '#4C1D95', inner: '#C4B5FD', emblem: '🌌' },
+  { id: 'blossom', name: 'Blossom', outer: '#EC4899', inner: '#FBCFE8', emblem: '🌸' },
+  { id: 'royal', name: 'Royal', outer: '#B45309', inner: '#FDE68A', emblem: '👑' },
 ] as const;
 
 /**

@@ -249,8 +249,9 @@ const themedStyles = createThemedStyles({
   headerCopy: { flex: 1 },
   title: { fontSize: 20, fontWeight: '900', color: '#24212D' },
   subtitle: { marginTop: 2, fontSize: 13, fontWeight: '600', color: '#6A6573' },
-  themeRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 6 },
-  themeOption: { flex: 1, alignItems: 'center', gap: 6, paddingVertical: 4 },
+  // Wraps so the growing set of themes never overflows a narrow phone.
+  themeRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10 },
+  themeOption: { width: 62, alignItems: 'center', gap: 6, paddingVertical: 4 },
   swatchRing: { width: 52, height: 52, borderRadius: 26, borderWidth: 3, borderColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
   swatch: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   swatchTint: { position: 'absolute', right: -10, bottom: -10, width: 26, height: 26, borderRadius: 13 },

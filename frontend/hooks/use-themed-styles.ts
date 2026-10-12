@@ -90,6 +90,9 @@ export const APP_THEMES = [
   { id: 'ocean', name: 'Ocean', hue: 199, lift: 1.3 },
   { id: 'sunset', name: 'Sunset', hue: 16, lift: 1.3 },
   { id: 'forest', name: 'Forest', hue: 150, lift: 1.3 },
+  { id: 'rose', name: 'Rose', hue: 338, lift: 1.3 },
+  { id: 'amber', name: 'Amber', hue: 40, lift: 1.3 },
+  { id: 'berry', name: 'Berry', hue: 300, lift: 1.3 },
   { id: 'midnight', name: 'Midnight', hue: 228, lift: 0.62 },
 ] as const;
 export type AppTheme = (typeof APP_THEMES)[number]['id'];

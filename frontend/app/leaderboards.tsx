@@ -26,9 +26,9 @@ type Reward = {
 };
 
 const REWARD_LOOKS: Record<string, { detail: string; icon: keyof typeof Ionicons.glyphMap; color: string; action: string }> = {
-  'premium-theme': { detail: 'Ocean, Sunset, Forest and Midnight colours', icon: 'color-palette-outline', color: '#EEE5FF', action: 'Choose theme' },
+  'premium-theme': { detail: 'Seven colour themes for the whole app', icon: 'color-palette-outline', color: '#EEE5FF', action: 'Choose theme' },
   'custom-title': { detail: 'Your title on your profile and the leaderboard', icon: 'ribbon-outline', color: '#FBE3F1', action: 'Edit title' },
-  'profile-frames': { detail: 'Gold, Neon, Leaf and Fire frames for your photo', icon: 'person-circle-outline', color: '#FFF3D6', action: 'Choose frame' },
+  'profile-frames': { detail: 'Eight frames for your profile photo', icon: 'person-circle-outline', color: '#FFF3D6', action: 'Choose frame' },
 };
 /** Which sheet a bought reward opens. */
 const REWARD_SHEET: Record<string, 'theme' | 'title' | 'frame'> = { 'premium-theme': 'theme', 'custom-title': 'title', 'profile-frames': 'frame' };

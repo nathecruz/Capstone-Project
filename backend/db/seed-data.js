@@ -9,13 +9,13 @@ export const achievementSeeds = [
 export const rewardSeeds = [
   ['plant-buddy', 'Plant Buddy', 200, 'Profile decoration'],
   ['kindness-boost', 'Kindness Boost', 250, 'Send encouragement to a friend'],
-  ['premium-theme', 'Premium Themes', 200, 'Four app colour themes: Ocean, Sunset, Forest and Midnight'],
+  ['premium-theme', 'Premium Themes', 200, 'Seven app colour themes: Ocean, Sunset, Forest, Midnight, Rose, Amber and Berry'],
   ['habit-swap', 'Habit Swap Token', 380, 'Swap one habit, keep your streak history'],
   ['mystery-box', 'Mystery Box', 420, 'Open for a random reward'],
   ['xp-booster', 'XP Booster', 500, '+20% points for 3 days'],
   ['grace-day', 'Grace Day', 620, 'Skip logging for a day, streak stays safe'],
   ['custom-title', 'Custom Title', 250, 'Your own title under your name on your profile and the leaderboard'],
-  ['profile-frames', 'Profile Frames', 180, 'Four frames for your photo: Gold, Neon, Leaf and Fire'],
+  ['profile-frames', 'Profile Frames', 180, 'Eight frames for your photo: Gold, Neon, Leaf, Fire, Aqua, Galaxy, Blossom and Royal'],
 ];
 
 export async function seedCatalog(connection) {

@@ -11,21 +11,44 @@ export const BUDDY_STAGES = [
   { id: 'legend', name: 'Legend', min: 400 },
 ];
 
+// A long unlock ladder: something affordable at every stage and new goals to save for. Head and
+// hand items are drawn as the emoji; rooms also need a look in ROOM_LOOK (frontend/utils/buddy.ts).
 export const BUDDY_ITEMS = [
+  // Hats and head toppers.
   { id: 'cap', slot: 'head', name: 'Cap', emoji: '🧢', cost: 40, stage: 'baby' },
+  { id: 'sun-hat', slot: 'head', name: 'Sun hat', emoji: '👒', cost: 50, stage: 'baby' },
   { id: 'bow', slot: 'head', name: 'Bow', emoji: '🎀', cost: 60, stage: 'baby' },
+  { id: 'flower-crown', slot: 'head', name: 'Flower crown', emoji: '🌸', cost: 90, stage: 'kid' },
+  { id: 'party-hat', slot: 'head', name: 'Party hat', emoji: '🎉', cost: 110, stage: 'kid' },
   { id: 'grad-cap', slot: 'head', name: 'Graduation cap', emoji: '🎓', cost: 120, stage: 'kid' },
   { id: 'top-hat', slot: 'head', name: 'Top hat', emoji: '🎩', cost: 150, stage: 'teen' },
+  { id: 'star-topper', slot: 'head', name: 'Shining star', emoji: '⭐', cost: 180, stage: 'teen' },
   { id: 'crown', slot: 'head', name: 'Crown', emoji: '👑', cost: 300, stage: 'champ' },
+  { id: 'rainbow', slot: 'head', name: 'Rainbow', emoji: '🌈', cost: 360, stage: 'legend' },
+  // Things to hold.
+  { id: 'cookie', slot: 'hand', name: 'Cookie', emoji: '🍪', cost: 45, stage: 'baby' },
   { id: 'books', slot: 'hand', name: 'Books', emoji: '📚', cost: 50, stage: 'baby' },
+  { id: 'coffee', slot: 'hand', name: 'Coffee', emoji: '☕', cost: 55, stage: 'baby' },
   { id: 'plant', slot: 'hand', name: 'Little plant', emoji: '🌱', cost: 70, stage: 'baby' },
+  { id: 'teddy', slot: 'hand', name: 'Teddy bear', emoji: '🧸', cost: 85, stage: 'baby' },
   { id: 'ball', slot: 'hand', name: 'Basketball', emoji: '🏀', cost: 90, stage: 'kid' },
   { id: 'headphones', slot: 'hand', name: 'Headphones', emoji: '🎧', cost: 100, stage: 'kid' },
+  { id: 'game', slot: 'hand', name: 'Game controller', emoji: '🎮', cost: 120, stage: 'kid' },
+  { id: 'guitar', slot: 'hand', name: 'Guitar', emoji: '🎸', cost: 140, stage: 'teen' },
+  { id: 'laptop', slot: 'hand', name: 'Laptop', emoji: '💻', cost: 170, stage: 'teen' },
   { id: 'trophy', slot: 'hand', name: 'Trophy', emoji: '🏆', cost: 250, stage: 'champ' },
+  { id: 'wand', slot: 'hand', name: 'Magic wand', emoji: '🪄', cost: 280, stage: 'champ' },
+  // Rooms (each one also has a look in ROOM_LOOK).
   { id: 'garden', slot: 'room', name: 'Garden', emoji: '🌳', cost: 60, stage: 'baby' },
+  { id: 'bedroom', slot: 'room', name: 'Cozy room', emoji: '🛏️', cost: 70, stage: 'baby' },
   { id: 'library', slot: 'room', name: 'Library', emoji: '🏛️', cost: 90, stage: 'kid' },
+  { id: 'gym', slot: 'room', name: 'Gym', emoji: '🏋️', cost: 110, stage: 'kid' },
   { id: 'beach', slot: 'room', name: 'Beach', emoji: '🏖️', cost: 120, stage: 'kid' },
+  { id: 'cafe', slot: 'room', name: 'Café', emoji: '☕', cost: 140, stage: 'kid' },
+  { id: 'mountains', slot: 'room', name: 'Mountains', emoji: '🏔️', cost: 170, stage: 'teen' },
   { id: 'space', slot: 'room', name: 'Space', emoji: '🪐', cost: 200, stage: 'teen' },
+  { id: 'city', slot: 'room', name: 'City lights', emoji: '🌆', cost: 230, stage: 'teen' },
+  { id: 'underwater', slot: 'room', name: 'Underwater', emoji: '🐠', cost: 280, stage: 'champ' },
   { id: 'castle', slot: 'room', name: 'Castle', emoji: '🏰', cost: 300, stage: 'champ' },
 ];
 const SLOTS = ['head', 'hand', 'room'];
