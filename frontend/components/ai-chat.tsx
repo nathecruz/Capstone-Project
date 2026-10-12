@@ -40,13 +40,52 @@ export function useAiChat(ask: (question: string) => Promise<ChatAnswer>) {
 }
 export type AiChat = ReturnType<typeof useAiChat>;
 
-export function AiAvatar({ size = 30 }: { size?: number }) {
+/**
+ * The AI mascot. `animated` makes it breathe, float and pulse a halo (a living "AI"); `thinking`
+ * speeds it up while the AI answers. Static by default so the small bubble avatars stay cheap.
+ */
+export function AiAvatar({ size = 30, animated = false, thinking = false }: { size?: number; animated?: boolean; thinking?: boolean }) {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
+  const [pulse] = useState(() => new Animated.Value(0));
+
+  useEffect(() => {
+    if (!animated) return;
+    const half = thinking ? 620 : 1700;
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1, duration: half, easing: Easing.inOut(Easing.ease), useNativeDriver: Platform.OS !== 'web' }),
+      Animated.timing(pulse, { toValue: 0, duration: half, easing: Easing.inOut(Easing.ease), useNativeDriver: Platform.OS !== 'web' }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, [animated, thinking, pulse]);
+
+  const icon = <Ionicons name="sparkles" size={Math.round(size * 0.5)} color={themeColor('#FFFFFF')} />;
+  if (!animated) {
+    return <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}>{icon}</View>;
+  }
+  const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, thinking ? 1.14 : 1.07] });
+  const float = pulse.interpolate({ inputRange: [0, 1], outputRange: [0, thinking ? -4 : -2.5] });
+  const haloScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, thinking ? 1.9 : 1.6] });
+  const haloOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [thinking ? 0.5 : 0.4, 0] });
   return (
-    <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}>
-      <Ionicons name="sparkles" size={Math.round(size * 0.5)} color={themeColor('#FFFFFF')} />
-    </View>
+    <Animated.View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center', transform: [{ translateY: float }] }}>
+      <Animated.View style={[styles.halo, { width: size, height: size, borderRadius: size / 2, opacity: haloOpacity, transform: [{ scale: haloScale }] }]} pointerEvents="none" />
+      <Animated.View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, transform: [{ scale }] }]}>{icon}</Animated.View>
+    </Animated.View>
+  );
+}
+
+/** Fades and slides its children up as they mount — used for chat bubbles appearing. */
+export function Appear({ children, style }: { children: React.ReactNode; style?: object }) {
+  const [anim] = useState(() => new Animated.Value(0));
+  useEffect(() => {
+    Animated.timing(anim, { toValue: 1, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: Platform.OS !== 'web' }).start();
+  }, [anim]);
+  return (
+    <Animated.View style={[style, { opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] }]}>
+      {children}
+    </Animated.View>
   );
 }
 
@@ -128,7 +167,7 @@ export function AiChatSheet({ chat, visible, onClose, title, subtitle, greeting,
           <View style={styles.handle} />
           <View style={styles.header}>
             <View>
-              <AiAvatar size={44} />
+              <AiAvatar size={44} animated thinking={chat.loading} />
               <View style={styles.onlineDot} />
             </View>
             <View style={styles.headerCopy}>
@@ -162,29 +201,35 @@ export function AiChatSheet({ chat, visible, onClose, title, subtitle, greeting,
               <AiAvatar />
               <View style={styles.aiBubble}><Text style={styles.aiText} selectable>{greeting}</Text></View>
             </View>
-            {chat.messages.map((message) => message.role === 'user' ? (
-              <View key={message.id} style={styles.userRow}>
-                <View style={styles.userBubble}><Text style={styles.userText} selectable>{message.text}</Text></View>
-              </View>
-            ) : message.role === 'ai' ? (
-              <View key={message.id} style={styles.aiRow} accessibilityLiveRegion="polite">
-                <AiAvatar />
-                <View style={styles.aiColumn}>
-                  <View style={styles.aiBubble}><Text style={styles.aiText} selectable>{message.text}</Text></View>
-                  {message.note ? <Text style={styles.bubbleNote}>{message.note}</Text> : null}
-                </View>
-              </View>
-            ) : (
-              <View key={message.id} style={[styles.note, message.tone === 'warning' && styles.noteWarning]} accessibilityLiveRegion="polite">
-                <Ionicons name={message.tone === 'warning' ? 'information-circle' : 'alert-circle'} size={15} color={message.tone === 'warning' ? themeColor('#A0661A') : themeColor('#B52E4D')} />
-                <Text style={[styles.noteText, message.tone === 'warning' && styles.noteTextWarning]}>{message.text}</Text>
-              </View>
+            {chat.messages.map((message) => (
+              <Appear key={message.id}>
+                {message.role === 'user' ? (
+                  <View style={styles.userRow}>
+                    <View style={styles.userBubble}><Text style={styles.userText} selectable>{message.text}</Text></View>
+                  </View>
+                ) : message.role === 'ai' ? (
+                  <View style={styles.aiRow} accessibilityLiveRegion="polite">
+                    <AiAvatar />
+                    <View style={styles.aiColumn}>
+                      <View style={styles.aiBubble}><Text style={styles.aiText} selectable>{message.text}</Text></View>
+                      {message.note ? <Text style={styles.bubbleNote}>{message.note}</Text> : null}
+                    </View>
+                  </View>
+                ) : (
+                  <View style={[styles.note, message.tone === 'warning' && styles.noteWarning]} accessibilityLiveRegion="polite">
+                    <Ionicons name={message.tone === 'warning' ? 'information-circle' : 'alert-circle'} size={15} color={message.tone === 'warning' ? themeColor('#A0661A') : themeColor('#B52E4D')} />
+                    <Text style={[styles.noteText, message.tone === 'warning' && styles.noteTextWarning]}>{message.text}</Text>
+                  </View>
+                )}
+              </Appear>
             ))}
             {chat.loading && (
-              <View style={styles.aiRow}>
-                <AiAvatar />
-                <View style={styles.aiBubble}><TypingDots /></View>
-              </View>
+              <Appear>
+                <View style={styles.aiRow}>
+                  <AiAvatar animated thinking />
+                  <View style={styles.aiBubble}><TypingDots /></View>
+                </View>
+              </Appear>
             )}
           </ScrollView>
 
@@ -239,7 +284,7 @@ export function AskAiCard({ title, subtitle, suggestions, onOpen, onAsk }: { tit
   return (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
-        <AiAvatar size={40} />
+        <AiAvatar size={40} animated />
         <View style={styles.headerCopy}>
           <Text style={styles.cardTitle}>{title}</Text>
           <Text style={styles.subtitle}>{subtitle}</Text>
@@ -264,6 +309,7 @@ export function AskAiCard({ title, subtitle, suggestions, onOpen, onAsk }: { tit
 
 const themedStyles = createThemedStyles({
   avatar: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#5B42D8' },
+  halo: { position: 'absolute', backgroundColor: '#7C64E6' },
   dots: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 21, paddingHorizontal: 2 },
   dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#7C64E6' },
   backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(20, 16, 32, 0.5)' },
