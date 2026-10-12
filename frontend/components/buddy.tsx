@@ -48,6 +48,7 @@ export function BuddyAvatar({ buddy, checkIns, mood, size = 120 }: { buddy: Budd
   const lift = mood === 'ecstatic' ? -8 : -4;
   const head = itemEmoji(buddy, buddy?.head ?? '');
   const hand = itemEmoji(buddy, buddy?.hand ?? '');
+  const accessory = itemEmoji(buddy, buddy?.accessory ?? '');
   return (
     <View style={{ width: size, height: size }} accessible accessibilityLabel={`${buddy?.name ?? 'Your buddy'}, feeling ${mood}`}>
       {legend && <View style={[styles.circle, styles.glow, { width: size * 1.12, height: size * 1.12, borderRadius: size * 0.56, left: -size * 0.06, top: -size * 0.06 }]} />}
@@ -69,6 +70,7 @@ export function BuddyAvatar({ buddy, checkIns, mood, size = 120 }: { buddy: Budd
         <Text style={{ fontSize: size * 0.52, lineHeight: size * 0.62 }}>🐹</Text>
         {head ? <Text style={[styles.head, { fontSize: size * 0.26, top: -size * 0.13 }]}>{head}</Text> : null}
         {hand ? <Text style={[styles.hand, { fontSize: size * 0.22, right: -size * 0.12, bottom: -size * 0.02 }]}>{hand}</Text> : null}
+        {accessory ? <Text style={[styles.accessory, { fontSize: size * 0.2, left: -size * 0.12, bottom: size * 0.02 }]}>{accessory}</Text> : null}
       </Animated.View>
       <View style={[styles.moodBubble, { width: size * 0.3, height: size * 0.3, borderRadius: size * 0.15 }]}>
         <Text style={{ fontSize: size * 0.17 }}>{MOOD_FACE[mood]}</Text>
@@ -113,6 +115,7 @@ const themedStyles = createThemedStyles({
   body: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   head: { position: 'absolute', alignSelf: 'center' },
   hand: { position: 'absolute' },
+  accessory: { position: 'absolute' },
   moodBubble: { position: 'absolute', right: -2, top: -2, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', shadowColor: '#201444', shadowOpacity: 0.12, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
   card: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#FFFFFF', borderRadius: 20, padding: 14, shadowColor: '#201444', shadowOpacity: 0.06, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
   pressed: { opacity: 0.9, transform: [{ scale: 0.99 }] },

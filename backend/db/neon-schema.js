@@ -43,6 +43,8 @@ export async function ensureNeonSchema({ log = () => {} } = {}) {
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_frame TEXT NOT NULL DEFAULT ''");
   // Habit Buddy rooms (backgrounds bought with tokens).
   await query("ALTER TABLE user_buddy ADD COLUMN IF NOT EXISTS room_item TEXT NOT NULL DEFAULT ''");
+  // Habit Buddy gear: a worn accessory (scarf, glasses, medal...) alongside the hat and held item.
+  await query("ALTER TABLE user_buddy ADD COLUMN IF NOT EXISTS accessory_item TEXT NOT NULL DEFAULT ''");
   await query('ALTER TABLE rewards ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE');
 
   const appStateId = await query(`

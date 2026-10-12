@@ -293,6 +293,7 @@ CREATE TABLE IF NOT EXISTS user_buddy (
   head_item TEXT NOT NULL DEFAULT '',
   hand_item TEXT NOT NULL DEFAULT '',
   room_item TEXT NOT NULL DEFAULT '',
+  accessory_item TEXT NOT NULL DEFAULT '',
   updated_at BIGINT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS buddy_items (
@@ -300,6 +301,15 @@ CREATE TABLE IF NOT EXISTS buddy_items (
   item_id TEXT NOT NULL,
   bought_at BIGINT NOT NULL,
   PRIMARY KEY (user_id, item_id)
+);
+-- Treats are consumables: each feed spends tokens and bumps the count (the token spend itself is in
+-- token_transactions). A treat fed at least once is "discovered" for the collection.
+CREATE TABLE IF NOT EXISTS buddy_treats (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  treat_id TEXT NOT NULL,
+  fed_count INTEGER NOT NULL DEFAULT 0,
+  last_fed_at BIGINT NOT NULL,
+  PRIMARY KEY (user_id, treat_id)
 );
 
 -- Streak Freeze: freezes held (bought with tokens, at most two) and the days they covered. A

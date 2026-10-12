@@ -680,6 +680,15 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const moved = await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ room: '' }) });
     assert.equal(moved.body.buddy.room, '');
     assert.equal((await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ room: 'cap' }) })).response.status, 400, 'a hat is not a room');
+    // Treats: fed with tokens, counted toward the collection, and the buddy says a line.
+    assert.equal((await request('/api/buddy/treats', { method: 'POST', headers, body: JSON.stringify({ treatId: 'nope' }) })).response.status, 404, 'unknown treats are refused');
+    const apple = await request('/api/buddy/treats', { method: 'POST', headers, body: JSON.stringify({ treatId: 'apple' }) });
+    assert.equal(apple.response.status, 200, JSON.stringify(apple.body));
+    assert.equal(apple.body.tokens, 45, 'a 15-token treat is charged');
+    assert.ok(typeof apple.body.line === 'string' && apple.body.line.length > 0, 'the buddy says something');
+    assert.deepEqual(apple.body.buddy.fedTreats, [{ treatId: 'apple', count: 1 }]);
+    const apple2 = await request('/api/buddy/treats', { method: 'POST', headers, body: JSON.stringify({ treatId: 'apple' }) });
+    assert.equal(apple2.body.buddy.treatsFed, 2, 'feeding again bumps the count');
 
     // Done on a reminder notification checks the habit in, with no session; a forged token cannot.
     await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'read', date: today, completed: false, timeZone: 'UTC' }) });

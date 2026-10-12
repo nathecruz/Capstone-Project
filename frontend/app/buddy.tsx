@@ -6,17 +6,17 @@ import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { Animated, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { buyBuddyItem, saveBuddy } from '@/authentication/authService';
+import { buyBuddyItem, feedBuddyTreat, saveBuddy } from '@/authentication/authService';
 import { BuddyAvatar } from '@/components/buddy';
 import { Confetti } from '@/components/confetti';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { publishBuddy, useBuddy } from '@/hooks/use-buddy';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
-import { buddyGrowth, buddyMood, buddyTips, buddyWeek, MOOD_FACE, PET_LINES, type BuddyItem, type BuddySlot } from '@/utils/buddy';
+import { buddyGrowth, buddyMood, buddyTips, buddyWeek, MOOD_FACE, PET_LINES, type BuddyItem, type BuddySlot, type BuddyTreat } from '@/utils/buddy';
 
 type Slot = BuddySlot;
-const TABS: { slot: Slot; label: string }[] = [{ slot: 'head', label: 'Hats' }, { slot: 'hand', label: 'To hold' }, { slot: 'room', label: 'Rooms' }];
+const TABS: { slot: Slot; label: string }[] = [{ slot: 'head', label: 'Hats' }, { slot: 'hand', label: 'To hold' }, { slot: 'accessory', label: 'Gear' }, { slot: 'room', label: 'Rooms' }];
 
 export default function BuddyScreen() {
   const styles = useThemedStyles(themedStyles);
@@ -90,7 +90,37 @@ export default function BuddyScreen() {
     ]);
   };
 
+  const cheer = (petText: string) => {
+    setBurst((count) => count + 1);
+    setPetLine(petText);
+    hearts.setValue(0);
+    Animated.timing(hearts, { toValue: 1, duration: 900, useNativeDriver: Platform.OS !== 'web' }).start();
+  };
+
+  const feed = (treat: BuddyTreat) => {
+    showAlert(`Feed the ${treat.name}?`, `${treat.emoji}  ${treat.cost} tokens. ${name} will love it!`, [
+      { text: 'Not now', style: 'cancel' },
+      {
+        text: `Feed for ${treat.cost}`,
+        onPress: async () => {
+          setBusy(true);
+          const result = await feedBuddyTreat(treat.id);
+          setBusy(false);
+          if (!result.ok) {
+            showAlert('Not yet', result.message);
+            return;
+          }
+          publishBuddy(result.buddy);
+          applyWallet(result);
+          cheer(result.line);
+        },
+      },
+    ]);
+  };
+
   const items = (buddy?.items ?? []).filter((item) => item.slot === slot);
+  const treats = buddy?.treats ?? [];
+  const fedCount = new Map((buddy?.fedTreats ?? []).map((treat) => [treat.treatId, treat.count]));
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -224,6 +254,41 @@ export default function BuddyScreen() {
             })}
           </View>
         )}
+
+        {treats.length > 0 && (
+          <View style={styles.card}>
+            <View style={styles.cardHead}>
+              <View style={[styles.cardIcon, styles.treatIcon]}><Ionicons name="fast-food" size={15} color="#FFFFFF" /></View>
+              <Text style={styles.cardTitle}>Treats</Text>
+            </View>
+            <Text style={styles.treatIntro}>
+              Feed {name} a snack to cheer them up.{buddy && buddy.treatsFed > 0 ? ` You have shared ${buddy.treatsFed} so far.` : ''}
+            </Text>
+            <View style={styles.grid}>
+              {treats.map((treat) => {
+                const count = fedCount.get(treat.id) ?? 0;
+                const short = Math.max(0, treat.cost - tokens);
+                return (
+                  <Pressable
+                    key={treat.id}
+                    style={[styles.item, count > 0 && styles.itemWearing, Boolean(short) && styles.itemDim]}
+                    disabled={busy || Boolean(short)}
+                    onPress={() => feed(treat)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${treat.name}: feed for ${treat.cost} tokens${count > 0 ? `, fed ${count}` : ''}`}
+                  >
+                    {count > 0 ? <View style={styles.treatCount}><Text style={styles.treatCountText}>×{count}</Text></View> : null}
+                    <Text style={styles.itemEmoji}>{treat.emoji}</Text>
+                    <Text style={styles.itemName} numberOfLines={1}>{treat.name}</Text>
+                    <View style={[styles.itemAction, count > 0 && styles.itemActionOwned]}>
+                      <Text style={[styles.itemActionText, count > 0 && styles.itemActionTextOwned]}>{short ? `${short} more` : `Feed · ${treat.cost}`}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -265,6 +330,11 @@ const themedStyles = createThemedStyles({
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   cardIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F2A93B' },
   weekIcon: { backgroundColor: '#5B42D8' },
+  treatIcon: { backgroundColor: '#E86F9E' },
+  treatIntro: { fontSize: 13, lineHeight: 19, fontWeight: '600', color: '#6A6573' },
+  // A small tally on a discovered treat (how many times it has been fed).
+  treatCount: { position: 'absolute', top: 6, right: 6, minWidth: 20, height: 18, paddingHorizontal: 5, borderRadius: 9, backgroundColor: '#5B42D8', alignItems: 'center', justifyContent: 'center' },
+  treatCountText: { fontSize: 10, fontWeight: '900', color: '#FFFFFF' },
   cardTitle: { fontSize: 16, fontWeight: '900', color: '#24212D' },
   tipRow: { flexDirection: 'row', gap: 8 },
   tipDot: { fontSize: 15, lineHeight: 20, fontWeight: '900', color: '#F2A93B' },

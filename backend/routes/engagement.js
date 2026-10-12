@@ -1,8 +1,8 @@
 import { query, withTransaction } from '../db/client.js';
 import { parse } from '../lib/http.js';
-import { buddyItemSchema, buddySaveSchema, dayInputSchema, mysteryBoxSchema, streakFreezeSchema, webPushDoneSchema } from '../schemas.js';
+import { buddyItemSchema, buddySaveSchema, buddyTreatSchema, dayInputSchema, mysteryBoxSchema, streakFreezeSchema, webPushDoneSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
-import { buyBuddyItem, getBuddy, saveBuddy } from '../services/buddy.js';
+import { buyBuddyItem, feedTreat, getBuddy, saveBuddy } from '../services/buddy.js';
 import { setCheckIn } from '../services/check-ins.js';
 import { isOpenCheckInDate } from '../services/completion-date.js';
 import { getDailyChallenges } from '../services/daily-challenges.js';
@@ -45,6 +45,22 @@ export default function registerEngagementRoutes(app) {
     const refused = await saveBuddy({ query }, session.userId, input);
     if (refused) return response.status(refused.status).json({ ok: false, message: refused.message });
     response.json({ ok: true, buddy: await getBuddy({ query }, session.userId) });
+  });
+
+  // Feeds a treat to the buddy: spends its tokens and returns the line it says.
+  app.post('/api/buddy/treats', async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const input = parse(buddyTreatSchema, request, response);
+    if (!input) return;
+    const result = await withTransaction(async (db) => {
+      await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
+      const fed = await feedTreat(db, session.userId, input.treatId);
+      if (fed.status) return { refused: fed };
+      return { line: fed.line, buddy: await getBuddy(db, session.userId), wallet: await getWallet(db, session.userId) };
+    });
+    if (result.refused) return response.status(result.refused.status).json({ ok: false, message: result.refused.message });
+    response.json({ ok: true, line: result.line, buddy: result.buddy, ...result.wallet });
   });
 
   // Live updates: a version for each kind of data, so an open tab fetches only what changed.

@@ -5,10 +5,25 @@ import { isHabitLate, STREAK_MILESTONES, todayAgenda } from '@/utils/engagement'
 import { getLocalDateKey, isHabitMissedYesterday } from '@/utils/habit-visibility';
 import { isHabitScheduledOn } from '@/utils/streaks';
 
-export type BuddySlot = 'head' | 'hand' | 'room';
+export type BuddySlot = 'head' | 'hand' | 'room' | 'accessory';
 export type BuddyItem = { id: string; slot: BuddySlot; name: string; emoji: string; cost: number; stage: string };
 export type BuddyStage = { id: string; name: string; min: number };
-export type Buddy = { name: string; head: string; hand: string; room?: string; owned: string[]; checkIns: number; items: BuddyItem[]; stages: BuddyStage[] };
+export type BuddyTreat = { id: string; name: string; emoji: string; cost: number; line: string };
+export type BuddyFedTreat = { treatId: string; count: number };
+export type Buddy = {
+  name: string;
+  head: string;
+  hand: string;
+  room?: string;
+  accessory?: string;
+  owned: string[];
+  checkIns: number;
+  items: BuddyItem[];
+  stages: BuddyStage[];
+  treats: BuddyTreat[];
+  fedTreats: BuddyFedTreat[];
+  treatsFed: number;
+};
 
 /** How each room looks behind the buddy: its colour and two things in it. */
 export const ROOM_LOOK: Record<string, { background: string; decor: [string, string] }> = {
