@@ -16,6 +16,7 @@ import { normalizeAppState } from '../services/app-state-sync.js';
 import { isValidCompletionDate } from '../services/completion-date.js';
 import { weeklyQuests } from '../services/quests.js';
 import { retireRewards } from '../services/rewards.js';
+import { awardStreakMilestones } from '../services/wallet.js';
 import { doneActionSecret, makeDoneToken } from '../services/web-push-actions.js';
 import { getSupportEmailConfig } from '../services/support-email.js';
 
@@ -724,6 +725,16 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(tooMany.response.status, 409, 'two is the most you can hold');
     const synced = await request('/api/streak-freezes/sync', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
     assert.deepEqual({ used: synced.body.used, available: synced.body.available, frozenDays: synced.body.frozenDays }, { used: [], available: 2, frozenDays: [dayBefore(1)] });
+
+    // Streak milestone bonuses: crossing 7 days pays once, the same milestone never pays twice,
+    // and a jump pays every milestone it clears.
+    const streakBonus = async () => (await db.query('SELECT COALESCE(SUM(amount),0)::int AS total, COUNT(*)::int AS n FROM token_transactions WHERE id LIKE $1', [`${userId}:token:streak:%`])).rows[0];
+    await awardStreakMilestones(db, userId, 'walk', 'Morning walk', 6, 7);
+    assert.deepEqual(await streakBonus(), { total: 15, n: 1 }, 'reaching 7 days pays 15 once');
+    await awardStreakMilestones(db, userId, 'walk', 'Morning walk', 6, 7);
+    assert.deepEqual(await streakBonus(), { total: 15, n: 1 }, 'the same milestone never pays twice');
+    await awardStreakMilestones(db, userId, 'walk', 'Morning walk', 7, 30);
+    assert.deepEqual(await streakBonus(), { total: 90, n: 3 }, 'a jump past 14 and 30 adds both bonuses');
   });
 
   await t.test('token rewards: real ones on sale, retired ones refunded, and the custom title', async () => {

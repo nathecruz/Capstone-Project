@@ -4,6 +4,7 @@ import { BUDDY_ITEMS, BUDDY_STAGES, BUDDY_TREATS, buddyStageIndex } from '../ser
 import { MYSTERY_REWARDS, pickMysteryReward } from '../services/mystery-box.js';
 import { weekStartOf, weeklyQuests } from '../services/quests.js';
 import { daysToFreeze, STREAK_FREEZE_COST, STREAK_FREEZE_MAX } from '../services/streak-freeze.js';
+import { crossedStreakMilestones, STREAK_MILESTONE_BONUS } from '../services/wallet.js';
 import { computeStreak } from '../services/streaks.js';
 import { doneActionSecret, getWebPushDoneUrl, localDateIn, makeDoneToken, readDoneToken } from '../services/web-push-actions.js';
 import { dailyChallenges, minuteOfDay, ROTATING_CHALLENGES } from '../services/daily-challenges.js';
@@ -55,6 +56,21 @@ test('the buddy grows with check-ins and the shop has a price and stage for ever
   for (const treat of BUDDY_TREATS) {
     assert.ok(treat.cost > 0 && Boolean(treat.emoji) && Boolean(treat.line), treat.id);
   }
+});
+
+test('streak milestone bonuses rise with the milestone and fire only on the ones just crossed', () => {
+  // The bonus table only grows, so a longer streak is always worth more.
+  const milestones = Object.keys(STREAK_MILESTONE_BONUS).map(Number);
+  assert.deepEqual(milestones, [...milestones].sort((a, b) => a - b), 'milestones are in order');
+  for (let i = 1; i < milestones.length; i += 1) {
+    assert.ok(STREAK_MILESTONE_BONUS[milestones[i]] > STREAK_MILESTONE_BONUS[milestones[i - 1]], 'each bonus is bigger');
+  }
+  // Only milestones in (before, after] are crossed.
+  assert.deepEqual(crossedStreakMilestones(6, 7), [7]);
+  assert.deepEqual(crossedStreakMilestones(7, 7), [], 'staying put crosses nothing');
+  assert.deepEqual(crossedStreakMilestones(7, 30), [14, 30], 'a jump can cross several at once');
+  assert.deepEqual(crossedStreakMilestones(0, 6), [], 'below the first milestone pays nothing');
+  assert.deepEqual(crossedStreakMilestones(364, 365), [365]);
 });
 
 test('the mystery box gives small amounts often and 20 rarely', () => {

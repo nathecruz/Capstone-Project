@@ -10,7 +10,7 @@ import type { EditableHabitFields } from '@/utils/habit-edit';
 import { namesOf } from '@/utils/names';
 import { badgeProgress } from '@/utils/achievements';
 import { buddyGrowth } from '@/utils/buddy';
-import { isHabitLockedMissed, levelProgress, streakMilestone, todayAgenda } from '@/utils/engagement';
+import { isHabitLockedMissed, levelProgress, streakMilestone, STREAK_MILESTONE_BONUS, todayAgenda } from '@/utils/engagement';
 import { weeklyQuests } from '@/utils/quests';
 import { computeStreak } from '@/utils/streaks';
 import { applyRemoteCompletionDates, applyVisibleOrder, getLocalDateKey } from './app-state/habit-progress';
@@ -641,7 +641,8 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       const name = buddy?.name ?? 'Habi';
       celebrate({ id: `buddy:${grownAfter.stage.id}`, kind: 'buddy', icon: 'paw', title: `${name} grew into a ${grownAfter.stage.name}!`, message: `${checkInsBefore + 1} check-ins together. New looks are waiting in ${name}'s shop.` });
     } else if (milestone) {
-      celebrate({ id: `streak:${habit.id}:${milestone}:${dateKey}`, kind: 'streak', icon: 'flame', title: `${milestone}-day streak!`, message: `${habit.label}: ${milestone} days in a row. Keep the flame going!` });
+      const bonus = STREAK_MILESTONE_BONUS[milestone];
+      celebrate({ id: `streak:${habit.id}:${milestone}:${dateKey}`, kind: 'streak', icon: 'flame', title: `${milestone}-day streak!`, message: `${habit.label}: ${milestone} days in a row.${bonus ? ` +${bonus} tokens!` : ''} Keep the flame going!` });
     } else if (newBadge) {
       celebrate({ id: `badge:${newBadge.id}`, kind: 'badge', icon: newBadge.icon, color: newBadge.color, title: `Badge unlocked: ${newBadge.title}`, message: `You did it: ${newBadge.goal.charAt(0).toLowerCase()}${newBadge.goal.slice(1)}. See all your badges in Achievements.` });
     } else if (newQuest) {

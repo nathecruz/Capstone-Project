@@ -6,7 +6,8 @@ import { buildServerState, getLatestAppState, saveUserAppState, syncNormalizedSt
 import { isPastHabitDeadline } from './completion-date.js';
 import { syncWeeklyQuests } from './quests.js';
 import { syncDailyChallenges } from './daily-challenges.js';
-import { awardCheckIn, revokeCheckIn } from './wallet.js';
+import { computeStreak } from './streaks.js';
+import { awardCheckIn, awardStreakMilestones, revokeCheckIn } from './wallet.js';
 
 /**
  * Returns null when the habit does not exist, { locked: true } when an undo is too late, else
@@ -32,7 +33,15 @@ export async function setCheckIn(connection, { userId, habitId, date, timeZone, 
 
   if (completed) {
     const inserted = await connection.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING habit_id', [userId, habitId, date, now]);
-    if (inserted.rowCount) await awardCheckIn(connection, userId, habitId, date, habit.label, now);
+    if (inserted.rowCount) {
+      await awardCheckIn(connection, userId, habitId, date, habit.label, now);
+      // Bonus tokens when this check-in pushes the habit's streak past a milestone (once per habit and milestone).
+      const frozen = (await connection.query('SELECT freeze_date::text AS date FROM streak_freeze_days WHERE user_id=$1', [userId])).rows.map((row) => row.date);
+      const oldDates = Array.isArray(habit.completionDates) ? habit.completionDates : [];
+      const before = computeStreak(habit, oldDates, date, frozen);
+      const after = computeStreak(habit, [...oldDates, date], date, frozen);
+      await awardStreakMilestones(connection, userId, habitId, habit.label, before, after, now);
+    }
   } else {
     const removed = await connection.query('DELETE FROM habit_completions WHERE user_id=$1 AND habit_id=$2 AND completed_date=$3', [userId, habitId, date]);
     if (removed.rowCount) await revokeCheckIn(connection, userId, habitId, date, habit.label, now);

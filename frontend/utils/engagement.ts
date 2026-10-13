@@ -136,6 +136,13 @@ export function levelProgress(points: number) {
 
 export const STREAK_MILESTONES = [3, 7, 14, 21, 30, 50, 75, 100, 150, 200, 365];
 
+/**
+ * Bonus tokens the server awards when a habit's streak reaches a milestone (once per habit and
+ * milestone). Kept in sync with the server's copy (backend/services/wallet.js) so the celebration
+ * can show the amount; the server is the source of truth for the balance.
+ */
+export const STREAK_MILESTONE_BONUS: Record<number, number> = { 7: 15, 14: 25, 30: 50, 50: 80, 100: 150, 200: 300, 365: 500 };
+
 /** The milestone a streak just reached (going from `before` to `after`), or null. */
 export function streakMilestone(before: number, after: number) {
   return STREAK_MILESTONES.filter((days) => before < days && after >= days).at(-1) ?? null;
