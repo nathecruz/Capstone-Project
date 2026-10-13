@@ -116,6 +116,24 @@ function HabitRow({ habit, late, onCheck }: { habit: Habit; late: boolean; onChe
   );
 }
 
+/** A habit that passed its deadline without a check-in: shown but no longer checkable. */
+function MissedRow({ habit }: { habit: Habit }) {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
+  return (
+    <View style={styles.missedRow} accessible accessibilityLabel={`${habit.label}, missed today, no longer open`}>
+      <View style={[styles.rowIcon, { backgroundColor: `${habit.color || '#5B42D8'}18` }]}>
+        <Ionicons name={habit.icon} size={17} color={habit.color || themeColor('#5b42d8')} />
+      </View>
+      <View style={styles.rowCopy}>
+        <Text style={[styles.rowLabel, styles.missedLabel]} numberOfLines={1}>{habit.label}</Text>
+        <Text style={styles.missedMeta} numberOfLines={1}>Missed today · opens on its next day</Text>
+      </View>
+      <View style={styles.missedBadge}><Ionicons name="close" size={15} color={themeColor('#B4701C')} /></View>
+    </View>
+  );
+}
+
 export function TodayAgenda({ habits, now, onCheck, middle, style }: { habits: Habit[]; now: Date; onCheck: (habit: Habit) => void; middle?: React.ReactNode; style?: object | false }) {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
@@ -147,7 +165,7 @@ export function TodayAgenda({ habits, now, onCheck, middle, style }: { habits: H
   const listSections = agenda.sections
     .map((section) => ({ ...section, rows: section.habits.filter((habit) => habit.id !== nextUp?.id) }))
     .filter((section) => section.rows.length > 0);
-  const hasList = listSections.length > 0 || agenda.done.length > 0 || Boolean(justChecked) || agenda.notToday > 0;
+  const hasList = listSections.length > 0 || agenda.done.length > 0 || Boolean(justChecked) || agenda.notToday > 0 || agenda.missed.length > 0;
 
   return (
     <View style={[styles.stack, style]}>
@@ -249,6 +267,17 @@ export function TodayAgenda({ habits, now, onCheck, middle, style }: { habits: H
             </View>
           )}
 
+          {agenda.missed.length > 0 && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="close-circle" size={14} color={themeColor('#C2541E')} />
+                <Text style={[styles.sectionTitle, styles.lateText]}>Missed today</Text>
+                <Text style={styles.sectionCount}>{agenda.missed.length}</Text>
+              </View>
+              <View style={styles.rows}>{agenda.missed.map((habit) => <MissedRow key={habit.id} habit={habit} />)}</View>
+            </View>
+          )}
+
           {agenda.done.length > 0 && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
@@ -334,6 +363,11 @@ const themedStyles = createThemedStyles({
   rowLabelDone: { textDecorationLine: 'line-through', color: '#6F8F7D' },
   focusButton: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F7F4FF' },
   focusButtonActive: { backgroundColor: '#EFE9FF' },
+  // Missed: shown but not checkable, so it reads as closed for the day rather than actionable.
+  missedRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#FBF1E6', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 9 },
+  missedLabel: { color: '#6E6480' },
+  missedMeta: { marginTop: 1, fontSize: 11, fontWeight: '700', color: '#B4701C' },
+  missedBadge: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F6DFC4' },
   undoBar: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 14, backgroundColor: '#ECF8F1' },
   undoText: { flex: 1, fontSize: 13, fontWeight: '700', color: '#2C6B4C' },
   undoAction: { fontSize: 13, fontWeight: '800', color: '#4F2AC8' },

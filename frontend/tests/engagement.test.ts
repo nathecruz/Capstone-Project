@@ -47,6 +47,20 @@ describe('todayAgenda', () => {
     expect(evening.nextUp?.id).toBe('Morning walk');
     expect(todayAgenda(habits.slice(1), at(18, 30)).nextUp?.id).toBe('Review notes');
   });
+
+  it('moves a habit past its deadline to missed, out of late and next up', () => {
+    const habits = [
+      habit('Pills', { reminderEnabled: true, reminderTime: '07:00 AM', reminderTimes: ['07:00 AM'] }),
+      habit('Walk', { meta: 'Daily • 06:00 AM' }),
+    ];
+    const agenda = todayAgenda(habits, at(8, 0));
+    expect(agenda.missed.map((item) => item.id)).toEqual(['Pills']);
+    expect(agenda.late.map((item) => item.id)).toEqual(['Walk']);
+    expect(agenda.sections.find((section) => section.key === 'late')?.habits.map((item) => item.id)).toEqual(['Walk']);
+    expect(agenda.nextUp?.id).toBe('Walk');
+    // A missed habit still counts as open (to do), like the Habits tab.
+    expect(agenda.open.map((item) => item.id).sort()).toEqual(['Pills', 'Walk']);
+  });
 });
 
 describe('late habits', () => {
