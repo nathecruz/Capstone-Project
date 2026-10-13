@@ -24,6 +24,14 @@ describe('computeStreak', () => {
     expect(computeStreak({ frequency: 'Monthly', startDate: '2026-07-30' }, ['2026-08-30', '2026-09-30'], today)).toBe(2);
   });
 
+  it('clamps a monthly day past the month length to the last day (e.g. the 31st in February)', () => {
+    const endOfMonth = { frequency: 'Monthly', startDate: '2026-01-31' };
+    // Jan 31, then Feb 28 (clamped) and Mar 31 — three months in a row.
+    expect(computeStreak(endOfMonth, ['2026-01-31', '2026-02-28', '2026-03-31'], '2026-03-31')).toBe(3);
+    // Missing the clamped February day breaks the run, leaving only March.
+    expect(computeStreak(endOfMonth, ['2026-01-31', '2026-03-31'], '2026-03-31')).toBe(1);
+  });
+
   it('breaks the streak when today is missed (its deadline passed)', () => {
     const daily = { frequency: 'Daily', startDate: '2026-09-01' };
     // Yesterday and the day before are done; an unfinished today normally keeps the streak.

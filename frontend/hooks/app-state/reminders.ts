@@ -47,7 +47,8 @@ export function getHabitReminderSchedule(habit: Pick<Habit, 'frequency' | 'meta'
 export function isHabitReminderDay(habit: Pick<Habit, 'frequency' | 'meta' | 'reminderDays' | 'startDate'>, date: Date) {
   const schedule = getHabitReminderSchedule(habit);
   if (schedule.type === 'weekly') return schedule.days.includes(reminderDayLabels[date.getDay()]);
-  if (schedule.type === 'monthly') return date.getDate() === schedule.day;
+  // A monthly day past the month's length (29-31) falls on the last day of that month instead.
+  if (schedule.type === 'monthly') return date.getDate() === Math.min(schedule.day, new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate());
   return true;
 }
 

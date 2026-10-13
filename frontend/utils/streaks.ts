@@ -19,6 +19,8 @@ function shiftDay(dateKey: string, days: number) {
 
 const weekdayOf = (dateKey: string) => DAY_LABELS[new Date(`${dateKey}T00:00:00Z`).getUTCDay()];
 const isDateKey = (value: string | undefined): value is string => /^\d{4}-\d{2}-\d{2}$/.test(value ?? '');
+/** Days in the month of this date key (28-31). */
+const daysInMonthOf = (dateKey: string) => new Date(Date.UTC(Number(dateKey.slice(0, 4)), Number(dateKey.slice(5, 7)), 0)).getUTCDate();
 
 function scheduledDays(habit: StreakHabit) {
   const configured = habit.reminderDays?.length
@@ -44,7 +46,8 @@ export function habitSchedule(habit: StreakHabit): Schedule {
 
 function isScheduledDay(schedule: Schedule, dateKey: string) {
   if (schedule.type === 'weekly') return schedule.days.includes(weekdayOf(dateKey));
-  if (schedule.type === 'monthly') return Number(dateKey.slice(8, 10)) === schedule.day;
+  // A monthly day past the month's length (29-31) falls on the last day of that month instead.
+  if (schedule.type === 'monthly') return Number(dateKey.slice(8, 10)) === Math.min(schedule.day, daysInMonthOf(dateKey));
   return true;
 }
 

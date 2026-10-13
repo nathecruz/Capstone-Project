@@ -44,6 +44,19 @@ test('checks weekly and monthly reminders on their configured cadence', () => {
     { date: '2026-10-14', time: '08:30' },
   ]);
   assert.deepEqual(getDueHabitReminders(monthly, 'UTC', new Date('2026-10-15T08:30:00.000Z')), []);
+
+  // A monthly habit on the 31st falls on the last day of shorter months.
+  const endOfMonth = {
+    label: 'Rent', reminderEnabled: true, frequency: 'Monthly', startDate: '2026-01-31',
+    reminderTime: '08:30 AM', completionDates: [],
+  };
+  assert.deepEqual(getDueHabitReminders(endOfMonth, 'UTC', new Date('2026-02-28T08:30:00.000Z')), [
+    { date: '2026-02-28', time: '08:30' },
+  ]);
+  assert.deepEqual(getDueHabitReminders(endOfMonth, 'UTC', new Date('2026-02-27T08:30:00.000Z')), []);
+  assert.deepEqual(getDueHabitReminders(endOfMonth, 'UTC', new Date('2026-03-31T08:30:00.000Z')), [
+    { date: '2026-03-31', time: '08:30' },
+  ]);
 });
 
 test('skips completed, future-start, disabled, and invalid-timezone reminders', () => {

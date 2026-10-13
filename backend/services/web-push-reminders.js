@@ -81,7 +81,9 @@ function isScheduledReminderDay(habit, local, days) {
   }
   if (habit.frequency === 'Monthly') {
     const scheduledDay = Number(String(habit.startDate || '').slice(8, 10)) || 1;
-    return local.dayOfMonth === scheduledDay;
+    // A monthly day past the month's length (29-31) falls on the last day of that month instead.
+    const lastDay = new Date(Date.UTC(Number(local.date.slice(0, 4)), Number(local.date.slice(5, 7)), 0)).getUTCDate();
+    return local.dayOfMonth === Math.min(scheduledDay, lastDay);
   }
   return true;
 }

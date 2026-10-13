@@ -11,6 +11,8 @@ function shiftDay(dateKey, days) {
 }
 
 const weekdayOf = (dateKey) => DAY_LABELS[new Date(`${dateKey}T00:00:00Z`).getUTCDay()];
+/** Days in the month of this date key (28-31). */
+const daysInMonthOf = (dateKey) => new Date(Date.UTC(Number(dateKey.slice(0, 4)), Number(dateKey.slice(5, 7)), 0)).getUTCDate();
 
 /** 'daily' | { weekly: [...days] } | { monthly: dayOfMonth } — same rules as reminder scheduling. */
 export function habitSchedule(habit) {
@@ -29,7 +31,8 @@ export function habitSchedule(habit) {
 
 export function isScheduledDay(schedule, dateKey) {
   if (schedule.type === 'weekly') return schedule.days.includes(weekdayOf(dateKey));
-  if (schedule.type === 'monthly') return Number(dateKey.slice(8, 10)) === schedule.day;
+  // A monthly day past the month's length (29-31) falls on the last day of that month instead.
+  if (schedule.type === 'monthly') return Number(dateKey.slice(8, 10)) === Math.min(schedule.day, daysInMonthOf(dateKey));
   return true;
 }
 
