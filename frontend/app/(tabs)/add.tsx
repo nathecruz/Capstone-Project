@@ -58,7 +58,6 @@ export default function AddScreen() {
   const [startDate, setStartDate] = useState(() => formatDate(new Date()));
   const [startDatePickerVisible, setStartDatePickerVisible] = useState(false);
   const [customFrequency, setCustomFrequency] = useState('Weekdays only');
-  const [goal, setGoal] = useState('');
   const [reminder, setReminder] = useState(Platform.OS !== 'web');
   const [reminderPermissionPending, setReminderPermissionPending] = useState(false);
   const [reminderTimes, setReminderTimes] = useState(['07:00 AM']);
@@ -167,7 +166,7 @@ export default function AddScreen() {
       frequency,
       icon: (selectedCategory?.icon || 'ellipse-outline') as keyof typeof Ionicons.glyphMap,
       color: selectedCategory?.color || '#57B991',
-      goal: Number.parseInt(goal, 10) || 1,
+      goal: 1,
       reminderEnabled: reminder && reminderTimes.length > 0,
       reminderTime: reminderTimes[0] || '07:00 AM',
       reminderTimes: reminderTimes,
@@ -218,7 +217,6 @@ export default function AddScreen() {
     setFrequency('Daily');
     setStartDate(formatDate(new Date()));
     setCustomFrequency('Weekdays only');
-    setGoal('');
     setReminder(Platform.OS !== 'web');
     setReminderTimes(['07:00 AM']);
     setRepeatDays(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
@@ -236,12 +234,9 @@ export default function AddScreen() {
   const selectedCategory = categories.find((item) => item.label === category);
   const categoryColor = selectedCategory?.color || '#5B42D8';
   const categoryIcon = (selectedCategory?.icon || 'ellipse-outline') as keyof typeof Ionicons.glyphMap;
-  const goalCount = Math.max(1, Number.parseInt(goal, 10) || 1);
-  const goalUnit = frequency === 'Weekly' ? 'a week' : frequency === 'Monthly' ? 'a month' : 'a day';
   const scheduleText = frequency === 'Custom' ? `${customFrequency} · ${repeatDays.join(', ') || 'no days'}` : frequency;
-  const changeGoal = (step: number) => setGoal(String(Math.min(50, Math.max(1, goalCount + step))));
   const close = () => {
-    if (name.trim() || goal.trim()) {
+    if (name.trim()) {
       showAlert('Discard habit?', 'Your current entries will be cleared.', [{ text: 'Keep editing', style: 'cancel' }, { text: 'Discard', style: 'destructive', onPress: () => router.back() }]);
     } else router.back();
   };
@@ -265,7 +260,7 @@ export default function AddScreen() {
     </View>
 
     {/* Live preview: how the habit will look in the list. */}
-    <View style={[styles.preview, dark.preview]} accessible accessibilityLabel={`Preview: ${name.trim() || 'Your new habit'}, ${scheduleText}, ${goalCount} times ${goalUnit}, ${reminder ? `${reminderTimes.length} reminders` : 'no reminder'}`}>
+    <View style={[styles.preview, dark.preview]} accessible accessibilityLabel={`Preview: ${name.trim() || 'Your new habit'}, ${scheduleText}, ${reminder ? `${reminderTimes.length} reminders` : 'no reminder'}`}>
       <View style={[styles.previewIcon, { backgroundColor: `${categoryColor}26` }]}><Ionicons name={categoryIcon} size={26} color={categoryColor} /></View>
       <View style={styles.previewCopy}>
         <Text style={[styles.previewLabel, dark.previewLabel]}>PREVIEW · {category.toUpperCase()}</Text>
@@ -273,7 +268,6 @@ export default function AddScreen() {
         <View style={styles.previewChips}>
           {[
             { icon: 'calendar-outline' as const, text: scheduleText },
-            { icon: 'repeat' as const, text: `${goalCount}× ${goalUnit}` },
             { icon: (reminder ? 'notifications-outline' : 'notifications-off-outline') as keyof typeof Ionicons.glyphMap, text: reminder ? reminderTimes.join(', ') || 'No time set' : 'No reminder' },
           ].map((chip) => (
             <View key={chip.icon} style={[styles.previewChip, dark.previewChip]}>
@@ -337,17 +331,6 @@ export default function AddScreen() {
           <Text style={[styles.customFrequencyHint, dark.customFrequencyHint]}>{repeatDays.length ? `Repeats every week on ${repeatDays.join(', ')}` : 'Select at least one day'}</Text>
         </View>
       )}
-      <View style={[styles.goalRow, dark.goalRow]}>
-        <View style={styles.goalCopy}>
-          <Text style={[styles.goalTitle, dark.goalTitle]}>How many times</Text>
-          <Text style={[styles.goalHint, dark.goalHint]}>{goalCount === 1 ? `Once ${goalUnit}` : `${goalCount} times ${goalUnit}`}, e.g. glasses of water</Text>
-        </View>
-        <View style={styles.stepper}>
-          <Pressable style={({ pressed }) => [styles.stepperButton, dark.stepperButton, goalCount <= 1 && styles.stepperDisabled, pressed && styles.pressed]} onPress={() => changeGoal(-1)} disabled={goalCount <= 1} accessibilityRole="button" accessibilityLabel="Fewer times"><Ionicons name="remove" size={18} color={accent} /></Pressable>
-          <Text style={[styles.stepperValue, dark.stepperValue]} accessibilityLabel={`${goalCount} times`}>{goalCount}</Text>
-          <Pressable style={({ pressed }) => [styles.stepperButton, dark.stepperButton, goalCount >= 50 && styles.stepperDisabled, pressed && styles.pressed]} onPress={() => changeGoal(1)} disabled={goalCount >= 50} accessibilityRole="button" accessibilityLabel="More times"><Ionicons name="add" size={18} color={accent} /></Pressable>
-        </View>
-      </View>
       <View style={[styles.startDateRow, dark.startDateRow]}>
         <View style={styles.startDateCopy}>
           <Ionicons name="calendar-outline" size={20} color={accent} />
@@ -537,14 +520,6 @@ const baseStyles = StyleSheet.create(withReadableText({
   daysRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 6, marginTop: 12, marginBottom: 10 },
   dayButton: { width: 38, height: 38, borderRadius: 19, borderWidth: 1.5, borderColor: '#DCD8E5', alignItems: 'center', justifyContent: 'center', flexShrink: 0, backgroundColor: '#FFFFFF' },
   dayText: { fontSize: 12, color: '#5C5670', fontWeight: '800' },
-  goalRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 14, padding: 12, borderRadius: 16, backgroundColor: '#F8F6FF' },
-  goalCopy: { flex: 1, minWidth: 0 },
-  goalTitle: { fontSize: 14, fontWeight: '800', color: '#2D2A3D' },
-  goalHint: { fontSize: 12, fontWeight: '600', color: '#7A7488', marginTop: 2 },
-  stepper: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  stepperButton: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: '#DCD3F5' },
-  stepperDisabled: { opacity: 0.4 },
-  stepperValue: { minWidth: 30, textAlign: 'center', fontSize: 20, fontWeight: '900', color: '#1F1C26' },
   startDateRow: { minHeight: 60, marginTop: 12, padding: 12, borderRadius: 16, backgroundColor: '#F8F6FF', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   startDateCopy: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   startDateTitle: { fontSize: 14, fontWeight: '800', color: '#2D2A3D' },
@@ -655,11 +630,6 @@ const darkStyles = StyleSheet.create({
   segmentOptionActive: { backgroundColor: '#5B42D8' },
   segmentText: darkMuted,
   segmentTextActive: { color: '#FFFFFF' },
-  goalRow: { backgroundColor: '#25212E' },
-  goalTitle: darkInk,
-  goalHint: darkMuted,
-  stepperButton: { backgroundColor: '#1D1A24', borderColor: '#40365C' },
-  stepperValue: darkInk,
   startDateRow: { backgroundColor: '#25212E' },
   startDateButton: { backgroundColor: '#1D1A24' },
   dayButton: { borderColor: '#3B3647', backgroundColor: '#1D1A24' },

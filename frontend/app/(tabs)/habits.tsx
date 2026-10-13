@@ -155,13 +155,6 @@ export default function HabitsScreen() {
                   </Pressable>
                 </View>
 
-                {item.goal > 1 && (
-                  <View style={styles.goalRow}>
-                    <View style={styles.goalTrack}><View style={[styles.goalFill, { width: `${item.progress}%`, backgroundColor: item.color }]} /></View>
-                    <Text style={styles.goalText}>{item.total}</Text>
-                  </View>
-                )}
-
                 <View style={styles.cardBottom}>
                   <View style={styles.chips}>
                     {item.done ? (
@@ -453,10 +446,6 @@ const themedStyles = createThemedStyles({
   check: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
   checkEmpty: { borderWidth: 2, borderColor: '#D8D4E3', backgroundColor: '#FFFFFF' },
   checkDone: { backgroundColor: '#2E9D5C' },
-  goalRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12, marginLeft: 56 },
-  goalTrack: { flex: 1, height: 8, borderRadius: 4, overflow: 'hidden', backgroundColor: '#ECEAF1' },
-  goalFill: { height: '100%', borderRadius: 4 },
-  goalText: { fontSize: 12, fontWeight: '900', color: '#3B3650' },
   cardBottom: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, marginLeft: 56 },
   chips: { flex: 1, minWidth: 0, flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: '#F2F0F7' },
