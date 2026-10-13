@@ -3,11 +3,12 @@ import { router } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import { Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EditHabitSheet } from '@/components/edit-habit-sheet';
 import { ProgressRing } from '@/components/progress-ring';
 import { openFocus } from '@/components/today-agenda';
 import { isHabitLate, isHabitLockedMissed } from '@/utils/engagement';
+import { CHECK_IN_UNDO_MS } from '@/utils/habit-visibility';
 import { FACULTY_HABIT_IDEAS } from '@/constants/faculty';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { isHabitMissedYesterday, useAppColorScheme } from '@/hooks/color-scheme-context';
@@ -38,11 +39,19 @@ export default function HabitsScreen() {
   const [search, setSearch] = useState('');
   const [suggestion, setSuggestion] = useState('');
   const [currentTime, setCurrentTime] = useState(() => new Date());
+  const insets = useSafeAreaInsets();
+  // The habit just checked off: a short-lived "+20 XP" confirmation with Undo, like Home's Today.
+  const [justChecked, setJustChecked] = useState<(typeof habitList)[number] | null>(null);
   useEffect(() => {
     // Keeps "late" and "missed yesterday" current while the screen stays open.
     const timer = setInterval(() => setCurrentTime(new Date()), 60_000);
     return () => clearInterval(timer);
   }, []);
+  useEffect(() => {
+    if (!justChecked) return;
+    const timer = setTimeout(() => setJustChecked(null), CHECK_IN_UNDO_MS);
+    return () => clearTimeout(timer);
+  }, [justChecked]);
   // The hero is purple in both modes; its ring needs the same colour in the middle.
   const heroBackground = themedColor(isDarkMode ? '#30215A' : '#5B42D8', appTheme);
 
@@ -84,10 +93,17 @@ export default function HabitsScreen() {
 
   const pressCheck = (item: (typeof habitList)[number]) => {
     // Done and past its Undo: locked for the day, so explain instead of doing nothing.
-    if (item.done && !canUndoCheckIn(item.id)) showAlert('Already done today', 'A check-in locks a few seconds after you tap it, so streaks and tokens stay fair. This habit opens again tomorrow.');
+    if (item.done && !canUndoCheckIn(item.id)) { showAlert('Already done today', 'A check-in locks a few seconds after you tap it, so streaks and tokens stay fair. This habit opens again tomorrow.'); return; }
     // Past its last reminder time without a check-in: missed for today, so it can no longer be checked in.
-    else if (!item.done && isHabitLockedMissed(item, new Date())) showAlert('Missed today', 'This habit passed its reminder time without a check-in, so it is missed for today. It opens again on its next scheduled day.');
-    else toggleHabit(item.id);
+    if (!item.done && isHabitLockedMissed(item, new Date())) { showAlert('Missed today', 'This habit passed its reminder time without a check-in, so it is missed for today. It opens again on its next scheduled day.'); return; }
+    toggleHabit(item.id);
+    // Checking one on shows the "+20 XP" bar; tapping a done one off clears it.
+    setJustChecked(item.done ? null : item);
+  };
+
+  const undoJustChecked = () => {
+    if (justChecked) toggleHabit(justChecked.id);
+    setJustChecked(null);
   };
 
   return (
@@ -354,6 +370,17 @@ export default function HabitsScreen() {
           </View>
         }
       />
+      {justChecked && (
+        <View style={[styles.undoWrap, { bottom: insets.bottom + 92 }]} pointerEvents="box-none">
+          <View style={styles.undoBar} accessibilityLiveRegion="polite">
+            <Ionicons name="checkmark-circle" size={18} color={themeColor('#3BAA74')} />
+            <Text style={styles.undoText} numberOfLines={1}>{justChecked.label} done · +20 XP</Text>
+            <Pressable onPress={undoJustChecked} accessibilityRole="button" accessibilityLabel={`Undo ${justChecked.label}`} hitSlop={8}>
+              <Text style={styles.undoAction}>Undo</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
       <EditHabitSheet habit={editingHabit} onClose={() => setEditingHabit(null)} />
     </SafeAreaView>
   );
@@ -462,6 +489,11 @@ const themedStyles = createThemedStyles({
   ideaResultTitle: { flex: 1, fontSize: 15, fontWeight: '900', color: '#302B3B' },
   useButton: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 40, paddingHorizontal: 14, borderRadius: 12, backgroundColor: '#5B42D8' },
   useButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
+  // A floating "+20 XP" confirmation with Undo, above the tab bar, matching Home's Today.
+  undoWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', paddingHorizontal: 16 },
+  undoBar: { flexDirection: 'row', alignItems: 'center', gap: 8, width: '100%', maxWidth: 440, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 16, backgroundColor: '#E6F6EC', shadowColor: '#201444', shadowOpacity: 0.14, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 8 },
+  undoText: { flex: 1, fontSize: 13, fontWeight: '800', color: '#23774A' },
+  undoAction: { fontSize: 13, fontWeight: '900', color: '#4F2AC8' },
 }, {
   // Dark mode: the hero keeps its deep purple, the selected status sits a step above its track.
   hero: { backgroundColor: '#30215A', borderRadius: 24, padding: 18, marginBottom: 14 },
