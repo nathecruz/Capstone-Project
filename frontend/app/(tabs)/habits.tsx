@@ -197,8 +197,9 @@ export default function HabitsScreen() {
                       </View>
                     )}
                   </View>
-                  {/* Not done yet: start a focus session that checks it off at the end. */}
-                  {!item.done && (
+                  {/* Not done and still open: start a focus session that checks it off at the end.
+                      A missed habit can no longer be checked in, so it has no focus button. */}
+                  {!item.done && !lockedMissed && (
                     <Pressable style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]} onPress={() => openFocus(item.id)} accessibilityRole="button" accessibilityLabel={`Start a focus session for ${item.label}`}>
                       <Ionicons name="timer-outline" size={18} color={themeColor('#5B42D8')} />
                     </Pressable>

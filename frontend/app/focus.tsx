@@ -9,7 +9,7 @@ import { Animated, Easing, Platform, Pressable, ScrollView, StyleSheet, Text, Vi
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Confetti } from '@/components/confetti';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
-import { focusMinutesFor, todayAgenda } from '@/utils/engagement';
+import { focusMinutesFor, isHabitLockedMissed, todayAgenda } from '@/utils/engagement';
 import { getLocalDateKey } from '@/utils/habit-visibility';
 
 const PRESETS = [5, 15, 25, 45];
@@ -31,7 +31,13 @@ export default function FocusScreen() {
   const habit = habits.find((item) => item.id === habitId) ?? null;
   const today = getLocalDateKey();
   const doneToday = Boolean(habit?.completionDates.includes(today));
-  const openToday = useMemo(() => todayAgenda(habits).open, [habits]);
+  // Missed habits cannot be checked in, so they are not offered to focus on and the end-of-session
+  // check-off is skipped for them (it would be rejected and the "checked off" message would lie).
+  const missedNow = Boolean(habit && !doneToday && isHabitLockedMissed(habit, new Date()));
+  const openToday = useMemo(() => {
+    const agenda = todayAgenda(habits);
+    return agenda.open.filter((item) => !agenda.missed.includes(item));
+  }, [habits]);
 
   const [minutes, setMinutes] = useState(() => focusMinutesFor(habit?.label ?? ''));
   const [phase, setPhase] = useState<Phase>('idle');
@@ -71,7 +77,7 @@ export default function FocusScreen() {
       setPhase('finished');
       setLeftMs(0);
       if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      if (habit && !habit.completionDates.includes(getLocalDateKey())) {
+      if (habit && !habit.completionDates.includes(getLocalDateKey()) && !isHabitLockedMissed(habit, new Date())) {
         toggleHabit(habit.id);
         setCheckedOff(true);
       }
@@ -199,7 +205,10 @@ export default function FocusScreen() {
                 <Text style={styles.primaryText}>{phase === 'running' ? 'Pause' : phase === 'paused' ? 'Resume' : 'Start focus'}</Text>
               </Pressable>
             </View>
-            {habit && !doneToday && <Text style={styles.note}>When the timer ends, {habit.label} is checked off for today.</Text>}
+            {habit && !doneToday && (missedNow
+              ? <Text style={styles.note}>{habit.label} is missed for today, so this is focus time only.</Text>
+              : <Text style={styles.note}>When the timer ends, {habit.label} is checked off for today.</Text>
+            )}
           </>
         )}
 

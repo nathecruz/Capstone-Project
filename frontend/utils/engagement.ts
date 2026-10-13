@@ -141,11 +141,15 @@ export function streakMilestone(before: number, after: number) {
   return STREAK_MILESTONES.filter((days) => before < days && after >= days).at(-1) ?? null;
 }
 
-/** In the evening, habits due today that are not done yet and would break a running streak. */
+/**
+ * In the evening, habits due today that are still open, have a running streak, and can still be done
+ * tonight. A habit already past its reminder deadline is missed (its streak is already broken), so it
+ * is not "at risk tonight" and is left out — you can no longer act on it.
+ */
 export function habitsAtRisk(habits: Habit[], now = new Date(), fromHour = 18, frozenDays: string[] = []) {
   if (now.getHours() < fromHour) return [];
   const today = getLocalDateKey(now);
-  return habits.filter((habit) => scheduledOn(habit, today) && !habit.completionDates.includes(today) && computeStreak(habit, habit.completionDates, today, frozenDays) > 0);
+  return habits.filter((habit) => scheduledOn(habit, today) && !habit.completionDates.includes(today) && !isHabitLockedMissed(habit, now) && computeStreak(habit, habit.completionDates, today, frozenDays) > 0);
 }
 
 export const DAILY_CHALLENGE_BONUS = 10;

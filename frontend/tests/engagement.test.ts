@@ -123,6 +123,9 @@ describe('levels, milestones and streaks at risk', () => {
     ];
     expect(habitsAtRisk(habits, at(15))).toEqual([]);
     expect(habitsAtRisk(habits, at(20)).map((item) => item.id)).toEqual(['walk']);
+    // A habit past its reminder deadline is already missed, so it is not "at risk tonight".
+    const missed = habit('pills', { completionDates: ['2026-10-01', '2026-10-02'], reminderEnabled: true, reminderTime: '07:00 AM', reminderTimes: ['07:00 AM'] });
+    expect(habitsAtRisk([missed], at(20))).toEqual([]);
   });
 });
 
