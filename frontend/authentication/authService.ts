@@ -187,6 +187,33 @@ function setSlowRequests(delta: number) {
   }
 }
 
+export type Reachability = 'online' | 'offline';
+const reachabilityListeners = new Set<(status: Reachability) => void>();
+let serverReachable = true;
+
+/**
+ * Notifies when the server stops being reachable (a request failed with a network error — no
+ * internet, or connected to Wi-Fi with no internet) and when it recovers. More accurate than
+ * navigator.onLine, which only reports whether a network interface is up.
+ */
+export function subscribeToReachability(listener: (status: Reachability) => void) {
+  reachabilityListeners.add(listener);
+  return () => {
+    reachabilityListeners.delete(listener);
+  };
+}
+
+/** The last known server reachability (true until a request fails). */
+export function isServerReachable() {
+  return serverReachable;
+}
+
+function setReachable(ok: boolean) {
+  if (ok === serverReachable) return;
+  serverReachable = ok;
+  reachabilityListeners.forEach((listener) => listener(ok ? 'online' : 'offline'));
+}
+
 export async function apiRequest<T>(path: string, options: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
   const { timeoutMs = DEFAULT_TIMEOUT_MS, ...init } = options;
   const controller = new AbortController();
@@ -206,11 +233,17 @@ export async function apiRequest<T>(path: string, options: RequestInit & { timeo
         ...(init.headers ?? {}),
       },
     });
+  } catch (error) {
+    // A network error (no internet, or Wi-Fi with no internet) means the server is unreachable.
+    if (isNetworkError(error)) setReachable(false);
+    throw error;
   } finally {
     clearTimeout(timer);
     clearTimeout(slowTimer);
     if (markedSlow) setSlowRequests(-1);
   }
+  // The server answered (even an error status means it is reachable).
+  setReachable(true);
 
   const rawBody = await response.text();
   let payload: unknown = {};

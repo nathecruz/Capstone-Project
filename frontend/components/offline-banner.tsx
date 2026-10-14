@@ -3,25 +3,38 @@ import { useEffect, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { isServerReachable, subscribeToReachability } from '@/authentication/authService';
+
 /**
  * A quiet banner while the device has no connection, so a student knows HabitAI still works: the
  * cached app keeps running, habits and check-ins save on the device, and they sync when back online.
+ *
+ * "Offline" means the server is actually unreachable — a request failed with a network error —
+ * which covers no Wi-Fi, no mobile data, and being on Wi-Fi that has no internet. On web it also
+ * reacts to the browser's online/offline events so the banner appears the instant the link drops.
  */
 export function OfflineBanner() {
   const insets = useSafeAreaInsets();
   const [offline, setOffline] = useState(false);
 
   useEffect(() => {
-    // Web only: navigator.onLine + its events. Native builds bundle the app, so they already run
-    // offline; connection changes there would need a separate module.
-    if (Platform.OS !== 'web' || typeof navigator === 'undefined' || typeof window === 'undefined') return;
-    const update = () => setOffline(!navigator.onLine);
-    update();
-    window.addEventListener('online', update);
-    window.addEventListener('offline', update);
+    const onWeb = Platform.OS === 'web' && typeof navigator !== 'undefined' && typeof window !== 'undefined';
+    const compute = () => {
+      const navOffline = onWeb ? navigator.onLine === false : false;
+      setOffline(navOffline || !isServerReachable());
+    };
+    compute();
+    const unsubscribe = subscribeToReachability(compute);
+    if (onWeb) {
+      window.addEventListener('online', compute);
+      window.addEventListener('offline', compute);
+    }
     return () => {
-      window.removeEventListener('online', update);
-      window.removeEventListener('offline', update);
+      unsubscribe();
+      if (onWeb) {
+        window.removeEventListener('online', compute);
+        window.removeEventListener('offline', compute);
+      }
     };
   }, []);
 
