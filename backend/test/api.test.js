@@ -865,7 +865,15 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     // Saving habits changes the state (and the first habit earns a badge notification); renaming the buddy changes the buddy.
     await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify(appState) });
     await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ name: 'Mochi' }) });
-    assert.deepEqual(changed(read, await live()), ['buddy', 'notifications', 'state']);
+    const afterHabits = await live();
+    assert.deepEqual(changed(read, afterHabits), ['buddy', 'notifications', 'state']);
+
+    // Feeding a treat records it in buddy_treats; the buddy version must change so the collection
+    // syncs to the student's other devices, and the wallet changes because the treat costs tokens.
+    await db.query("INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,50,'Test grant',$3,$4)", [`${userId}:token:treat-grant`, userId, new Date().toISOString(), Date.now()]);
+    const beforeTreat = await live();
+    await request('/api/buddy/treats', { method: 'POST', headers, body: JSON.stringify({ treatId: 'apple' }) });
+    assert.deepEqual(changed(beforeTreat, await live()), ['buddy', 'wallet'], 'a treat feed syncs the buddy collection and the wallet');
   });
 
   await t.test('issue reports store attachments in the database and validate content', async () => {

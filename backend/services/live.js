@@ -8,7 +8,7 @@ export async function getLiveVersions(db, userId) {
     `SELECT
        (SELECT COALESCE(MAX(updated_at), 0) FROM user_app_state WHERE user_id = u.id)::text AS state,
        (SELECT COALESCE(MAX(created_at), 0) || ':' || COUNT(*) FROM token_transactions WHERE user_id = u.id) AS wallet,
-       (SELECT COALESCE(MAX(updated_at), 0) FROM user_buddy WHERE user_id = u.id) || ':' || (SELECT COUNT(*) FROM buddy_items WHERE user_id = u.id) AS buddy,
+       (SELECT COALESCE(MAX(updated_at), 0) FROM user_buddy WHERE user_id = u.id) || ':' || (SELECT COUNT(*) FROM buddy_items WHERE user_id = u.id) || ':' || (SELECT COALESCE(SUM(fed_count), 0) FROM buddy_treats WHERE user_id = u.id) AS buddy,
        (SELECT COUNT(*) FROM reward_redemptions WHERE user_id = u.id) || ':' || u.custom_title || ':' || u.profile_frame AS rewards,
        (SELECT COALESCE(MAX(created_at), 0) || ':' || COUNT(*) FILTER (WHERE read_at IS NULL) FROM notifications WHERE user_id = u.id) AS notifications,
        (SELECT COUNT(*) FILTER (WHERE read_at IS NULL) FROM notifications WHERE user_id = u.id)::int AS unread,
