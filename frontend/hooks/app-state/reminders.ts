@@ -108,6 +108,15 @@ export async function getBrowserNotificationRegistration() {
   }
 }
 
+/**
+ * Registers the service worker on web as the app starts, so HabitAI is cached for offline use for
+ * every student (not only those who turned on reminders). The same worker also handles push later.
+ */
+export function registerAppServiceWorker() {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+  void navigator.serviceWorker.register('/service-worker.js', { scope: '/' }).catch(() => undefined);
+}
+
 function decodeVapidPublicKey(value: string) {
   const padded = `${value}${'='.repeat((4 - value.length % 4) % 4)}`;
   const base64 = padded.replace(/-/g, '+').replace(/_/g, '/');

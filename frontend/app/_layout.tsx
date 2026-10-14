@@ -15,8 +15,10 @@ import { getSession, subscribeToAuthChanges, type SessionUser } from '@/authenti
 import { CelebrationOverlay } from '@/components/celebration-overlay';
 import { PageSidebar } from '@/components/desktop-sidebar';
 import { ServerStatusBanner } from '@/components/server-status-banner';
+import { OfflineBanner } from '@/components/offline-banner';
 import { CONTENT_MAX_WIDTH, pageBackground, useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { canonicalRedirect } from '@/utils/canonical-host';
+import { registerAppServiceWorker } from '@/hooks/app-state/reminders';
 // Keeps the browser's install prompt as soon as it fires, for HabitAI's own Install button.
 import '@/utils/install-app';
 
@@ -74,6 +76,11 @@ function RootNavigator() {
   if (currentPage && !OVERLAY_ROUTES.has(currentPage) && currentPage !== pageBelowOverlay) setPageBelowOverlay(currentPage);
   const sidebarPage = currentPage && OVERLAY_ROUTES.has(currentPage) ? pageBelowOverlay : currentPage;
   const showPageSidebar = isDesktop && Boolean(sessionUser) && Boolean(sidebarPage) && !NO_SIDEBAR_ROUTES.has(sidebarPage ?? '');
+
+  // Register the service worker on web so an installed HabitAI is cached and opens offline.
+  useEffect(() => {
+    if (Platform.OS === 'web') registerAppServiceWorker();
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -190,6 +197,7 @@ function RootNavigator() {
         </View>
       )}
       <ServerStatusBanner />
+      <OfflineBanner />
       <CelebrationOverlay />
       <StorageNotice />
       <UpdateBanner />

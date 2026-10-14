@@ -1,13 +1,75 @@
-// HabitAI service worker: shows Web Push reminders and handles their Snooze action.
+// HabitAI service worker: shows Web Push reminders and handles their Snooze action, and caches the
+// app shell so an installed HabitAI opens and runs with no connection (habits, check-ins, streaks
+// and settings all live on the device; only the server-backed extras need a connection).
 // The phone plays its notification sound for these (a web page cannot choose the sound of a
 // notification); when HabitAI is open, the page also plays the HabitAI reminder sound.
 
-// A new version takes over right away instead of waiting for every tab to close.
-self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
-
 const ICON = '/icons/icon-192.png';
 const BADGE = '/icons/badge-96.png';
+
+// Bump this to retire an older cache. The app's JS/CSS are content-hashed, so a cached copy is
+// never stale; only the shell cache name is versioned.
+const SHELL_CACHE = 'habitai-shell-v1';
+const APP_SHELL = ['/', '/index.html', '/manifest.json', '/favicon.ico', ICON, BADGE];
+
+// A new version takes over right away instead of waiting for every tab to close.
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+  // Pre-cache the shell so even the very first offline open works; failures are ignored (runtime
+  // caching below fills in anything missing on the first online visit).
+  event.waitUntil(caches.open(SHELL_CACHE).then((cache) => Promise.allSettled(APP_SHELL.map((url) => cache.add(url)))).catch(() => undefined));
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil((async () => {
+    // Drop shell caches from earlier versions.
+    const names = await caches.keys();
+    await Promise.all(names.filter((name) => name.startsWith('habitai-shell-') && name !== SHELL_CACHE).map((name) => caches.delete(name)));
+    await self.clients.claim();
+  })());
+});
+
+// Serve HabitAI offline: a page navigation uses the network first and falls back to the cached
+// shell; same-origin static assets are cache-first; cross-origin requests (the API) and non-GET
+// requests are left to the network, so they fail cleanly offline and the app uses its local copy.
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  if (request.method !== 'GET') return;
+  let url;
+  try {
+    url = new URL(request.url);
+  } catch {
+    return;
+  }
+  if (url.origin !== self.location.origin) return;
+
+  if (request.mode === 'navigate') {
+    event.respondWith((async () => {
+      try {
+        const fresh = await fetch(request);
+        void caches.open(SHELL_CACHE).then((cache) => cache.put('/index.html', fresh.clone())).catch(() => undefined);
+        return fresh;
+      } catch {
+        return (await caches.match('/index.html')) || (await caches.match('/')) || Response.error();
+      }
+    })());
+    return;
+  }
+
+  event.respondWith((async () => {
+    const cached = await caches.match(request);
+    if (cached) return cached;
+    try {
+      const fresh = await fetch(request);
+      if (fresh.ok && fresh.type === 'basic') {
+        void caches.open(SHELL_CACHE).then((cache) => cache.put(request, fresh.clone())).catch(() => undefined);
+      }
+      return fresh;
+    } catch {
+      return cached || Response.error();
+    }
+  })());
+});
 
 /**
  * Shows a reminder so it alerts: sound (unless turned off for the habit), vibration, and it stays
