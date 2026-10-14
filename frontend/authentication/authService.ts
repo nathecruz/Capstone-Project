@@ -214,6 +214,29 @@ function setReachable(ok: boolean) {
   reachabilityListeners.forEach((listener) => listener(ok ? 'online' : 'offline'));
 }
 
+/**
+ * Actively checks whether the server can be reached, with a short timeout, and updates reachability.
+ * Used to detect "offline" reliably without waiting for another request — on the sign-in screen,
+ * while idle, and on devices where navigator.onLine stays true with Wi-Fi off. A hung request (Wi-Fi
+ * with no internet) is treated as offline once the timeout fires. Does nothing with no API configured.
+ */
+export async function probeReachability(timeoutMs = 5000): Promise<boolean> {
+  const base = getApiBaseUrl();
+  if (!base) return serverReachable;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    await fetch(`${base}/healthz`, { signal: controller.signal, cache: 'no-store' });
+    setReachable(true);
+    return true;
+  } catch {
+    setReachable(false);
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function apiRequest<T>(path: string, options: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
   const { timeoutMs = DEFAULT_TIMEOUT_MS, ...init } = options;
   const controller = new AbortController();

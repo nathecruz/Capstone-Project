@@ -3,7 +3,10 @@ import { useEffect, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { isServerReachable, subscribeToReachability } from '@/authentication/authService';
+import { isServerReachable, probeReachability, subscribeToReachability } from '@/authentication/authService';
+
+// How often to actively check the connection, so offline shows without waiting for another request.
+const PROBE_MS = 15000;
 
 /**
  * A quiet banner while the device has no connection, so a student knows HabitAI still works: the
@@ -25,14 +28,21 @@ export function OfflineBanner() {
     };
     compute();
     const unsubscribe = subscribeToReachability(compute);
+    // Actively check the connection so "offline" is detected on any loss of internet — Wi-Fi or data
+    // off, no signal, or Wi-Fi with no internet — without turning on Airplane mode, and even on the
+    // sign-in screen or while idle. navigator.onLine alone is unreliable on some devices.
+    void probeReachability();
+    const probe = setInterval(() => void probeReachability(), PROBE_MS);
+    const onOnline = () => { void probeReachability(); compute(); };
     if (onWeb) {
-      window.addEventListener('online', compute);
+      window.addEventListener('online', onOnline);
       window.addEventListener('offline', compute);
     }
     return () => {
       unsubscribe();
+      clearInterval(probe);
       if (onWeb) {
-        window.removeEventListener('online', compute);
+        window.removeEventListener('online', onOnline);
         window.removeEventListener('offline', compute);
       }
     };
