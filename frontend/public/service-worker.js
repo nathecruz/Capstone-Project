@@ -9,15 +9,40 @@ const BADGE = '/icons/badge-96.png';
 
 // Bump this to retire an older cache. The app's JS/CSS are content-hashed, so a cached copy is
 // never stale; only the shell cache name is versioned.
-const SHELL_CACHE = 'habitai-shell-v1';
+const SHELL_CACHE = 'habitai-shell-v2';
 const APP_SHELL = ['/', '/index.html', '/manifest.json', '/favicon.ico', ICON, BADGE];
+
+/**
+ * Caches the shell AND the JS/CSS the current index.html references, so the app opens offline after
+ * one online visit. The bundle names are content-hashed and unknown ahead of time, so they are read
+ * from index.html here (inside install's waitUntil, which keeps the worker alive until it finishes —
+ * a fire-and-forget cache write during fetch can be dropped when the worker sleeps).
+ */
+async function precacheShell() {
+  const cache = await caches.open(SHELL_CACHE);
+  await Promise.allSettled(APP_SHELL.map((url) => cache.add(url)));
+  try {
+    const response = await fetch('/index.html', { cache: 'no-store' });
+    if (!response.ok) return;
+    await cache.put('/index.html', response.clone());
+    const html = await response.text();
+    const assets = new Set();
+    for (const match of html.matchAll(/(?:src|href)\s*=\s*["']([^"']+)["']/g)) {
+      const value = match[1];
+      if (/\.(?:js|css)(?:\?|#|$)/.test(value) && (value.startsWith('/') || value.startsWith(self.location.origin))) {
+        assets.add(value);
+      }
+    }
+    await Promise.allSettled([...assets].map((asset) => cache.add(asset)));
+  } catch {
+    // Offline during install: the runtime cache below fills these in on the next online visit.
+  }
+}
 
 // A new version takes over right away instead of waiting for every tab to close.
 self.addEventListener('install', (event) => {
   self.skipWaiting();
-  // Pre-cache the shell so even the very first offline open works; failures are ignored (runtime
-  // caching below fills in anything missing on the first online visit).
-  event.waitUntil(caches.open(SHELL_CACHE).then((cache) => Promise.allSettled(APP_SHELL.map((url) => cache.add(url)))).catch(() => undefined));
+  event.waitUntil(precacheShell());
 });
 
 self.addEventListener('activate', (event) => {
@@ -61,8 +86,15 @@ self.addEventListener('fetch', (event) => {
     if (cached) return cached;
     try {
       const fresh = await fetch(request);
+      // Keep a copy of same-origin assets. The write is awaited (and guarded) so the worker is not
+      // killed before it finishes, which is what left the JS bundle uncached before.
       if (fresh.ok && fresh.type === 'basic') {
-        void caches.open(SHELL_CACHE).then((cache) => cache.put(request, fresh.clone())).catch(() => undefined);
+        try {
+          const cache = await caches.open(SHELL_CACHE);
+          await cache.put(request, fresh.clone());
+        } catch {
+          // Cache write failed (e.g. storage full): still serve the response.
+        }
       }
       return fresh;
     } catch {
