@@ -411,8 +411,12 @@ export async function getSession() {
   }
 
   try {
+    // Validating the saved session must not hold the app on its loading screen: a short timeout keeps
+    // start-up fast on slow or cold mobile data, falling back to the saved session below (offline-first).
+    // Signing in itself keeps the full timeout, so a waking free-tier server still works.
     const payload = await apiRequest<{ ok: boolean; user?: SessionUser }>('/api/auth/me', {
       headers: { Authorization: `Bearer ${token}` },
+      timeoutMs: 8000,
     });
     if (!payload.ok || !isValidSessionUser(payload.user)) {
       await logoutUser();
