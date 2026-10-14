@@ -14,13 +14,34 @@ function isWebSessionAvailable(): boolean {
   return Platform.OS === 'web';
 }
 
-function getWebSessionStorage(): Storage | null {
-  if (!isWebSessionAvailable() || typeof window === 'undefined') return null;
+/**
+ * An installed/standalone PWA (Add to Home Screen): its session should persist so a student stays
+ * signed in across launches and the app works offline. A normal browser tab stays ephemeral — the
+ * token lives in sessionStorage and clears when the tab closes, which suits a shared/school computer.
+ */
+function isInstalledPwa(): boolean {
+  if (typeof window === 'undefined') return false;
   try {
-    return window.sessionStorage;
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches) return true;
+    return (window.navigator as { standalone?: boolean } | undefined)?.standalone === true;
   } catch {
-    return null;
+    return false;
   }
+}
+
+/**
+ * Where the web session token lives: localStorage for an installed PWA (persists across launches, so
+ * it works offline after one online sign-in), sessionStorage for a normal tab. `other` is the one not
+ * in use, so a token left there (e.g. before the app was installed) can be migrated and cleared.
+ */
+function getWebTokenStorages(): { active: Storage | null; other: Storage | null } {
+  if (!isWebSessionAvailable() || typeof window === 'undefined') return { active: null, other: null };
+  let local: Storage | null = null;
+  let session: Storage | null = null;
+  try { local = window.localStorage ?? null; } catch { local = null; }
+  try { session = window.sessionStorage ?? null; } catch { session = null; }
+  if (isInstalledPwa()) return { active: local ?? session, other: local ? session : null };
+  return { active: session, other: local };
 }
 
 export type SessionUser = {
@@ -131,9 +152,11 @@ export async function getCurrentSession(): Promise<SessionUser | null> {
 }
 
 export async function saveSessionToken(token: string, user: SessionUser) {
-  const webStorage = getWebSessionStorage();
+  const { active: webStorage, other: otherWebStorage } = getWebTokenStorages();
   if (isWebSessionAvailable() && webStorage) {
     webStorage.setItem(SESSION_TOKEN_KEY, token);
+    // Don't leave a copy in the other web storage (e.g. sessionStorage from before the app was installed).
+    try { otherWebStorage?.removeItem(SESSION_TOKEN_KEY); } catch { /* storage unavailable */ }
     await AsyncStorage.removeItem(SESSION_TOKEN_KEY);
   } else if (isWebSessionAvailable()) {
     await AsyncStorage.setItem(SESSION_TOKEN_KEY, token);
@@ -148,9 +171,19 @@ export async function saveSessionToken(token: string, user: SessionUser) {
 export async function getSessionToken(): Promise<string> {
   try {
     if (isWebSessionAvailable()) {
-      const webStorage = getWebSessionStorage();
-      const sessionToken = webStorage?.getItem(SESSION_TOKEN_KEY);
-      if (sessionToken) return sessionToken;
+      const { active: webStorage, other: otherWebStorage } = getWebTokenStorages();
+      const activeToken = webStorage?.getItem(SESSION_TOKEN_KEY);
+      if (activeToken) return activeToken;
+
+      // A token left in the other web storage (e.g. saved in sessionStorage before the app was
+      // installed as a PWA) moves into the active one so it persists from now on.
+      const otherToken = otherWebStorage?.getItem(SESSION_TOKEN_KEY);
+      if (otherToken && webStorage) {
+        webStorage.setItem(SESSION_TOKEN_KEY, otherToken);
+        try { otherWebStorage?.removeItem(SESSION_TOKEN_KEY); } catch { /* storage unavailable */ }
+        return otherToken;
+      }
+      if (otherToken) return otherToken;
 
       const legacyToken = await AsyncStorage.getItem(SESSION_TOKEN_KEY);
       if (legacyToken && webStorage) {
@@ -179,7 +212,7 @@ export async function getSessionToken(): Promise<string> {
 }
 
 export async function logoutUser() {
-  const webStorage = getWebSessionStorage();
+  const { active: webStorage, other: otherWebStorage } = getWebTokenStorages();
   const signedOutEmail = (await getCurrentSession().catch(() => null))?.email.trim().toLowerCase() ?? '';
   if (isWebSessionAvailable() && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     try {
@@ -192,6 +225,7 @@ export async function logoutUser() {
   }
   try {
     webStorage?.removeItem(SESSION_TOKEN_KEY);
+    otherWebStorage?.removeItem(SESSION_TOKEN_KEY);
   } catch {
     // Continue clearing the remaining session data.
   }

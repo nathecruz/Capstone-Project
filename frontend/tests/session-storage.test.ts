@@ -82,6 +82,31 @@ describe('session token storage', () => {
     expect(AsyncStorage.removeItem).toHaveBeenCalledWith('habitai_session_token');
   });
 
+  it('persists the web token in localStorage for an installed PWA, not ephemeral sessionStorage', async () => {
+    const localStore = {
+      getItem: jest.fn<string | null, [string]>().mockReturnValue(null),
+      setItem: jest.fn<void, [string, string]>(),
+      removeItem: jest.fn<void, [string]>(),
+    };
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        sessionStorage: webSessionStorage,
+        localStorage: localStore,
+        // Standalone display mode = installed PWA.
+        matchMedia: jest.fn().mockReturnValue({ matches: true }),
+      },
+    });
+
+    await saveSessionToken('pwa-token', { fullName: 'PWA User', email: 'pwa@example.com' });
+    expect(localStore.setItem).toHaveBeenCalledWith('habitai_session_token', 'pwa-token');
+    expect(webSessionStorage.removeItem).toHaveBeenCalledWith('habitai_session_token');
+    expect(webSessionStorage.setItem).not.toHaveBeenCalled();
+
+    localStore.getItem.mockReturnValue('pwa-token');
+    await expect(getSessionToken()).resolves.toBe('pwa-token');
+  });
+
   it('stores native session tokens in SecureStore', async () => {
     setPlatform('android');
     const user = { fullName: 'Test User', email: 'test@example.com' };
