@@ -39,6 +39,10 @@ The root `render.yaml` deploys all services as one Blueprint:
 5. Deploy the Blueprint. Keep `ML_MODEL_RELEASE_APPROVED=false` until real approved training outcomes and an independent holdout report have been verified.
 6. `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_AI_API_URL` are injected from the backend URL. `EXPO_PUBLIC_AUTH_URL` must point to the Neon Auth client endpoint. It is compiled into the public web bundle, so it must be a public URL, never a secret. Render only prompts for `sync: false` values when a Blueprint is first created; add or update this value in the service's Environment settings after that.
 
+### Android app builds
+
+The EAS `preview` and `production` profiles set `EXPO_PUBLIC_API_URL` to the deployed backend URL so standalone Android builds can reach the account API. Build a new APK with `eas build --platform android --profile preview` (or use the `production` profile for a production build). Install the newly built APK; changing the profile does not update APKs that are already installed. Development builds can continue using the local API URL inferred from the Expo development server.
+
 ### Mobile web push reminders
 
 Web Push lets scheduled reminders arrive when the browser/PWA is backgrounded or closed, on every device where the student turned reminders on (Chrome and Android, Microsoft Edge, Firefox, Safari, and HabitAI installed on an iPhone's Home Screen). Two senders share the work, and each delivery is claimed in the database so nothing is sent twice:
