@@ -3,11 +3,13 @@ import DateTimePicker, { type DateTimePickerChangeEvent } from '@react-native-co
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Image, Modal, Platform, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { updateAuthenticatedProfile } from '@/authentication';
 import { type Profile, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { toAvatarDataUri } from '@/utils/avatar-image';
+import { getLocalDateKey } from '@/utils/habit-visibility';
 import { joinName } from '@/utils/names';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
@@ -17,9 +19,23 @@ const formatDateOfBirth = (date: Date) => date.toLocaleDateString('en-US', {
   year: 'numeric',
 });
 
+const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+
+/**
+ * Reads a saved birth date ("January 5, 2003", as formatDateOfBirth writes it, or "2003-01-05").
+ * Parsed by hand: Hermes, the phone app's JavaScript engine, cannot read "January 5, 2003" with
+ * new Date() (only browsers can).
+ */
 const parseDateOfBirth = (value: string) => {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? new Date(1998, 4, 14) : date;
+  const text = value.trim();
+  const named = /^([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})$/.exec(text);
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  const month = named ? MONTHS.findIndex((name) => name.startsWith(named[1].toLowerCase()) && named[1].length >= 3) : iso ? Number(iso[2]) - 1 : -1;
+  const day = Number(named ? named[2] : iso?.[3]);
+  const year = Number(named ? named[3] : iso?.[1]);
+  const date = new Date(year, month, day);
+  const valid = month >= 0 && date.getFullYear() === year && date.getMonth() === month && date.getDate() === day;
+  return valid ? date : new Date(1998, 4, 14);
 };
 
 const detailFields: { key: keyof Profile; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
@@ -32,6 +48,8 @@ const detailFields: { key: keyof Profile; label: string; icon: keyof typeof Ioni
 ];
 
 const genderOptions = ['Female', 'Male', 'Non-binary', 'Prefer not to say'];
+
+const genderIcon = (gender: string): keyof typeof Ionicons.glyphMap => gender === 'Female' ? 'female-outline' : gender === 'Male' ? 'male-outline' : 'male-female-outline';
 
 export default function PersonalInformationScreen() {
   const styles = useThemedStyles(themedStyles);
@@ -99,7 +117,6 @@ export default function PersonalInformationScreen() {
       fullName: joinName(draftProfile.firstName, draftProfile.lastName),
       email: draftProfile.email.trim(),
       username: draftProfile.username.trim(),
-      dateOfBirth: formatDateOfBirth(draftBirthDate),
       about: draftProfile.about.trim(),
     };
     setIsSaving(true);
@@ -116,6 +133,15 @@ export default function PersonalInformationScreen() {
     showAlert('Profile updated', result.message && emailChanging ? result.message : 'Your personal information has been saved.', undefined, 'success');
   };
 
+  const saveAvatar = async (result: ImagePicker.ImagePickerResult) => {
+    if (result.canceled) return;
+    try {
+      setAvatarImage(await toAvatarDataUri(result.assets[0]));
+    } catch {
+      showAlert('Photo not added', 'This photo could not be used. Please try another one.');
+    }
+  };
+
   const openAvatarActions = () => {
     showAlert('Profile Picture', 'Choose a profile picture.', [
       { text: 'Cancel', style: 'cancel' },
@@ -123,13 +149,13 @@ export default function PersonalInformationScreen() {
         const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!permission.granted) { showAlert('Permission needed', 'Allow photo library access to choose a profile picture.'); return; }
         const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.85 });
-        if (!result.canceled) setAvatarImage(result.assets[0].uri);
+        await saveAvatar(result);
       } },
       { text: 'Take a Photo', onPress: async () => {
         const permission = await ImagePicker.requestCameraPermissionsAsync();
         if (!permission.granted) { showAlert('Permission needed', 'Allow camera access to take a profile picture.'); return; }
         const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.85 });
-        if (!result.canceled) setAvatarImage(result.assets[0].uri);
+        await saveAvatar(result);
       } },
     ]);
   };
@@ -180,7 +206,7 @@ export default function PersonalInformationScreen() {
             {detailFields.map((detail, index) => (
               <View key={detail.label} style={[styles.detailRow, index < detailFields.length - 1 && styles.detailBorder]}>
                 <View style={styles.detailIcon}>
-                  <Ionicons name={detail.icon as keyof typeof Ionicons.glyphMap} size={22} color={themeColor('#5B42D8')} />
+                  <Ionicons name={detail.key === 'gender' ? genderIcon(profile.gender) : detail.icon} size={22} color={themeColor('#5B42D8')} />
                 </View>
                 <View style={styles.detailCopy}>
                   <Text style={styles.detailLabel}>{detail.label}</Text>
@@ -208,7 +234,8 @@ export default function PersonalInformationScreen() {
       </ScrollView>
 
       <Modal visible={isEditing} animationType="slide" transparent onRequestClose={cancelEditing}>
-        <View style={styles.modalBackdrop}>
+        {/* Keeps the About and password fields above the keyboard (Android does not resize for it either). */}
+        <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'web' ? undefined : 'padding'}>
           <View style={[styles.modalCard, isDarkMode && styles.darkModalCard]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, isDarkMode && styles.darkText]}>Edit Profile</Text>
@@ -227,10 +254,35 @@ export default function PersonalInformationScreen() {
                     </Pressable>
                   ) : field.key === 'dateOfBirth' ? (
                     <>
-                      <Pressable style={[styles.input, styles.dateInput, isDarkMode && styles.darkInput]} onPress={() => setIsDatePickerOpen(true)} accessibilityLabel="Select date of birth">
-                        <Text style={[styles.dateInputText, isDarkMode && styles.darkText]}>{draftProfile.dateOfBirth}</Text>
-                        <Ionicons name="calendar-outline" size={19} color={isDarkMode ? '#AAA4B7' : '#827C8C'} />
-                      </Pressable>
+                      {Platform.OS === 'web' ? (
+                        // The browser's own date picker: an invisible native input over the field opens it on tap.
+                        <View style={[styles.input, styles.dateInput, styles.webDateInput, isDarkMode && styles.darkInput]}>
+                          <Text style={[styles.dateInputText, isDarkMode && styles.darkText]}>{draftProfile.dateOfBirth}</Text>
+                          <Ionicons name="calendar-outline" size={19} color={isDarkMode ? '#AAA4B7' : '#827C8C'} />
+                          <input
+                            type="date"
+                            aria-label="Select date of birth"
+                            // Uncontrolled, so a year still being typed is not reset.
+                            defaultValue={getLocalDateKey(draftBirthDate)}
+                            min="1900-01-01"
+                            max={getLocalDateKey()}
+                            onClick={(event) => { try { event.currentTarget.showPicker?.(); } catch { /* older browsers still allow typing */ } }}
+                            onChange={(event) => {
+                              const value = event.currentTarget.value;
+                              const selectedDate = value ? new Date(`${value}T00:00:00`) : null;
+                              if (!selectedDate || Number.isNaN(selectedDate.getTime()) || selectedDate.getFullYear() < 1900 || selectedDate > new Date()) return;
+                              setDraftBirthDate(selectedDate);
+                              setDraftProfile((current) => ({ ...current, dateOfBirth: formatDateOfBirth(selectedDate) }));
+                            }}
+                            style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
+                          />
+                        </View>
+                      ) : (
+                        <Pressable style={[styles.input, styles.dateInput, isDarkMode && styles.darkInput]} onPress={() => setIsDatePickerOpen(true)} accessibilityLabel="Select date of birth">
+                          <Text style={[styles.dateInputText, isDarkMode && styles.darkText]}>{draftProfile.dateOfBirth}</Text>
+                          <Ionicons name="calendar-outline" size={19} color={isDarkMode ? '#AAA4B7' : '#827C8C'} />
+                        </Pressable>
+                      )}
                       {isDatePickerOpen && Platform.OS === 'ios' && (
                         <View style={[styles.datePickerContainer, isDarkMode && styles.darkInput]}>
                           <DateTimePicker
@@ -313,7 +365,7 @@ export default function PersonalInformationScreen() {
               </View>
             </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal visible={isGenderPickerOpen} animationType="fade" transparent onRequestClose={() => setIsGenderPickerOpen(false)}>
@@ -391,6 +443,7 @@ const themedStyles = createThemedStyles({
   inputLabel: { fontSize: 12, color: '#827C8C', fontWeight: '700', marginBottom: 6 },
   input: { minHeight: 46, borderWidth: 1, borderColor: '#E2DEEA', borderRadius: 12, paddingHorizontal: 13, color: '#302B3B', fontSize: 14, backgroundColor: '#FBFAFD' },
   dateInput: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  webDateInput: { position: 'relative' },
   dateInputText: { color: '#302B3B', fontSize: 14 },
   darkInput: { borderColor: '#3B3647', color: '#F2EFF8', backgroundColor: '#25212E' },
   passwordBox: { marginTop: 10, padding: 12, borderRadius: 14, backgroundColor: '#F5F1FF', gap: 10 },

@@ -12,6 +12,7 @@ import { FramedAvatar } from '@/components/framed-avatar';
 import { FrameSheet, TitleBadge, TitleSheet } from '@/components/reward-sheets';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { badgeProgress, badgeRemaining, historyStats, nextBadge } from '@/utils/achievements';
+import { toAvatarDataUri } from '@/utils/avatar-image';
 import { askAi } from '@/utils/ai-client';
 import { levelProgress } from '@/utils/engagement';
 import type { TranslationKey } from '@/constants/i18n';
@@ -98,7 +99,7 @@ export default function ProfileScreen() {
       quality: 0.85,
     });
 
-    if (!result.canceled) setAvatarImage(result.assets[0].uri);
+    await saveAvatar(result);
   };
 
   const takePhoto = async () => {
@@ -109,7 +110,16 @@ export default function ProfileScreen() {
     }
 
     const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.85 });
-    if (!result.canceled) setAvatarImage(result.assets[0].uri);
+    await saveAvatar(result);
+  };
+
+  const saveAvatar = async (result: ImagePicker.ImagePickerResult) => {
+    if (result.canceled) return;
+    try {
+      setAvatarImage(await toAvatarDataUri(result.assets[0]));
+    } catch {
+      showAlert('Photo not added', 'This photo could not be used. Please try another one.');
+    }
   };
 
   const openAvatarActions = () => {
