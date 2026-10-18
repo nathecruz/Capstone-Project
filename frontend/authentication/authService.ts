@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
+import * as Network from 'expo-network';
 import { Platform } from 'react-native';
 // The app's single API client: every backend request goes through apiRequest below.
 // session.ts only stores the session token and profile on the device.
@@ -215,10 +216,34 @@ function setReachable(ok: boolean) {
 }
 
 /**
+ * Whether the device itself has internet: the phone's own check (Android validates the network, so
+ * Wi-Fi with no internet is false), or navigator.onLine on the web. Unknown counts as online.
+ */
+async function deviceHasInternet() {
+  try {
+    const state = await Network.getNetworkStateAsync();
+    return state.isConnected !== false && state.isInternetReachable !== false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * A request that failed outright means the server is unreachable. One that only timed out may be
+ * the free server waking up (up to a minute), so it counts as offline only when the device has no
+ * internet either; otherwise every cold start showed "You are offline" on a working connection.
+ */
+async function markUnreachable(error: unknown) {
+  const timedOut = error instanceof Error && error.name === 'AbortError';
+  if (timedOut && await deviceHasInternet()) return;
+  setReachable(false);
+}
+
+/**
  * Actively checks whether the server can be reached, with a short timeout, and updates reachability.
  * Used to detect "offline" reliably without waiting for another request — on the sign-in screen,
- * while idle, and on devices where navigator.onLine stays true with Wi-Fi off. A hung request (Wi-Fi
- * with no internet) is treated as offline once the timeout fires. Does nothing with no API configured.
+ * while idle, and on devices where navigator.onLine stays true with Wi-Fi off. A hung request counts
+ * as offline when the device has no internet (Wi-Fi with no internet). Does nothing with no API configured.
  */
 export async function probeReachability(timeoutMs = 5000): Promise<boolean> {
   const base = getApiBaseUrl();
@@ -229,9 +254,9 @@ export async function probeReachability(timeoutMs = 5000): Promise<boolean> {
     await fetch(`${base}/healthz`, { signal: controller.signal, cache: 'no-store' });
     setReachable(true);
     return true;
-  } catch {
-    setReachable(false);
-    return false;
+  } catch (error) {
+    await markUnreachable(error);
+    return serverReachable;
   } finally {
     clearTimeout(timer);
   }
@@ -258,7 +283,7 @@ export async function apiRequest<T>(path: string, options: RequestInit & { timeo
     });
   } catch (error) {
     // A network error (no internet, or Wi-Fi with no internet) means the server is unreachable.
-    if (isNetworkError(error)) setReachable(false);
+    if (isNetworkError(error)) await markUnreachable(error);
     throw error;
   } finally {
     clearTimeout(timer);
