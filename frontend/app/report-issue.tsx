@@ -59,7 +59,7 @@ export default function ReportIssueScreen() {
       // A question has no "when"; the report still needs one.
       timing: isQuestion ? 'Not applicable' : timing,
       description: description.trim(),
-      attachment: attachment ? { uri: attachment.uri, name: attachment.name, type: attachment.mimeType } : undefined,
+      attachment: attachment ? { uri: attachment.uri, name: attachment.name, type: attachment.mimeType, file: attachment.file } : undefined,
     });
     setIsSubmitting(false);
     if (!result.ok) {

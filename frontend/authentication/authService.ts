@@ -850,7 +850,8 @@ export async function submitIssueReport(report: {
   topic: string;
   timing: string;
   description: string;
-  attachment?: { uri: string; name: string; type?: string | null };
+  /** `file` is the picked File on the web; the phone app sends the file by its `uri`. */
+  attachment?: { uri: string; name: string; type?: string | null; file?: File };
 }) {
   const token = await getSessionToken();
   if (!token) return { ok: false, message: 'You are not signed in.' };
@@ -860,7 +861,10 @@ export async function submitIssueReport(report: {
     formData.append('topic', report.topic);
     formData.append('timing', report.timing);
     formData.append('description', report.description);
-    if (report.attachment) {
+    if (report.attachment?.file) {
+      // A browser's FormData takes the File itself; the { uri } object below would be sent as "[object Object]".
+      formData.append('attachment', report.attachment.file, report.attachment.name);
+    } else if (report.attachment) {
       formData.append('attachment', {
         uri: report.attachment.uri,
         name: report.attachment.name,
