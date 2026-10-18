@@ -100,7 +100,8 @@ export default function VerifyEmailScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* Android too: drawn edge to edge, its window no longer shrinks for the keyboard (padding is 0 when it does). */}
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'web' ? undefined : 'padding'}>
         <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
           <View style={styles.iconBadge}>
             <Ionicons name="mail-unread-outline" size={30} color="#5B42D8" />
