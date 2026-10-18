@@ -12,6 +12,9 @@ import type { Habit } from '@/hooks/app-state/types';
 import { useHabitCategories } from '@/hooks/use-habit-categories';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 import { EDITABLE_FREQUENCIES, HABIT_NAME_MAX_LENGTH, editedHabitFields } from '@/utils/habit-edit';
+import { getLocalDateKey } from '@/utils/habit-visibility';
+
+const displayDate = (dateKey: string) => new Date(`${dateKey}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
 export function EditHabitSheet({ habit, onClose }: { habit: Habit | null; onClose: () => void }) {
   return (
@@ -31,7 +34,7 @@ function EditHabitForm({ habit, onClose }: { habit: Habit; onClose: () => void }
   const [label, setLabel] = useState(habit.label);
   const [category, setCategory] = useState(habit.category);
   const [frequency, setFrequency] = useState(habit.frequency);
-  const [startDate, setStartDate] = useState(habit.startDate || new Date().toISOString().slice(0, 10));
+  const [startDate, setStartDate] = useState(habit.startDate || getLocalDateKey());
   const [startDatePickerVisible, setStartDatePickerVisible] = useState(false);
   const savedTimes = (habit.reminderTimes?.length ? habit.reminderTimes : [habit.reminderTime]).filter(Boolean);
   const [remindersOn, setRemindersOn] = useState(habit.reminderEnabled && savedTimes.length > 0);
@@ -142,18 +145,35 @@ function EditHabitForm({ habit, onClose }: { habit: Habit; onClose: () => void }
           {frequency !== habit.frequency ? <Text style={styles.hint}>Your check-ins stay; the streak is recounted for the new schedule.</Text> : null}
 
           <Text style={styles.label}>Start date</Text>
-          <Pressable style={styles.startDateButton} onPress={() => setStartDatePickerVisible(true)} accessibilityRole="button" accessibilityLabel={`Start date ${new Date(`${startDate}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}. Change`}>
-            <Text style={styles.startDateText}>{new Date(`${startDate}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
-            <Ionicons name="calendar-outline" size={16} color={themeColor('#5B42D8')} />
-          </Pressable>
-          {startDatePickerVisible && (
+          {Platform.OS === 'web' ? (
+            // The browser's own date picker: an invisible native input over the field opens it on tap.
+            <View style={[styles.startDateButton, styles.startDateWebButton]}>
+              <Text style={styles.startDateText}>{displayDate(startDate)}</Text>
+              <Ionicons name="calendar-outline" size={16} color={themeColor('#5B42D8')} />
+              <input
+                type="date"
+                aria-label={`Start date ${displayDate(startDate)}. Change`}
+                value={startDate}
+                onClick={(event) => { try { event.currentTarget.showPicker?.(); } catch { /* older browsers still allow typing */ } }}
+                onChange={(event) => { const value = event.currentTarget.value; if (value) setStartDate(value); }}
+                style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
+              />
+            </View>
+          ) : (
+            <Pressable style={styles.startDateButton} onPress={() => setStartDatePickerVisible(true)} accessibilityRole="button" accessibilityLabel={`Start date ${displayDate(startDate)}. Change`}>
+              <Text style={styles.startDateText}>{displayDate(startDate)}</Text>
+              <Ionicons name="calendar-outline" size={16} color={themeColor('#5B42D8')} />
+            </Pressable>
+          )}
+          {startDatePickerVisible && Platform.OS !== 'web' && (
             <DateTimePicker
               value={new Date(`${startDate}T00:00:00`)}
               mode="date"
               display={Platform.OS === 'ios' ? 'inline' : 'default'}
               onChange={(_event, date) => {
                 setStartDatePickerVisible(false);
-                if (date) setStartDate(date.toISOString().slice(0, 10));
+                // The picked day in the phone's time zone (toISOString would give the UTC day, a day early east of UTC).
+                if (date) setStartDate(getLocalDateKey(date));
               }}
             />
           )}
@@ -213,6 +233,7 @@ const themedStyles = createThemedStyles({
   chipTextSelected: { color: '#5B42D8', fontWeight: '800' },
   hint: { fontSize: 12, color: '#777282', fontWeight: '600' },
   startDateButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderWidth: 1, borderColor: '#E4E0EC', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, backgroundColor: '#FAF9FD' },
+  startDateWebButton: { position: 'relative' },
   startDateText: { fontSize: 15, fontWeight: '700', color: '#1D1C26' },
   reminderHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 6 },
   reminderCopy: { flex: 1 },
