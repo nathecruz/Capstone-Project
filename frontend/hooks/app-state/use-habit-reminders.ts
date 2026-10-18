@@ -80,7 +80,9 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
       if (Platform.OS === 'web') {
         if (!preferences.notificationsEnabled || typeof window === 'undefined' || typeof window.Notification === 'undefined' || window.Notification.permission !== 'granted') return;
         const registration = await getBrowserNotificationRegistration();
-        if (!registration) return;
+        // Rescheduled while waiting (habits changed, or the screen closed): starting the timer now
+        // would leave it running forever next to the new one.
+        if (!registration || cancelled) return;
         const reminders = habits.filter((habit) => habit.smartReminderEnabled || (habit.reminderEnabled && getHabitReminderTimes(habit).length > 0));
         if (!reminders.length) return;
 
@@ -192,6 +194,7 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
           });
         }
 
+        if (cancelled) return;
         if (habit.frequency === 'Custom') continue;
         const lastReminderTime = times.reduce((latest, time) => time.hour * 60 + time.minute > latest.hour * 60 + latest.minute ? time : latest);
         const missedAt = new Date(now);
