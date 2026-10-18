@@ -36,7 +36,8 @@ export function AuthScreen({ title, subtitle, children, footer }: { title: strin
   return (
     <SafeAreaView style={styles.safe}>
       <RNStatusBar barStyle="dark-content" backgroundColor="#F3F1FB" />
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* Android too: drawn edge to edge, its window no longer shrinks for the keyboard (padding is 0 when it does). */}
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'web' ? undefined : 'padding'}>
         <ScrollView contentContainerStyle={[styles.scroll, wide && styles.scrollWide]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.blobOne} pointerEvents="none" />
           <View style={styles.blobTwo} pointerEvents="none" />
