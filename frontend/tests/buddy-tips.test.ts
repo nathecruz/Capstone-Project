@@ -20,6 +20,16 @@ describe('Habi\'s tips', () => {
     expect(tips).toContain('Do Read today for a 7-day streak!');
   });
 
+  it('only urges habits that can still be done today, not ones past their last reminder time', () => {
+    // 7 PM: Read was planned for 6 PM with no reminder (late, still open); Gym's last reminder was 6 PM (missed).
+    const read = habit('Read', days('10-01', '10-02', '10-03'), { streak: 6, meta: 'Daily • 06:00 PM' });
+    const gym = habit('Gym', days('10-01', '10-02', '10-03'), { streak: 6, meta: 'Daily • 06:00 PM', reminderEnabled: true, reminderTime: '06:00 PM', reminderTimes: ['06:00 PM'] });
+    const tips = buddyTips([gym, read], { checkIns: 20 }, now);
+    expect(tips).toContain('Do Read today for a 7-day streak!');
+    expect(tips).toContain('Read was due earlier. There is still time today!');
+    expect(tips.some((tip) => tip.includes('Gym'))).toBe(false);
+  });
+
   it('pairs a habit that needs love with one the student rarely skips', () => {
     const tips = buddyTips([habit('Read', lastWeek), habit('Journal', days('09-28'))], { checkIns: 20 }, now);
     expect(tips).toContain('Journal needs some love. Try it right after Read, which you rarely skip.');

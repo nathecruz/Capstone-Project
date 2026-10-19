@@ -4,6 +4,8 @@ import { query, withTransaction } from '../db/client.js';
 import { parse } from '../lib/http.js';
 import { notificationReadSchema, webPushSnoozeRequestSchema, webPushSubscriptionRequestSchema, webPushTestSchema, webPushUnsubscribeSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
+import { canStillCheckIn } from '../services/completion-date.js';
+import { localDateIn } from '../services/web-push-actions.js';
 import { notifyReminderChange } from '../services/web-push-clock.js';
 import { getConfiguredVapidDetails, getConfiguredVapidPublicKey, getWebPushSnoozeSettings, hashWebPushSnoozeToken, isAllowedWebPushEndpoint } from '../services/web-push-reminders.js';
 
@@ -124,7 +126,9 @@ export default function registerNotificationRoutes(app) {
         SELECT snooze_token.subscription_id AS "subscriptionId",
                snooze_token.habit_id AS "habitId",
                snooze_token.snooze_count AS "snoozeCount",
+               snooze_token.created_at AS "createdAt",
                subscription.user_id AS "userId",
+               subscription.time_zone AS "timeZone",
                current_state.state_json AS "stateJson"
         FROM web_push_snooze_tokens AS snooze_token
         JOIN web_push_subscriptions AS subscription ON subscription.id=snooze_token.subscription_id
@@ -137,6 +141,12 @@ export default function registerNotificationRoutes(app) {
       if (!token) return false;
       const settings = getWebPushSnoozeSettings(token.stateJson, token.habitId, Number(token.snoozeCount));
       if (!settings) return false;
+      // The snooze must come back on its reminder's day while the habit can still be checked in;
+      // later (the day is over, the habit is done or past its last reminder time) it is refused.
+      const reminderDate = localDateIn(token.timeZone, new Date(Number(token.createdAt)));
+      if (!canStillCheckIn(settings.habit, reminderDate, token.timeZone, new Date(now + settings.intervalMinutes * 60_000))) {
+        return { refused: 'This habit can no longer be checked in today, so this reminder cannot be snoozed.' };
+      }
       const consumed = await db.query('UPDATE web_push_snooze_tokens SET consumed_at=$1 WHERE token_hash=$2 AND consumed_at=0 AND expires_at>$1', [now, tokenHash]);
       if (!consumed.rowCount) return false;
       await db.query(
@@ -146,6 +156,7 @@ export default function registerNotificationRoutes(app) {
       return token.userId;
     });
     if (!enqueued) return response.status(410).json({ ok: false, message: 'This snooze action is no longer available.' });
+    if (enqueued.refused) return response.status(410).json({ ok: false, message: enqueued.refused });
     // The snoozed reminder comes back on its minute when the API is still awake then.
     notifyReminderChange(enqueued);
     response.json({ ok: true });

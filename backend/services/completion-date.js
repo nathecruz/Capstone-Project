@@ -62,6 +62,20 @@ export function isOpenCheckInDate(date, timeZone = 'UTC', now = new Date()) {
 }
 
 /**
+ * Seconds until a check-in of the habit for `date` (today) closes at `now`: the end of its last
+ * reminder minute, or the end of the day without a reminder; 0 once closed. A reminder push lives
+ * only that long, so a phone that was offline or asleep never shows it after the habit is missed.
+ */
+export function secondsUntilCheckInCloses(habit, date, timeZone = 'UTC', now = new Date()) {
+  if (!isOpenCheckInDate(date, timeZone, now)) return 0;
+  const minutes = getMinutesOfDayInTimeZone(now, timeZone);
+  if (minutes === null) return 0;
+  const closesAtMinute = (habitDeadlineMinutes(habit) ?? 24 * 60 - 1) + 1;
+  // Time zones are whole minutes off UTC, so the seconds into the minute are the same everywhere.
+  return Math.max(0, (closesAtMinute - minutes) * 60 - now.getUTCSeconds());
+}
+
+/**
  * Whether a check-in of the habit for `date` would still be accepted at `now`: the day is today
  * and the habit's last reminder time has not passed. Otherwise the habit is missed for that day
  * (or done), so a reminder about it is not sent.

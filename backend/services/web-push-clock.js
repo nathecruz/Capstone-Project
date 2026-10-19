@@ -25,7 +25,8 @@ const CHANGE_DELAY_MS = 5_000;
 const FIRE_OFFSET_MS = 1_000;
 const RETRY_MS = 60_000;
 const MAX_RETRIES = 3;
-// After a restart, reminders missed in the last 30 minutes (while asleep) are sent, as on GitHub.
+// After a restart, reminders missed in the last 30 minutes (while asleep) are sent, as on GitHub,
+// unless their habit can no longer be checked in (see dispatchDueReminders).
 const MAX_LOOKBACK_MINUTES = 30;
 const ALL = '*';
 

@@ -170,6 +170,10 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
   };
 
   const password = 'Violet!Orbit7!Cedar2!Mint';
+  // A time zone where it is around noon now, so reminder deadlines (12:00 AM here) have passed and
+  // the day is far from over whatever time the tests run.
+  const utcHour = new Date().getUTCHours();
+  const middayZone = utcHour <= 12 ? `Etc/GMT-${12 - utcHour}` : `Etc/GMT+${utcHour - 12}`;
   const registration = { firstName: 'Test', lastName: 'User', username: 'test_user', email: 'test@example.com', password, dateOfBirth: 'May 14, 1998', gender: 'Prefer not to say' };
   let token;
   let userId;
@@ -243,8 +247,9 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const pushSubscription = { endpoint: 'https://fcm.googleapis.com/fcm/send/test-endpoint', expirationTime: null, keys: { p256dh: 'test-p256dh-key', auth: 'test-auth-key' } };
     assert.equal((await request('/api/web-push/public-key')).body.publicKey, 'test-vapid-public-key');
     assert.equal((await request('/api/web-push/subscriptions', { method: 'POST', body: JSON.stringify({ subscription: pushSubscription, timeZone: 'UTC' }) })).response.status, 401);
-    assert.equal((await request('/api/web-push/subscriptions', { method: 'POST', headers: authHeaders, body: JSON.stringify({ subscription: pushSubscription, timeZone: 'America/Los_Angeles' }) })).response.status, 200);
-    const snoozeState = { avatarImage: null, profile: { fullName: 'Test User' }, preferences: { notificationsEnabled: true }, habits: [{ id: 'habit-snooze', label: 'Stretch', reminderEnabled: true }], points: 0, tokens: 0, tokenHistory: [], darkModeOverride: null, ringInterval: 15, snoozeFrequency: '2 times', goals: [] };
+    assert.equal((await request('/api/web-push/subscriptions', { method: 'POST', headers: authHeaders, body: JSON.stringify({ subscription: pushSubscription, timeZone: middayZone }) })).response.status, 200);
+    const missedHabit = { id: 'habit-missed', label: 'Pills', reminderEnabled: true, reminderTime: '12:00 AM', reminderTimes: ['12:00 AM'] };
+    const snoozeState = { avatarImage: null, profile: { fullName: 'Test User' }, preferences: { notificationsEnabled: true }, habits: [{ id: 'habit-snooze', label: 'Stretch', reminderEnabled: true }, missedHabit], points: 0, tokens: 0, tokenHistory: [], darkModeOverride: null, ringInterval: 15, snoozeFrequency: '2 times', goals: [] };
     assert.equal((await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify(snoozeState) })).response.status, 200);
     const snoozeToken = crypto.randomBytes(32).toString('base64url');
     const subscriptionId = (await db.query('SELECT id FROM web_push_subscriptions WHERE endpoint=$1', [pushSubscription.endpoint])).rows[0].id;
@@ -252,6 +257,17 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal((await request('/api/web-push/snooze', { method: 'POST', body: JSON.stringify({ token: snoozeToken }) })).response.status, 200);
     assert.equal((await request('/api/web-push/snooze', { method: 'POST', body: JSON.stringify({ token: snoozeToken }) })).response.status, 410);
     assert.equal((await db.query('SELECT COUNT(*)::int AS count FROM web_push_snooze_queue')).rows[0].count, 1);
+    // A habit past its last reminder time (12:00 AM) is missed: snoozing its reminder is refused with the reason.
+    const missedToken = crypto.randomBytes(32).toString('base64url');
+    await db.query('INSERT INTO web_push_snooze_tokens(token_hash,subscription_id,habit_id,snooze_count,expires_at,created_at) VALUES($1,$2,$3,0,$4,$5)', [crypto.createHash('sha256').update(missedToken).digest('hex'), subscriptionId, missedHabit.id, Date.now() + 60000, Date.now()]);
+    const missedSnooze = await request('/api/web-push/snooze', { method: 'POST', body: JSON.stringify({ token: missedToken }) });
+    assert.equal(missedSnooze.response.status, 410);
+    assert.match(missedSnooze.body.message, /can no longer be checked in/);
+    // A reminder from an earlier day cannot be snoozed into today either.
+    const oldToken = crypto.randomBytes(32).toString('base64url');
+    await db.query('INSERT INTO web_push_snooze_tokens(token_hash,subscription_id,habit_id,snooze_count,expires_at,created_at) VALUES($1,$2,$3,0,$4,$5)', [crypto.createHash('sha256').update(oldToken).digest('hex'), subscriptionId, 'habit-snooze', Date.now() + 60000, Date.now() - 24 * 60 * 60 * 1000]);
+    assert.equal((await request('/api/web-push/snooze', { method: 'POST', body: JSON.stringify({ token: oldToken }) })).response.status, 410);
+    assert.equal((await db.query('SELECT COUNT(*)::int AS count FROM web_push_snooze_queue')).rows[0].count, 1, 'nothing more is queued');
     assert.equal((await request('/api/web-push/subscriptions', { method: 'POST', headers: authHeaders, body: JSON.stringify({ subscription: { ...pushSubscription, endpoint: 'https://attacker.example/push' }, timeZone: 'UTC' }) })).response.status, 400);
     assert.equal((await request('/api/web-push/subscriptions', { method: 'DELETE', headers: authHeaders, body: JSON.stringify({ endpoint: pushSubscription.endpoint }) })).response.status, 200);
     // The test notification needs a signed-in account with this device subscribed.
@@ -701,6 +717,14 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(done.body.label, 'Read');
     const completions = (await request('/api/habit-completions', { headers })).body.completions;
     assert.ok(completions.some((row) => row.habitId === 'read' && row.date === today), 'the habit is checked in');
+    // Done on a habit already past its last reminder time is refused with the reason (it used to fail with a 500).
+    const pills = { ...appState.habits[0], id: 'pills', label: 'Pills', reminderEnabled: true, reminderTime: '12:00 AM', reminderTimes: ['12:00 AM'] };
+    const current = await request('/api/app-state', { headers });
+    await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...current.body.state, habits: [...current.body.state.habits, pills], baseUpdatedAt: current.body.updatedAt, baseState: current.body.state }) });
+    const middayDate = new Intl.DateTimeFormat('en-CA', { timeZone: middayZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const lateDone = await request('/api/web-push/done', { method: 'POST', body: JSON.stringify({ token: makeDoneToken({ userId, habitId: 'pills', date: middayDate, timeZone: middayZone }, secret) }) });
+    assert.equal(lateDone.response.status, 409, JSON.stringify(lateDone.body));
+    assert.equal(lateDone.body.code, 'PAST_DEADLINE');
 
     // Streak Freeze: the walk ran for three days, then yesterday was missed.
     const dayBefore = (days) => new Date(Date.parse(`${today}T00:00:00Z`) - days * 86_400_000).toISOString().slice(0, 10);

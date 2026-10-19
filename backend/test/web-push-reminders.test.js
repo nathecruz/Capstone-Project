@@ -233,7 +233,7 @@ function fakeDispatchDb({ snoozes = [], subscription = null, state = null } = {}
 
 function fakeWebPush() {
   const sent = [];
-  return { sent, async sendNotification(_subscription, payload) { sent.push(JSON.parse(payload)); } };
+  return { sent, async sendNotification(_subscription, payload, options) { sent.push({ ...JSON.parse(payload), options }); } };
 }
 
 test('a reminder sent late is dropped once the habit is missed (past its last reminder time)', async (t) => {
@@ -259,7 +259,22 @@ test('a reminder sent late is dropped once the habit is missed (past its last re
   assert.deepEqual(listed, ['Read reminder', 'Stretch reminder']);
   // Read can still be done until 8:00 PM, so its late 11:30 reminder offers Snooze; Stretch's
   // reminder is its last one, so a snooze would come back after it is missed.
-  assert.deepEqual(webpush.sent.map((push) => push.actions.map((action) => action.action)), [['SNOOZE'], []]);
+  assert.deepEqual(webpush.sent.map((push) => push.actions.some((action) => action.action === 'SNOOZE')), [true, false]);
+  // Each push expires when its habit can no longer be checked in (Read at the end of 8:00 PM,
+  // Stretch at the end of 11:55 AM), so a phone that was offline does not show it later.
+  assert.deepEqual(webpush.sent.map((push) => push.options), [{ TTL: (20 * 60 + 1 - (11 * 60 + 55)) * 60, urgency: 'high' }, { TTL: 60, urgency: 'high' }]);
+});
+
+test('a push lives only until its habit can no longer be checked in', async () => {
+  const { secondsUntilCheckInCloses } = await import('../services/completion-date.js');
+  const gym = { reminderEnabled: true, reminderTimes: ['11:30 AM'], completionDates: [] };
+  // 11:29:20 in Manila: the check-in closes at 11:31:00.
+  assert.equal(secondsUntilCheckInCloses(gym, '2026-10-19', 'Asia/Manila', new Date('2026-10-19T03:29:20.000Z')), 100);
+  assert.equal(secondsUntilCheckInCloses(gym, '2026-10-19', 'Asia/Manila', new Date('2026-10-19T03:30:59.000Z')), 1);
+  assert.equal(secondsUntilCheckInCloses(gym, '2026-10-19', 'Asia/Manila', new Date('2026-10-19T03:31:00.000Z')), 0, 'missed');
+  assert.equal(secondsUntilCheckInCloses(gym, '2026-10-18', 'Asia/Manila', new Date('2026-10-19T03:29:20.000Z')), 0, 'a day that is over');
+  // Without a reminder, until midnight.
+  assert.equal(secondsUntilCheckInCloses({ reminderEnabled: false }, '2026-10-19', 'Asia/Manila', new Date('2026-10-19T15:59:30.000Z')), 30);
 });
 
 test('a snoozed reminder is dropped once the habit is done or missed, or its day is over', async (t) => {
@@ -283,6 +298,7 @@ test('a snoozed reminder is dropped once the habit is done or missed, or its day
 
   // Gym passed its 11:30 deadline, Water is done, and yesterday's snooze is for a day that is over.
   assert.deepEqual(webpush.sent.map((push) => push.tag), ['snooze-read']);
+  assert.deepEqual(webpush.sent[0].options, { TTL: (20 * 60 + 1 - (11 * 60 + 55)) * 60, urgency: 'high' });
   assert.equal(result.sent, 1);
   const closed = db.queries.filter((entry) => entry.text.startsWith('UPDATE web_push_snooze_queue SET sent_at')).map((entry) => entry.values[0]);
   assert.deepEqual(closed.sort(), ['gym', 'read', 'water', 'yesterday']);
