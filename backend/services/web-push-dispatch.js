@@ -3,6 +3,7 @@
 // (scripts/web-push-scheduler.js), and by the every-minute dispatcher for a paid cron job
 // (scripts/send-web-push-reminders.js). `db` is anything with pg's `query(text, values)`.
 import crypto from 'node:crypto';
+import { canStillCheckIn } from './completion-date.js';
 import { getSmartReminderText } from './smart-reminders.js';
 import { doneActionSecret, getWebPushDoneUrl, localDateIn, makeDoneToken } from './web-push-actions.js';
 import { getDueHabitReminders, getReminderText, getSnoozeLimit, getWebPushSnoozeSettings, hashWebPushSnoozeToken } from './web-push-reminders.js';
@@ -75,13 +76,18 @@ function makeNotificationId(userId, habitId, date, time) {
   return `web-push:${crypto.createHash('sha256').update(value).digest('hex')}`;
 }
 
-/** Creates a one-time Snooze token; `followUpAt` is when the snooze would be due if tapped right away. */
-async function makeSnoozeAction(db, snoozeUrl, subscriptionId, habitId, snoozeCount, state) {
+/**
+ * Creates a one-time Snooze token; `followUpAt` is when the snooze would be due if tapped right away.
+ * No Snooze when that is after the habit's last reminder time on `date` (or after that day): by then
+ * the habit is missed and the snoozed reminder would be dropped.
+ */
+async function makeSnoozeAction(db, snoozeUrl, subscriptionId, habitId, snoozeCount, state, { date, timeZone }) {
   if (!snoozeUrl) return null;
   const settings = getWebPushSnoozeSettings(state, habitId, snoozeCount);
   if (!settings || settings.nextSnoozeCount > getSnoozeLimit(state.snoozeFrequency || 'Once')) return null;
-  const token = crypto.randomBytes(32).toString('base64url');
   const createdAt = Date.now();
+  if (!canStillCheckIn(settings.habit, date, timeZone, new Date(createdAt + settings.intervalMinutes * 60_000))) return null;
+  const token = crypto.randomBytes(32).toString('base64url');
   await db.query(`
     INSERT INTO web_push_snooze_tokens(token_hash,subscription_id,habit_id,snooze_count,expires_at,created_at)
     VALUES($1,$2,$3,$4,$5,$6)
@@ -102,7 +108,7 @@ export async function dispatchDueSnoozes(db, { webpush, template = null, snoozeU
     UPDATE web_push_snooze_queue AS queue SET attempted_at=$1
     FROM due WHERE queue.id=due.id
     RETURNING queue.id,queue.subscription_id AS "subscriptionId",queue.user_id AS "userId",
-              queue.habit_id AS "habitId",queue.snooze_count AS "snoozeCount"
+              queue.habit_id AS "habitId",queue.snooze_count AS "snoozeCount",queue.created_at AS "createdAt"
   `, [now]);
   const result = { sent: 0, expired: 0, failed: 0, followUps: [] };
 
@@ -117,17 +123,20 @@ export async function dispatchDueSnoozes(db, { webpush, template = null, snoozeU
     const state = typeof appState === 'string' ? JSON.parse(appState) : appState;
     const settings = getWebPushSnoozeSettings(state, row.habitId, Number(row.snoozeCount) - 1);
     const habit = Array.isArray(state.habits) ? state.habits.find((item) => item.id === row.habitId) : null;
-    if (!settings || !habit) {
+    // The snooze is for the day it was tapped. Once the habit is done, or missed (its last reminder
+    // time or its day has passed), it is dropped: it could no longer be checked in.
+    const date = localDateIn(subscription.timeZone, new Date(Number(row.createdAt) || now));
+    if (!settings || !habit || !canStillCheckIn(habit, date, subscription.timeZone, new Date())) {
       await db.query('UPDATE web_push_snooze_queue SET sent_at=$2,attempted_at=0 WHERE id=$1', [row.id, now]);
       continue;
     }
     try {
-      const action = await makeSnoozeAction(db, snoozeUrl, row.subscriptionId, row.habitId, Number(row.snoozeCount), state);
+      const action = await makeSnoozeAction(db, snoozeUrl, row.subscriptionId, row.habitId, Number(row.snoozeCount), state, { date, timeZone: subscription.timeZone });
       await webpush.sendNotification(subscription.subscriptionJson, JSON.stringify({
         ...getReminderText(habit, template),
         tag: `snooze-${row.id}`,
         soundEnabled: habit.reminderSoundEnabled !== false,
-        ...reminderActions({ userId: row.userId, habitId: row.habitId, label: habit.label, type: 'habit-reminder', date: localDateIn(subscription.timeZone), timeZone: subscription.timeZone, snooze: action, snoozeCount: Number(row.snoozeCount) }),
+        ...reminderActions({ userId: row.userId, habitId: row.habitId, label: habit.label, type: 'habit-reminder', date, timeZone: subscription.timeZone, snooze: action, snoozeCount: Number(row.snoozeCount) }),
       }), { TTL: 86400 });
       await db.query('UPDATE web_push_snooze_queue SET sent_at=$2,attempted_at=0 WHERE id=$1', [row.id, Date.now()]);
       result.sent += 1;
@@ -160,6 +169,9 @@ export async function dispatchDueReminders(db, { webpush, template = null, snooz
     for (const habit of Array.isArray(state.habits) ? state.habits : []) {
       if (typeof habit.id !== 'string' || !habit.id || habit.id.length > 120) continue;
       for (const due of getDueHabitReminders(habit, row.timeZone, now, lookbackMinutes)) {
+        // Sent late (the API was asleep, or a run was slow): a habit already past its last reminder
+        // time, or whose day is over, is missed and can no longer be checked in, so it is not reminded.
+        if (!canStillCheckIn(habit, due.date, row.timeZone, new Date())) continue;
         const claim = await db.query(`
           INSERT INTO web_push_deliveries(subscription_id,habit_id,reminder_date,reminder_time,attempted_at,sent_at)
           VALUES($1,$2,$3,$4,$5,0)
@@ -175,7 +187,7 @@ export async function dispatchDueReminders(db, { webpush, template = null, snooz
         const type = due.smart ? 'smart-reminder' : 'habit-reminder';
         const notificationId = makeNotificationId(row.userId, String(habit.id), due.date, due.time);
         try {
-          const action = await makeSnoozeAction(db, snoozeUrl, row.subscriptionId, String(habit.id), 0, state);
+          const action = await makeSnoozeAction(db, snoozeUrl, row.subscriptionId, String(habit.id), 0, state, { date: due.date, timeZone: row.timeZone });
           await webpush.sendNotification(row.subscriptionJson, JSON.stringify({
             title,
             body,

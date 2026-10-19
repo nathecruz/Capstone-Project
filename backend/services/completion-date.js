@@ -60,3 +60,13 @@ export function isOpenCheckInDate(date, timeZone = 'UTC', now = new Date()) {
   if (!isValidCompletionDate(date, timeZone, now)) return false;
   return date === getDateKeyInTimeZone(now, timeZone);
 }
+
+/**
+ * Whether a check-in of the habit for `date` would still be accepted at `now`: the day is today
+ * and the habit's last reminder time has not passed. Otherwise the habit is missed for that day
+ * (or done), so a reminder about it is not sent.
+ */
+export function canStillCheckIn(habit, date, timeZone = 'UTC', now = new Date()) {
+  if (Array.isArray(habit?.completionDates) && habit.completionDates.includes(date)) return false;
+  return isOpenCheckInDate(date, timeZone, now) && !isPastHabitDeadline(habit, date, timeZone, now);
+}

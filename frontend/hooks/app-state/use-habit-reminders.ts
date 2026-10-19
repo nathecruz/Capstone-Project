@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import { getLocalDateKey } from './habit-progress';
-import { enableWebReminders, getBrowserNotificationRegistration, getHabitReminderTimes, getNotificationsModule, getSnoozeLimit, isHabitReminderDay, nextReminderOccurrence, playReminderSound, requestWebNotificationPermission, type NotificationsModule } from './reminders';
+import { canRemindAt, canSnoozeAt, enableWebReminders, getBrowserNotificationRegistration, getHabitReminderTimes, getNotificationsModule, getSnoozeLimit, isHabitReminderDay, nextReminderOccurrence, playReminderSound, requestWebNotificationPermission, type NotificationsModule } from './reminders';
 import { computeSmartReminderTimes, getSmartReminderMessage, requestHabitPrediction } from './smart-reminders';
 import type { Habit, Preferences } from './types';
 
@@ -108,7 +108,8 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
             if (!key.includes(`-${today}-`)) sentBrowserRemindersRef.current.delete(key);
           }
           for (const habit of reminders) {
-            if ((habit.startDate && habit.startDate > today) || !isHabitReminderDay(habit, now) || habit.completionDates.includes(today)) continue;
+            // Done, or missed (past its last reminder time): it can no longer be checked in today.
+            if ((habit.startDate && habit.startDate > today) || !isHabitReminderDay(habit, now) || !canRemindAt(habit, now, now)) continue;
             const smart = habit.smartReminderEnabled ? computeSmartReminderTimes(habit, now) : null;
             const times = smart ? smart.times : getHabitReminderTimes(habit);
             for (const time of times) {
@@ -188,29 +189,13 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
               body: 'A small step today keeps your streak moving.',
               sound: soundEnabled ? 'reminder_sound.mp3' : false,
               data: { habitId: habit.id, snoozeCount: 0 },
-              categoryIdentifier: 'habit-reminder-snooze',
+              ...(canSnoozeAt(habit, time.hour * 60 + time.minute, ringInterval) ? { categoryIdentifier: 'habit-reminder-snooze' } : {}),
             },
             trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: target, ...channel },
           });
         }
-
-        if (cancelled) return;
-        if (habit.frequency === 'Custom') continue;
-        const lastReminderTime = times.reduce((latest, time) => time.hour * 60 + time.minute > latest.hour * 60 + latest.minute ? time : latest);
-        const missedAt = new Date(now);
-        missedAt.setHours(lastReminderTime.hour, lastReminderTime.minute + 1, 0, 0);
-        // Done for today: skip the "still open for today" nudge and aim it at the next day instead.
-        if (missedAt <= now || completedToday) missedAt.setDate(missedAt.getDate() + 1);
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: 'Smart Reminder',
-            body: `${habit.label} is still open for today. Complete it before the day ends to keep your streak.`,
-            sound: soundEnabled ? 'reminder_sound.mp3' : false,
-            data: { habitId: habit.id, type: 'missed-habit', snoozeCount: 0 },
-            categoryIdentifier: 'habit-reminder-snooze',
-          },
-          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: missedAt, ...channel },
-        });
+        // No "still open for today" nudge after the last reminder time: the habit is missed from
+        // then on and can no longer be checked in.
       }
 
       const predictions = await Promise.all(smartReminders.map(async ({ habit }) => ({
@@ -245,7 +230,7 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
               body: prediction?.recommended_action || getSmartReminderMessage(habit, riskLevel),
               sound: soundEnabled ? 'reminder_sound.mp3' : false,
               data: { habitId: habit.id, type: 'smart-reminder', riskLevel, snoozeCount: 0 },
-              categoryIdentifier: 'habit-reminder-snooze',
+              ...(canSnoozeAt(habit, time.hour * 60 + time.minute, ringInterval) ? { categoryIdentifier: 'habit-reminder-snooze' } : {}),
             },
             trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: target, ...channel },
           });
@@ -257,7 +242,7 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
       cancelled = true;
       if (browserReminderTimer) clearInterval(browserReminderTimer);
     };
-  }, [habits, preferences.notificationsEnabled, reminderScheduleRevision]);
+  }, [habits, preferences.notificationsEnabled, reminderScheduleRevision, ringInterval]);
 
   useEffect(() => {
     let active = true;
@@ -275,6 +260,11 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
       if (snoozeCount >= snoozeLimit) return;
       const habitId = typeof data.habitId === 'string' ? data.habitId : '';
       const habit = habits.find((item) => item.id === habitId);
+      const now = new Date();
+      const snoozeAt = new Date(now.getTime() + ringInterval * 60_000);
+      // A snooze that would come back once the habit is done or missed would remind of a habit
+      // that can no longer be checked in, so none is set.
+      if (habit && !canRemindAt(habit, snoozeAt, now)) return;
       const soundEnabled = habit?.reminderSoundEnabled !== false;
       const channel = Platform.OS === 'android'
         ? { channelId: soundEnabled ? 'habit-reminders-sound-v2' : 'habit-reminders-silent-v2' }
@@ -291,7 +281,7 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
         },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DATE,
-          date: new Date(Date.now() + ringInterval * 60_000),
+          date: snoozeAt,
           ...channel,
         },
       });

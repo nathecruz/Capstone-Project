@@ -215,3 +215,75 @@ test('smart reminders keep the set times and add an early nudge when the habit i
   assert.equal(getSmartReminderText(habit, 'high').title, 'Smart reminder: Read');
   assert.match(getSmartReminderText(habit, 'high').body, /at risk of being skipped/);
 });
+
+/** A database stand-in for the dispatcher: claims succeed, snoozes and the subscription come from `data`. */
+function fakeDispatchDb({ snoozes = [], subscription = null, state = null } = {}) {
+  const queries = [];
+  return {
+    queries,
+    async query(text, values = []) {
+      queries.push({ text, values });
+      if (text.includes('UPDATE web_push_snooze_queue AS queue')) return { rows: snoozes, rowCount: snoozes.length };
+      if (text.includes('FROM web_push_subscriptions s')) return { rows: subscription ? [subscription] : [], rowCount: subscription ? 1 : 0 };
+      if (text.includes('FROM user_app_state')) return { rows: state ? [{ stateJson: state }] : [], rowCount: state ? 1 : 0 };
+      return { rows: [], rowCount: 1 };
+    },
+  };
+}
+
+function fakeWebPush() {
+  const sent = [];
+  return { sent, async sendNotification(_subscription, payload) { sent.push(JSON.parse(payload)); } };
+}
+
+test('a reminder sent late is dropped once the habit is missed (past its last reminder time)', async (t) => {
+  const { dispatchDueReminders } = await import('../services/web-push-dispatch.js');
+  // 11:55 AM in Manila on Monday, October 19: the API just woke up and looks back 30 minutes.
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-19T03:55:00.000Z') });
+  const habit = (id, reminderTimes) => ({ id, label: id, frequency: 'Daily', startDate: '2026-10-01', reminderEnabled: true, reminderTime: reminderTimes[0], reminderTimes, completionDates: [] });
+  const state = {
+    preferences: { notificationsEnabled: true }, ringInterval: 30, snoozeFrequency: 'Once',
+    habits: [habit('Gym', ['11:30 AM']), habit('Read', ['11:30 AM', '08:00 PM']), habit('Stretch', ['11:55 AM'])],
+  };
+  const db = fakeDispatchDb();
+  const webpush = fakeWebPush();
+  const result = await dispatchDueReminders(db, {
+    webpush, snoozeUrl: 'https://api.example.com/api/web-push/snooze', lookbackMinutes: 30,
+    rows: [{ subscriptionId: 'sub-1', userId: 'user-1', subscriptionJson: {}, timeZone: 'Asia/Manila', state }],
+  });
+
+  // Gym's only (last) reminder was 11:30: missed by now, so neither pushed nor listed in Notifications.
+  assert.deepEqual(webpush.sent.map((push) => push.title), ['Read reminder', 'Stretch reminder']);
+  assert.equal(result.sent, 2);
+  const listed = db.queries.filter((entry) => entry.text.includes('INSERT INTO notifications')).map((entry) => entry.values[3]);
+  assert.deepEqual(listed, ['Read reminder', 'Stretch reminder']);
+  // Read can still be done until 8:00 PM, so its late 11:30 reminder offers Snooze; Stretch's
+  // reminder is its last one, so a snooze would come back after it is missed.
+  assert.deepEqual(webpush.sent.map((push) => push.actions.map((action) => action.action)), [['SNOOZE'], []]);
+});
+
+test('a snoozed reminder is dropped once the habit is done or missed, or its day is over', async (t) => {
+  const { dispatchDueSnoozes } = await import('../services/web-push-dispatch.js');
+  const now = new Date('2026-10-19T03:55:00.000Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const habit = (id, reminderTimes, completionDates = []) => ({ id, label: id, frequency: 'Daily', startDate: '2026-10-01', reminderEnabled: true, reminderTime: reminderTimes[0], reminderTimes, completionDates });
+  const state = {
+    preferences: { notificationsEnabled: true }, ringInterval: 30, snoozeFrequency: '2 times',
+    habits: [habit('Gym', ['11:30 AM']), habit('Read', ['11:30 AM', '08:00 PM']), habit('Water', ['11:00 AM', '08:00 PM'], ['2026-10-19'])],
+  };
+  const tappedAt = now.getTime() - 30 * 60_000;
+  const snooze = (id, habitId, createdAt = tappedAt) => ({ id, subscriptionId: 'sub-1', userId: 'user-1', habitId, snoozeCount: 1, createdAt });
+  const db = fakeDispatchDb({
+    snoozes: [snooze('gym', 'Gym'), snooze('read', 'Read'), snooze('water', 'Water'), snooze('yesterday', 'Read', tappedAt - 24 * 60 * 60_000)],
+    subscription: { subscriptionJson: {}, timeZone: 'Asia/Manila' },
+    state,
+  });
+  const webpush = fakeWebPush();
+  const result = await dispatchDueSnoozes(db, { webpush, snoozeUrl: 'https://api.example.com/api/web-push/snooze' });
+
+  // Gym passed its 11:30 deadline, Water is done, and yesterday's snooze is for a day that is over.
+  assert.deepEqual(webpush.sent.map((push) => push.tag), ['snooze-read']);
+  assert.equal(result.sent, 1);
+  const closed = db.queries.filter((entry) => entry.text.startsWith('UPDATE web_push_snooze_queue SET sent_at')).map((entry) => entry.values[0]);
+  assert.deepEqual(closed.sort(), ['gym', 'read', 'water', 'yesterday']);
+});
