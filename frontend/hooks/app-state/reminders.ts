@@ -1,6 +1,8 @@
 // Reminder schedules and notification permissions (native notifications and Web Push).
 import { Platform } from 'react-native';
 import { getWebPushVapidPublicKey, saveWebPushSubscription, sendTestWebPush } from '@/authentication/authService';
+import { deadlineMinutes, isHabitLockedMissed } from '@/utils/engagement';
+import { getLocalDateKey } from '@/utils/habit-visibility';
 import { parseReminderTime } from '@/utils/reminder-time';
 import type { Habit } from './types';
 
@@ -72,6 +74,25 @@ export function nextReminderOccurrence(
     target.setDate(target.getDate() + 1);
   }
   return null;
+}
+
+/**
+ * Whether a reminder about the habit at `at` can still be acted on: `at` is on `now`'s day and the
+ * habit is neither done today nor missed (past its last reminder time) by then. Once it is missed it
+ * can no longer be checked in, so it is not reminded any more.
+ */
+export function canRemindAt(habit: Habit, at: Date, now = new Date()) {
+  const today = getLocalDateKey(now);
+  return getLocalDateKey(at) === today && !habit.completionDates.includes(today) && !isHabitLockedMissed(habit, at);
+}
+
+/**
+ * Whether the reminder at `minutes` after midnight offers Snooze: a snooze tapped right away comes
+ * back `ringInterval` minutes later, which has to be no later than the habit's last reminder time
+ * (or the end of the day without one). A later one would be about a missed habit.
+ */
+export function canSnoozeAt(habit: Pick<Habit, 'reminderEnabled' | 'reminderTime' | 'reminderTimes'>, minutes: number, ringInterval: number) {
+  return minutes + ringInterval <= (deadlineMinutes(habit) ?? 24 * 60 - 1);
 }
 
 export function getSnoozeLimit(frequency: string) {
