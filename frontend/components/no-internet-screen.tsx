@@ -8,6 +8,8 @@ import { serverAnswers } from '@/authentication/authService';
 
 // Moving between Wi-Fi and mobile data briefly reports no connection; only a lasting one counts.
 const SETTLE_MS = 2000;
+// While shown, it checks again now and then and goes away by itself once the connection is back.
+const RECHECK_MS = 10_000;
 
 const reportsNoInternet = (state: Network.NetworkState | null) => Boolean(state) && (state?.isConnected === false || state?.isInternetReachable === false);
 
@@ -30,7 +32,8 @@ export function NoInternetScreen() {
       return;
     }
     // The phone says it has no internet. Shown only if HabitAI's server is out of reach too, so a
-    // network the phone has not verified (but that works) never blocks the app.
+    // network the phone has not verified (but that works) does not block the app. A server still
+    // waking up can keep it shown for a moment; the recheck below hides it once the server answers.
     const reachable = await serverAnswers();
     if (current()) setOffline(!reachable);
   }, []);
@@ -43,6 +46,12 @@ export function NoInternetScreen() {
       subscription.remove();
     };
   }, [check]);
+
+  useEffect(() => {
+    if (!offline) return;
+    const timer = setInterval(() => void check(false), RECHECK_MS);
+    return () => clearInterval(timer);
+  }, [check, offline]);
 
   const tryAgain = async () => {
     setChecking(true);

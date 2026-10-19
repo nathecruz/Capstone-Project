@@ -234,19 +234,26 @@ export async function deviceHasInternet() {
 
 /**
  * Waits until the server answers its health check, for up to `maxWaitMs`. A sleeping free server holds
- * the request until it is up (up to a minute or so), so each try may wait that long; one that fails
- * at once (the host dropping connections while the server boots) is tried again a few seconds later.
+ * the request until it is up (up to a minute or so), so one try may wait that long, and while it boots
+ * the host answers for it with its own 502/503 page, which is asked again a few seconds later. A
+ * connection refused again and again (a blocked host, wrong address, no route) is not a server
+ * waking up, so that gives up after a few tries instead of holding the sign-in for the full wait.
  */
 export async function waitForServer(maxWaitMs = 90_000, retryDelayMs = 3000) {
   const deadline = Date.now() + maxWaitMs;
+  let refusals = 0;
   while (Date.now() < deadline) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Math.max(1, deadline - Date.now()));
+    const startedAt = Date.now();
     try {
-      await fetch(`${getApiBaseUrl()}/healthz`, { signal: controller.signal, cache: 'no-store' });
-      return true;
+      const response = await fetch(`${getApiBaseUrl()}/healthz`, { signal: controller.signal, cache: 'no-store' });
+      if (response.ok) return true;
+      refusals = 0;
     } catch {
       if (controller.signal.aborted) return false;
+      refusals = Date.now() - startedAt < 2000 ? refusals + 1 : 0;
+      if (refusals >= 3) return false;
     } finally {
       clearTimeout(timer);
     }
@@ -345,12 +352,17 @@ const ACCOUNT_REQUEST_TIMEOUT_MS = 120_000;
  */
 async function sendSignIn<T>(body: string) {
   const send = () => apiRequest<T>('/api/auth/login', { method: 'POST', body, timeoutMs: ACCOUNT_REQUEST_TIMEOUT_MS });
+  // In flight for the whole sign-in, the wait between the two tries included, so the web app does
+  // not reload itself for an update in the middle of it.
+  requestsInFlight += 1;
   try {
     return await send();
   } catch (error) {
     const dropped = error instanceof TypeError || (error instanceof ApiRequestError && [502, 503, 504].includes(error.status));
     if (!dropped || !(await deviceHasInternet()) || !(await waitForServer())) throw error;
     return send();
+  } finally {
+    requestsInFlight -= 1;
   }
 }
 
@@ -498,9 +510,13 @@ export async function getSession() {
       await logoutUser();
       return null;
     }
-    // A role set or changed on the server (e.g. a sign-in saved before Faculty mode existed) is
-    // stored, so the app switches mode without signing out. Only on a change, to avoid a reload loop.
-    if ((payload.user.role ?? 'user') !== (session.role ?? 'user')) await refreshStoredUser(payload.user);
+    // What the server says about the role, the email confirmation and the privacy consent is stored
+    // when it changed (a role set later, verification turned off), so a later start-up that falls back
+    // to the saved session routes the same way. Only on a change, to avoid a reload loop.
+    const changed = (payload.user.role ?? 'user') !== (session.role ?? 'user')
+      || (payload.user.emailVerified !== undefined && payload.user.emailVerified !== session.emailVerified)
+      || (payload.user.privacyConsentAt !== undefined && (payload.user.privacyConsentAt ?? null) !== (session.privacyConsentAt ?? null));
+    if (changed) await refreshStoredUser(payload.user);
     return payload.user;
   } catch (error) {
     if (error instanceof ApiRequestError && error.status === 401) {

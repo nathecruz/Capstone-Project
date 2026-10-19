@@ -160,12 +160,50 @@ describe('auth service offline behavior', () => {
   });
 
   it('shows a readable message instead of the host\'s HTML error page', async () => {
-    fetchMock.mockResolvedValue(answer(502, '<!DOCTYPE html><html><body>Bad gateway</body></html>'));
+    const page = answer(502, '<!DOCTYPE html><html><body>Bad gateway</body></html>');
+    fetchMock.mockResolvedValueOnce(page).mockResolvedValueOnce(answer(200, { ok: true })).mockResolvedValueOnce(page);
 
     await expect(signIn('test@psau.edu.ph', 'password')).resolves.toEqual({
       ok: false,
       message: 'The HabitAI server is starting up. Please try again in a moment.',
     });
+  });
+
+  it('waits while the host answers for the booting server before sending the sign-in again', async () => {
+    jest.useFakeTimers();
+    try {
+      const user = { id: 'user-1', fullName: 'Test User', email: 'test@psau.edu.ph' };
+      const booting = answer(503, '<html>Service starting</html>');
+      fetchMock
+        .mockResolvedValueOnce(booting) // the sign-in
+        .mockResolvedValueOnce(booting) // /healthz: still the host's page
+        .mockResolvedValueOnce(answer(200, { ok: true })) // /healthz: the server is up
+        .mockResolvedValueOnce(answer(200, { ok: true, token: 'issued-token', user }));
+
+      const result = signIn('test@psau.edu.ph', 'StrongPass!123');
+      await jest.advanceTimersByTimeAsync(5000);
+
+      await expect(result).resolves.toMatchObject({ ok: true, user });
+      expect(fetchMock.mock.calls.map(([url]) => String(url).replace(/^https?:\/\/[^/]+/, ''))).toEqual(['/api/auth/login', '/healthz', '/healthz', '/api/auth/login']);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('gives up within seconds when the server is refused again and again (not a server waking up)', async () => {
+    jest.useFakeTimers();
+    try {
+      fetchMock.mockRejectedValue(new TypeError('Network request failed'));
+
+      const result = signIn('test@psau.edu.ph', 'password');
+      await jest.advanceTimersByTimeAsync(10_000);
+
+      await expect(result).resolves.toEqual({ ok: false, message: 'Could not reach the HabitAI server. Please try again in a moment.' });
+      // The sign-in and three quick /healthz refusals; never sent a second time.
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('does not call a correct password wrong when the answer is not the API\'s (a Wi-Fi sign-in page)', async () => {
@@ -175,6 +213,17 @@ describe('auth service offline behavior', () => {
       ok: false,
       message: 'The sign-in service sent an unexpected answer. Please try again.',
     });
+  });
+
+  it('stores an email confirmation the server reports, so a slow later start does not ask for a code again', async () => {
+    const saved = { id: 'user-1', fullName: 'Test User', email: 'test@psau.edu.ph', emailVerified: false, privacyConsentAt: 1, role: 'user' as const };
+    const fromServer = { ...saved, emailVerified: true };
+    jest.mocked(getCurrentSession).mockResolvedValue(saved);
+    jest.mocked(getSessionToken).mockResolvedValue('session-token');
+    fetchMock.mockResolvedValue(answer(200, { ok: true, user: fromServer }));
+
+    await expect(getSession()).resolves.toEqual(fromServer);
+    expect(saveSessionToken).toHaveBeenCalledWith('session-token', fromServer);
   });
 
   it('keeps an account whose confirmed email is at another domain signed in', async () => {

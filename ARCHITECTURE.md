@@ -37,8 +37,9 @@ flowchart LR
 
 Design rules that the data flows below rely on:
 
-- The **database is the single source of truth**. The app keeps a local copy for offline
-  use and syncs it; the Admin Panel and AI features only read what is in the database.
+- The **database is the single source of truth**. The app keeps a local copy for a quick
+  start and syncs it (there is no offline mode); the Admin Panel and AI features only read what is
+  in the database.
 - **Secrets stay on servers.** The app only holds the public API URL and its own session
   token. Groq, email, ML and database credentials exist only in server environments.
 - **Everything the client sends is validated** with Zod schemas (`backend/schemas.js`),
@@ -194,7 +195,10 @@ sequenceDiagram
 
 Key properties:
 
-- **Offline first:** the app saves to device storage immediately and syncs when online.
+- **Local first, online only:** the app saves to device storage immediately and syncs when the
+  server answers; a change it has not confirmed (for example while the free server wakes up) waits on
+  the device and is retried. There is no offline mode: with no internet the app shows a "No internet
+  connection" screen.
 - **Conflict-safe:** concurrent saves from two phones are merged field by field against the
   common base version instead of overwriting each other.
 - **Cheap polling:** an unchanged poll is a single indexed `max(updated_at)` query.

@@ -34,6 +34,25 @@ function setPlatform(platform: string) {
   Object.defineProperty(Platform, 'OS', { configurable: true, value: platform });
 }
 
+/** A browser Storage backed by a Map, so a test can look inside it. */
+function mapStorage(initial: Record<string, string> = {}) {
+  const stored = new Map(Object.entries(initial));
+  return {
+    stored,
+    getItem: jest.fn<string | null, [string]>((key) => stored.get(key) ?? null),
+    setItem: jest.fn<void, [string, string]>((key, value) => { stored.set(key, value); }),
+    removeItem: jest.fn<void, [string]>((key) => { stored.delete(key); }),
+  };
+}
+
+/** A browser window: one tab's sessionStorage, the origin's localStorage, installed app or not. */
+function browserWindow(tab: ReturnType<typeof mapStorage>, local: ReturnType<typeof mapStorage>, installed = false) {
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { sessionStorage: tab, localStorage: local, matchMedia: jest.fn().mockReturnValue({ matches: installed }) },
+  });
+}
+
 describe('session token storage', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -73,12 +92,41 @@ describe('session token storage', () => {
     expect(SecureStore.getItemAsync).not.toHaveBeenCalled();
   });
 
-  it('moves legacy web tokens into session-only storage', async () => {
-    jest.mocked(AsyncStorage.getItem).mockResolvedValue('legacy-token');
+  it('moves a token an older version left in localStorage into this tab only', async () => {
+    const tab = mapStorage();
+    const local = mapStorage({ habitai_session_token: 'legacy-token' });
+    browserWindow(tab, local);
 
     await expect(getSessionToken()).resolves.toBe('legacy-token');
-    expect(webSessionStorage.setItem).toHaveBeenCalledWith('habitai_session_token', 'legacy-token');
-    expect(AsyncStorage.removeItem).toHaveBeenCalledWith('habitai_session_token');
+    expect(tab.stored.get('habitai_session_token')).toBe('legacy-token');
+    expect(local.stored.has('habitai_session_token')).toBe(false);
+  });
+
+  it('keeps a tab on its own account when another tab signs in with Remember me', async () => {
+    const local = mapStorage();
+    const tabA = mapStorage();
+    const tabB = mapStorage();
+    browserWindow(tabA, local);
+    await saveSessionToken('token-x', { fullName: 'Student X', email: 'x@example.com' }, { persist: false });
+    browserWindow(tabB, local);
+    await saveSessionToken('token-y', { fullName: 'Student Y', email: 'y@example.com' }, { persist: true });
+
+    browserWindow(tabA, local);
+    await expect(getSessionToken()).resolves.toBe('token-x');
+    browserWindow(tabB, local);
+    await expect(getSessionToken()).resolves.toBe('token-y');
+  });
+
+  it('leaves the installed app signed in when the site is opened in a Chrome tab (shared localStorage)', async () => {
+    const local = mapStorage();
+    browserWindow(mapStorage(), local, true);
+    await saveSessionToken('app-token', { fullName: 'Phone User', email: 'phone@example.com' }, { persist: false });
+
+    // A Chrome tab reads the same localStorage and must not take the token away from the app.
+    browserWindow(mapStorage(), local, false);
+    await expect(getSessionToken()).resolves.toBe('app-token');
+    browserWindow(mapStorage(), local, true);
+    await expect(getSessionToken()).resolves.toBe('app-token');
   });
 
   it('persists the web token in localStorage for an installed PWA, not ephemeral sessionStorage', async () => {
@@ -165,7 +213,6 @@ describe('session token storage', () => {
 
     await saveSessionToken('tab-token', { fullName: 'Tab User', email: 'tab@example.com' }, { persist: false });
     expect(webSessionStorage.setItem).toHaveBeenCalledWith('habitai_session_token', 'tab-token');
-    expect(localStore.removeItem).toHaveBeenCalledWith('habitai_keep_signed_in');
     expect(localStore.setItem).not.toHaveBeenCalled();
   });
 
