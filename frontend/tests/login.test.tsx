@@ -63,7 +63,7 @@ describe('LoginScreen', () => {
     await fireEvent.press(getByText('Log In'));
 
     await waitFor(() => {
-      expect(signIn).toHaveBeenCalledWith('newuser@psau.edu.ph', 'ValidPassword!234');
+      expect(signIn).toHaveBeenCalledWith('newuser@psau.edu.ph', 'ValidPassword!234', { keepSignedIn: false });
       expect(router.replace).toHaveBeenCalledWith('/(tabs)');
     });
     expect(queryByText('Legacy account migration required')).toBeNull();
@@ -82,7 +82,7 @@ describe('LoginScreen', () => {
     await fireEvent.press(getByText('Log In'));
 
     await waitFor(() => {
-      expect(jest.requireMock('@/authentication').signIn).toHaveBeenCalledWith('student@psau.edu.ph', 'ValidPassword!234');
+      expect(jest.requireMock('@/authentication').signIn).toHaveBeenCalledWith('student@psau.edu.ph', 'ValidPassword!234', { keepSignedIn: false });
     });
     expect(queryByText('Invalid email')).toBeNull();
 
@@ -92,7 +92,7 @@ describe('LoginScreen', () => {
     await fireEvent.press(getByText('Log In'));
 
     await waitFor(() => {
-      expect(jest.requireMock('@/authentication').signIn).toHaveBeenCalledWith('student@gmail.com', 'ValidPassword!234');
+      expect(jest.requireMock('@/authentication').signIn).toHaveBeenCalledWith('student@gmail.com', 'ValidPassword!234', { keepSignedIn: false });
     });
     expect(queryByText('Invalid email')).toBeNull();
 

@@ -199,10 +199,12 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   // True once the server's state is known (loaded, confirmed empty, or a saved base exists).
   // Until then nothing is sent, so an empty or stale device can never overwrite it.
   const remoteReadyRef = useRef(false);
-  // Local changes the server has not accepted yet (a failed save or one made offline).
+  // Local changes the server has not accepted yet (a failed save, e.g. while the server was waking).
   const unsavedRef = useRef(false);
   // Saves scheduled or in flight; a poll must not replace the state while one is pending.
   const pendingSavesRef = useRef(0);
+  // The app opened while the server did not answer (asleep): its state is loaded once it does.
+  const startedWithoutServerRef = useRef(false);
   useHabitReminders({ habits, preferences, ringInterval, snoozeFrequency });
   useHomeWidget(habits);
 
@@ -277,8 +279,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
 
       const remoteState = await getRemoteAppState();
       if (cancelled || version !== sessionLoadVersion) return;
+      startedWithoutServerRef.current = !remoteState;
       unsavedRef.current = syncMeta.unsaved;
-      // Changes made on this device that never reached the server (offline) are kept and merged
+      // Changes made on this device that never reached the server (a failed save) are kept and merged
       // into the server copy by the next save, instead of being replaced by it.
       const keepLocalChanges = syncMeta.unsaved && Boolean(syncMeta.base);
       const remoteBase = remoteState?.state && remoteState.updatedAt ? { updatedAt: remoteState.updatedAt, state: remoteState.state } : null;
@@ -295,15 +298,17 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         syncBaseRef.current = keepLocalChanges ? syncMeta.base : remoteBase;
         remoteReadyRef.current = true;
       } else {
-        // Unreachable (offline or the server is waking up): keep the local copy. Saves wait until the
+        // Unreachable (the server is waking up or slow to answer): keep the local copy. Saves wait until the
         // server state is known, unless a saved base lets the server merge them safely.
         syncBaseRef.current = syncMeta.base;
         remoteReadyRef.current = Boolean(syncMeta.base);
       }
 
       // Check-ins and streak freezes together; a held freeze may cover a day missed since the last visit.
+      // Not asked when the server did not answer just now: Home would wait for that too (up to another
+      // minute) before showing the saved habits. The first live pulse that gets an answer loads them.
       const [remoteCompletions, freezes] = await Promise.all([
-        keepLocalChanges ? null : getRemoteHabitCompletions(),
+        keepLocalChanges || !remoteState ? null : getRemoteHabitCompletions(),
         remoteState ? syncStreakFreezes(getLocalDateKey()) : null,
       ]);
       if (cancelled || version !== sessionLoadVersion) return;
@@ -430,7 +435,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       if (cancelled || !appIsActive || refreshInFlight || pendingSavesRef.current > 0) return;
       refreshInFlight = true;
       try {
-        // Changes that could not be saved earlier (offline) are sent first and merged by the server.
+        // Changes that could not be saved earlier are sent first and merged by the server.
         if (unsavedRef.current && remoteReadyRef.current) {
           const saved = await syncAppStateRef.current?.();
           if (cancelled || !saved?.ok) return;
@@ -500,14 +505,21 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       if (cancelled || !appIsActive || pulseInFlight) return;
       pulseInFlight = true;
       try {
-        // Changes that could not be saved (offline) are retried on every pulse.
+        // Changes that could not be saved are retried on every pulse.
         if (unsavedRef.current) void refreshRemoteState();
         const live = await getLiveVersions();
         if (cancelled || !live.ok) return;
         setUnreadCount(live.unread);
         const before = lastVersions;
         lastVersions = live.versions;
-        if (!before) return;
+        if (!before) {
+          // The server answers now: load what the start-up could not get while it was asleep.
+          if (startedWithoutServerRef.current) {
+            startedWithoutServerRef.current = false;
+            void refreshRemoteState();
+          }
+          return;
+        }
         const changed = (key: string) => before[key] !== live.versions[key];
         if (changed('state')) void refreshRemoteState();
         else if (changed('wallet')) void refreshWallet();

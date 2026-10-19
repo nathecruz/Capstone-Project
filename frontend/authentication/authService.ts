@@ -46,19 +46,31 @@ export type AppStateSyncBase = {
 
 export type HabitCompletion = { habitId: string; date: string };
 
+/** The deployed backend, for a production build made without EXPO_PUBLIC_API_URL. */
+const DEFAULT_PRODUCTION_API_URL = 'https://habitai-backend.onrender.com';
+
+const URL_HOST = /^([a-z][a-z0-9+.-]*:\/\/)(\[[^\]]+\]|[^:/?#]+)/i;
+
+function isLocalHostname(hostname: string) {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
+// Read with a pattern, not new URL(): React Native's URL does not implement hostname.
 function isLocalUrl(value: string) {
-  try {
-    const hostname = new URL(value).hostname;
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
-  } catch {
-    return false;
-  }
+  const host = URL_HOST.exec(value.trim())?.[2];
+  return Boolean(host && isLocalHostname(host));
 }
 
 function isLocalWebHost() {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
-  const hostname = window.location.hostname;
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  return isLocalHostname(window.location.hostname);
+}
+
+/** The development server's host as this device reaches it: the page's host on the web, Metro's in the app. */
+function developmentHost() {
+  if (Platform.OS === 'web') return typeof window === 'undefined' ? '' : window.location.hostname;
+  return Constants.expoConfig?.hostUri?.split(':')[0] ?? '';
 }
 
 function isAllowedLocalWebApiUrl(value: string) {
@@ -101,6 +113,12 @@ export function getApiBaseUrl() {
     if (process.env.NODE_ENV === 'production' && hasInvalidProductionUrl && !isAllowedLocalWebApiUrl(envUrl)) {
       throw new Error('Production API is not configured. Set EXPO_PUBLIC_API_URL to the deployed backend URL.');
     }
+    // Development on a phone: "localhost" in .env is the laptop for the laptop's own browser, but the
+    // phone itself for a phone on the same Wi-Fi, so the phone calls the development server's host.
+    const devHost = process.env.NODE_ENV === 'production' ? '' : developmentHost();
+    if (isLocalUrl(envUrl) && devHost && !isLocalHostname(devHost)) {
+      return envUrl.replace(/\/$/, '').replace(URL_HOST, `$1${devHost}`);
+    }
     return envUrl.replace(/\/$/, '');
   }
 
@@ -108,7 +126,9 @@ export function getApiBaseUrl() {
     if (isLocalWebHost()) {
       return `http://${window.location.hostname}:8787`;
     }
-    throw new Error('Production API is not configured. Set EXPO_PUBLIC_API_URL to the deployed backend URL.');
+    // A build made without EXPO_PUBLIC_API_URL (a Vercel project or an EAS build missing it) still
+    // signs in against the deployed backend, instead of failing every sign-in.
+    return DEFAULT_PRODUCTION_API_URL;
   }
 
   if (Platform.OS === 'web') {
@@ -132,9 +152,19 @@ export function getApiBaseUrl() {
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ALLOWED_EMAIL_DOMAINS = ['@psau.edu.ph', '@gmail.com', '@yahoo.com', '@outlook.com'];
 
+/** An address new accounts may register with: a valid email at one of the accepted providers. */
 export function isValidEmailFormat(email: string) {
   const trimmed = email.trim().toLowerCase();
   return emailPattern.test(trimmed) && ALLOWED_EMAIL_DOMAINS.some((domain) => trimmed.endsWith(domain));
+}
+
+/**
+ * Any well-formed email address. The account the server confirms only has to pass this: it can hold
+ * an address at another domain (an email changed later, or an Admin Panel account), and checking the
+ * provider list here signed those students out on every launch.
+ */
+function isEmailAddress(email: string) {
+  return emailPattern.test(email.trim());
 }
 
 function isValidSessionUser(value: unknown): value is SessionUser {
@@ -145,7 +175,7 @@ function isValidSessionUser(value: unknown): value is SessionUser {
     && typeof user.fullName === 'string'
     && Boolean(user.fullName.trim())
     && typeof user.email === 'string'
-    && isValidEmailFormat(user.email);
+    && isEmailAddress(user.email);
 }
 
 export class ApiRequestError extends Error {
@@ -188,38 +218,12 @@ function setSlowRequests(delta: number) {
   }
 }
 
-export type Reachability = 'online' | 'offline';
-const reachabilityListeners = new Set<(status: Reachability) => void>();
-let serverReachable = true;
-
 /**
- * Notifies when the server stops being reachable (a request failed with a network error — no
- * internet, or connected to Wi-Fi with no internet) and when it recovers. More accurate than
- * navigator.onLine, which only reports whether a network interface is up.
+ * Whether the phone has an internet connection at all: Android's own validated-network check (so
+ * Wi-Fi with no internet counts as none), iOS's network path, or navigator.onLine on the web.
+ * Unknown counts as connected, so a check that cannot run never blocks anything.
  */
-export function subscribeToReachability(listener: (status: Reachability) => void) {
-  reachabilityListeners.add(listener);
-  return () => {
-    reachabilityListeners.delete(listener);
-  };
-}
-
-/** The last known server reachability (true until a request fails). */
-export function isServerReachable() {
-  return serverReachable;
-}
-
-function setReachable(ok: boolean) {
-  if (ok === serverReachable) return;
-  serverReachable = ok;
-  reachabilityListeners.forEach((listener) => listener(ok ? 'online' : 'offline'));
-}
-
-/**
- * Whether the device itself has internet: the phone's own check (Android validates the network, so
- * Wi-Fi with no internet is false), or navigator.onLine on the web. Unknown counts as online.
- */
-async function deviceHasInternet() {
+export async function deviceHasInternet() {
   try {
     const state = await Network.getNetworkStateAsync();
     return state.isConnected !== false && state.isInternetReachable !== false;
@@ -229,37 +233,47 @@ async function deviceHasInternet() {
 }
 
 /**
- * A request that failed outright means the server is unreachable. One that only timed out may be
- * the free server waking up (up to a minute), so it counts as offline only when the device has no
- * internet either; otherwise every cold start showed "You are offline" on a working connection.
+ * Waits until the server answers its health check, for up to `maxWaitMs`. A sleeping free server holds
+ * the request until it is up (up to a minute or so), so each try may wait that long; one that fails
+ * at once (the host dropping connections while the server boots) is tried again a few seconds later.
  */
-async function markUnreachable(error: unknown) {
-  const timedOut = error instanceof Error && error.name === 'AbortError';
-  if (timedOut && await deviceHasInternet()) return;
-  setReachable(false);
+export async function waitForServer(maxWaitMs = 90_000, retryDelayMs = 3000) {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.max(1, deadline - Date.now()));
+    try {
+      await fetch(`${getApiBaseUrl()}/healthz`, { signal: controller.signal, cache: 'no-store' });
+      return true;
+    } catch {
+      if (controller.signal.aborted) return false;
+    } finally {
+      clearTimeout(timer);
+    }
+    await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+  }
+  return false;
 }
 
-/**
- * Actively checks whether the server can be reached, with a short timeout, and updates reachability.
- * Used to detect "offline" reliably without waiting for another request — on the sign-in screen,
- * while idle, and on devices where navigator.onLine stays true with Wi-Fi off. A hung request counts
- * as offline when the device has no internet (Wi-Fi with no internet). Does nothing with no API configured.
- */
-export async function probeReachability(timeoutMs = 5000): Promise<boolean> {
-  const base = getApiBaseUrl();
-  if (!base) return serverReachable;
+/** Whether HabitAI's server answers at all within `timeoutMs` (any HTTP answer counts). */
+export async function serverAnswers(timeoutMs = 8000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    await fetch(`${base}/healthz`, { signal: controller.signal, cache: 'no-store' });
-    setReachable(true);
+    await fetch(`${getApiBaseUrl()}/healthz`, { signal: controller.signal, cache: 'no-store' });
     return true;
-  } catch (error) {
-    await markUnreachable(error);
-    return serverReachable;
+  } catch {
+    return false;
   } finally {
     clearTimeout(timer);
   }
+}
+
+let requestsInFlight = 0;
+
+/** Whether an API request is still waiting for its answer (e.g. a sign-in while the server wakes). */
+export function hasRequestsInFlight() {
+  return requestsInFlight > 0;
 }
 
 export async function apiRequest<T>(path: string, options: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
@@ -272,6 +286,7 @@ export async function apiRequest<T>(path: string, options: RequestInit & { timeo
     setSlowRequests(1);
   }, SLOW_REQUEST_MS);
   let response: Response;
+  requestsInFlight += 1;
   try {
     response = await fetch(`${getApiBaseUrl()}${path}`, {
       ...init,
@@ -281,17 +296,12 @@ export async function apiRequest<T>(path: string, options: RequestInit & { timeo
         ...(init.headers ?? {}),
       },
     });
-  } catch (error) {
-    // A network error (no internet, or Wi-Fi with no internet) means the server is unreachable.
-    if (isNetworkError(error)) await markUnreachable(error);
-    throw error;
   } finally {
+    requestsInFlight -= 1;
     clearTimeout(timer);
     clearTimeout(slowTimer);
     if (markedSlow) setSlowRequests(-1);
   }
-  // The server answered (even an error status means it is reachable).
-  setReachable(true);
 
   const rawBody = await response.text();
   let payload: unknown = {};
@@ -306,17 +316,53 @@ export async function apiRequest<T>(path: string, options: RequestInit & { timeo
 
   if (!response.ok) {
     const body = typeof payload === 'object' && payload !== null ? payload as Record<string, unknown> : {};
+    const text = typeof payload === 'string' ? payload.trim() : '';
+    // The host's own error page (HTML, while the free server boots or redeploys) is not shown as is:
+    // it filled the sign-in error with markup. A short plain-text message from the API still is.
     const message = typeof body.message === 'string'
       ? body.message
       : typeof body.error === 'string'
         ? body.error
-        : typeof payload === 'string' && payload.trim()
-          ? payload.trim()
-          : 'Request failed.';
+        : response.status >= 500 && (!text || text.startsWith('<'))
+          ? 'The HabitAI server is starting up. Please try again in a moment.'
+          : text && !text.startsWith('<')
+            ? text
+            : `Request failed (HTTP ${response.status}).`;
     throw new ApiRequestError(message, response.status, body);
   }
 
   return payload as T;
+}
+
+// Long enough for an account request (sign-in, sign-up, password reset) to wake the free server
+// itself: that can take over a minute, past the usual request timeout.
+const ACCOUNT_REQUEST_TIMEOUT_MS = 120_000;
+
+/**
+ * Sends the sign-in so it survives the free server waking up. One that was dropped on the way (the
+ * host's "starting" error page, a restart, or the phone moving between Wi-Fi and mobile data) is
+ * sent once more as soon as the server answers again.
+ */
+async function sendSignIn<T>(body: string) {
+  const send = () => apiRequest<T>('/api/auth/login', { method: 'POST', body, timeoutMs: ACCOUNT_REQUEST_TIMEOUT_MS });
+  try {
+    return await send();
+  } catch (error) {
+    const dropped = error instanceof TypeError || (error instanceof ApiRequestError && [502, 503, 504].includes(error.status));
+    if (!dropped || !(await deviceHasInternet()) || !(await waitForServer())) throw error;
+    return send();
+  }
+}
+
+/**
+ * What to tell the student when an account request got no answer: no internet on the phone, the free
+ * server still starting, or the server not reachable (it used to say "Connect to the internet" for all
+ * three, also on a working connection while the server woke up).
+ */
+async function connectionErrorMessage(error: unknown) {
+  if (!(await deviceHasInternet())) return 'No internet connection. Connect to Wi-Fi or mobile data, then try again.';
+  if (error instanceof Error && error.name === 'AbortError') return 'The HabitAI server is taking too long to start. Please try again in a few seconds.';
+  return 'Could not reach the HabitAI server. Please try again in a moment.';
 }
 
 export async function signUp(user: { firstName: string; lastName: string; username: string; email: string; password: string; dateOfBirth: string; gender: string; region: string; privacyConsent: boolean }) {
@@ -328,6 +374,7 @@ export async function signUp(user: { firstName: string; lastName: string; userna
   try {
     const payload = await apiRequest<{ ok: boolean; message?: string; token?: string; user?: SessionUser }>('/api/auth/register', {
       method: 'POST',
+      timeoutMs: ACCOUNT_REQUEST_TIMEOUT_MS,
       body: JSON.stringify({
         firstName: user.firstName.trim(),
         lastName: user.lastName.trim(),
@@ -353,7 +400,7 @@ export async function signUp(user: { firstName: string; lastName: string; userna
     return { ok: true, message: payload.message || 'Account created successfully.', user: payload.user };
   } catch (error) {
     if (isNetworkError(error)) {
-      return { ok: false, message: 'Unable to reach the account service. Connect to the internet and try again.' };
+      return { ok: false, message: await connectionErrorMessage(error) };
     }
 
     return {
@@ -363,18 +410,21 @@ export async function signUp(user: { firstName: string; lastName: string; userna
   }
 }
 
-export async function signIn(email: string, password: string) {
+export async function signIn(email: string, password: string, { keepSignedIn = false }: { keepSignedIn?: boolean } = {}) {
   const normalizedEmail = email.trim();
   if (!isValidEmailFormat(normalizedEmail)) {
     return { ok: false, message: 'Please enter a valid email address.' };
   }
 
   try {
-    const payload = await apiRequest<{ ok: boolean; message?: string; token?: string; user?: SessionUser }>('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email: normalizedEmail, password, device: getDeviceLabel() }),
-    });
+    const payload = await sendSignIn<{ ok: boolean; message?: string; token?: string; user?: SessionUser }>(
+      JSON.stringify({ email: normalizedEmail, password, device: getDeviceLabel() }),
+    );
 
+    if (typeof payload !== 'object' || payload === null || typeof payload.ok !== 'boolean') {
+      // Not the API's answer (e.g. a Wi-Fi sign-in page): a correct password must not look wrong.
+      return { ok: false, message: 'The sign-in service sent an unexpected answer. Please try again.' };
+    }
     if (!payload.ok) {
       return { ok: false, message: payload.message || 'Incorrect email or password.' };
     }
@@ -386,12 +436,12 @@ export async function signIn(email: string, password: string) {
     if (payload.user.role === 'admin') {
       return { ok: false, message: 'System admin accounts cannot sign in to the HabitAI app. Please use the HabitAI Admin Panel.' };
     }
-    await saveSessionToken(payload.token, payload.user);
+    await saveSessionToken(payload.token, payload.user, { persist: keepSignedIn });
 
     return { ok: true, message: payload.message || 'Login successful.', user: payload.user };
   } catch (error) {
     if (isNetworkError(error)) {
-      return { ok: false, message: 'Unable to reach the account service. Connect to the internet and try again.' };
+      return { ok: false, message: await connectionErrorMessage(error) };
     }
 
     return {
@@ -405,7 +455,8 @@ function getDeviceLabel() {
   const model = Device.modelName || Device.deviceName || (Platform.OS === 'web' ? 'Web browser' : `${Platform.OS} device`);
   const operatingSystem = Device.osName || Platform.OS;
   const version = Device.osVersion || String(Platform.Version);
-  return `${model} (${operatingSystem} ${version})`;
+  // The server accepts up to 160 characters; a longer label would refuse the sign-in.
+  return `${model} (${operatingSystem} ${version})`.slice(0, 160);
 }
 
 export async function signOut() {
@@ -437,8 +488,8 @@ export async function getSession() {
 
   try {
     // Validating the saved session must not hold the app on its loading screen: a short timeout keeps
-    // start-up fast on slow or cold mobile data, falling back to the saved session below (offline-first).
-    // Signing in itself keeps the full timeout, so a waking free-tier server still works.
+    // start-up fast on slow mobile data or while the free server wakes, falling back to the saved
+    // session below (the live check, getLiveVersions, signs out a session the server no longer has).
     const payload = await apiRequest<{ ok: boolean; user?: SessionUser }>('/api/auth/me', {
       headers: { Authorization: `Bearer ${token}` },
       timeoutMs: 8000,
@@ -457,7 +508,7 @@ export async function getSession() {
       return null;
     }
 
-    // Offline or server asleep: keep the saved session instead of signing the student out.
+    // Server asleep or slow (or no connection): keep the saved session instead of signing the student out.
     return session;
   }
 }
@@ -477,7 +528,7 @@ export async function verifyEmailCode(otp: string) {
     await refreshStoredUser(payload.user);
     return { ok: true, message: payload.message || 'Email confirmed.' };
   } catch (error) {
-    if (isNetworkError(error)) return { ok: false, message: 'Unable to reach the account service. Connect to the internet and try again.' };
+    if (isNetworkError(error)) return { ok: false, message: await connectionErrorMessage(error) };
     const payload = error instanceof ApiRequestError ? error.payload : {};
     return { ok: false, message: error instanceof Error ? error.message : 'Unable to verify the code.', attemptsLeft: typeof payload.attemptsLeft === 'number' ? payload.attemptsLeft : undefined };
   }
@@ -492,7 +543,7 @@ export async function resendEmailVerification() {
     });
     return { ok: true, message: payload.message || 'A new code was sent.', retryAfterSeconds: payload.retryAfterSeconds ?? 60, alreadyVerified: Boolean(payload.alreadyVerified) };
   } catch (error) {
-    if (isNetworkError(error)) return { ok: false, message: 'Unable to reach the account service. Connect to the internet and try again.' };
+    if (isNetworkError(error)) return { ok: false, message: await connectionErrorMessage(error) };
     const payload = error instanceof ApiRequestError ? error.payload : {};
     return { ok: false, message: error instanceof Error ? error.message : 'Unable to send a new code.', retryAfterSeconds: typeof payload.retryAfterSeconds === 'number' ? payload.retryAfterSeconds : undefined };
   }
@@ -657,7 +708,23 @@ const deviceTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone ||
 /** Uses held streak freezes for days missed before `date` (the device's today) and returns the status. */
 export const syncStreakFreezes = (date: string) => authedRequest<StreakFreezeStatus>('/api/streak-freezes/sync', { method: 'POST', body: JSON.stringify({ date, timeZone: deviceTimeZone() }) });
 /** A version of each kind of the student's data (changes whenever that data does), and unread notifications. */
-export const getLiveVersions = () => authedRequest<{ versions: Record<string, string>; unread: number }>('/api/live');
+/**
+ * What changed on the server, asked every few seconds while the app is open. A 401 here means the
+ * session expired or was signed out on another device: start-up keeps the saved session when the
+ * server is slow to answer, so this is where the student is sent back to sign in, instead of every
+ * request failing quietly.
+ */
+export async function getLiveVersions(): Promise<Result<{ versions: Record<string, string>; unread: number }>> {
+  const token = await getSessionToken();
+  if (!token) return { ok: false, message: 'Please sign in again.' };
+  try {
+    const body = await apiRequest<{ versions: Record<string, string>; unread: number }>('/api/live', { headers: { Authorization: `Bearer ${token}` } });
+    return { ok: true, ...body };
+  } catch (error) {
+    if (error instanceof ApiRequestError && error.status === 401 && (await getSessionToken()) === token) await logoutUser();
+    return { ok: false, message: error instanceof ApiRequestError ? error.message : 'Could not reach HabitAI. Check your connection.' };
+  }
+}
 
 export type DailyChallenge = { id: string; title: string; icon: string; target: number; progress: number; reward: number; date: string; complete: boolean };
 export type DailyClaim = { date: string; day: number; claimedToday: boolean; amount: number; rewards: number[]; alreadyClaimed?: boolean };
@@ -933,6 +1000,7 @@ export async function resetPassword(email: string) {
   try {
     const payload = await apiRequest<{ ok: boolean; message?: string; email?: string; expiresInSeconds?: number; retryAfterSeconds?: number }>('/api/auth/forgot-password', {
       method: 'POST',
+      timeoutMs: ACCOUNT_REQUEST_TIMEOUT_MS,
       body: JSON.stringify({ email: normalizedEmail }),
     });
 
@@ -945,7 +1013,7 @@ export async function resetPassword(email: string) {
     };
   } catch (error) {
     if (isNetworkError(error)) {
-      return { ok: false, message: 'Unable to reach the account service. Connect to the internet and try again.' };
+      return { ok: false, message: await connectionErrorMessage(error) };
     }
     const retryAfterSeconds = error instanceof ApiRequestError && typeof error.payload.retryAfterSeconds === 'number' ? error.payload.retryAfterSeconds : undefined;
     return {
@@ -967,6 +1035,7 @@ export async function verifyPasswordReset(email: string, otp: string) {
   try {
     const payload = await apiRequest<{ ok: boolean; message?: string }>('/api/auth/verify-otp', {
       method: 'POST',
+      timeoutMs: ACCOUNT_REQUEST_TIMEOUT_MS,
       body: JSON.stringify({ email: normalizedEmail, otp: normalizedOtp }),
     });
 
@@ -976,7 +1045,7 @@ export async function verifyPasswordReset(email: string, otp: string) {
     };
   } catch (error) {
     if (isNetworkError(error)) {
-      return { ok: false, message: 'Password reset requires a connection to the account service.' };
+      return { ok: false, message: await connectionErrorMessage(error) };
     }
 
     const payload = error instanceof ApiRequestError ? error.payload : {};
@@ -1001,6 +1070,7 @@ export async function updatePasswordWithOtp(email: string, otp: string, newPassw
   try {
     const payload = await apiRequest<{ ok: boolean; message?: string }>('/api/auth/reset-password', {
       method: 'POST',
+      timeoutMs: ACCOUNT_REQUEST_TIMEOUT_MS,
       body: JSON.stringify({ email: normalizedEmail, otp: normalizedOtp, newPassword }),
     });
 
@@ -1010,7 +1080,7 @@ export async function updatePasswordWithOtp(email: string, otp: string, newPassw
     };
   } catch (error) {
     if (isNetworkError(error)) {
-      return { ok: false, message: 'Unable to reach the account service. Connect to the internet and try again.' };
+      return { ok: false, message: await connectionErrorMessage(error) };
     }
 
     return {

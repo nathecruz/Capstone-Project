@@ -1,12 +1,12 @@
 // Device-side sync bookkeeping, kept per account next to the saved app state:
 //   - the base: the last state the server confirmed, so a later save can be merged on the
-//     server (3-way) even when the app started offline or during a server cold start;
+//     server (3-way) even when the app started during a server cold start;
 //   - the unsaved flag: local changes that have not reached the server yet, so they are
 //     merged instead of being replaced by the server copy on the next launch.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AppStateSyncBase } from '@/authentication/authService';
 
-/** The account's saved copy of its habits and settings, for a quick start and offline use. */
+/** The account's saved copy of its habits and settings, for a quick start and while the server wakes. */
 export const APP_STATE_KEY_PREFIX = 'habitai_app_state:';
 const BASE_KEY_PREFIX = 'habitai_sync_base:';
 const UNSAVED_KEY_PREFIX = 'habitai_unsaved:';

@@ -143,17 +143,20 @@ export default function LoginScreen() {
     setIsSubmitting(true);
 
     try {
-      const result = await signIn(email, password);
+      // "Remember me" also keeps a phone browser signed in after its tab is closed.
+      const result = await signIn(email, password, { keepSignedIn: rememberMe });
 
       if (!result.ok) {
         showDialog('Login failed', result.message || 'Incorrect email or password.');
         return;
       }
 
-      if (rememberMe) {
-        await rememberEmail(email);
-      } else {
-        await rememberEmail('');
+      // Signed in either way: a storage error while remembering the email must not keep the
+      // student on this screen.
+      try {
+        await rememberEmail(rememberMe ? email : '');
+      } catch {
+        // The email is simply not remembered this time.
       }
 
       router.replace('/(tabs)');

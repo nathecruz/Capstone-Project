@@ -109,8 +109,8 @@ export async function getBrowserNotificationRegistration() {
 }
 
 /**
- * Registers the service worker on web as the app starts, so HabitAI is cached for offline use for
- * every student (not only those who turned on reminders). The same worker also handles push later.
+ * Registers the Web Push worker on web as the app starts, so every phone gets its current version
+ * (which also deletes the offline copy of the app older versions kept) before reminders need it.
  */
 export function registerAppServiceWorker() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;

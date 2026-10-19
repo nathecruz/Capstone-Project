@@ -11,9 +11,9 @@ const NOTICE_KEY = 'habitai_storage_notice';
 
 /** What HabitAI keeps on this device, and for how long. */
 export const STORED_ON_DEVICE = [
-  { icon: 'key-outline', title: 'Sign-in session', detail: 'Keeps you signed in. On the web it lasts for this browser tab only and is deleted when you sign out.' },
+  { icon: 'key-outline', title: 'Sign-in session', detail: 'Keeps you signed in. On the web it lasts for this browser tab only, unless you tick Remember me or use the installed app, and it is deleted when you sign out.' },
   { icon: 'person-circle-outline', title: 'Account and settings', detail: 'A copy of your habits, theme and preferences, so the app opens quickly. Removed from this device when you sign out.' },
-  { icon: 'cloud-offline-outline', title: 'Habits not yet synced', detail: 'Check-ins made offline wait here until they reach the server, even after you sign out.' },
+  { icon: 'cloud-upload-outline', title: 'Changes not yet saved', detail: 'A change the server has not confirmed yet (for example while it is starting up) waits here until it is saved, even after you sign out.' },
   { icon: 'mail-outline', title: 'Remembered email', detail: 'Only if you ask HabitAI to remember it on the sign-in screen.' },
   { icon: 'notifications-outline', title: 'Reminders', detail: 'Only if you turn reminders on: lets this browser show habit reminders.' },
 ] as const;

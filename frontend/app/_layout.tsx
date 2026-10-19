@@ -11,11 +11,11 @@ import { ColorSchemeProvider, useAppColorScheme } from '@/hooks/color-scheme-con
 import { AppDialogProvider } from '@/components/ui/app-dialog';
 import { StorageNotice } from '@/components/storage-notice';
 import { UpdateBanner } from '@/components/update-banner';
-import { getSession, subscribeToAuthChanges, type SessionUser } from '@/authentication';
+import { getCurrentSession, getSession, getSessionToken, subscribeToAuthChanges, type SessionUser } from '@/authentication';
 import { CelebrationOverlay } from '@/components/celebration-overlay';
 import { PageSidebar } from '@/components/desktop-sidebar';
 import { ServerStatusBanner } from '@/components/server-status-banner';
-import { OfflineBanner } from '@/components/offline-banner';
+import { NoInternetScreen } from '@/components/no-internet-screen';
 import { CONTENT_MAX_WIDTH, pageBackground, useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { canonicalRedirect } from '@/utils/canonical-host';
 import { registerAppServiceWorker } from '@/hooks/app-state/reminders';
@@ -77,26 +77,32 @@ function RootNavigator() {
   const sidebarPage = currentPage && OVERLAY_ROUTES.has(currentPage) ? pageBelowOverlay : currentPage;
   const showPageSidebar = isDesktop && Boolean(sessionUser) && Boolean(sidebarPage) && !NO_SIDEBAR_ROUTES.has(sidebarPage ?? '');
 
-  // Register the service worker on web so an installed HabitAI is cached and opens offline.
+  // Register the Web Push worker on web as the app starts, so it is up to date for reminders.
   useEffect(() => {
     if (Platform.OS === 'web') registerAppServiceWorker();
   }, []);
 
   useEffect(() => {
     let isMounted = true;
-    const refreshSession = async () => {
+    const refreshSession = async (check: () => Promise<SessionUser | null>) => {
       const checkVersion = ++sessionCheckVersion.current;
-      const session = await getSession();
+      const session = await check();
       if (isMounted && checkVersion === sessionCheckVersion.current) {
         setSessionUser(session ?? null);
       }
     };
+    // A sign-in, sign-out or profile change was just saved on this device and already confirmed by
+    // the server, so it is read back locally. Asking the server again put the loading screen back
+    // after every sign-in (up to 8 s while the free server wakes).
+    const savedSession = async () => ((await getSessionToken()) ? getCurrentSession() : null);
     const unsubscribe = subscribeToAuthChanges(() => {
+      // Unknown for a moment, so the redirects below wait instead of acting on the old session.
       setSessionUser(undefined);
-      void refreshSession();
+      void refreshSession(savedSession);
     });
 
-    void refreshSession();
+    // At start-up the saved session is confirmed with the server.
+    void refreshSession(getSession);
 
     return () => {
       isMounted = false;
@@ -197,10 +203,10 @@ function RootNavigator() {
         </View>
       )}
       <ServerStatusBanner />
-      <OfflineBanner />
       <CelebrationOverlay />
       <StorageNotice />
       <UpdateBanner />
+      <NoInternetScreen />
       <StatusBar
         style={colorScheme === 'dark' ? 'light' : 'dark'}
       />

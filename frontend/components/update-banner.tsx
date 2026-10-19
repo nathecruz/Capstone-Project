@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { hasRequestsInFlight } from '@/authentication/authService';
 import { createThemedStyles, useThemedStyles } from '@/hooks/use-themed-styles';
 
 const CHECK_EVERY_MS = 60_000;
@@ -51,7 +52,8 @@ export function UpdateBanner() {
     const check = async () => {
       const latest = await publishedEntry();
       if (stopped || !latest || latest === running) return;
-      if (document.hidden) window.location.reload();
+      // Not in the middle of a request (a sign-in waiting for the server to wake): reloading would drop it.
+      if (document.hidden && !hasRequestsInFlight()) window.location.reload();
       else setReady(true);
     };
     const checkWhenVisible = () => {
@@ -78,7 +80,7 @@ export function UpdateBanner() {
     const events = ['pointerdown', 'keydown', 'touchstart', 'wheel'] as const;
     events.forEach((name) => window.addEventListener(name, active, { passive: true }));
     const timer = setInterval(() => {
-      const busy = isTyping() || Date.now() - lastActive < IDLE_SECONDS * 1000;
+      const busy = isTyping() || hasRequestsInFlight() || Date.now() - lastActive < IDLE_SECONDS * 1000;
       setWaiting(busy);
       if (busy) return;
       left -= 1;

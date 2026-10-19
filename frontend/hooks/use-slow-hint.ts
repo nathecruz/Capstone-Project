@@ -17,4 +17,4 @@ export function useSlowHint(active: boolean, afterMs = 6000) {
   return slow;
 }
 
-export const SLOW_SERVER_HINT = 'The server is waking up. The first sign-in after a while can take up to a minute.';
+export const SLOW_SERVER_HINT = 'The server is waking up. The first sign-in after a while can take a minute or two; please keep this screen open.';
