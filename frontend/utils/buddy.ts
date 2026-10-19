@@ -1,7 +1,7 @@
 // Habit Buddy: the mascot grows with check-ins (stages match backend/services/buddy.js), its mood
 // follows today's habits, it gives tips from the student's own check-ins, and it lives in a room.
 import type { Habit } from '@/hooks/app-state/types';
-import { isHabitLate, STREAK_MILESTONES, todayAgenda } from '@/utils/engagement';
+import { isHabitLate, isHabitLockedMissed, STREAK_MILESTONES, todayAgenda } from '@/utils/engagement';
 import { getLocalDateKey, isHabitMissedYesterday } from '@/utils/habit-visibility';
 import { isHabitScheduledOn } from '@/utils/streaks';
 
@@ -109,7 +109,8 @@ function recentRate(habit: Habit, now: Date, days = 7) {
 export function buddyTips(habits: Habit[], buddy: { checkIns: number; stages?: BuddyStage[] }, now = new Date()): string[] {
   const tips: string[] = [];
   const today = getLocalDateKey(now);
-  const open = habits.filter((habit) => dueOn(habit, today) && !habit.completionDates.includes(today));
+  // Past its last reminder time a habit is missed for today and cannot be done any more.
+  const open = habits.filter((habit) => dueOn(habit, today) && !habit.completionDates.includes(today) && !isHabitLockedMissed(habit, now));
   const growth = buddyGrowth(buddy.checkIns, buddy.stages);
   if (growth.next && growth.toNext <= 5) tips.push(`Just ${growth.toNext} more check-in${growth.toNext === 1 ? '' : 's'} and I grow into a ${growth.next.name}!`);
   for (const habit of open) {

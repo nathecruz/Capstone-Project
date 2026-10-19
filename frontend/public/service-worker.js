@@ -109,6 +109,7 @@ self.addEventListener('notificationclick', (event) => {
     if (event.action === 'SNOOZE') {
       const { snoozeToken, snoozeUrl } = event.notification.data || {};
       if (!snoozeToken || !snoozeUrl) return;
+      let message = 'Open HabitAI and check your connection before trying again.';
       try {
         const response = await fetch(snoozeUrl, {
           method: 'POST',
@@ -116,15 +117,18 @@ self.addEventListener('notificationclick', (event) => {
           body: JSON.stringify({ token: snoozeToken }),
           cache: 'no-store',
         });
-        if (!response.ok) throw new Error('Snooze request rejected.');
+        if (response.ok) return;
+        // The server says why (for example, the habit can no longer be checked in today).
+        message = (await response.json().catch(() => ({}))).message || message;
       } catch {
-        await self.registration.showNotification('Snooze unavailable', {
-          body: 'Open HabitAI and check your connection before trying again.',
-          tag: 'snooze-unavailable',
-          icon: ICON,
-          badge: BADGE,
-        });
+        // Offline: the connection hint above.
       }
+      await self.registration.showNotification('Snooze unavailable', {
+        body: message,
+        tag: 'snooze-unavailable',
+        icon: ICON,
+        badge: BADGE,
+      });
       return;
     }
     const target = new URL(event.notification.data?.url || '/', self.location.origin).href;

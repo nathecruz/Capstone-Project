@@ -262,9 +262,10 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
       const habit = habits.find((item) => item.id === habitId);
       const now = new Date();
       const snoozeAt = new Date(now.getTime() + ringInterval * 60_000);
-      // A snooze that would come back once the habit is done or missed would remind of a habit
-      // that can no longer be checked in, so none is set.
-      if (habit && !canRemindAt(habit, snoozeAt, now)) return;
+      // A snooze that would come back once the habit is done or missed, or that is tapped on an
+      // older day's reminder, would remind of a habit that can no longer be checked in: none is set.
+      const shownToday = getLocalDateKey(new Date(response.notification.date)) === getLocalDateKey(now);
+      if (habit && (!shownToday || !canRemindAt(habit, snoozeAt, now))) return;
       const soundEnabled = habit?.reminderSoundEnabled !== false;
       const channel = Platform.OS === 'android'
         ? { channelId: soundEnabled ? 'habit-reminders-sound-v2' : 'habit-reminders-silent-v2' }
@@ -277,7 +278,8 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
           body: notificationContent.body || 'A small step today keeps your streak moving.',
           sound: soundEnabled ? 'reminder_sound.mp3' : false,
           data: { ...data, snoozeCount: nextSnoozeCount },
-          ...(nextSnoozeCount < snoozeLimit ? { categoryIdentifier: 'habit-reminder-snooze' } : {}),
+          // Snooze again only while that snooze could still come back before the habit is missed.
+          ...(nextSnoozeCount < snoozeLimit && (!habit || canSnoozeAt(habit, snoozeAt.getHours() * 60 + snoozeAt.getMinutes(), ringInterval)) ? { categoryIdentifier: 'habit-reminder-snooze' } : {}),
         },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DATE,

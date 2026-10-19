@@ -3,7 +3,7 @@
 // (scripts/web-push-scheduler.js), and by the every-minute dispatcher for a paid cron job
 // (scripts/send-web-push-reminders.js). `db` is anything with pg's `query(text, values)`.
 import crypto from 'node:crypto';
-import { canStillCheckIn } from './completion-date.js';
+import { canStillCheckIn, secondsUntilCheckInCloses } from './completion-date.js';
 import { getSmartReminderText } from './smart-reminders.js';
 import { doneActionSecret, getWebPushDoneUrl, localDateIn, makeDoneToken } from './web-push-actions.js';
 import { getDueHabitReminders, getReminderText, getSnoozeLimit, getWebPushSnoozeSettings, hashWebPushSnoozeToken } from './web-push-reminders.js';
@@ -54,6 +54,15 @@ export async function pendingSnoozes(db, until, userIds = null) {
 /** Times (epoch ms) of snoozes that are queued but not sent yet, up to `until`. */
 export async function pendingSnoozeTimes(db, until) {
   return (await pendingSnoozes(db, until)).map((snooze) => snooze.scheduledAt);
+}
+
+/**
+ * Push options for a reminder about `habit` on `date`: it expires when the habit can no longer be
+ * checked in, so a phone that was offline or asleep does not show it once the habit is missed, and
+ * it is urgent, so Android's Doze and iOS do not hold it back until then.
+ */
+function reminderPushOptions(habit, date, timeZone) {
+  return { TTL: secondsUntilCheckInCloses(habit, date, timeZone, new Date()), urgency: 'high' };
 }
 
 /** Done (check in from the notification) and Snooze buttons, and the data the service worker needs for them. */
@@ -137,7 +146,7 @@ export async function dispatchDueSnoozes(db, { webpush, template = null, snoozeU
         tag: `snooze-${row.id}`,
         soundEnabled: habit.reminderSoundEnabled !== false,
         ...reminderActions({ userId: row.userId, habitId: row.habitId, label: habit.label, type: 'habit-reminder', date, timeZone: subscription.timeZone, snooze: action, snoozeCount: Number(row.snoozeCount) }),
-      }), { TTL: 86400 });
+      }), reminderPushOptions(habit, date, subscription.timeZone));
       await db.query('UPDATE web_push_snooze_queue SET sent_at=$2,attempted_at=0 WHERE id=$1', [row.id, Date.now()]);
       result.sent += 1;
       if (action) result.followUps.push(action.followUpAt);
@@ -194,7 +203,7 @@ export async function dispatchDueReminders(db, { webpush, template = null, snooz
             tag: `${habit.id}-${due.date}-${due.time}`,
             soundEnabled: habit.reminderSoundEnabled !== false,
             ...reminderActions({ userId: row.userId, habitId: String(habit.id), label: habit.label, type, date: due.date, timeZone: row.timeZone, snooze: action, snoozeCount: 0 }),
-          }), { TTL: 86400 });
+          }), reminderPushOptions(habit, due.date, row.timeZone));
           const sentAt = Date.now();
           await db.query(`UPDATE web_push_deliveries
             SET sent_at=$5, attempted_at=0
