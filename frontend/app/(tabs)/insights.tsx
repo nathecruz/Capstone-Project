@@ -188,14 +188,14 @@ export default function InsightsScreen() {
 
   // AI Assistant: the server answers from the student's habits and check-ins (only the question
   // is sent). If it cannot, a tip from the same data is shown and labelled as such.
-  const offlineTip = weakestHabit && openHabits > 0
+  const fallbackTip = weakestHabit && openHabits > 0
     ? `Start with ${weakestHabit.label}: do the smallest version of it before the day ends, then check it in.`
     : 'Pick one habit and repeat it at the same time tomorrow, so it becomes automatic.';
   const assistantChat = useAiChat(async (question): Promise<ChatAnswer> => {
     const result = await askAi('assistant', question);
     if (result.ok) return { ok: true, answer: result.answer };
     if (result.status === 401 || result.status === 429) return { ok: false, message: result.message, tone: 'warning' };
-    return { ok: true, answer: offlineTip, note: `Offline tip from your habit data. ${result.message}` };
+    return { ok: true, answer: fallbackTip, note: `Tip from your habit data (AI unavailable). ${result.message}` };
   });
   const openAssistant = (question?: string) => {
     setAssistantOpen(true);

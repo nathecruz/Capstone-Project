@@ -16,7 +16,7 @@ export function ServerStatusBanner() {
     <View pointerEvents="none" style={[styles.wrap, { top: insets.top + 8 }]} accessibilityLiveRegion="polite">
       <View style={styles.banner}>
         <ActivityIndicator size="small" color="#FFFFFF" />
-        <Text style={styles.text}>Connecting to HabitAI… the server may take up to a minute to wake up.</Text>
+        <Text style={styles.text}>Connecting to HabitAI… the server may take a minute or two to wake up.</Text>
       </View>
     </View>
   );

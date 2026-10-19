@@ -1,5 +1,7 @@
+import * as Network from 'expo-network';
 import {
   getApiBaseUrl,
+  getLiveVersions,
   getSession,
   saveRemoteHabitCompletion,
   signIn,
@@ -20,6 +22,17 @@ const unsetEnv = (key: string) => {
   delete (process.env as Record<string, string | undefined>)[key];
 };
 
+jest.mock('expo-network', () => ({ getNetworkStateAsync: jest.fn() }));
+const deviceOnline = (online: boolean) => jest.mocked(Network.getNetworkStateAsync).mockResolvedValue({
+  isConnected: online,
+  isInternetReachable: online,
+} as Awaited<ReturnType<typeof Network.getNetworkStateAsync>>);
+const answer = (status: number, body: unknown) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+});
+
 jest.mock('@/authentication/session', () => ({
   getCurrentSession: jest.fn(),
   getRememberedEmail: jest.fn(),
@@ -33,6 +46,7 @@ jest.mock('@/authentication/session', () => ({
 describe('auth service offline behavior', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    deviceOnline(true);
     fetchMock.mockReset();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
   });
@@ -113,13 +127,80 @@ describe('auth service offline behavior', () => {
     });
   });
 
-  it('returns an actionable message when sign-in is attempted offline', async () => {
+  it('says there is no internet when sign-in fails on a phone with no connection', async () => {
+    deviceOnline(false);
     fetchMock.mockRejectedValue(new TypeError('Network request failed'));
 
     await expect(signIn('test@psau.edu.ph', 'password')).resolves.toEqual({
       ok: false,
-      message: 'Unable to reach the account service. Connect to the internet and try again.',
+      message: 'No internet connection. Connect to Wi-Fi or mobile data, then try again.',
     });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends a sign-in again once the waking server answers, when its connection was dropped', async () => {
+    const user = { id: 'user-1', fullName: 'Test User', email: 'test@psau.edu.ph' };
+    fetchMock
+      .mockRejectedValueOnce(new TypeError('Network request failed'))
+      .mockResolvedValueOnce(answer(200, { ok: true }))
+      .mockResolvedValueOnce(answer(200, { ok: true, token: 'issued-token', user }));
+
+    await expect(signIn('test@psau.edu.ph', 'StrongPass!123')).resolves.toMatchObject({ ok: true, user });
+    expect(fetchMock.mock.calls.map(([url]) => String(url).replace(/^https?:\/\/[^/]+/, ''))).toEqual(['/api/auth/login', '/healthz', '/api/auth/login']);
+  });
+
+  it('does not blame the internet when the server takes too long to start', async () => {
+    fetchMock.mockRejectedValue(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+
+    await expect(signIn('test@psau.edu.ph', 'password')).resolves.toEqual({
+      ok: false,
+      message: 'The HabitAI server is taking too long to start. Please try again in a few seconds.',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a readable message instead of the host\'s HTML error page', async () => {
+    fetchMock.mockResolvedValue(answer(502, '<!DOCTYPE html><html><body>Bad gateway</body></html>'));
+
+    await expect(signIn('test@psau.edu.ph', 'password')).resolves.toEqual({
+      ok: false,
+      message: 'The HabitAI server is starting up. Please try again in a moment.',
+    });
+  });
+
+  it('does not call a correct password wrong when the answer is not the API\'s (a Wi-Fi sign-in page)', async () => {
+    fetchMock.mockResolvedValue(answer(200, '<html><body>Log in to the school Wi-Fi</body></html>'));
+
+    await expect(signIn('test@psau.edu.ph', 'password')).resolves.toEqual({
+      ok: false,
+      message: 'The sign-in service sent an unexpected answer. Please try again.',
+    });
+  });
+
+  it('keeps an account whose confirmed email is at another domain signed in', async () => {
+    const user = { id: 'user-1', fullName: 'Test User', email: 'test@student.psau.edu.ph' };
+    jest.mocked(getCurrentSession).mockResolvedValue(user);
+    jest.mocked(getSessionToken).mockResolvedValue('session-token');
+    fetchMock.mockResolvedValue(answer(200, { ok: true, user }));
+
+    await expect(getSession()).resolves.toEqual(user);
+    expect(logoutUser).not.toHaveBeenCalled();
+  });
+
+  it('signs out when the live check finds the session ended on the server', async () => {
+    jest.mocked(getSessionToken).mockResolvedValue('session-token');
+    fetchMock.mockResolvedValue(answer(401, { ok: false, message: 'Authentication required.' }));
+
+    await expect(getLiveVersions()).resolves.toMatchObject({ ok: false });
+    expect(logoutUser).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the session when the live check cannot reach the server', async () => {
+    jest.mocked(getSessionToken).mockResolvedValue('session-token');
+    fetchMock.mockRejectedValue(new TypeError('Network request failed'));
+
+    await expect(getLiveVersions()).resolves.toMatchObject({ ok: false });
+    expect(logoutUser).not.toHaveBeenCalled();
   });
 
   it('stores a server-issued session after successful sign-in', async () => {
@@ -135,7 +216,7 @@ describe('auth service offline behavior', () => {
       message: 'Login successful.',
       user,
     });
-    expect(saveSessionToken).toHaveBeenCalledWith('issued-token', user);
+    expect(saveSessionToken).toHaveBeenCalledWith('issued-token', user, { persist: false });
   });
 
   it('shows the server reason when a system admin tries to sign in to the app', async () => {
@@ -225,7 +306,7 @@ describe('auth service offline behavior', () => {
     });
   });
 
-  it('blocks sign-in in production until the backend API URL is configured', async () => {
+  it('signs in against the deployed backend when a production build has no API URL', async () => {
     const previousNodeEnv = process.env.NODE_ENV;
     const previousApiUrl = process.env.EXPO_PUBLIC_API_URL;
     const previousAiApiUrl = process.env.EXPO_PUBLIC_AI_API_URL;
@@ -236,10 +317,12 @@ describe('auth service offline behavior', () => {
     process.env.EXPO_PUBLIC_AUTH_URL = 'https://your-production-auth.example.com';
 
     try {
+      fetchMock.mockResolvedValue(answer(401, { ok: false, message: 'Incorrect email or password.' }));
       await expect(signIn('test@psau.edu.ph', 'StrongPass!123')).resolves.toEqual({
         ok: false,
-        message: expect.stringContaining('Production API is not configured'),
+        message: 'Incorrect email or password.',
       });
+      expect(fetchMock).toHaveBeenCalledWith('https://habitai-backend.onrender.com/api/auth/login', expect.anything());
     } finally {
       if (previousNodeEnv === undefined) unsetEnv('NODE_ENV'); else process.env.NODE_ENV = previousNodeEnv;
       if (previousApiUrl === undefined) unsetEnv('EXPO_PUBLIC_API_URL'); else process.env.EXPO_PUBLIC_API_URL = previousApiUrl;
@@ -279,6 +362,33 @@ describe('auth service offline behavior', () => {
       if (previousApiUrl === undefined) unsetEnv('EXPO_PUBLIC_API_URL'); else process.env.EXPO_PUBLIC_API_URL = previousApiUrl;
       if (previousAiApiUrl === undefined) unsetEnv('EXPO_PUBLIC_AI_API_URL'); else process.env.EXPO_PUBLIC_AI_API_URL = previousAiApiUrl;
       if (previousAuthUrl === undefined) unsetEnv('EXPO_PUBLIC_AUTH_URL'); else process.env.EXPO_PUBLIC_AUTH_URL = previousAuthUrl;
+    }
+  });
+
+  it('reaches a localhost API in .env through the laptop\'s address when a phone opens the dev server', () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousApiUrl = process.env.EXPO_PUBLIC_API_URL;
+    const previousLocation = window.location;
+    const previousPlatform = Platform.OS;
+
+    Platform.OS = 'web';
+    process.env.NODE_ENV = 'development';
+    process.env.EXPO_PUBLIC_API_URL = 'http://localhost:8787/';
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...previousLocation, hostname: '192.168.1.23' },
+    });
+
+    try {
+      expect(getApiBaseUrl()).toBe('http://192.168.1.23:8787');
+    } finally {
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: previousLocation,
+      });
+      Platform.OS = previousPlatform;
+      if (previousNodeEnv === undefined) unsetEnv('NODE_ENV'); else process.env.NODE_ENV = previousNodeEnv;
+      if (previousApiUrl === undefined) unsetEnv('EXPO_PUBLIC_API_URL'); else process.env.EXPO_PUBLIC_API_URL = previousApiUrl;
     }
   });
 

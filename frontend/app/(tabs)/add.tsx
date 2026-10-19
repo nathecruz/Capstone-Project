@@ -128,7 +128,7 @@ export default function AddScreen() {
   const classifyHabitRisk = async (habitName: string): Promise<{ isHabit: boolean; isBadHabit: boolean; categoryFits: boolean; suggestedCategory: string; reason: string }> => {
     const ai = await classifyHabit(habitName, { category, categories: categories.map((item) => item.label) });
     if (ai.ok) return { isHabit: ai.isHabit, isBadHabit: ai.isBadHabit, categoryFits: ai.categoryFits, suggestedCategory: ai.suggestedCategory, reason: ai.reason };
-    // Offline fallback: the keyword check only knows good vs bad, so let the habit through.
+    // Fallback: the keyword check only knows good vs bad, so let the habit through.
     const detected = detectBadHabit(habitName);
     return { isHabit: true, isBadHabit: detected.isBadHabit, categoryFits: true, suggestedCategory: category, reason: detected.reason };
   };

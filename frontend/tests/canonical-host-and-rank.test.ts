@@ -16,6 +16,10 @@ describe('canonicalRedirect', () => {
     expect(canonicalRedirect(at('habitai-frontend.onrender.com'), app)).toBeNull();
     expect(canonicalRedirect(at('capstone-project-gbvtscz85-team-c14.vercel.app'), 'not a url')).toBeNull();
   });
+
+  it('leaves a branch preview alone, so it can be tried on a phone before it goes live', () => {
+    expect(canonicalRedirect(at('capstone-project-git-claude-mobile-bugs-errors-mpby2a-team-c14.vercel.app'), app)).toBeNull();
+  });
 });
 
 describe('rankSummary', () => {

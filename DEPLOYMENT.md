@@ -80,7 +80,7 @@ Sign-ups send a verification code and password resets send a code, so email must
 
 ### Free-tier cold starts
 
-The Render free web service sleeps after 15 minutes without traffic and takes up to a minute to wake. The app waits up to 60 seconds for API calls and shows a "Connecting to HabitAI…" banner after 4 seconds, and a signed-in student keeps using the cached session meanwhile. To remove the delay, upgrade the backend to a paid instance or ping `/healthz` every 10 minutes from an uptime monitor.
+The Render free web service sleeps after 15 minutes without traffic and takes up to a minute to wake. The app waits up to 60 seconds for API calls (up to 2 minutes for sign-in, sign-up and password reset, which also retry once when the connection drops while the server boots) and shows a "Connecting to HabitAI…" banner after 4 seconds, and a signed-in student keeps the saved session meanwhile. There is no offline mode: with no internet the app shows a "No internet connection" screen, and the web service worker only handles Web Push reminders (it deletes the offline app cache older versions kept). To remove the delay, upgrade the backend to a paid instance or ping `/healthz` every 10 minutes from an uptime monitor.
 
 For Vercel frontend-only hosting, either set the project root to `frontend` (recommended) or leave it at the repository root. The frontend config supports the first option; the root `vercel.json` supports the second. Add these build-time environment variables in Project Settings:
 

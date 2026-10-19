@@ -69,7 +69,6 @@ describe('session token storage', () => {
 
     await expect(getSessionToken()).resolves.toBe('web-token');
     expect(webSessionStorage.setItem).toHaveBeenCalledWith('habitai_session_token', 'web-token');
-    expect(AsyncStorage.removeItem).toHaveBeenCalledWith('habitai_session_token');
     expect(SecureStore.setItemAsync).not.toHaveBeenCalled();
     expect(SecureStore.getItemAsync).not.toHaveBeenCalled();
   });
@@ -105,6 +104,69 @@ describe('session token storage', () => {
 
     localStore.getItem.mockReturnValue('pwa-token');
     await expect(getSessionToken()).resolves.toBe('pwa-token');
+  });
+
+  it('keeps the token the installed (Home Screen) app saves, although web AsyncStorage is that same localStorage', async () => {
+    // As in a browser: AsyncStorage on the web reads and writes window.localStorage under the same keys.
+    const stored = new Map<string, string>();
+    const localStore = {
+      getItem: jest.fn<string | null, [string]>((key) => stored.get(key) ?? null),
+      setItem: jest.fn<void, [string, string]>((key, value) => { stored.set(key, value); }),
+      removeItem: jest.fn<void, [string]>((key) => { stored.delete(key); }),
+    };
+    jest.mocked(AsyncStorage.getItem).mockImplementation(async (key: string) => stored.get(key) ?? null);
+    jest.mocked(AsyncStorage.setItem).mockImplementation(async (key: string, value: string) => { stored.set(key, value); });
+    jest.mocked(AsyncStorage.removeItem).mockImplementation(async (key: string) => { stored.delete(key); });
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { sessionStorage: webSessionStorage, localStorage: localStore, matchMedia: jest.fn().mockReturnValue({ matches: true }) },
+    });
+
+    await saveSessionToken('home-screen-token', { fullName: 'Phone User', email: 'phone@example.com' });
+
+    expect(stored.get('habitai_session_token')).toBe('home-screen-token');
+    await expect(getSessionToken()).resolves.toBe('home-screen-token');
+  });
+
+  it('keeps a phone-browser sign-in after its tab is closed when Remember me was ticked', async () => {
+    const stored = new Map<string, string>();
+    const localStore = {
+      getItem: jest.fn<string | null, [string]>((key) => stored.get(key) ?? null),
+      setItem: jest.fn<void, [string, string]>((key, value) => { stored.set(key, value); }),
+      removeItem: jest.fn<void, [string]>((key) => { stored.delete(key); }),
+    };
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { sessionStorage: webSessionStorage, localStorage: localStore, matchMedia: jest.fn().mockReturnValue({ matches: false }) },
+    });
+
+    await saveSessionToken('remembered-token', { fullName: 'Phone User', email: 'phone@example.com' }, { persist: true });
+    expect(stored.get('habitai_session_token')).toBe('remembered-token');
+    expect(webSessionStorage.setItem).not.toHaveBeenCalled();
+
+    // A new tab starts with an empty sessionStorage and still finds the session.
+    await expect(getSessionToken()).resolves.toBe('remembered-token');
+
+    await logoutUser();
+    expect(stored.has('habitai_session_token')).toBe(false);
+    expect(stored.has('habitai_keep_signed_in')).toBe(false);
+  });
+
+  it('keeps a browser sign-in for this tab only without Remember me', async () => {
+    const localStore = {
+      getItem: jest.fn<string | null, [string]>().mockReturnValue(null),
+      setItem: jest.fn<void, [string, string]>(),
+      removeItem: jest.fn<void, [string]>(),
+    };
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { sessionStorage: webSessionStorage, localStorage: localStore, matchMedia: jest.fn().mockReturnValue({ matches: false }) },
+    });
+
+    await saveSessionToken('tab-token', { fullName: 'Tab User', email: 'tab@example.com' }, { persist: false });
+    expect(webSessionStorage.setItem).toHaveBeenCalledWith('habitai_session_token', 'tab-token');
+    expect(localStore.removeItem).toHaveBeenCalledWith('habitai_keep_signed_in');
+    expect(localStore.setItem).not.toHaveBeenCalled();
   });
 
   it('stores native session tokens in SecureStore', async () => {

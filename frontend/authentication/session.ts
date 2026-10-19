@@ -9,15 +9,16 @@ const SESSION_TOKEN_KEY = 'habitai_session_token';
 const ACCOUNTS_KEY = 'habitai_accounts';
 const REMEMBERED_EMAIL_KEY = 'habitai_remembered_email';
 const PASSWORD_RESET_KEY = 'habitai_password_reset';
+const KEEP_SIGNED_IN_KEY = 'habitai_keep_signed_in';
 
 function isWebSessionAvailable(): boolean {
   return Platform.OS === 'web';
 }
 
 /**
- * An installed/standalone PWA (Add to Home Screen): its session should persist so a student stays
- * signed in across launches and the app works offline. A normal browser tab stays ephemeral — the
- * token lives in sessionStorage and clears when the tab closes, which suits a shared/school computer.
+ * An installed/standalone PWA (Add to Home Screen): its session persists so a student stays signed
+ * in across launches. A normal browser tab stays ephemeral — the token lives in sessionStorage and
+ * clears when the tab closes, which suits a shared/school computer — unless "Remember me" was ticked.
  */
 function isInstalledPwa(): boolean {
   if (typeof window === 'undefined') return false;
@@ -29,18 +30,34 @@ function isInstalledPwa(): boolean {
   }
 }
 
+function browserStorage(kind: 'localStorage' | 'sessionStorage'): Storage | null {
+  try {
+    return window[kind] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** "Remember me" on a web sign-in: the phone browser keeps the session after its tab is closed. */
+function keepsWebSignIn(local: Storage | null) {
+  try {
+    return local?.getItem(KEEP_SIGNED_IN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Where the web session token lives: localStorage for an installed PWA (persists across launches, so
- * it works offline after one online sign-in), sessionStorage for a normal tab. `other` is the one not
- * in use, so a token left there (e.g. before the app was installed) can be migrated and cleared.
+ * Where the web session token lives: localStorage for an installed PWA or after "Remember me"
+ * (persists across launches; mobile browsers also discard background tabs, which emptied
+ * sessionStorage and signed the student out), sessionStorage for a normal tab. `other` is the one
+ * not in use, so a token left there (e.g. before the app was installed) can be migrated and cleared.
  */
 function getWebTokenStorages(): { active: Storage | null; other: Storage | null } {
   if (!isWebSessionAvailable() || typeof window === 'undefined') return { active: null, other: null };
-  let local: Storage | null = null;
-  let session: Storage | null = null;
-  try { local = window.localStorage ?? null; } catch { local = null; }
-  try { session = window.sessionStorage ?? null; } catch { session = null; }
-  if (isInstalledPwa()) return { active: local ?? session, other: local ? session : null };
+  const local = browserStorage('localStorage');
+  const session = browserStorage('sessionStorage');
+  if (isInstalledPwa() || keepsWebSignIn(local)) return { active: local ?? session, other: local ? session : null };
   return { active: session, other: local };
 }
 
@@ -151,13 +168,36 @@ export async function getCurrentSession(): Promise<SessionUser | null> {
   }
 }
 
-export async function saveSessionToken(token: string, user: SessionUser) {
+/**
+ * Saves the session. `persist` (the web sign-in's "Remember me") keeps a browser session after its
+ * tab is closed; leaving it out keeps the choice made at sign-in (a refreshed profile, for example).
+ */
+export async function saveSessionToken(token: string, user: SessionUser, { persist }: { persist?: boolean } = {}) {
+  if (isWebSessionAvailable() && persist !== undefined && typeof window !== 'undefined') {
+    try {
+      const local = browserStorage('localStorage');
+      if (persist) local?.setItem(KEEP_SIGNED_IN_KEY, '1');
+      else local?.removeItem(KEEP_SIGNED_IN_KEY);
+    } catch {
+      // Storage blocked (private mode): the session lasts for this tab.
+    }
+  }
   const { active: webStorage, other: otherWebStorage } = getWebTokenStorages();
+  let savedOnWeb = false;
   if (isWebSessionAvailable() && webStorage) {
-    webStorage.setItem(SESSION_TOKEN_KEY, token);
+    try {
+      webStorage.setItem(SESSION_TOKEN_KEY, token);
+      savedOnWeb = true;
+    } catch {
+      // Storage full or blocked: AsyncStorage below still keeps the sign-in.
+    }
+  }
+  if (savedOnWeb) {
     // Don't leave a copy in the other web storage (e.g. sessionStorage from before the app was installed).
+    // Not AsyncStorage.removeItem: on the web AsyncStorage IS localStorage, under the same key, so it
+    // deleted the token just saved there by the installed app — every sign-in on a phone's Home
+    // Screen app ended back on the sign-in screen.
     try { otherWebStorage?.removeItem(SESSION_TOKEN_KEY); } catch { /* storage unavailable */ }
-    await AsyncStorage.removeItem(SESSION_TOKEN_KEY);
   } else if (isWebSessionAvailable()) {
     await AsyncStorage.setItem(SESSION_TOKEN_KEY, token);
   } else {
@@ -226,6 +266,7 @@ export async function logoutUser() {
   try {
     webStorage?.removeItem(SESSION_TOKEN_KEY);
     otherWebStorage?.removeItem(SESSION_TOKEN_KEY);
+    if (isWebSessionAvailable() && typeof window !== 'undefined') browserStorage('localStorage')?.removeItem(KEEP_SIGNED_IN_KEY);
   } catch {
     // Continue clearing the remaining session data.
   }
