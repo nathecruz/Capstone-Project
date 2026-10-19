@@ -1,21 +1,27 @@
 // Schedules habit reminders (native notifications; on web, reminders shown by an open HabitAI tab
 // alongside Web Push) and handles the Snooze action. Rescheduled at midnight and whenever the app returns to the foreground.
+import type { NotificationResponse } from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import { getLocalDateKey } from './habit-progress';
-import { canRemindAt, canSnoozeAt, enableWebReminders, getBrowserNotificationRegistration, getHabitReminderTimes, getNotificationsModule, getSnoozeLimit, isHabitReminderDay, nextReminderOccurrence, notificationShownAt, playReminderSound, requestWebNotificationPermission, type NotificationsModule } from './reminders';
+import { canRemindAt, canSnoozeAt, enableWebReminders, getBrowserNotificationRegistration, getHabitReminderTimes, getNotificationsModule, isHabitReminderDay, nextReminderOccurrence, playReminderSound, requestWebNotificationPermission, type NotificationsModule } from './reminders';
 import { computeSmartReminderTimes, getSmartReminderMessage, requestHabitPrediction } from './smart-reminders';
+import { keepsSnooze, loadSnoozeSettings, SNOOZE_CATEGORY, snoozeReminder } from './snooze';
 import type { Habit, Preferences } from './types';
 
-export function useHabitReminders({ habits, preferences, ringInterval, snoozeFrequency }: {
+/**
+ * `ready`: the account's habits and settings have loaded. Until then the Android/iOS reminders are
+ * left as scheduled, since rescheduling from the empty startup state would cancel them all.
+ */
+export function useHabitReminders({ habits, preferences, ringInterval, snoozeFrequency, ready }: {
   habits: Habit[];
   preferences: Preferences;
   ringInterval: number;
   snoozeFrequency: string;
+  ready: boolean;
 }) {
   const [reminderScheduleRevision, setReminderScheduleRevision] = useState(0);
   const sentBrowserRemindersRef = useRef(new Set<string>());
-  const handledSnoozeActionsRef = useRef(new Set<string>());
 
   useEffect(() => {
     const refreshAtMidnight = () => {
@@ -142,14 +148,21 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
         browserReminderTimer = setInterval(() => void notifyDueReminders(), 5000);
         return;
       }
+      if (!ready) return;
       const Notifications = await getNotificationsModule();
       if (!Notifications) return;
-      await Notifications.setNotificationCategoryAsync('habit-reminder-snooze', [{
+      await Notifications.setNotificationCategoryAsync(SNOOZE_CATEGORY, [{
         identifier: 'SNOOZE',
         buttonTitle: 'Snooze',
         options: { opensAppToForeground: false },
       }]);
-      await Notifications.cancelAllScheduledNotificationsAsync();
+      // Everything is scheduled again below, except a snooze the student asked for that can still
+      // be acted on (opening the app used to cancel it, so it never came back).
+      const scheduledNow = new Date();
+      const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+      await Promise.all(scheduled
+        .filter((request) => !preferences.notificationsEnabled || !keepsSnooze(request, habits, scheduledNow))
+        .map((request) => Notifications.cancelScheduledNotificationAsync(request.identifier)));
       if (!preferences.notificationsEnabled) return;
       const reminders = habits
         .map((habit) => ({ habit, times: getHabitReminderTimes(habit) }))
@@ -189,7 +202,7 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
               body: 'A small step today keeps your streak moving.',
               sound: soundEnabled ? 'reminder_sound.mp3' : false,
               data: { habitId: habit.id, snoozeCount: 0 },
-              ...(canSnoozeAt(habit, time.hour * 60 + time.minute, ringInterval) ? { categoryIdentifier: 'habit-reminder-snooze' } : {}),
+              ...(canSnoozeAt(habit, time.hour * 60 + time.minute, ringInterval) ? { categoryIdentifier: SNOOZE_CATEGORY } : {}),
             },
             trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: target, ...channel },
           });
@@ -230,7 +243,7 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
               body: prediction?.recommended_action || getSmartReminderMessage(habit, riskLevel),
               sound: soundEnabled ? 'reminder_sound.mp3' : false,
               data: { habitId: habit.id, type: 'smart-reminder', riskLevel, snoozeCount: 0 },
-              ...(canSnoozeAt(habit, time.hour * 60 + time.minute, ringInterval) ? { categoryIdentifier: 'habit-reminder-snooze' } : {}),
+              ...(canSnoozeAt(habit, time.hour * 60 + time.minute, ringInterval) ? { categoryIdentifier: SNOOZE_CATEGORY } : {}),
             },
             trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: target, ...channel },
           });
@@ -242,57 +255,25 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
       cancelled = true;
       if (browserReminderTimer) clearInterval(browserReminderTimer);
     };
-  }, [habits, preferences.notificationsEnabled, reminderScheduleRevision, ringInterval]);
+  }, [habits, preferences.notificationsEnabled, ready, reminderScheduleRevision, ringInterval]);
 
   useEffect(() => {
     let active = true;
     let responseSubscription: { remove: () => void } | undefined;
 
-    const handleResponse = async (Notifications: NotificationsModule, response: import('expo-notifications').NotificationResponse) => {
+    const handleResponse = async (Notifications: NotificationsModule, response: NotificationResponse) => {
       if (response.actionIdentifier !== 'SNOOZE') return;
-      const actionKey = `${response.notification.request.identifier}:SNOOZE`;
-      if (handledSnoozeActionsRef.current.has(actionKey)) return;
-      handledSnoozeActionsRef.current.add(actionKey);
-
-      const data = response.notification.request.content.data ?? {};
-      const snoozeCount = Number(data.snoozeCount) || 0;
-      const snoozeLimit = getSnoozeLimit(snoozeFrequency);
-      if (snoozeCount >= snoozeLimit) return;
-      const habitId = typeof data.habitId === 'string' ? data.habitId : '';
-      const habit = habits.find((item) => item.id === habitId);
-      const now = new Date();
-      const snoozeAt = new Date(now.getTime() + ringInterval * 60_000);
-      // A snooze tapped on an older day's reminder, or one that would come back once the habit is
-      // done or missed, would remind of a habit that can no longer be checked in: none is set.
-      if (getLocalDateKey(notificationShownAt(response.notification.date, now)) !== getLocalDateKey(now)) return;
-      if (habit && !canRemindAt(habit, snoozeAt, now)) return;
-      const soundEnabled = habit?.reminderSoundEnabled !== false;
-      const channel = Platform.OS === 'android'
-        ? { channelId: soundEnabled ? 'habit-reminders-sound-v2' : 'habit-reminders-silent-v2' }
-        : {};
-      const notificationContent = response.notification.request.content;
-      const nextSnoozeCount = snoozeCount + 1;
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: notificationContent.title || 'Habit reminder',
-          body: notificationContent.body || 'A small step today keeps your streak moving.',
-          sound: soundEnabled ? 'reminder_sound.mp3' : false,
-          data: { ...data, snoozeCount: nextSnoozeCount },
-          // Snooze again only while that snooze could still come back before the habit is missed.
-          ...(nextSnoozeCount < snoozeLimit && (!habit || canSnoozeAt(habit, snoozeAt.getHours() * 60 + snoozeAt.getMinutes(), ringInterval)) ? { categoryIdentifier: 'habit-reminder-snooze' } : {}),
-        },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.DATE,
-          date: snoozeAt,
-          ...channel,
-        },
-      });
+      // Before the account has loaded (the tap opened the app), its habits and snooze settings as
+      // last saved on this device.
+      const settings = ready ? { habits, ringInterval, snoozeFrequency } : await loadSnoozeSettings();
+      if (!active || !settings) return;
+      await snoozeReminder(Notifications, response, settings);
     };
 
     const register = async () => {
       const Notifications = await getNotificationsModule();
       if (!Notifications || !active) return;
-      await Notifications.setNotificationCategoryAsync('habit-reminder-snooze', [{
+      await Notifications.setNotificationCategoryAsync(SNOOZE_CATEGORY, [{
         identifier: 'SNOOZE',
         buttonTitle: 'Snooze',
         options: { opensAppToForeground: false },
@@ -309,5 +290,5 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
       active = false;
       responseSubscription?.remove();
     };
-  }, [habits, ringInterval, snoozeFrequency]);
+  }, [habits, ready, ringInterval, snoozeFrequency]);
 }

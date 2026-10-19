@@ -1,22 +1,28 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, renderHook } from '@testing-library/react-native';
 import { Platform } from 'react-native';
 import type { Habit, Preferences } from '@/hooks/app-state/types';
 import { useHabitReminders } from '@/hooks/app-state/use-habit-reminders';
 
+jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
 jest.mock('@/authentication/authService', () => ({ getApiBaseUrl: jest.fn(), getAuthenticatedHeaders: jest.fn(), getWebPushVapidPublicKey: jest.fn(), saveWebPushSubscription: jest.fn(), sendTestWebPush: jest.fn() }));
 
 type Listener = (response: unknown) => void;
+type ScheduledRequest = { identifier: string; content: { data: Record<string, unknown> } };
+// What getAllScheduledNotificationsAsync returns: the notifications scheduled before.
+let mockPending: ScheduledRequest[] = [];
+const mockListeners: Listener[] = [];
 const mockNotifications = {
-  listeners: [] as Listener[],
   setNotificationCategoryAsync: jest.fn(async () => undefined),
-  cancelAllScheduledNotificationsAsync: jest.fn(async () => undefined),
+  getAllScheduledNotificationsAsync: jest.fn(async () => mockPending),
+  cancelScheduledNotificationAsync: jest.fn(async (_identifier: string) => undefined),
   setNotificationChannelAsync: jest.fn(async () => undefined),
   getPermissionsAsync: jest.fn(async () => ({ status: 'granted' })),
   requestPermissionsAsync: jest.fn(async () => ({ status: 'granted' })),
   scheduleNotificationAsync: jest.fn(async (_request: { content: Record<string, unknown>; trigger: { date: Date } }) => 'id'),
   getLastNotificationResponseAsync: jest.fn(async () => null),
   addNotificationResponseReceivedListener: jest.fn((listener: Listener) => {
-    mockNotifications.listeners.push(listener);
+    mockListeners.push(listener);
     return { remove: jest.fn() };
   }),
   SchedulableTriggerInputTypes: { DATE: 'date' },
@@ -52,13 +58,15 @@ async function settle() {
   for (let round = 0; round < 10; round += 1) await act(async () => { await Promise.resolve(); });
 }
 
-// iOS (jest-expo's platform) gives the notification's date in seconds.
+// iOS (jest-expo's platform) gives the notification's date in seconds. Each tap is a new notification.
+let tapCount = 0;
 function snoozeResponse(shownAt: Date) {
+  tapCount += 1;
   return {
     actionIdentifier: 'SNOOZE',
     notification: {
       date: shownAt.getTime() / 1000,
-      request: { identifier: `gym-${shownAt.getTime()}`, content: { title: 'Gym reminder', body: 'A small step today keeps your streak moving.', data: { habitId: 'gym', snoozeCount: 0 } } },
+      request: { identifier: `gym-${tapCount}`, content: { title: 'Gym reminder', body: 'A small step today keeps your streak moving.', data: { habitId: 'gym', snoozeCount: 0 } } },
     },
   };
 }
@@ -66,15 +74,17 @@ function snoozeResponse(shownAt: Date) {
 const scheduled = () => mockNotifications.scheduleNotificationAsync.mock.calls.map(([request]) => request);
 
 describe('reminders scheduled by the Android and iOS app', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.useFakeTimers({ now, doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] });
-    mockNotifications.listeners = [];
+    mockListeners.length = 0;
+    mockPending = [];
     jest.clearAllMocks();
+    await AsyncStorage.clear();
   });
   afterEach(() => jest.useRealTimers());
 
   it('schedules no "still open" nudge after the last reminder, and no Snooze where it cannot come back in time', async () => {
-    renderHook(() => useHabitReminders({ habits: [gym], preferences, ringInterval: 20, snoozeFrequency: 'Once' }));
+    renderHook(() => useHabitReminders({ habits: [gym], preferences, ringInterval: 20, snoozeFrequency: 'Once', ready: true }));
     await settle();
     const requests = scheduled();
     expect(requests.map((request) => request.content.title)).toEqual(['Gym reminder', 'Gym reminder']);
@@ -85,34 +95,75 @@ describe('reminders scheduled by the Android and iOS app', () => {
     expect(category(11, 30)).toBeUndefined();
   });
 
+  it('keeps a pending snooze when the reminders are scheduled again, but not one that is no use any more', async () => {
+    const at = (hour: number, minute: number) => new Date(2026, 9, 19, hour, minute).getTime();
+    mockPending = [
+      { identifier: 'regular', content: { data: { habitId: 'gym', snoozeCount: 0 } } },
+      { identifier: 'habitai-snooze:gym', content: { data: { habitId: 'gym', snoozeCount: 1, snoozeAt: at(11, 25) } } },
+      { identifier: 'after-deadline', content: { data: { habitId: 'gym', snoozeCount: 1, snoozeAt: at(11, 35) } } },
+      { identifier: 'deleted-habit', content: { data: { habitId: 'old', snoozeCount: 1, snoozeAt: at(11, 25) } } },
+    ];
+    renderHook(() => useHabitReminders({ habits: [gym], preferences, ringInterval: 10, snoozeFrequency: 'Once', ready: true }));
+    await settle();
+    const cancelled = mockNotifications.cancelScheduledNotificationAsync.mock.calls.map(([identifier]) => identifier);
+    expect(cancelled.sort()).toEqual(['after-deadline', 'deleted-habit', 'regular']);
+
+    // Checked in meanwhile: its snooze goes too.
+    jest.clearAllMocks();
+    renderHook(() => useHabitReminders({ habits: [{ ...gym, completionDates: ['2026-10-19'] }], preferences, ringInterval: 10, snoozeFrequency: 'Once', ready: true }));
+    await settle();
+    expect(mockNotifications.cancelScheduledNotificationAsync.mock.calls.map(([identifier]) => identifier)).toContain('habitai-snooze:gym');
+  });
+
+  it('leaves the scheduled reminders alone until the account has loaded', async () => {
+    mockPending = [{ identifier: 'habitai-snooze:gym', content: { data: { habitId: 'gym', snoozeCount: 1 } } }];
+    renderHook(() => useHabitReminders({ habits: [], preferences, ringInterval: 30, snoozeFrequency: 'Once', ready: false }));
+    await settle();
+    expect(mockNotifications.getAllScheduledNotificationsAsync).not.toHaveBeenCalled();
+    expect(mockNotifications.cancelScheduledNotificationAsync).not.toHaveBeenCalled();
+    expect(mockNotifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  it('snoozes with the settings saved on the device when the tap opens the app before it has loaded', async () => {
+    await AsyncStorage.setItem('habitai_session', JSON.stringify({ email: 'Student@Example.com', fullName: 'A Student' }));
+    await AsyncStorage.setItem('habitai_app_state:student@example.com', JSON.stringify({ habits: [gym], ringInterval: 10, snoozeFrequency: 'Once' }));
+    renderHook(() => useHabitReminders({ habits: [], preferences, ringInterval: 30, snoozeFrequency: 'Once', ready: false }));
+    await settle();
+    await act(async () => { mockListeners.forEach((listener) => listener(snoozeResponse(new Date(2026, 9, 19, 11, 0)))); });
+    await settle();
+    expect(scheduled()).toHaveLength(1);
+    expect(scheduled()[0].trigger.date).toEqual(new Date(2026, 9, 19, 11, 25));
+    expect((scheduled()[0] as { identifier?: string }).identifier).toBe('habitai-snooze:gym');
+  });
+
   it('does not set a snooze that would come back after the habit is missed', async () => {
-    renderHook(() => useHabitReminders({ habits: [gym], preferences, ringInterval: 20, snoozeFrequency: '2 times' }));
+    renderHook(() => useHabitReminders({ habits: [gym], preferences, ringInterval: 20, snoozeFrequency: '2 times', ready: true }));
     await settle();
     mockNotifications.scheduleNotificationAsync.mockClear();
     // 11:15 + 20 minutes is 11:35, past the 11:30 deadline.
-    await act(async () => { mockNotifications.listeners.forEach((listener) => listener(snoozeResponse(now))); });
+    await act(async () => { mockListeners.forEach((listener) => listener(snoozeResponse(now))); });
     await settle();
     expect(mockNotifications.scheduleNotificationAsync).not.toHaveBeenCalled();
   });
 
-  it('ignores Snooze on an older day\'s reminder even before the habits have loaded', async () => {
-    // The app can be woken by the Snooze tap before its habits are read: no habit to check yet.
-    renderHook(() => useHabitReminders({ habits: [], preferences, ringInterval: 30, snoozeFrequency: 'Once' }));
+  it('ignores Snooze on an older day\'s reminder even when its habit is not found', async () => {
+    // No habit to check the deadline against (for example, none saved on the device yet).
+    renderHook(() => useHabitReminders({ habits: [], preferences, ringInterval: 30, snoozeFrequency: 'Once', ready: true }));
     await settle();
-    await act(async () => { mockNotifications.listeners.forEach((listener) => listener(snoozeResponse(new Date(2026, 9, 18, 21, 0)))); });
+    await act(async () => { mockListeners.forEach((listener) => listener(snoozeResponse(new Date(2026, 9, 18, 21, 0)))); });
     await settle();
     expect(mockNotifications.scheduleNotificationAsync).not.toHaveBeenCalled();
     // Today's reminder is still snoozed.
-    await act(async () => { mockNotifications.listeners.forEach((listener) => listener(snoozeResponse(new Date(2026, 9, 19, 11, 0)))); });
+    await act(async () => { mockListeners.forEach((listener) => listener(snoozeResponse(new Date(2026, 9, 19, 11, 0)))); });
     await settle();
     expect(scheduled()).toHaveLength(1);
   });
 
   it('sets a snooze that comes back in time, without another Snooze that could not, and none from an older reminder', async () => {
-    renderHook(() => useHabitReminders({ habits: [gym], preferences, ringInterval: 10, snoozeFrequency: '2 times' }));
+    renderHook(() => useHabitReminders({ habits: [gym], preferences, ringInterval: 10, snoozeFrequency: '2 times', ready: true }));
     await settle();
     mockNotifications.scheduleNotificationAsync.mockClear();
-    await act(async () => { mockNotifications.listeners.forEach((listener) => listener(snoozeResponse(now))); });
+    await act(async () => { mockListeners.forEach((listener) => listener(snoozeResponse(now))); });
     await settle();
     expect(scheduled()).toHaveLength(1);
     expect(scheduled()[0].trigger.date).toEqual(new Date(2026, 9, 19, 11, 25));
@@ -121,7 +172,7 @@ describe('reminders scheduled by the Android and iOS app', () => {
 
     mockNotifications.scheduleNotificationAsync.mockClear();
     // Snooze tapped today on yesterday's reminder: that day is over.
-    await act(async () => { mockNotifications.listeners.forEach((listener) => listener(snoozeResponse(new Date(2026, 9, 18, 11, 0)))); });
+    await act(async () => { mockListeners.forEach((listener) => listener(snoozeResponse(new Date(2026, 9, 18, 11, 0)))); });
     await settle();
     expect(mockNotifications.scheduleNotificationAsync).not.toHaveBeenCalled();
   });
@@ -142,7 +193,7 @@ describe('reminders shown by an open HabitAI tab', () => {
 
   const shownAt = async (hour: number, minute: number) => {
     jest.useFakeTimers({ now: new Date(2026, 9, 19, hour, minute, 5), doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] });
-    const { unmount } = renderHook(() => useHabitReminders({ habits: [gym], preferences, ringInterval: 20, snoozeFrequency: 'Once' }));
+    const { unmount } = renderHook(() => useHabitReminders({ habits: [gym], preferences, ringInterval: 20, snoozeFrequency: 'Once', ready: true }));
     await settle();
     unmount();
     return mockRegistration.showNotification.mock.calls.map(([title]) => title);

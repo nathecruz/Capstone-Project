@@ -205,7 +205,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   const pendingSavesRef = useRef(0);
   // The app opened while the server did not answer (asleep): its state is loaded once it does.
   const startedWithoutServerRef = useRef(false);
-  useHabitReminders({ habits, preferences, ringInterval, snoozeFrequency });
+  useHabitReminders({ habits, preferences, ringInterval, snoozeFrequency, ready: stateHydrated });
   useHomeWidget(habits);
 
   /** The last state the server confirmed; kept on the device so later saves merge correctly. */
