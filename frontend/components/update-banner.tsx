@@ -53,7 +53,7 @@ export function UpdateBanner() {
       const latest = await publishedEntry();
       if (stopped || !latest || latest === running) return;
       // Not in the middle of a request (a sign-in waiting for the server to wake): reloading would drop it.
-      if (document.hidden && !hasRequestsInFlight()) window.location.reload();
+      if (document.hidden && !hasRequestsInFlight() && navigator.onLine !== false) window.location.reload();
       else setReady(true);
     };
     const checkWhenVisible = () => {
@@ -79,13 +79,27 @@ export function UpdateBanner() {
     };
     const events = ['pointerdown', 'keydown', 'touchstart', 'wheel'] as const;
     events.forEach((name) => window.addEventListener(name, active, { passive: true }));
+    let reloading = false;
     const timer = setInterval(() => {
+      if (reloading) return;
       const busy = isTyping() || hasRequestsInFlight() || Date.now() - lastActive < IDLE_SECONDS * 1000;
       setWaiting(busy);
       if (busy) return;
       left -= 1;
       setSeconds(left);
-      if (left <= 0) window.location.reload();
+      if (left > 0) return;
+      // Only with a connection: there is no offline copy of the app, so reloading without one would
+      // leave the browser's error page (and an installed app has no reload button).
+      reloading = true;
+      void publishedEntry().then((latest) => {
+        if (latest) {
+          window.location.reload();
+          return;
+        }
+        left = COUNTDOWN_SECONDS;
+        setSeconds(left);
+        reloading = false;
+      });
     }, 1000);
     return () => {
       clearInterval(timer);

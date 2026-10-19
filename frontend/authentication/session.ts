@@ -48,17 +48,68 @@ function keepsWebSignIn(local: Storage | null) {
 }
 
 /**
- * Where the web session token lives: localStorage for an installed PWA or after "Remember me"
- * (persists across launches; mobile browsers also discard background tabs, which emptied
- * sessionStorage and signed the student out), sessionStorage for a normal tab. `other` is the one
- * not in use, so a token left there (e.g. before the app was installed) can be migrated and cleared.
+ * A web sign-in is one of two kinds. A lasting one (the installed app, or "Remember me") keeps its
+ * token in localStorage with the keep flag: it outlives the tab (mobile browsers also discard
+ * background tabs, which emptied sessionStorage and signed the student out) and is shared by every tab
+ * and the installed app. A tab sign-in keeps its token in that tab's sessionStorage and ends with the
+ * tab, which suits a shared or school computer. A tab's own sign-in comes first, so a sign-in with
+ * Remember me in another tab never moves a tab that is already signed in onto another account.
  */
-function getWebTokenStorages(): { active: Storage | null; other: Storage | null } {
-  if (!isWebSessionAvailable() || typeof window === 'undefined') return { active: null, other: null };
+function readWebToken(): string {
   const local = browserStorage('localStorage');
   const session = browserStorage('sessionStorage');
-  if (isInstalledPwa() || keepsWebSignIn(local)) return { active: local ?? session, other: local ? session : null };
-  return { active: session, other: local };
+  const tabToken = session?.getItem(SESSION_TOKEN_KEY);
+  if (tabToken) {
+    if (isInstalledPwa() && local) {
+      // Signed in in the browser before the app was installed: the installed app keeps it from now on.
+      try {
+        local.setItem(SESSION_TOKEN_KEY, tabToken);
+        local.setItem(KEEP_SIGNED_IN_KEY, '1');
+        session?.removeItem(SESSION_TOKEN_KEY);
+      } catch {
+        // It still works for this launch.
+      }
+    }
+    return tabToken;
+  }
+  const savedToken = local?.getItem(SESSION_TOKEN_KEY);
+  if (!savedToken) return '';
+  // A token in localStorage without the keep flag was saved for a tab by an older version: it moves
+  // into this tab only. One the installed app or Remember me saved stays where every tab (and the
+  // installed app, which shares this storage with Chrome on Android) can find it.
+  if (!keepsWebSignIn(local) && !isInstalledPwa() && session) {
+    try {
+      session.setItem(SESSION_TOKEN_KEY, savedToken);
+      local?.removeItem(SESSION_TOKEN_KEY);
+    } catch {
+      // It still works for this tab.
+    }
+  }
+  return savedToken;
+}
+
+/** Saves a web token as a lasting sign-in or a tab sign-in (see readWebToken); false if storage refused it. */
+function writeWebToken(token: string, persist: boolean | undefined): boolean {
+  const local = browserStorage('localStorage');
+  const session = browserStorage('sessionStorage');
+  // Left out (a refreshed profile, for example): the same kind as the current sign-in.
+  const lasting = isInstalledPwa() || (persist ?? (!session?.getItem(SESSION_TOKEN_KEY) && keepsWebSignIn(local)));
+  try {
+    if (lasting && local) {
+      local.setItem(SESSION_TOKEN_KEY, token);
+      local.setItem(KEEP_SIGNED_IN_KEY, '1');
+      session?.removeItem(SESSION_TOKEN_KEY);
+      return true;
+    }
+    if (session) {
+      // A lasting sign-in someone made earlier in this browser is left alone: this tab uses its own.
+      session.setItem(SESSION_TOKEN_KEY, token);
+      return true;
+    }
+  } catch {
+    // Storage full or blocked.
+  }
+  return false;
 }
 
 export type SessionUser = {
@@ -173,33 +224,11 @@ export async function getCurrentSession(): Promise<SessionUser | null> {
  * tab is closed; leaving it out keeps the choice made at sign-in (a refreshed profile, for example).
  */
 export async function saveSessionToken(token: string, user: SessionUser, { persist }: { persist?: boolean } = {}) {
-  if (isWebSessionAvailable() && persist !== undefined && typeof window !== 'undefined') {
-    try {
-      const local = browserStorage('localStorage');
-      if (persist) local?.setItem(KEEP_SIGNED_IN_KEY, '1');
-      else local?.removeItem(KEEP_SIGNED_IN_KEY);
-    } catch {
-      // Storage blocked (private mode): the session lasts for this tab.
-    }
-  }
-  const { active: webStorage, other: otherWebStorage } = getWebTokenStorages();
-  let savedOnWeb = false;
-  if (isWebSessionAvailable() && webStorage) {
-    try {
-      webStorage.setItem(SESSION_TOKEN_KEY, token);
-      savedOnWeb = true;
-    } catch {
-      // Storage full or blocked: AsyncStorage below still keeps the sign-in.
-    }
-  }
-  if (savedOnWeb) {
-    // Don't leave a copy in the other web storage (e.g. sessionStorage from before the app was installed).
-    // Not AsyncStorage.removeItem: on the web AsyncStorage IS localStorage, under the same key, so it
-    // deleted the token just saved there by the installed app — every sign-in on a phone's Home
-    // Screen app ended back on the sign-in screen.
-    try { otherWebStorage?.removeItem(SESSION_TOKEN_KEY); } catch { /* storage unavailable */ }
-  } else if (isWebSessionAvailable()) {
-    await AsyncStorage.setItem(SESSION_TOKEN_KEY, token);
+  if (isWebSessionAvailable()) {
+    // Not through AsyncStorage: on the web it IS localStorage, under the same key, and its cleanup
+    // deleted the token the installed app had just saved there, so every sign-in on a phone's Home
+    // Screen app ended back on the sign-in screen. It only takes the token when storage refused it.
+    if (!writeWebToken(token, persist)) await AsyncStorage.setItem(SESSION_TOKEN_KEY, token);
   } else {
     await SecureStore.setItemAsync(SESSION_TOKEN_KEY, token);
     await AsyncStorage.removeItem(SESSION_TOKEN_KEY);
@@ -211,26 +240,7 @@ export async function saveSessionToken(token: string, user: SessionUser, { persi
 export async function getSessionToken(): Promise<string> {
   try {
     if (isWebSessionAvailable()) {
-      const { active: webStorage, other: otherWebStorage } = getWebTokenStorages();
-      const activeToken = webStorage?.getItem(SESSION_TOKEN_KEY);
-      if (activeToken) return activeToken;
-
-      // A token left in the other web storage (e.g. saved in sessionStorage before the app was
-      // installed as a PWA) moves into the active one so it persists from now on.
-      const otherToken = otherWebStorage?.getItem(SESSION_TOKEN_KEY);
-      if (otherToken && webStorage) {
-        webStorage.setItem(SESSION_TOKEN_KEY, otherToken);
-        try { otherWebStorage?.removeItem(SESSION_TOKEN_KEY); } catch { /* storage unavailable */ }
-        return otherToken;
-      }
-      if (otherToken) return otherToken;
-
-      const legacyToken = await AsyncStorage.getItem(SESSION_TOKEN_KEY);
-      if (legacyToken && webStorage) {
-        webStorage.setItem(SESSION_TOKEN_KEY, legacyToken);
-        await AsyncStorage.removeItem(SESSION_TOKEN_KEY);
-      }
-      return legacyToken ?? '';
+      return readWebToken() || (await AsyncStorage.getItem(SESSION_TOKEN_KEY)) || '';
     }
 
     const secureToken = await SecureStore.getItemAsync(SESSION_TOKEN_KEY);
@@ -252,7 +262,6 @@ export async function getSessionToken(): Promise<string> {
 }
 
 export async function logoutUser() {
-  const { active: webStorage, other: otherWebStorage } = getWebTokenStorages();
   const signedOutEmail = (await getCurrentSession().catch(() => null))?.email.trim().toLowerCase() ?? '';
   if (isWebSessionAvailable() && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     try {
@@ -263,12 +272,16 @@ export async function logoutUser() {
       // Continue clearing the session if browser push cleanup is unavailable.
     }
   }
-  try {
-    webStorage?.removeItem(SESSION_TOKEN_KEY);
-    otherWebStorage?.removeItem(SESSION_TOKEN_KEY);
-    if (isWebSessionAvailable() && typeof window !== 'undefined') browserStorage('localStorage')?.removeItem(KEEP_SIGNED_IN_KEY);
-  } catch {
-    // Continue clearing the remaining session data.
+  if (isWebSessionAvailable() && typeof window !== 'undefined') {
+    // Signing out ends this browser's sign-ins: this tab's and a lasting one (Remember me, installed app).
+    for (const storage of [browserStorage('sessionStorage'), browserStorage('localStorage')]) {
+      try {
+        storage?.removeItem(SESSION_TOKEN_KEY);
+        storage?.removeItem(KEEP_SIGNED_IN_KEY);
+      } catch {
+        // Continue clearing the remaining session data.
+      }
+    }
   }
 
   const cleanup = [
