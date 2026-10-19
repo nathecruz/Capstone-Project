@@ -11,6 +11,25 @@ import { getConfiguredVapidDetails, getConfiguredVapidPublicKey, getWebPushSnooz
 
 const TEST_PUSH_COOLDOWN_MS = 15_000;
 
+/**
+ * Why a snooze tapped at `now` for a reminder on `reminderDate` would be no use, or null. It has
+ * to come back (at `followUpAt`) while the habit can still be checked in that day.
+ */
+function snoozeRefusal(habit, reminderDate, timeZone, now, followUpAt) {
+  if (canStillCheckIn(habit, reminderDate, timeZone, new Date(followUpAt))) return null;
+  if (Array.isArray(habit.completionDates) && habit.completionDates.includes(reminderDate)) {
+    return { code: 'HABIT_DONE', message: 'This habit is already checked in.' };
+  }
+  if (reminderDate !== localDateIn(timeZone, new Date(now))) {
+    return { code: 'DAY_OVER', message: 'This reminder is from a day that is over, so it cannot be snoozed.' };
+  }
+  // Still open now: only the snooze would come back after the last reminder time.
+  if (canStillCheckIn(habit, reminderDate, timeZone, new Date(now))) {
+    return { code: 'SNOOZE_TOO_LATE', message: "A snooze would come back after this habit's last reminder time. Check it in before then." };
+  }
+  return { code: 'HABIT_MISSED', message: 'This habit passed its last reminder time, so it is missed and cannot be snoozed.' };
+}
+
 export default function registerNotificationRoutes(app) {
   const lastTestPush = new Map();
   // In-app notifications: achievements, reminders, and Admin Panel broadcasts/announcements.
@@ -141,12 +160,10 @@ export default function registerNotificationRoutes(app) {
       if (!token) return false;
       const settings = getWebPushSnoozeSettings(token.stateJson, token.habitId, Number(token.snoozeCount));
       if (!settings) return false;
-      // The snooze must come back on its reminder's day while the habit can still be checked in;
-      // later (the day is over, the habit is done or past its last reminder time) it is refused.
+      // The snooze must come back on its reminder's day while the habit can still be checked in.
       const reminderDate = localDateIn(token.timeZone, new Date(Number(token.createdAt)));
-      if (!canStillCheckIn(settings.habit, reminderDate, token.timeZone, new Date(now + settings.intervalMinutes * 60_000))) {
-        return { refused: 'This habit can no longer be checked in today, so this reminder cannot be snoozed.' };
-      }
+      const refusal = snoozeRefusal(settings.habit, reminderDate, token.timeZone, now, now + settings.intervalMinutes * 60_000);
+      if (refusal) return { refusal };
       const consumed = await db.query('UPDATE web_push_snooze_tokens SET consumed_at=$1 WHERE token_hash=$2 AND consumed_at=0 AND expires_at>$1', [now, tokenHash]);
       if (!consumed.rowCount) return false;
       await db.query(
@@ -156,7 +173,7 @@ export default function registerNotificationRoutes(app) {
       return token.userId;
     });
     if (!enqueued) return response.status(410).json({ ok: false, message: 'This snooze action is no longer available.' });
-    if (enqueued.refused) return response.status(410).json({ ok: false, message: enqueued.refused });
+    if (enqueued.refusal) return response.status(409).json({ ok: false, ...enqueued.refusal });
     // The snoozed reminder comes back on its minute when the API is still awake then.
     notifyReminderChange(enqueued);
     response.json({ ok: true });

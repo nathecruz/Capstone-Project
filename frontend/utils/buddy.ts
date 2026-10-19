@@ -66,10 +66,13 @@ export function buddyMood(habits: Habit[], name: string, now = new Date(), froze
   const agenda = todayAgenda(habits, now);
   const total = agenda.scheduled.length;
   const done = agenda.done.length;
+  // Still possible today: habits past their last reminder time are missed and cannot be checked in.
+  const left = agenda.open.length - agenda.missed.length;
   const energy = total ? done / total : 0;
   if (!habits.length) return { mood: 'sleepy', line: `Add a habit and ${name} will grow with you.`, energy };
   if (total && done === total) return { mood: 'ecstatic', line: 'We did everything today! I feel amazing.', energy };
-  if (done > 0) return { mood: 'happy', line: `Yum, thanks! ${total - done} more and I'm full of energy.`, energy };
+  if (done > 0) return { mood: 'happy', line: left ? `Yum, thanks! ${left} more and I'm full of energy.` : 'Yum, thanks! That\'s all for today.', energy };
+  if (total && !left) return { mood: 'sad', line: 'We missed today\'s habits... let\'s get them next time.', energy };
   if (habits.some((habit) => isHabitMissedYesterday(habit, now))) {
     const yesterday = getLocalDateKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
     return frozenDays.includes(yesterday)

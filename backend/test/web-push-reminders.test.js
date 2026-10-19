@@ -275,6 +275,12 @@ test('a push lives only until its habit can no longer be checked in', async () =
   assert.equal(secondsUntilCheckInCloses(gym, '2026-10-18', 'Asia/Manila', new Date('2026-10-19T03:29:20.000Z')), 0, 'a day that is over');
   // Without a reminder, until midnight.
   assert.equal(secondsUntilCheckInCloses({ reminderEnabled: false }, '2026-10-19', 'Asia/Manila', new Date('2026-10-19T15:59:30.000Z')), 30);
+  // Daylight saving: from 1:00 AM to the end of 8:00 AM is 6 h 1 min on the day the clocks go
+  // forward in New York, and 8 h 1 min on the day they go back.
+  const morning = { reminderEnabled: true, reminderTimes: ['01:00 AM', '08:00 AM'] };
+  assert.equal(secondsUntilCheckInCloses(morning, '2026-03-08', 'America/New_York', new Date('2026-03-08T06:00:00.000Z')), (6 * 60 + 1) * 60);
+  assert.equal(secondsUntilCheckInCloses(morning, '2026-11-01', 'America/New_York', new Date('2026-11-01T05:00:00.000Z')), (8 * 60 + 1) * 60);
+  assert.equal(secondsUntilCheckInCloses(morning, '2026-10-04', 'Australia/Adelaide', new Date('2026-10-03T15:30:00.000Z')), (6 * 60 + 1) * 60);
 });
 
 test('a snoozed reminder is dropped once the habit is done or missed, or its day is over', async (t) => {

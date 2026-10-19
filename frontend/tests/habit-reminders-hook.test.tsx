@@ -52,11 +52,12 @@ async function settle() {
   for (let round = 0; round < 10; round += 1) await act(async () => { await Promise.resolve(); });
 }
 
+// iOS (jest-expo's platform) gives the notification's date in seconds.
 function snoozeResponse(shownAt: Date) {
   return {
     actionIdentifier: 'SNOOZE',
     notification: {
-      date: shownAt.getTime(),
+      date: shownAt.getTime() / 1000,
       request: { identifier: `gym-${shownAt.getTime()}`, content: { title: 'Gym reminder', body: 'A small step today keeps your streak moving.', data: { habitId: 'gym', snoozeCount: 0 } } },
     },
   };

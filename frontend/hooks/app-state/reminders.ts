@@ -95,6 +95,15 @@ export function canSnoozeAt(habit: Pick<Habit, 'reminderEnabled' | 'reminderTime
   return minutes + ringInterval <= (deadlineMinutes(habit) ?? 24 * 60 - 1);
 }
 
+/**
+ * When a native notification was shown. expo-notifications gives its `date` in seconds on iOS and
+ * in milliseconds on Android; `fallback` when it has none.
+ */
+export function notificationShownAt(date: number, fallback = new Date()) {
+  if (!Number.isFinite(date) || date <= 0) return fallback;
+  return new Date(date < 1e11 ? date * 1000 : date);
+}
+
 export function getSnoozeLimit(frequency: string) {
   if (frequency === 'Once') return 1;
   const count = Number.parseInt(frequency, 10);

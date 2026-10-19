@@ -1,5 +1,5 @@
 import type { Habit } from '@/hooks/app-state/types';
-import { canRemindAt, canSnoozeAt } from '@/hooks/app-state/reminders';
+import { canRemindAt, canSnoozeAt, notificationShownAt } from '@/hooks/app-state/reminders';
 
 jest.mock('@/authentication/authService', () => ({ getApiBaseUrl: jest.fn(), getAuthenticatedHeaders: jest.fn(), getWebPushVapidPublicKey: jest.fn(), saveWebPushSubscription: jest.fn(), sendTestWebPush: jest.fn() }));
 
@@ -53,5 +53,12 @@ describe('reminders for missed habits', () => {
     // Reminders off: until the end of the day.
     expect(canSnoozeAt(habit({ reminderEnabled: false }), 23 * 60, 30)).toBe(true);
     expect(canSnoozeAt(habit({ reminderEnabled: false }), 23 * 60 + 45, 30)).toBe(false);
+  });
+
+  it('reads when a native notification was shown, in seconds (iOS) or milliseconds (Android)', () => {
+    const shown = at(11, 0);
+    expect(notificationShownAt(shown.getTime() / 1000)).toEqual(shown);
+    expect(notificationShownAt(shown.getTime())).toEqual(shown);
+    expect(notificationShownAt(Number.NaN, shown)).toBe(shown);
   });
 });
