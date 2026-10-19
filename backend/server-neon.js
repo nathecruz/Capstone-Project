@@ -39,7 +39,17 @@ if (config.ml.key) {
 async function shutdown() {
   clearInterval(maintenance);
   stopReminderClock();
-  server.close();
+  // Stop taking requests, let the ones in progress finish (at most 10 s), and close each kept-alive
+  // connection as soon as it is idle: with the long keep-alive above, a connection busy at shutdown
+  // would otherwise keep serving requests after the database pool below is closed.
+  const closed = new Promise((resolve) => server.close(resolve));
+  server.closeIdleConnections();
+  const sweep = setInterval(() => server.closeIdleConnections(), 500);
+  let timeout;
+  await Promise.race([closed, new Promise((resolve) => { timeout = setTimeout(resolve, 10_000); })]);
+  clearTimeout(timeout);
+  clearInterval(sweep);
+  server.closeAllConnections();
   await closeDatabase();
 }
 process.once('SIGTERM', shutdown);
