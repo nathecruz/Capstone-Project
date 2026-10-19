@@ -75,15 +75,19 @@ function utcOffsetMinutes(date, timeZone) {
  * only that long, so a phone that was offline or asleep never shows it after the habit is missed.
  */
 export function secondsUntilCheckInCloses(habit, date, timeZone = 'UTC', now = new Date()) {
-  if (!isOpenCheckInDate(date, timeZone, now)) return 0;
+  const open = (at) => isOpenCheckInDate(date, timeZone, at) && !isPastHabitDeadline(habit, date, timeZone, at);
+  if (!open(now)) return 0;
   const minutes = getMinutesOfDayInTimeZone(now, timeZone);
   if (minutes === null) return 0;
   const closesAtMinute = (habitDeadlineMinutes(habit) ?? 24 * 60 - 1) + 1;
   // Time zones are whole minutes off UTC, so the seconds into the minute are the same everywhere.
   const clockSeconds = (closesAtMinute - minutes) * 60 - now.getUTCSeconds();
-  // A daylight saving change before the close moves it by the change in the zone's offset.
+  // A daylight saving change before the close moves it by the change in the zone's offset...
   const shiftMinutes = utcOffsetMinutes(new Date(now.getTime() + clockSeconds * 1000), timeZone) - utcOffsetMinutes(now, timeZone);
-  return Math.max(0, clockSeconds - shiftMinutes * 60);
+  let closesAt = now.getTime() + (clockSeconds - shiftMinutes * 60) * 1000;
+  // ...unless the clocks jump over the closing time itself: then it closes at the jump.
+  for (let step = 0; step < 120 && open(new Date(closesAt)); step += 1) closesAt += 60_000;
+  return Math.max(0, Math.round((closesAt - now.getTime()) / 1000));
 }
 
 /**

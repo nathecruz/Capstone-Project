@@ -281,6 +281,13 @@ test('a push lives only until its habit can no longer be checked in', async () =
   assert.equal(secondsUntilCheckInCloses(morning, '2026-03-08', 'America/New_York', new Date('2026-03-08T06:00:00.000Z')), (6 * 60 + 1) * 60);
   assert.equal(secondsUntilCheckInCloses(morning, '2026-11-01', 'America/New_York', new Date('2026-11-01T05:00:00.000Z')), (8 * 60 + 1) * 60);
   assert.equal(secondsUntilCheckInCloses(morning, '2026-10-04', 'Australia/Adelaide', new Date('2026-10-03T15:30:00.000Z')), (6 * 60 + 1) * 60);
+  // When the clocks jump over the closing time itself, it closes at the jump: Chile skips from
+  // midnight to 1:00 AM (10:00 PM to then is 2 hours), New York from 2:00 to 3:00 AM.
+  assert.equal(secondsUntilCheckInCloses({ reminderEnabled: false }, '2026-09-05', 'America/Santiago', new Date('2026-09-06T02:00:00.000Z')), 2 * 60 * 60);
+  const skipped = { reminderEnabled: true, reminderTimes: ['01:00 AM', '02:30 AM'] };
+  assert.equal(secondsUntilCheckInCloses(skipped, '2026-03-08', 'America/New_York', new Date('2026-03-08T06:00:00.000Z')), 60 * 60);
+  assert.equal(secondsUntilCheckInCloses({ reminderEnabled: true, reminderTimes: ['01:00 AM', '01:59 AM'] }, '2026-03-08', 'America/New_York', new Date('2026-03-08T06:00:05.000Z')), 60 * 60 - 5);
+  assert.equal(secondsUntilCheckInCloses(skipped, '2026-03-08', 'America/New_York', new Date('2026-03-08T07:00:30.000Z')), 0, 'closed at 3:00 AM');
 });
 
 test('a snoozed reminder is dropped once the habit is done or missed, or its day is over', async (t) => {
