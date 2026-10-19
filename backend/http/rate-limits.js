@@ -11,11 +11,12 @@ const clientKey = (request) => {
 };
 const emailKey = (request) => `${ipKeyGenerator(request.ip)}:${normalizeEmail(request.body?.email ?? '')}`;
 
-function limiter({ limit, keyGenerator = clientKey, message }) {
+function limiter({ limit, keyGenerator = clientKey, message, skipSuccessfulRequests = false }) {
   return rateLimit({
     windowMs: WINDOW,
     limit,
     keyGenerator,
+    skipSuccessfulRequests,
     standardHeaders: 'draft-8',
     legacyHeaders: false,
     message: { ok: false, message },
@@ -23,7 +24,9 @@ function limiter({ limit, keyGenerator = clientKey, message }) {
 }
 
 export const apiLimiter = limiter({ limit: 900, message: 'Too many requests. Please slow down and try again shortly.' });
-export const loginLimiter = limiter({ limit: 10, keyGenerator: emailKey, message: 'Too many sign-in attempts for this account. Please wait 15 minutes and try again.' });
+// Only failed sign-ins count: a student who signs in again (or whose phone retried while the free
+// server woke up) must not be locked out. The per-account lock still stops password guessing.
+export const loginLimiter = limiter({ limit: 10, keyGenerator: emailKey, skipSuccessfulRequests: true, message: 'Too many sign-in attempts for this account. Please wait 15 minutes and try again.' });
 export const registerLimiter = limiter({ limit: 20, keyGenerator: (request) => `ip:${ipKeyGenerator(request.ip)}`, message: 'Too many sign-up attempts from this network. Please try again later.' });
 export const resetRequestLimiter = limiter({ limit: 5, keyGenerator: emailKey, message: 'Too many password reset requests. Please try again later.' });
 export const resetVerificationLimiter = limiter({ limit: 15, keyGenerator: emailKey, message: 'Too many verification attempts. Please try again later.' });

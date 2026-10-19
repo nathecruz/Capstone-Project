@@ -13,15 +13,19 @@ import registerPasswordResetRoutes from '../routes/password-reset.js';
 import registerSupportRoutes from '../routes/support.js';
 import { apiLimiter } from './rate-limits.js';
 
-/** Expo dev servers on this machine or the LAN (never in production). */
+/**
+ * Expo dev servers on this machine or the LAN (never in production), on any port: a phone opening
+ * the laptop's dev server by its Wi-Fi address (or a .local name) must be able to sign in, also when
+ * Expo picked another port because the usual one was taken.
+ */
 function isLocalDevelopmentOrigin(origin) {
   if (config.isProduction) return false;
   try {
     const url = new URL(origin);
     const hostname = url.hostname.replace(/^\[|\]$/g, '');
-    const isPrivateAddress = /^10\./.test(hostname) || /^192\.168\./.test(hostname) || /^172\.(1[6-9]|2\d|3[01])\./.test(hostname);
+    const isPrivateAddress = /^10\./.test(hostname) || /^192\.168\./.test(hostname) || /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) || hostname.endsWith('.local');
     const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
-    return url.protocol === 'http:' && ['8081', '8082', '19006', '19080'].includes(url.port) && (isPrivateAddress || isLocalHost);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && (isPrivateAddress || isLocalHost);
   } catch {
     return false;
   }

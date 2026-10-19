@@ -30,6 +30,13 @@ test('ALLOWED_ORIGINS accepts exact origins and the deployment URLs of one proje
   }
 });
 
+test('ALLOWED_ORIGINS entries match whatever their case or trailing slash', () => {
+  const allowed = originMatcher(['https://Capstone-Project-Indol-Five.vercel.app/', ' https://capstone-project-*-team-c14.vercel.app// ']);
+  assert.equal(allowed('https://capstone-project-indol-five.vercel.app'), true);
+  assert.equal(allowed('https://capstone-project-git-main-team-c14.vercel.app'), true);
+  assert.equal(allowed('https://evil.example.org'), false);
+});
+
 test('a real value in the root .env wins over a placeholder in backend/.env', async () => {
   const { mkdtempSync, writeFileSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
