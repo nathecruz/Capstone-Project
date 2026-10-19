@@ -95,6 +95,19 @@ describe('reminders scheduled by the Android and iOS app', () => {
     expect(mockNotifications.scheduleNotificationAsync).not.toHaveBeenCalled();
   });
 
+  it('ignores Snooze on an older day\'s reminder even before the habits have loaded', async () => {
+    // The app can be woken by the Snooze tap before its habits are read: no habit to check yet.
+    renderHook(() => useHabitReminders({ habits: [], preferences, ringInterval: 30, snoozeFrequency: 'Once' }));
+    await settle();
+    await act(async () => { mockNotifications.listeners.forEach((listener) => listener(snoozeResponse(new Date(2026, 9, 18, 21, 0)))); });
+    await settle();
+    expect(mockNotifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+    // Today's reminder is still snoozed.
+    await act(async () => { mockNotifications.listeners.forEach((listener) => listener(snoozeResponse(new Date(2026, 9, 19, 11, 0)))); });
+    await settle();
+    expect(scheduled()).toHaveLength(1);
+  });
+
   it('sets a snooze that comes back in time, without another Snooze that could not, and none from an older reminder', async () => {
     renderHook(() => useHabitReminders({ habits: [gym], preferences, ringInterval: 10, snoozeFrequency: '2 times' }));
     await settle();

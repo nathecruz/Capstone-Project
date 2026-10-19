@@ -262,10 +262,10 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
       const habit = habits.find((item) => item.id === habitId);
       const now = new Date();
       const snoozeAt = new Date(now.getTime() + ringInterval * 60_000);
-      // A snooze that would come back once the habit is done or missed, or that is tapped on an
-      // older day's reminder, would remind of a habit that can no longer be checked in: none is set.
-      const shownToday = getLocalDateKey(notificationShownAt(response.notification.date, now)) === getLocalDateKey(now);
-      if (habit && (!shownToday || !canRemindAt(habit, snoozeAt, now))) return;
+      // A snooze tapped on an older day's reminder, or one that would come back once the habit is
+      // done or missed, would remind of a habit that can no longer be checked in: none is set.
+      if (getLocalDateKey(notificationShownAt(response.notification.date, now)) !== getLocalDateKey(now)) return;
+      if (habit && !canRemindAt(habit, snoozeAt, now)) return;
       const soundEnabled = habit?.reminderSoundEnabled !== false;
       const channel = Platform.OS === 'android'
         ? { channelId: soundEnabled ? 'habit-reminders-sound-v2' : 'habit-reminders-silent-v2' }

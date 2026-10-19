@@ -4,7 +4,7 @@ import { query, withTransaction } from '../db/client.js';
 import { parse } from '../lib/http.js';
 import { notificationReadSchema, webPushSnoozeRequestSchema, webPushSubscriptionRequestSchema, webPushTestSchema, webPushUnsubscribeSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
-import { canStillCheckIn } from '../services/completion-date.js';
+import { canStillCheckIn, habitDeadlineMinutes } from '../services/completion-date.js';
 import { localDateIn } from '../services/web-push-actions.js';
 import { notifyReminderChange } from '../services/web-push-clock.js';
 import { getConfiguredVapidDetails, getConfiguredVapidPublicKey, getWebPushSnoozeSettings, hashWebPushSnoozeToken, isAllowedWebPushEndpoint } from '../services/web-push-reminders.js';
@@ -23,9 +23,10 @@ function snoozeRefusal(habit, reminderDate, timeZone, now, followUpAt) {
   if (reminderDate !== localDateIn(timeZone, new Date(now))) {
     return { code: 'DAY_OVER', message: 'This reminder is from a day that is over, so it cannot be snoozed.' };
   }
-  // Still open now: only the snooze would come back after the last reminder time.
+  // Still open now: only the snooze would come back after the last reminder time (or midnight).
   if (canStillCheckIn(habit, reminderDate, timeZone, new Date(now))) {
-    return { code: 'SNOOZE_TOO_LATE', message: "A snooze would come back after this habit's last reminder time. Check it in before then." };
+    const closes = habitDeadlineMinutes(habit) === null ? "midnight, when today's check-in closes" : "this habit's last reminder time";
+    return { code: 'SNOOZE_TOO_LATE', message: `A snooze would come back after ${closes}. Check it in before then.` };
   }
   return { code: 'HABIT_MISSED', message: 'This habit passed its last reminder time, so it is missed and cannot be snoozed.' };
 }

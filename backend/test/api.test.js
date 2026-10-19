@@ -273,6 +273,12 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.match(lateSnooze.body.message, /Check it in before then/);
     const oldSnooze = await snoozeWith('habit-snooze', Date.now() - 24 * 60 * 60 * 1000);
     assert.deepEqual([oldSnooze.response.status, oldSnooze.body.code], [409, 'DAY_OVER'], 'a reminder from an earlier day');
+    // Without a reminder time the habit is open until midnight; a 1000-minute snooze from noon is not.
+    await db.query(`UPDATE user_app_state SET state_json = jsonb_set(state_json, '{ringInterval}', '1000') WHERE user_id=$1`, [userId]);
+    const pastMidnight = await snoozeWith('habit-snooze');
+    assert.deepEqual([pastMidnight.response.status, pastMidnight.body.code], [409, 'SNOOZE_TOO_LATE'], JSON.stringify(pastMidnight.body));
+    assert.match(pastMidnight.body.message, /after midnight/);
+    await db.query(`UPDATE user_app_state SET state_json = jsonb_set(state_json, '{ringInterval}', '15') WHERE user_id=$1`, [userId]);
     assert.equal((await db.query('SELECT COUNT(*)::int AS count FROM web_push_snooze_queue')).rows[0].count, 1, 'nothing more is queued');
     assert.equal((await request('/api/web-push/subscriptions', { method: 'POST', headers: authHeaders, body: JSON.stringify({ subscription: { ...pushSubscription, endpoint: 'https://attacker.example/push' }, timeZone: 'UTC' }) })).response.status, 400);
     assert.equal((await request('/api/web-push/subscriptions', { method: 'DELETE', headers: authHeaders, body: JSON.stringify({ endpoint: pushSubscription.endpoint }) })).response.status, 200);
