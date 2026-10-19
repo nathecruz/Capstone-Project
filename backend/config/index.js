@@ -24,6 +24,10 @@ function list(value, fallback) {
   return new Set((value || fallback).split(',').map((item) => item.trim()).filter(Boolean));
 }
 
+// Browsers send an origin in lower case with no trailing slash; an entry typed as
+// "https://Example.vercel.app/" in the dashboard must still match it.
+const normalizeOrigin = (origin) => origin.trim().replace(/\/+$/, '').toLowerCase();
+
 /**
  * Builds the CORS check for ALLOWED_ORIGINS. An entry may hold `*` to accept every deployment
  * address of one project (Vercel gives each deploy its own URL), e.g.
@@ -33,7 +37,8 @@ function list(value, fallback) {
 export function originMatcher(origins) {
   const exact = new Set();
   const patterns = [];
-  for (const origin of origins) {
+  for (const entry of origins) {
+    const origin = normalizeOrigin(entry);
     if (!origin.includes('*')) {
       exact.add(origin);
       continue;
@@ -41,7 +46,10 @@ export function originMatcher(origins) {
     const source = origin.split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[a-z0-9-]+');
     patterns.push(new RegExp(`^${source}$`));
   }
-  return (origin) => exact.has(origin) || patterns.some((pattern) => pattern.test(origin));
+  return (value) => {
+    const origin = normalizeOrigin(value);
+    return exact.has(origin) || patterns.some((pattern) => pattern.test(origin));
+  };
 }
 
 const allowedOrigins = list(env.ALLOWED_ORIGINS, 'http://localhost:19006,http://localhost:19080,http://localhost:8081');

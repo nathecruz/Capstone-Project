@@ -23,6 +23,10 @@ void verifyAi();
 const maintenance = scheduleMaintenance();
 
 const server = createApp().listen(config.port, '0.0.0.0', () => console.log(`Neon Insights API listening on http://0.0.0.0:${config.port}`));
+// Keep idle connections open longer than the hosting proxy does (Node closes them after 5 s), or the
+// proxy can reuse one just as Node closes it and answer a 502 — a sign-in that fails for no reason.
+server.keepAliveTimeout = 120_000;
+server.headersTimeout = 125_000;
 // Habit reminders on their exact minute while the API is awake (GitHub Actions covers the rest).
 if (startReminderClock({ query })) console.log('Reminder clock on: Web Push reminders are sent on their minute while the API is awake.');
 

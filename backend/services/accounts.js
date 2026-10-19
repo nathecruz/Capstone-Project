@@ -7,6 +7,11 @@ import { namesFromRow } from '../lib/names.js';
 const USER_COLUMNS = `u.full_name AS "fullName", u.first_name AS "firstName", u.last_name AS "lastName", u.username, u.email, u.date_of_birth AS "dateOfBirth", u.gender, u.region, u.about,
   u.email_verified_at AS "emailVerifiedAt", u.privacy_consent_at AS "privacyConsentAt", u.role`;
 
+// REQUIRE_EMAIL_VERIFICATION=false turns verification off for every account, also those that never
+// confirmed: one rule here and in requireAuth, so the app never sends a student to a code screen
+// the server does not require (they were stuck there after signing in).
+const verificationRequired = () => process.env.REQUIRE_EMAIL_VERIFICATION !== 'false';
+
 export function userFromRow(row) {
   return {
     id: row.id ?? row.userId,
@@ -17,7 +22,7 @@ export function userFromRow(row) {
     gender: row.gender || '',
     region: row.region || '',
     about: row.about || '',
-    emailVerified: Boolean(row.emailVerifiedAt),
+    emailVerified: Boolean(row.emailVerifiedAt) || !verificationRequired(),
     privacyConsentAt: row.privacyConsentAt ? Number(row.privacyConsentAt) : null,
     // 'faculty' turns on the app's Faculty mode (their own habits, faculty AI advice, no student leaderboards).
     role: row.role || 'user',
@@ -59,8 +64,6 @@ export async function currentSession(request) {
   if (!result.rows[0]) await query('DELETE FROM sessions WHERE token_hash = $1 OR expires_at <= $2', [tokenHash, now]);
   return result.rows[0] || null;
 }
-
-const verificationRequired = () => process.env.REQUIRE_EMAIL_VERIFICATION !== 'false';
 
 /**
  * Sends a 401 and returns null when the request is not signed in. Accounts that have
