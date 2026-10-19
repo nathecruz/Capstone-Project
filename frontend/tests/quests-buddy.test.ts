@@ -55,4 +55,13 @@ describe('habit buddy', () => {
     // Missed yesterday (October 2) and nothing done yet today.
     expect(buddyMood([habit('a', ['2026-10-01'])], 'Habi', afternoon).mood).toBe('sad');
   });
+
+  it('does not ask for check-ins that are no longer possible today', () => {
+    const afternoon = new Date(2026, 9, 3, 15);
+    // Its last reminder was at noon: missed for today, so it cannot be checked in any more.
+    const missed = habit('gym', ['2026-10-02'], { reminderEnabled: true, reminderTime: '12:00 PM', reminderTimes: ['12:00 PM'] });
+    expect(buddyMood([missed, habit('read', ['2026-10-02', '2026-10-03']), habit('walk', ['2026-10-02'])], 'Habi', afternoon).line).toBe("Yum, thanks! 1 more and I'm full of energy.");
+    expect(buddyMood([missed, habit('read', ['2026-10-02', '2026-10-03'])], 'Habi', afternoon).line).toBe("Yum, thanks! That's all for today.");
+    expect(buddyMood([missed], 'Habi', afternoon)).toMatchObject({ mood: 'sad', line: "We missed today's habits... let's get them next time." });
+  });
 });

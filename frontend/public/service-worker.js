@@ -110,6 +110,7 @@ self.addEventListener('notificationclick', (event) => {
       const { snoozeToken, snoozeUrl } = event.notification.data || {};
       if (!snoozeToken || !snoozeUrl) return;
       let message = 'Open HabitAI and check your connection before trying again.';
+      let code = '';
       try {
         const response = await fetch(snoozeUrl, {
           method: 'POST',
@@ -118,10 +119,25 @@ self.addEventListener('notificationclick', (event) => {
           cache: 'no-store',
         });
         if (response.ok) return;
-        // The server says why (for example, the habit can no longer be checked in today).
-        message = (await response.json().catch(() => ({}))).message || message;
+        // The server says why (for example, the habit is missed or already done).
+        const body = await response.json().catch(() => ({}));
+        message = body.message || message;
+        code = body.code || '';
       } catch {
         // Offline: the connection hint above.
+      }
+      const { doneToken, doneUrl } = event.notification.data || {};
+      if (code === 'SNOOZE_TOO_LATE') {
+        // The habit can still be checked in, only not after a snooze: bring the reminder back,
+        // quietly, with its Done button.
+        await showReminder(event.notification.title, {
+          body: message,
+          tag: event.notification.tag,
+          data: event.notification.data,
+          actions: doneToken && doneUrl ? [{ action: 'DONE', title: '✓ Done' }] : [],
+          quiet: true,
+        });
+        return;
       }
       await self.registration.showNotification('Snooze unavailable', {
         body: message,

@@ -61,6 +61,14 @@ export function isOpenCheckInDate(date, timeZone = 'UTC', now = new Date()) {
   return date === getDateKeyInTimeZone(now, timeZone);
 }
 
+/** The time zone's offset from UTC at `date`, in minutes (480 in Manila). */
+function utcOffsetMinutes(date, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, Number(value)]));
+  const local = Date.UTC(values.year, values.month - 1, values.day, values.hour, values.minute);
+  return Math.round((local - Math.floor(date.getTime() / 60_000) * 60_000) / 60_000);
+}
+
 /**
  * Seconds until a check-in of the habit for `date` (today) closes at `now`: the end of its last
  * reminder minute, or the end of the day without a reminder; 0 once closed. A reminder push lives
@@ -72,7 +80,10 @@ export function secondsUntilCheckInCloses(habit, date, timeZone = 'UTC', now = n
   if (minutes === null) return 0;
   const closesAtMinute = (habitDeadlineMinutes(habit) ?? 24 * 60 - 1) + 1;
   // Time zones are whole minutes off UTC, so the seconds into the minute are the same everywhere.
-  return Math.max(0, (closesAtMinute - minutes) * 60 - now.getUTCSeconds());
+  const clockSeconds = (closesAtMinute - minutes) * 60 - now.getUTCSeconds();
+  // A daylight saving change before the close moves it by the change in the zone's offset.
+  const shiftMinutes = utcOffsetMinutes(new Date(now.getTime() + clockSeconds * 1000), timeZone) - utcOffsetMinutes(now, timeZone);
+  return Math.max(0, clockSeconds - shiftMinutes * 60);
 }
 
 /**

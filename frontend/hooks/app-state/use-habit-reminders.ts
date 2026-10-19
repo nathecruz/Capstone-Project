@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import { getLocalDateKey } from './habit-progress';
-import { canRemindAt, canSnoozeAt, enableWebReminders, getBrowserNotificationRegistration, getHabitReminderTimes, getNotificationsModule, getSnoozeLimit, isHabitReminderDay, nextReminderOccurrence, playReminderSound, requestWebNotificationPermission, type NotificationsModule } from './reminders';
+import { canRemindAt, canSnoozeAt, enableWebReminders, getBrowserNotificationRegistration, getHabitReminderTimes, getNotificationsModule, getSnoozeLimit, isHabitReminderDay, nextReminderOccurrence, notificationShownAt, playReminderSound, requestWebNotificationPermission, type NotificationsModule } from './reminders';
 import { computeSmartReminderTimes, getSmartReminderMessage, requestHabitPrediction } from './smart-reminders';
 import type { Habit, Preferences } from './types';
 
@@ -264,7 +264,7 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
       const snoozeAt = new Date(now.getTime() + ringInterval * 60_000);
       // A snooze that would come back once the habit is done or missed, or that is tapped on an
       // older day's reminder, would remind of a habit that can no longer be checked in: none is set.
-      const shownToday = getLocalDateKey(new Date(response.notification.date)) === getLocalDateKey(now);
+      const shownToday = getLocalDateKey(notificationShownAt(response.notification.date, now)) === getLocalDateKey(now);
       if (habit && (!shownToday || !canRemindAt(habit, snoozeAt, now))) return;
       const soundEnabled = habit?.reminderSoundEnabled !== false;
       const channel = Platform.OS === 'android'

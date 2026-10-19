@@ -249,7 +249,10 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal((await request('/api/web-push/subscriptions', { method: 'POST', body: JSON.stringify({ subscription: pushSubscription, timeZone: 'UTC' }) })).response.status, 401);
     assert.equal((await request('/api/web-push/subscriptions', { method: 'POST', headers: authHeaders, body: JSON.stringify({ subscription: pushSubscription, timeZone: middayZone }) })).response.status, 200);
     const missedHabit = { id: 'habit-missed', label: 'Pills', reminderEnabled: true, reminderTime: '12:00 AM', reminderTimes: ['12:00 AM'] };
-    const snoozeState = { avatarImage: null, profile: { fullName: 'Test User' }, preferences: { notificationsEnabled: true }, habits: [{ id: 'habit-snooze', label: 'Stretch', reminderEnabled: true }, missedHabit], points: 0, tokens: 0, tokenHistory: [], darkModeOverride: null, ringInterval: 15, snoozeFrequency: '2 times', goals: [] };
+    // Its last reminder is 5 minutes from now: a 15-minute snooze would come back after it.
+    const soon = new Intl.DateTimeFormat('en-US', { timeZone: middayZone, hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(Date.now() + 5 * 60_000));
+    const soonHabit = { id: 'habit-soon', label: 'Water', reminderEnabled: true, reminderTime: soon, reminderTimes: [soon] };
+    const snoozeState = { avatarImage: null, profile: { fullName: 'Test User' }, preferences: { notificationsEnabled: true }, habits: [{ id: 'habit-snooze', label: 'Stretch', reminderEnabled: true }, missedHabit, soonHabit], points: 0, tokens: 0, tokenHistory: [], darkModeOverride: null, ringInterval: 15, snoozeFrequency: '2 times', goals: [] };
     assert.equal((await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify(snoozeState) })).response.status, 200);
     const snoozeToken = crypto.randomBytes(32).toString('base64url');
     const subscriptionId = (await db.query('SELECT id FROM web_push_subscriptions WHERE endpoint=$1', [pushSubscription.endpoint])).rows[0].id;
@@ -257,16 +260,19 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal((await request('/api/web-push/snooze', { method: 'POST', body: JSON.stringify({ token: snoozeToken }) })).response.status, 200);
     assert.equal((await request('/api/web-push/snooze', { method: 'POST', body: JSON.stringify({ token: snoozeToken }) })).response.status, 410);
     assert.equal((await db.query('SELECT COUNT(*)::int AS count FROM web_push_snooze_queue')).rows[0].count, 1);
-    // A habit past its last reminder time (12:00 AM) is missed: snoozing its reminder is refused with the reason.
-    const missedToken = crypto.randomBytes(32).toString('base64url');
-    await db.query('INSERT INTO web_push_snooze_tokens(token_hash,subscription_id,habit_id,snooze_count,expires_at,created_at) VALUES($1,$2,$3,0,$4,$5)', [crypto.createHash('sha256').update(missedToken).digest('hex'), subscriptionId, missedHabit.id, Date.now() + 60000, Date.now()]);
-    const missedSnooze = await request('/api/web-push/snooze', { method: 'POST', body: JSON.stringify({ token: missedToken }) });
-    assert.equal(missedSnooze.response.status, 410);
-    assert.match(missedSnooze.body.message, /can no longer be checked in/);
-    // A reminder from an earlier day cannot be snoozed into today either.
-    const oldToken = crypto.randomBytes(32).toString('base64url');
-    await db.query('INSERT INTO web_push_snooze_tokens(token_hash,subscription_id,habit_id,snooze_count,expires_at,created_at) VALUES($1,$2,$3,0,$4,$5)', [crypto.createHash('sha256').update(oldToken).digest('hex'), subscriptionId, 'habit-snooze', Date.now() + 60000, Date.now() - 24 * 60 * 60 * 1000]);
-    assert.equal((await request('/api/web-push/snooze', { method: 'POST', body: JSON.stringify({ token: oldToken }) })).response.status, 410);
+    // A snooze that could not come back while the habit can be checked in is refused, with the reason.
+    const snoozeWith = async (habitId, createdAt = Date.now()) => {
+      const oneTime = crypto.randomBytes(32).toString('base64url');
+      await db.query('INSERT INTO web_push_snooze_tokens(token_hash,subscription_id,habit_id,snooze_count,expires_at,created_at) VALUES($1,$2,$3,0,$4,$5)', [crypto.createHash('sha256').update(oneTime).digest('hex'), subscriptionId, habitId, Date.now() + 60000, createdAt]);
+      return request('/api/web-push/snooze', { method: 'POST', body: JSON.stringify({ token: oneTime }) });
+    };
+    const missedSnooze = await snoozeWith(missedHabit.id);
+    assert.deepEqual([missedSnooze.response.status, missedSnooze.body.code], [409, 'HABIT_MISSED'], 'past its last reminder time (12:00 AM)');
+    const lateSnooze = await snoozeWith(soonHabit.id);
+    assert.deepEqual([lateSnooze.response.status, lateSnooze.body.code], [409, 'SNOOZE_TOO_LATE'], JSON.stringify(lateSnooze.body));
+    assert.match(lateSnooze.body.message, /Check it in before then/);
+    const oldSnooze = await snoozeWith('habit-snooze', Date.now() - 24 * 60 * 60 * 1000);
+    assert.deepEqual([oldSnooze.response.status, oldSnooze.body.code], [409, 'DAY_OVER'], 'a reminder from an earlier day');
     assert.equal((await db.query('SELECT COUNT(*)::int AS count FROM web_push_snooze_queue')).rows[0].count, 1, 'nothing more is queued');
     assert.equal((await request('/api/web-push/subscriptions', { method: 'POST', headers: authHeaders, body: JSON.stringify({ subscription: { ...pushSubscription, endpoint: 'https://attacker.example/push' }, timeZone: 'UTC' }) })).response.status, 400);
     assert.equal((await request('/api/web-push/subscriptions', { method: 'DELETE', headers: authHeaders, body: JSON.stringify({ endpoint: pushSubscription.endpoint }) })).response.status, 200);
@@ -725,6 +731,10 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const lateDone = await request('/api/web-push/done', { method: 'POST', body: JSON.stringify({ token: makeDoneToken({ userId, habitId: 'pills', date: middayDate, timeZone: middayZone }, secret) }) });
     assert.equal(lateDone.response.status, 409, JSON.stringify(lateDone.body));
     assert.equal(lateDone.body.code, 'PAST_DEADLINE');
+    // Checked in before its deadline: Done tapped again afterwards still finds it done, not missed.
+    await db.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4)', [userId, 'pills', middayDate, Date.now()]);
+    const doneAgain = await request('/api/web-push/done', { method: 'POST', body: JSON.stringify({ token: makeDoneToken({ userId, habitId: 'pills', date: middayDate, timeZone: middayZone }, secret) }) });
+    assert.equal(doneAgain.response.status, 200, JSON.stringify(doneAgain.body));
 
     // Streak Freeze: the walk ran for three days, then yesterday was missed.
     const dayBefore = (days) => new Date(Date.parse(`${today}T00:00:00Z`) - days * 86_400_000).toISOString().slice(0, 10);
