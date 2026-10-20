@@ -55,28 +55,6 @@ export function isHabitReminderDay(habit: Pick<Habit, 'frequency' | 'meta' | 're
 }
 
 /**
- * The next day/time a habit's reminder should fire, at or after `now`. A time already passed today
- * moves to the next scheduled day; `skipToday` (used once the habit is done for the day) always
- * starts from tomorrow. Returns null if no scheduled day falls within the search window.
- */
-export function nextReminderOccurrence(
-  habit: Pick<Habit, 'frequency' | 'meta' | 'reminderDays' | 'startDate'>,
-  time: { hour: number; minute: number },
-  now: Date,
-  skipToday = false,
-) {
-  const target = new Date(now);
-  target.setHours(time.hour, time.minute, 0, 0);
-  if (target <= now || skipToday) target.setDate(target.getDate() + 1);
-  // 62 days covers monthly habits whose day is skipped by a short month (e.g. the 31st).
-  for (let step = 0; step < 62; step += 1) {
-    if (isHabitReminderDay(habit, target)) return target;
-    target.setDate(target.getDate() + 1);
-  }
-  return null;
-}
-
-/**
  * Whether a reminder about the habit at `at` can still be acted on: `at` is on `now`'s day and the
  * habit is neither done today nor missed (past its last reminder time) by then. Once it is missed it
  * can no longer be checked in, so it is not reminded any more.
