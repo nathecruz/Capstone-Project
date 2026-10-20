@@ -265,7 +265,7 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
       if (response.actionIdentifier !== 'SNOOZE') return;
       // Before the account has loaded (the tap opened the app), its habits and snooze settings as
       // last saved on this device.
-      const settings = ready ? { habits, ringInterval, snoozeFrequency } : await loadSnoozeSettings();
+      const settings = ready ? { habits, ringInterval, snoozeFrequency, notificationsEnabled: preferences.notificationsEnabled } : await loadSnoozeSettings();
       if (!active || !settings) return;
       await snoozeReminder(Notifications, response, settings);
     };
@@ -290,5 +290,5 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
       active = false;
       responseSubscription?.remove();
     };
-  }, [habits, ready, ringInterval, snoozeFrequency]);
+  }, [habits, preferences.notificationsEnabled, ready, ringInterval, snoozeFrequency]);
 }
