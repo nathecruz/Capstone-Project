@@ -45,6 +45,9 @@ describe('which pending snoozes stay when the reminders are scheduled again', ()
     expect(keepsSnooze(request({ habitId: 'gym', snoozeCount: 1, snoozeAt: at(11, 25).getTime() }), [{ ...gym, completionDates: ['2026-10-19'] }], at(11, 15))).toBe(false);
     expect(keepsSnooze(request({ habitId: 'gym', snoozeCount: 1, snoozeAt: at(11, 25).getTime() }), [{ ...gym, reminderEnabled: false }], at(11, 15))).toBe(false);
     expect(keepsSnooze(request({ habitId: 'gone', snoozeCount: 1, snoozeAt: at(11, 25).getTime() }), [gym], at(11, 15))).toBe(false);
+    // Reminders turned off (Smart Reminder left on), or the habit is no longer due today (Monday).
+    expect(keepsSnooze(request({ habitId: 'gym', snoozeCount: 1, snoozeAt: at(11, 25).getTime() }), [{ ...gym, reminderEnabled: false, smartReminderEnabled: true }], at(11, 15))).toBe(false);
+    expect(keepsSnooze(request({ habitId: 'gym', snoozeCount: 1, snoozeAt: at(11, 25).getTime() }), [{ ...gym, frequency: 'Weekly', reminderDays: ['Tue'] }], at(11, 15))).toBe(false);
   });
 
   it('keeps a snooze from an older version (no time saved) while the habit is still open', () => {
@@ -67,10 +70,32 @@ describe('a tapped Snooze', () => {
     expect(await snooze(tap)).toBe(true);
     expect(await snooze(tap)).toBe(false);
     // A tap a previous run of the app already handled (saved on the device).
-    await AsyncStorage.setItem('habitai_handled_snoozes', JSON.stringify(['earlier-tap:SNOOZE']));
+    await AsyncStorage.setItem('habitai_handled_snoozes', JSON.stringify([`earlier-tap:${at(11, 0).getTime()}:SNOOZE`]));
     const earlier = { ...snoozeTap(at(11, 0)), notification: { ...snoozeTap(at(11, 0)).notification, request: { identifier: 'earlier-tap', content: { title: 'Gym reminder', data: { habitId: 'gym', snoozeCount: 0 } } } } } as unknown as NotificationResponse;
     expect(await snooze(earlier)).toBe(false);
     expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('snoozes a snoozed reminder again, the same day and on later days', async () => {
+    const settings = { habits: [gym], ringInterval: 5, snoozeFrequency: '3 times' };
+    // Every snooze of a habit has the same identifier; each delivery is a new tap.
+    const snoozed = (shownAt: Date, snoozeCount: number) => ({
+      actionIdentifier: 'SNOOZE',
+      notification: { date: shownAt.getTime(), request: { identifier: 'habitai-snooze:gym', content: { title: 'Gym reminder', data: { habitId: 'gym', snoozeCount } } } },
+    }) as unknown as NotificationResponse;
+    expect(await snooze(snoozeTap(at(11, 0)), settings, at(11, 1))).toBe(true);
+    expect(await snooze(snoozed(at(11, 6), 1), settings, at(11, 7))).toBe(true);
+    expect(await snooze(snoozed(at(11, 12), 2), settings, at(11, 13))).toBe(true);
+    const tomorrow = (hour: number, minute: number) => new Date(2026, 9, 20, hour, minute);
+    expect(await snooze(snoozed(tomorrow(11, 6), 1), settings, tomorrow(11, 7))).toBe(true);
+    expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(4);
+  });
+
+  it('sets none with notifications off, or for a habit that is gone or no longer reminded', async () => {
+    expect(await snooze(snoozeTap(at(11, 0)), { habits: [gym], ringInterval: 10, snoozeFrequency: 'Once', notificationsEnabled: false } as never)).toBe(false);
+    expect(await snooze(snoozeTap(at(11, 0)), { habits: [], ringInterval: 10, snoozeFrequency: 'Once' })).toBe(false);
+    expect(await snooze(snoozeTap(at(11, 0)), { habits: [{ ...gym, reminderEnabled: false }], ringInterval: 10, snoozeFrequency: 'Once' })).toBe(false);
+    expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
   });
 });
 
