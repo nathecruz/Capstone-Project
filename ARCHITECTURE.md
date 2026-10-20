@@ -331,9 +331,12 @@ installed iPhone apps), so a reminder arrives on all of a student's devices; Hom
 reminders on for a device that does not get them yet.
 
 Native Android/iOS builds also schedule local notifications on the device; on Android they are
-exact alarms (`frontend/plugins/with-exact-alarms.js`), so they are not delayed. They are scheduled
-again when the app opens and when habits change; a pending snooze stays through that while its
-habit can still be checked in. On Android, a Snooze tapped while HabitAI is closed is handled by a
+exact alarms (`frontend/plugins/with-exact-alarms.js`), so they are not delayed. The phone shows
+them while the app is closed, so the next two weeks of reminders are scheduled
+(`frontend/hooks/app-state/native-reminders.ts`; fewer on iOS, which keeps at most 64), and they
+keep coming on days HabitAI is not opened. They are planned again when the app opens, at midnight
+and when habits change: reminders still as planned stay, today's are dropped once the habit is
+done, and a pending snooze stays while its habit can still be checked in. On Android, a Snooze tapped while HabitAI is closed is handled by a
 background task (`expo-task-manager`, registered from `frontend/index.js`), which sets the snooze
 from the habits and settings saved on the device.
 

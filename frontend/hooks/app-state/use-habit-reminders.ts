@@ -1,10 +1,12 @@
-// Schedules habit reminders (native notifications; on web, reminders shown by an open HabitAI tab
-// alongside Web Push) and handles the Snooze action. Rescheduled at midnight and whenever the app returns to the foreground.
+// Schedules habit reminders (native notifications, the next two weeks of them so they keep coming
+// while the app is not opened; on web, reminders shown by an open HabitAI tab alongside Web Push)
+// and handles the Snooze action. Planned again at midnight and whenever the app returns to the foreground.
 import type { NotificationResponse } from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import { getLocalDateKey } from './habit-progress';
-import { canRemindAt, canSnoozeAt, enableWebReminders, getBrowserNotificationRegistration, getHabitReminderTimes, getNotificationsModule, isHabitReminderDay, nextReminderOccurrence, playReminderSound, requestWebNotificationPermission, type NotificationsModule } from './reminders';
+import { planReminders, type PlannedReminder } from './native-reminders';
+import { canRemindAt, enableWebReminders, getBrowserNotificationRegistration, getHabitReminderTimes, getNotificationsModule, isHabitReminderDay, playReminderSound, requestWebNotificationPermission, type NotificationsModule } from './reminders';
 import { computeSmartReminderTimes, getSmartReminderMessage, requestHabitPrediction } from './smart-reminders';
 import { keepsSnooze, loadSnoozeSettings, SNOOZE_CATEGORY, snoozeReminder } from './snooze';
 import type { Habit, Preferences } from './types';
@@ -22,6 +24,7 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
 }) {
   const [reminderScheduleRevision, setReminderScheduleRevision] = useState(0);
   const sentBrowserRemindersRef = useRef(new Set<string>());
+  const schedulingRef = useRef(Promise.resolve());
 
   useEffect(() => {
     const refreshAtMidnight = () => {
@@ -156,101 +159,67 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
         buttonTitle: 'Snooze',
         options: { opensAppToForeground: false },
       }]);
-      // Everything is scheduled again below, except a snooze the student asked for that can still
-      // be acted on (opening the app used to cancel it, so it never came back).
+      const reminders = preferences.notificationsEnabled
+        ? habits.filter((habit) => habit.reminderEnabled && getHabitReminderTimes(habit).length > 0)
+        : [];
+      let plan: PlannedReminder[] = [];
+      if (reminders.length) {
+        if (Platform.OS === 'android') {
+          await Notifications.setNotificationChannelAsync('habit-reminders-sound-v2', {
+            name: 'Habit reminders', importance: Notifications.AndroidImportance.HIGH, sound: 'reminder_sound.mp3',
+          });
+          await Notifications.setNotificationChannelAsync('habit-reminders-silent-v2', {
+            name: 'Silent habit reminders', importance: Notifications.AndroidImportance.HIGH, sound: null,
+          });
+        }
+        const permission = await Notifications.getPermissionsAsync();
+        if (permission.status === 'granted' || (await Notifications.requestPermissionsAsync()).status === 'granted') {
+          const predictions = Object.fromEntries(await Promise.all(reminders
+            .filter((habit) => habit.smartReminderEnabled)
+            .map(async (habit) => [habit.id, await requestHabitPrediction(habit)] as const)));
+          if (cancelled) return;
+          // iOS keeps 64 scheduled notifications: a place is left for a snooze of each habit.
+          // Android allows 500 alarms per app.
+          plan = planReminders(reminders, new Date(), { ringInterval, predictions, limit: Platform.OS === 'ios' ? 64 - reminders.length : 200 });
+        }
+      }
+      // A reminder already scheduled as planned stays; the others are cancelled, except a snooze the
+      // student asked for that can still be acted on (opening the app used to cancel it).
       const scheduledNow = new Date();
       const scheduled = await Notifications.getAllScheduledNotificationsAsync();
-      await Promise.all(scheduled
-        .filter((request) => !preferences.notificationsEnabled || !keepsSnooze(request, habits, scheduledNow))
-        .map((request) => Notifications.cancelScheduledNotificationAsync(request.identifier)));
-      if (!preferences.notificationsEnabled) return;
-      const reminders = habits
-        .map((habit) => ({ habit, times: getHabitReminderTimes(habit) }))
-        .filter((entry): entry is { habit: Habit; times: { hour: number; minute: number }[] } => entry.habit.reminderEnabled && entry.times.length > 0 && (!entry.habit.startDate || entry.habit.startDate <= getLocalDateKey()));
-      if (!reminders.length) return;
-      if (Platform.OS === 'android') {
-        await Notifications.setNotificationChannelAsync('habit-reminders-sound-v2', {
-          name: 'Habit reminders', importance: Notifications.AndroidImportance.HIGH, sound: 'reminder_sound.mp3',
-        });
-        await Notifications.setNotificationChannelAsync('habit-reminders-silent-v2', {
-          name: 'Silent habit reminders', importance: Notifications.AndroidImportance.HIGH, sound: null,
-        });
-      }
-      const permission = await Notifications.getPermissionsAsync();
-      if (permission.status !== 'granted') {
-        const requested = await Notifications.requestPermissionsAsync();
-        if (requested.status !== 'granted') return;
-      }
-      const smartReminders = reminders.filter(({ habit }) => habit.smartReminderEnabled);
-      for (const { habit, times } of reminders.filter(({ habit }) => !habit.smartReminderEnabled)) {
-        const now = new Date();
-        const soundEnabled = habit.reminderSoundEnabled !== false;
-        const channel = Platform.OS === 'android'
-          ? { channelId: soundEnabled ? 'habit-reminders-sound-v2' : 'habit-reminders-silent-v2' }
-          : {};
-        // Once the habit is checked off for today, skip today's reminder and aim at the next day.
-        // Scheduled as the next occurrence (not a repeating trigger) and refreshed at midnight and
-        // whenever the app opens, so a completed habit no longer nudges for the rest of the day.
-        const completedToday = habit.completionDates.includes(getLocalDateKey(now));
-        for (const time of times) {
-          if (cancelled) return;
-          const target = nextReminderOccurrence(habit, time, now, completedToday);
-          if (!target) continue;
-          await Notifications.scheduleNotificationAsync({
-            content: {
-              title: `${habit.label} reminder`,
-              body: 'A small step today keeps your streak moving.',
-              sound: soundEnabled ? 'reminder_sound.mp3' : false,
-              data: { habitId: habit.id, snoozeCount: 0 },
-              ...(canSnoozeAt(habit, time.hour * 60 + time.minute, ringInterval) ? { categoryIdentifier: SNOOZE_CATEGORY } : {}),
-            },
-            trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: target, ...channel },
-          });
-        }
-        // No "still open for today" nudge after the last reminder time: the habit is missed from
-        // then on and can no longer be checked in.
-      }
-
-      const predictions = await Promise.all(smartReminders.map(async ({ habit }) => ({
-        habit,
-        prediction: await requestHabitPrediction(habit),
-      })));
       if (cancelled) return;
-      for (const { habit, prediction } of predictions) {
+      const planned = new Map(plan.map((reminder) => [reminder.identifier, reminder]));
+      await Promise.all(scheduled
+        .filter((request) => !planned.has(request.identifier) && !(preferences.notificationsEnabled && keepsSnooze(request, habits, scheduledNow)))
+        .map((request) => Notifications.cancelScheduledNotificationAsync(request.identifier)));
+      const current = new Set(scheduled
+        .filter((request) => planned.has(request.identifier) && request.content.data?.plan === planned.get(request.identifier)?.data.plan)
+        .map((request) => request.identifier));
+      for (const reminder of plan) {
         if (cancelled) return;
-        const modelRisk = prediction && typeof prediction.dropout_risk === 'number' && typeof prediction.completion_probability === 'number'
-          ? { dropoutRisk: prediction.dropout_risk, completionProbability: prediction.completion_probability }
-          : undefined;
-        const now = new Date();
-        const { times, riskLevel } = computeSmartReminderTimes(habit, now, modelRisk);
-        const soundEnabled = habit.reminderSoundEnabled !== false;
-        const channel = Platform.OS === 'android'
-          ? { channelId: soundEnabled ? 'habit-reminders-sound-v2' : 'habit-reminders-silent-v2' }
-          : {};
-        // Once the habit is checked off for today, its smart reminder is done until the next day.
-        const completedToday = habit.completionDates.includes(getLocalDateKey(now));
-        // The next time of each (today if still ahead and not yet done, else tomorrow); rescheduled
-        // at midnight and whenever the app opens, so the message follows the latest record.
-        for (const time of times) {
-          if (cancelled) return;
-          const target = new Date(now);
-          target.setHours(time.hour, time.minute, 0, 0);
-          if (target <= now || completedToday) target.setDate(target.getDate() + 1);
-          if (!isHabitReminderDay(habit, target)) continue;
-          await Notifications.scheduleNotificationAsync({
-            content: {
-              title: `Smart reminder: ${habit.label}`,
-              body: prediction?.recommended_action || getSmartReminderMessage(habit, riskLevel),
-              sound: soundEnabled ? 'reminder_sound.mp3' : false,
-              data: { habitId: habit.id, type: 'smart-reminder', riskLevel, snoozeCount: 0 },
-              ...(canSnoozeAt(habit, time.hour * 60 + time.minute, ringInterval) ? { categoryIdentifier: SNOOZE_CATEGORY } : {}),
-            },
-            trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: target, ...channel },
-          });
-        }
+        if (current.has(reminder.identifier)) continue;
+        // Scheduling it again under its identifier replaces an outdated one. One that cannot be
+        // scheduled (its time passed meanwhile) does not stop the rest.
+        await Notifications.scheduleNotificationAsync({
+          identifier: reminder.identifier,
+          content: {
+            title: reminder.title,
+            body: reminder.body,
+            sound: reminder.soundEnabled ? 'reminder_sound.mp3' : false,
+            data: reminder.data,
+            ...(reminder.snooze ? { categoryIdentifier: SNOOZE_CATEGORY } : {}),
+          },
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.DATE,
+            date: reminder.date,
+            ...(Platform.OS === 'android' ? { channelId: reminder.soundEnabled ? 'habit-reminders-sound-v2' : 'habit-reminders-silent-v2' } : {}),
+          },
+        }).catch(() => undefined);
       }
     };
-    void scheduleReminders().catch(() => undefined);
+    // One at a time: a schedule still running when the habits change finishes before the next one
+    // reads what is scheduled, so it cannot leave behind a reminder the next plan no longer has.
+    schedulingRef.current = schedulingRef.current.then(() => scheduleReminders()).catch(() => undefined);
     return () => {
       cancelled = true;
       if (browserReminderTimer) clearInterval(browserReminderTimer);
