@@ -62,7 +62,7 @@ const SECTIONS: { title: string; items: string[] }[] = [
     title: 'Cookies and storage',
     items: [
       'HabitAI uses no advertising, analytics or tracking cookies, and does not share your data with other websites.',
-      'On your device it keeps only what the app needs: your sign-in session (on the web, for the open browser tab, unless you tick Remember me or use the installed app), a copy of your habits and settings for a quick start, changes not yet saved, and, if you turn them on, permission for reminders.',
+      'On your device it keeps only what the app needs: your sign-in session (for 30 days; on the web, for the open browser tab only if you untick Remember me), a copy of your habits and settings for a quick start, changes not yet saved, and, if you turn them on, permission for reminders.',
       'Signing out removes your session and the copy of your habits from that device. You can see the full list in Settings & Preferences > Cookies and storage.',
     ],
   },

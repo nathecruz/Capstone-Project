@@ -233,6 +233,9 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const login = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'test@example.com', password, device: 'Test Phone (Android 15)' }) });
     assert.equal(login.response.status, 200);
     token = login.body.token;
+    // A sign-in lasts 30 days.
+    const { expiresAt } = (await db.query('SELECT expires_at AS "expiresAt" FROM sessions WHERE token_hash = $1', [crypto.createHash('sha256').update(token).digest('hex')])).rows[0];
+    assert.ok(Math.abs(Number(expiresAt) - (Date.now() + 30 * 24 * 60 * 60 * 1000)) < 60_000, `expires at ${new Date(Number(expiresAt)).toISOString()}`);
     authHeaders = { Authorization: `Bearer ${token}` };
     assert.equal((await request(`/api/auth/me?token=${encodeURIComponent(token)}`)).response.status, 401);
     assert.equal((await request('/api/leaderboard/sync', { method: 'POST', body: JSON.stringify({ token }) })).response.status, 401);
