@@ -43,6 +43,8 @@ The root `render.yaml` deploys all services as one Blueprint:
 
 The EAS `preview` and `production` profiles set `EXPO_PUBLIC_API_URL` to the deployed backend URL so standalone Android builds can reach the account API. Build a new APK with `eas build --platform android --profile preview` (or use the `production` profile for a production build). Install the newly built APK; changing the profile does not update APKs that are already installed. Development builds can continue using the local API URL inferred from the Expo development server.
 
+Habit reminders in the Android app use exact alarms, so they come on their minute instead of being delayed by Android (most of all while the phone dozes). `frontend/plugins/with-exact-alarms.js` declares `USE_EXACT_ALARM` (granted on install from Android 13) and `SCHEDULE_EXACT_ALARM` for Android 12. Google Play only accepts `USE_EXACT_ALARM` in alarm and calendar apps: before publishing there, declare only `SCHEDULE_EXACT_ALARM` and ask students to allow "Alarms & reminders" for HabitAI, which Android 14 and later leave off for new installs. Some phone makers' battery savers can still delay or stop reminders; excluding HabitAI from battery optimization avoids that.
+
 ### Mobile web push reminders
 
 Web Push lets scheduled reminders arrive when the browser/PWA is backgrounded or closed, on every device where the student turned reminders on (Chrome and Android, Microsoft Edge, Firefox, Safari, and HabitAI installed on an iPhone's Home Screen). Two senders share the work, and each delivery is claimed in the database so nothing is sent twice:

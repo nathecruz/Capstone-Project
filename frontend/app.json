@@ -51,6 +51,7 @@
         }
       ],
       "expo-localization",
+      "./plugins/with-exact-alarms",
       "expo-secure-store",
       "@bacons/apple-targets",
       [

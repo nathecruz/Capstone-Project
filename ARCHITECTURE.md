@@ -330,7 +330,8 @@ browser that allows notifications has its own subscription (Chrome, Edge, Firefo
 installed iPhone apps), so a reminder arrives on all of a student's devices; Home asks to turn
 reminders on for a device that does not get them yet.
 
-Native Android/iOS builds also schedule local notifications on the device. They are scheduled
+Native Android/iOS builds also schedule local notifications on the device; on Android they are
+exact alarms (`frontend/plugins/with-exact-alarms.js`), so they are not delayed. They are scheduled
 again when the app opens and when habits change; a pending snooze stays through that while its
 habit can still be checked in. On Android, a Snooze tapped while HabitAI is closed is handled by a
 background task (`expo-task-manager`, registered from `frontend/index.js`), which sets the snooze
