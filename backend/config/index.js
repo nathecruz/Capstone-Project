@@ -67,7 +67,8 @@ export const config = {
     timeoutMs: Math.max(1000, Number(env.ML_REQUEST_TIMEOUT_MS) || 60000),
   },
   session: {
-    lifetimeMs: 7 * 24 * 60 * 60 * 1000,
+    // A sign-in lasts 30 days (until the student signs out, changes the password or is deactivated).
+    lifetimeMs: 30 * 24 * 60 * 60 * 1000,
   },
   checkIns: {
     // A check-in can be undone this long after it was made (the app offers Undo for 10 s);

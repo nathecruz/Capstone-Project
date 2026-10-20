@@ -91,6 +91,9 @@ export async function ensureNeonSchema({ log = () => {} } = {}) {
     }
   });
 
+  // Sessions last 30 days from sign-in instead of 7: those still open get the same 30 days (once).
+  await runOnce('sessions-30-days', () => query('UPDATE sessions SET expires_at = expires_at + $1 WHERE expires_at > $2', [23 * 24 * 60 * 60 * 1000, Date.now()]));
+
   // Keep day-level engagement history before services/maintenance.js trims old snapshots.
   await backfillActivityFromSnapshots();
 }

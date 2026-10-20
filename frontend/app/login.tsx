@@ -37,7 +37,9 @@ import {
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(false);
+  // Ticked by default: a sign-in lasts 30 days (or until signing out). On the web, unticking it keeps
+  // the sign-in for this browser tab only, for a shared computer.
+  const [rememberMe, setRememberMe] = useState(true);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const slowSignIn = useSlowHint(isSubmitting);
@@ -143,7 +145,7 @@ export default function LoginScreen() {
     setIsSubmitting(true);
 
     try {
-      // "Remember me" also keeps a phone browser signed in after its tab is closed.
+      // "Remember me" keeps a browser signed in after its tab is closed.
       const result = await signIn(email, password, { keepSignedIn: rememberMe });
 
       if (!result.ok) {

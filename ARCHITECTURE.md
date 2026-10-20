@@ -154,7 +154,7 @@ sequenceDiagram
   else deactivated account
     API-->>A: 403 Account deactivated
   else ok
-    API->>DB: insert login_activity, insert sessions(sha256(token), 7 days)
+    API->>DB: insert login_activity, insert sessions(sha256(token), 30 days)
     API-->>A: 200 {token, user}
     A->>A: store token in SecureStore (web: sessionStorage)
   end
@@ -350,7 +350,7 @@ template is used by the reminder scheduler. Its analytics are aggregated and k-a
 | Concern | Measure |
 | --- | --- |
 | Passwords | bcrypt (cost 12), strength rules, timing-safe login for unknown emails |
-| Sessions | random 256-bit tokens, only SHA-256 hashes stored, 7-day expiry, revoked on password change/deactivation |
+| Sessions | random 256-bit tokens, only SHA-256 hashes stored, 30-day expiry, revoked on password change/deactivation |
 | Input | Zod schemas on every endpoint, 2 MB JSON limit, magic-byte checks on uploads |
 | Abuse | rate limits per session token, per IP + email for sign-in/reset, per student for AI |
 | Account enumeration | identical responses for unknown emails on login and password reset |
