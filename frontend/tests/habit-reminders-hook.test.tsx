@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, renderHook } from '@testing-library/react-native';
-import { Platform } from 'react-native';
+import { AppState, Platform, type AppStateStatus } from 'react-native';
 import { planReminders, type PlannedReminder } from '@/hooks/app-state/native-reminders';
 import type { Habit, Preferences } from '@/hooks/app-state/types';
 import { useHabitReminders } from '@/hooks/app-state/use-habit-reminders';
@@ -169,25 +169,52 @@ describe('reminders scheduled by the Android and iOS app', () => {
     expect(mockPending).toHaveLength(26);
   });
 
-  it('schedules every reminder again once each launch on Android, where a force stop removes their alarms', async () => {
+  it('on Android, schedules every reminder again once each launch and each return to the app, where alarms can be lost', async () => {
     const nativeOS = Platform.OS;
     Object.defineProperty(Platform, 'OS', { value: 'android', configurable: true });
+    const appStateListeners: ((state: AppStateStatus) => void)[] = [];
+    const addEventListener = AppState.addEventListener;
+    AppState.addEventListener = (_type, listener) => {
+      appStateListeners.push(listener);
+      return { remove: () => undefined };
+    };
     try {
       // Still listed as scheduled after a force stop, though no alarm is set for them.
       const plan = planReminders([gym], now, { ringInterval: 20, limit: 200 });
+      const identifiers = plan.map((reminder) => reminder.identifier);
       mockPending = plan.map((reminder) => ({ identifier: reminder.identifier, content: { data: reminder.data } }));
-      const { rerender } = renderHook(({ habits }: { habits: Habit[] }) => useHabitReminders({ habits, preferences, ringInterval: 20, snoozeFrequency: 'Once', ready: true }), { initialProps: { habits: [gym] } });
+      // The app starts before the account has loaded.
+      const { rerender } = renderHook(({ habits, ready }: { habits: Habit[]; ready: boolean }) => useHabitReminders({ habits, preferences, ringInterval: 20, snoozeFrequency: 'Once', ready }), { initialProps: { habits: [] as Habit[], ready: false } });
       await settle();
-      expect(scheduled().map((request) => request.identifier)).toEqual(plan.map((reminder) => reminder.identifier));
+      let release: () => void = () => undefined;
+      const slow = new Promise<void>((resolve) => { release = resolve; });
+      mockNotifications.scheduleNotificationAsync.mockImplementationOnce(async (request) => {
+        await slow;
+        return mockSchedule(request);
+      });
+      rerender({ habits: [gym], ready: true });
+      await settle();
+      // The habits change before that first schedule is done: the next one still sets every alarm.
+      rerender({ habits: [{ ...gym }], ready: true });
+      await settle();
+      release();
+      await settle();
+      expect(scheduled().map((request) => request.identifier)).toEqual([identifiers[0], ...identifiers]);
       expect(scheduled()[0].trigger).toMatchObject({ channelId: 'habit-reminders-sound-v2' });
       expect(mockNotifications.cancelScheduledNotificationAsync).not.toHaveBeenCalled();
 
-      // Later in the same launch, only what changed.
+      // Later, only what changed.
       jest.clearAllMocks();
-      rerender({ habits: [{ ...gym }] });
+      rerender({ habits: [{ ...gym }], ready: true });
       await settle();
       expect(mockNotifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+
+      // Back in the app (e.g. after allowing exact alarms in settings): every alarm again.
+      await act(async () => { appStateListeners.forEach((listener) => listener('active')); });
+      await settle();
+      expect(scheduled().map((request) => request.identifier)).toEqual(identifiers);
     } finally {
+      AppState.addEventListener = addEventListener;
       Object.defineProperty(Platform, 'OS', { value: nativeOS, configurable: true });
     }
   });
