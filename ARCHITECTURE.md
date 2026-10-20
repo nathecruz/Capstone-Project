@@ -336,7 +336,8 @@ them while the app is closed, so the next two weeks of reminders are scheduled
 (`frontend/hooks/app-state/native-reminders.ts`; fewer on iOS, which keeps at most 64), and they
 keep coming on days HabitAI is not opened. They are planned again when the app opens, at midnight
 and when habits change: reminders still as planned stay, today's are dropped once the habit is
-done, and a pending snooze stays while its habit can still be checked in. On Android, a Snooze tapped while HabitAI is closed is handled by a
+done, and a pending snooze stays while its habit can still be checked in. On Android each launch
+schedules them all once again, since a force stop removes the app's alarms. On Android, a Snooze tapped while HabitAI is closed is handled by a
 background task (`expo-task-manager`, registered from `frontend/index.js`), which sets the snooze
 from the habits and settings saved on the device.
 

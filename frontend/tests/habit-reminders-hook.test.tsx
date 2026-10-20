@@ -169,6 +169,29 @@ describe('reminders scheduled by the Android and iOS app', () => {
     expect(mockPending).toHaveLength(26);
   });
 
+  it('schedules every reminder again once each launch on Android, where a force stop removes their alarms', async () => {
+    const nativeOS = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { value: 'android', configurable: true });
+    try {
+      // Still listed as scheduled after a force stop, though no alarm is set for them.
+      const plan = planReminders([gym], now, { ringInterval: 20, limit: 200 });
+      mockPending = plan.map((reminder) => ({ identifier: reminder.identifier, content: { data: reminder.data } }));
+      const { rerender } = renderHook(({ habits }: { habits: Habit[] }) => useHabitReminders({ habits, preferences, ringInterval: 20, snoozeFrequency: 'Once', ready: true }), { initialProps: { habits: [gym] } });
+      await settle();
+      expect(scheduled().map((request) => request.identifier)).toEqual(plan.map((reminder) => reminder.identifier));
+      expect(scheduled()[0].trigger).toMatchObject({ channelId: 'habit-reminders-sound-v2' });
+      expect(mockNotifications.cancelScheduledNotificationAsync).not.toHaveBeenCalled();
+
+      // Later in the same launch, only what changed.
+      jest.clearAllMocks();
+      rerender({ habits: [{ ...gym }] });
+      await settle();
+      expect(mockNotifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(Platform, 'OS', { value: nativeOS, configurable: true });
+    }
+  });
+
   it('keeps a pending snooze when the reminders are scheduled again, but not one that is no use any more', async () => {
     const at = (hour: number, minute: number) => new Date(2026, 9, 19, hour, minute).getTime();
     mockPending = [
