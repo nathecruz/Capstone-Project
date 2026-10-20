@@ -25,8 +25,8 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
   const [reminderScheduleRevision, setReminderScheduleRevision] = useState(0);
   const sentBrowserRemindersRef = useRef(new Set<string>());
   const schedulingRef = useRef(Promise.resolve());
-  // Whether this launch has scheduled every planned reminder once (Android, see below).
-  const alarmsSetRef = useRef(false);
+  // The schedule revision whose run scheduled every planned reminder again (Android, see below).
+  const alarmsSetRevisionRef = useRef(-1);
 
   useEffect(() => {
     const refreshAtMidnight = () => {
@@ -195,9 +195,11 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
         .filter((request) => !planned.has(request.identifier) && !(preferences.notificationsEnabled && keepsSnooze(request, habits, scheduledNow)))
         .map((request) => Notifications.cancelScheduledNotificationAsync(request.identifier)));
       // Android removes an app's alarms when it is force stopped (some phones do it when the app is
-      // swiped away), but expo-notifications still lists them as scheduled: the first time each
-      // launch, every reminder is scheduled again so its alarm is set.
-      const current = new Set(Platform.OS === 'android' && !alarmsSetRef.current ? [] : scheduled
+      // swiped away) while expo-notifications still lists them as scheduled, and an alarm set before
+      // exact alarms were allowed stays inexact. So once each launch, each return to the app and at
+      // midnight (a new schedule revision), every reminder is scheduled again, which sets its alarm.
+      const rearm = Platform.OS === 'android' && alarmsSetRevisionRef.current !== reminderScheduleRevision;
+      const current = new Set(rearm ? [] : scheduled
         .filter((request) => planned.has(request.identifier) && request.content.data?.plan === planned.get(request.identifier)?.data.plan)
         .map((request) => request.identifier));
       for (const reminder of plan) {
@@ -221,7 +223,7 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
           },
         }).catch(() => undefined);
       }
-      alarmsSetRef.current = true;
+      alarmsSetRevisionRef.current = reminderScheduleRevision;
     };
     // One at a time: a schedule still running when the habits change finishes before the next one
     // reads what is scheduled, so it cannot leave behind a reminder the next plan no longer has.
