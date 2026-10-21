@@ -2,13 +2,13 @@
 // Dates: Monday October 12 to Sunday October 18, 2026 is "last week"; October 19 starts "this week".
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { accountStreak, accountStreakRun } from '../services/account-streak.js';
+import { accountStreak, accountStreakRun, longestAccountStreak } from '../services/account-streak.js';
 import { buildHabitContext } from '../services/ai-context.js';
 import { canStillCheckIn, secondsUntilCheckInCloses } from '../services/completion-date.js';
 import { dailyChallenges } from '../services/daily-challenges.js';
 import { habitStats } from '../services/habit-analysis.js';
 import { habitActiveUntil, hasHabitEnded, isHabitActiveOn, weekEndKey, withActiveUntil } from '../services/habit-week.js';
-import { buildTrainingRows } from '../services/ml-training-rows.js';
+import { buildTrainingRows, trainingSeries } from '../services/ml-training-rows.js';
 import { isHabitInWeek, weeklyQuests } from '../services/quests.js';
 import { daysToFreeze } from '../services/streak-freeze.js';
 import { computeStreak } from '../services/streaks.js';
@@ -193,6 +193,39 @@ test('ML training rows end a week before the habit\'s week did', () => {
   assert.equal(buildTrainingRows({ ...habit, activeUntil: undefined }, dates, { today: '2026-10-20' }).length, 6, 'an open-ended habit');
   assert.equal(buildTrainingRows({ ...habit, activeUntil: undefined }, dates, { today: '2026-10-20', activeUntil: '2026-09-20' }).length, 1, 'passed as an option');
   assert.deepEqual(buildTrainingRows(lastWeek('w'), days('2026-10-12', '2026-10-18'), { today: '2026-11-30' }), [], 'one week is too short for a row');
+});
+
+test('the longest account streak runs across weeks and breaks on a day with nothing done', () => {
+  const habits = [
+    lastWeek('read', { completionDates: days('2026-10-12', '2026-10-18') }),
+    thisWeek('walk', { completionDates: days('2026-10-19', '2026-10-21') }),
+    daily('old', '2026-10-01', '2026-10-04', { completionDates: ['2026-10-01', '2026-10-02'] }),
+  ];
+  assert.equal(longestAccountStreak(habits, '2026-10-22'), 10, 'Monday to Wednesday continues last week');
+  assert.equal(longestAccountStreak(habits, '2026-10-22', ['2026-10-16']), 10, 'a freeze on a done day changes nothing');
+  const missed = habits.map((habit) => (habit.id === 'read' ? { ...habit, completionDates: habit.completionDates.filter((day) => day !== '2026-10-15') } : habit));
+  assert.equal(longestAccountStreak(missed, '2026-10-22'), 6, 'a day with read due and nothing done breaks it');
+  assert.equal(longestAccountStreak(missed, '2026-10-22', ['2026-10-15']), 9, 'unless a freeze covered it');
+});
+
+test('ML training joins a habit kept week after week into one series', () => {
+  const habit = (id, label, startDate, activeUntil) => ({ ...daily(id, startDate, activeUntil), label, category: 'Health' });
+  const habits = [
+    habit('a', 'Shower', '2026-10-05', '2026-10-11'),
+    habit('b', ' shower', '2026-10-12', '2026-10-18'),
+    habit('c', 'Shower', '2026-10-26', '2026-11-01'),
+    habit('d', 'Read', '2026-10-05', '2026-10-11'),
+  ];
+  const dates = { a: days('2026-10-05', '2026-10-11'), b: days('2026-10-12', '2026-10-16'), c: ['2026-10-26'], d: ['2026-10-05'] };
+  const series = trainingSeries(habits, (item) => dates[item.id]);
+  assert.deepEqual(series.map(({ habit: item, completionDates }) => [item.startDate, item.activeUntil, completionDates.length]), [
+    ['2026-10-05', '2026-10-18', 12],
+    ['2026-10-26', '2026-11-01', 1],
+    ['2026-10-05', '2026-10-11', 1],
+  ], 'the same name in back-to-back weeks is one series; a week without it starts another');
+  const rows = buildTrainingRows(series[0].habit, series[0].completionDates, { today: '2026-11-10' });
+  assert.equal(rows.length, 1, 'two weeks give a row a single week cannot');
+  assert.equal(rows[0].completed_next_7_days, 1);
 });
 
 test('account streak milestones pay once per run of the streak', async () => {

@@ -14,6 +14,7 @@ import crypto from 'node:crypto';
 import { config } from '../config/index.js';
 import { query, withTransaction } from '../db/client.js';
 import { runAll } from '../db/run-all.js';
+import { longestAccountStreak } from './account-streak.js';
 import { sameState } from './app-state-sync.js';
 import { getDateKeyInTimeZone, isPastHabitDeadline } from './completion-date.js';
 import { hasHabitEnded, isDateKey } from './habit-week.js';
@@ -199,13 +200,18 @@ export async function pruneAllSnapshots() {
   return result.rowCount;
 }
 
-export function earnedAchievements(habits) {
+/**
+ * The achievements the habits earn, counting habits of past weeks too (they stay in the state).
+ * The seven-day streak follows the account streak, like the app's badge: the longest run of days
+ * with a check-in (services/account-streak.js), so it stays earned once reached.
+ */
+export function earnedAchievements(habits, { today = todayFor(habits.find((habit) => habit.completionTimeZone)?.completionTimeZone), frozenDays = [] } = {}) {
   const earned = new Set();
   if (habits.length > 0) earned.add('first-habit');
   if (habits.length >= 3) earned.add('habit-builder');
   if (habits.some((habit) => habit.reminderEnabled && /AM/i.test(habit.reminderTime || ''))) earned.add('early-bird');
   if (habits.some((habit) => habit.category === 'Mind' && habit.done)) earned.add('focus-master');
-  if (habits.some((habit) => Number(habit.streak) >= 7)) earned.add('streak-week');
+  if (habits.some((habit) => Number(habit.streak) >= 7) || longestAccountStreak(habits, today, frozenDays) >= 7) earned.add('streak-week');
   return [...earned];
 }
 
@@ -278,7 +284,7 @@ export async function syncNormalizedState(userId, state, updatedAt, connection) 
 
   // Achievements are upserted, so earned dates and the read state of their
   // notifications survive later syncs (they used to be recreated every time).
-  const earned = earnedAchievements(serverHabits);
+  const earned = earnedAchievements(serverHabits, { frozenDays: await getFrozenDays(connection, userId) });
   await connection.query('DELETE FROM user_achievements WHERE user_id=$1 AND NOT (achievement_id = ANY($2::text[]))', [userId, earned]);
   await connection.query(
     `DELETE FROM notifications WHERE user_id=$1 AND type='achievement'

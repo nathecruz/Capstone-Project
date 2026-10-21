@@ -60,6 +60,53 @@ export function buildTrainingRows(habit, completionDates, { today, activeUntil =
   return rows;
 }
 
+const nameKey = (habit) => String(habit?.label || habit?.name || '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/**
+ * Habits last one week, so a single habit never spans the 7 days of history plus the 7-day outcome
+ * a row needs. A student who keeps a habit week after week makes a new habit with the same name
+ * each week (the AI planner keeps the names of habits that went well), so those are joined into one
+ * series: a student's habits with the same name (any case), each starting no later than the day
+ * after the previous one ended. The series takes its check-ins from all of them, runs from the first
+ * start to the last end, and uses the latest habit's schedule and category. A week without the habit
+ * starts a new series, so a gap is never an outcome. Habits without a name stay on their own.
+ */
+export function trainingSeries(habits, datesOf) {
+  const groups = new Map();
+  const series = [];
+  for (const habit of habits || []) {
+    const key = nameKey(habit);
+    if (!key) {
+      series.push({ habit, completionDates: datesOf(habit) || [] });
+      continue;
+    }
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(habit);
+  }
+  for (const members of groups.values()) {
+    const sorted = [...members].sort((a, b) => String(a.startDate || '').localeCompare(String(b.startDate || '')));
+    let chain = null;
+    for (const habit of sorted) {
+      const start = /^\d{4}-\d{2}-\d{2}$/.test(habit.startDate || '') ? habit.startDate : '';
+      const end = /^\d{4}-\d{2}-\d{2}$/.test(habit.activeUntil || '') ? habit.activeUntil : '';
+      // Joins when the chain's habit had a week and this one starts by the day after it ended.
+      if (chain && chain.end && start && start <= shiftDay(chain.end, 1)) {
+        chain.members.push(habit);
+        chain.end = end && end > chain.end ? end : end ? chain.end : '';
+        continue;
+      }
+      chain = { members: [habit], start, end };
+      series.push(chain);
+    }
+  }
+  return series.map((entry) => {
+    if (!entry.members) return entry;
+    const latest = entry.members[entry.members.length - 1];
+    const completionDates = [...new Set(entry.members.flatMap((habit) => datesOf(habit) || []))].sort();
+    return { habit: { ...latest, startDate: entry.start || latest.startDate, activeUntil: entry.end || undefined }, completionDates };
+  });
+}
+
 const csvCell = (value) => (/[",\n]/.test(String(value)) ? `"${String(value).replace(/"/g, '""')}"` : String(value));
 
 export function toCsv(rows) {
