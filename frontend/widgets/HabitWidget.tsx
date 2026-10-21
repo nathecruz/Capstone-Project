@@ -2,7 +2,7 @@ import React from 'react';
 import { FlexWidget, TextWidget } from 'react-native-android-widget';
 import { EMPTY_WIDGET_DATA, type WidgetData } from './widget-data';
 
-/** The Android home-screen widget: today's habit progress and best streak. Tapping it opens the app. */
+/** The Android home-screen widget: today's habit progress and the account streak. Tapping it opens the app. */
 export function HabitWidget({ data = EMPTY_WIDGET_DATA }: { data?: WidgetData }) {
   const { doneToday, totalToday, bestStreak, dateLabel } = data;
   const allDone = totalToday > 0 && doneToday >= totalToday;

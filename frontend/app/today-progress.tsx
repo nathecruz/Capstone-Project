@@ -5,9 +5,10 @@ import React, { useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
-import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { dayCompletion } from '@/components/week-strip';
+import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { isHabitMissedOn } from '@/utils/habit-visibility';
-import { isHabitScheduledOn } from '@/utils/streaks';
+import { hasHabitEnded, isHabitActiveOn } from '@/utils/habit-week';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 const weekdays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
@@ -44,7 +45,8 @@ function getDateKey(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function getInsightMessages(completedCount: number, habitCount: number, isPast = false) {
+/** `habitCount` is the habits due on the day; `listedCount` the day's habits, due or not. */
+function getInsightMessages(completedCount: number, habitCount: number, isPast = false, listedCount = habitCount) {
   const completionPercent = habitCount ? Math.round((completedCount / habitCount) * 100) : 0;
   // A past day can no longer change, so describe it instead of suggesting what to do on it.
   if (isPast && habitCount > 0 && completionPercent < 100) {
@@ -52,7 +54,9 @@ function getInsightMessages(completedCount: number, habitCount: number, isPast =
       ? [`You completed ${completedCount} of ${habitCount} habits on this day. The rest stay missed; today is a fresh start.`, `${completionPercent}% of this day was completed. Focus on today's habits.`]
       : ['Nothing was checked in on this day. That day is closed, but today is a fresh start.', 'This day stays missed. Pick one habit to finish today.'];
   }
-  if (habitCount === 0) return ['Add your first habit to start building a consistency pattern.', 'Your next small habit can become the start of a stronger routine.'];
+  if (habitCount === 0 && listedCount > 0) return [isPast ? 'None of your habits was due on this day.' : 'None of your habits is due on this day. You can still check one in.', 'A free day in your schedule. Keep the rhythm going on the next one.'];
+  if (habitCount === 0 && isPast) return ['No habits were running on this day.', 'This day has nothing to show. Today is a fresh start.'];
+  if (habitCount === 0) return ['Add a habit to start building a consistency pattern.', 'Your next small habit can become the start of a stronger routine.'];
   if (completionPercent === 100) return [`Perfect work: all ${habitCount} habits are complete for this day.`, 'You showed up for every habit on this day. Keep the rhythm going.'];
   if (completedCount > 0) return [`You completed ${completedCount} of ${habitCount} habits on this day. One more step keeps the momentum alive.`, `${completionPercent}% complete for this day. Finish one more habit when you are ready.`];
   return ['No habits are complete on this day yet. Start with the easiest one.', 'A small action is enough to get this day moving. Pick one habit to begin.'];
@@ -61,10 +65,10 @@ function getInsightMessages(completedCount: number, habitCount: number, isPast =
 export default function InsightsScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
-  const { isDarkMode, habits, toggleHabitForDate, canUndoCheckIn } = useAppColorScheme();
+  // `habits` is every habit, also those of past weeks; `streak` the account streak.
+  const { isDarkMode, habits, streak, toggleHabitForDate, canUndoCheckIn } = useAppColorScheme();
   const showAlert = useAppDialog();
   const { date: initialDate } = useLocalSearchParams<{ date?: string }>();
-  const { maxStreak } = getHabitProgressSummary(habits);
   const [selectedDate, setSelectedDate] = useState(() => initialDate ? new Date(`${initialDate}T12:00:00`) : new Date());
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const date = initialDate ? new Date(`${initialDate}T12:00:00`) : new Date();
@@ -80,29 +84,31 @@ export default function InsightsScreen() {
     return isHabitMissedOn(habit, selectedDateKey) ? 'Missed' : '—';
   };
   const pressHabit = (habit: (typeof habits)[number]) => {
-    if (!isSelectedToday) return;
+    // Only this week's habits take a check-in (one whose week ended is only history).
+    if (!isSelectedToday || hasHabitEnded(habit, selectedDateKey)) return;
     if (habit.completionDates.includes(selectedDateKey) && !canUndoCheckIn(habit.id)) {
       showAlert('Already done today', 'A check-in locks a few seconds after you tap it, so streaks and tokens stay fair. This habit opens again tomorrow.');
       return;
     }
     toggleHabitForDate(habit.id, selectedDate);
   };
-  // Every habit can be completed all day, so all of them are listed for the selected date.
-  const visibleHabits = habits;
-  const selectedDateProgress = visibleHabits.filter((habit) => habit.completionDates.includes(selectedDateKey));
+  // The habits of the selected date's week that had started by then (habits last one week): on a
+  // past date, its own habits, ended ones included. Every one can be completed all day, so all of
+  // them are listed, not only those scheduled.
+  const visibleHabits = habits.filter((habit) => isHabitActiveOn(habit, selectedDateKey));
   // The selected day's week, Monday to Sunday: share of the habits due each day that were done.
   const weekOverview = Array.from({ length: 7 }, (_, index) => {
     const date = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate() - ((selectedDate.getDay() + 6) % 7) + index);
     const dateKey = getDateKey(date);
-    const due = visibleHabits.filter((habit) => (!habit.startDate || habit.startDate <= dateKey) && isHabitScheduledOn(habit, dateKey));
-    const done = due.filter((habit) => habit.completionDates.includes(dateKey)).length;
-    return { dateKey, label: date.toLocaleDateString('en-US', { weekday: 'short' }), due: due.length, done, share: due.length ? done / due.length : 0 };
+    return { dateKey, label: date.toLocaleDateString('en-US', { weekday: 'short' }), ...dayCompletion(habits, dateKey) };
   });
   const weekDone = weekOverview.reduce((sum, day) => sum + day.done, 0);
   const weekDue = weekOverview.reduce((sum, day) => sum + day.due, 0);
-  const selectedCompletedCount = selectedDateProgress.length;
-  const selectedCompletionPercent = visibleHabits.length ? Math.round((selectedCompletedCount / visibleHabits.length) * 100) : 0;
-  const insightMessages = getInsightMessages(selectedCompletedCount, visibleHabits.length, !isSelectedToday);
+  // The selected day: its habits due (and any done anyway) and how many were done.
+  const selectedDay = dayCompletion(habits, selectedDateKey);
+  const selectedCompletedCount = selectedDay.done;
+  const selectedCompletionPercent = Math.round(selectedDay.share * 100);
+  const insightMessages = getInsightMessages(selectedCompletedCount, selectedDay.due, !isSelectedToday, visibleHabits.length);
   const [insightIndex, setInsightIndex] = useState(0);
   const insightMessage = insightMessages[insightIndex % insightMessages.length];
   const progressSegments = Array.from({ length: 48 }, (_, index) => {
@@ -185,7 +191,7 @@ export default function InsightsScreen() {
                 <Text style={styles.progressValue}>{selectedCompletionPercent}%</Text>
               </View>
               <View style={styles.summaryTextWrap}>
-                <Text style={styles.progressMeta}>{selectedCompletedCount} / {visibleHabits.length} habits</Text>
+                <Text style={styles.progressMeta}>{selectedCompletedCount} / {selectedDay.due} habits</Text>
                 <Text style={styles.progressStats}>completed</Text>
               </View>
               <Ionicons name="chevron-forward" size={16} color={themeColor('#B4B0BE')} />
@@ -208,7 +214,7 @@ export default function InsightsScreen() {
                     </View>
                   </View>
                 </Pressable>
-              )) : <Text style={styles.emptyChartText}>Add a habit to see it here.</Text>}
+              )) : <Text style={styles.emptyChartText}>{isSelectedToday || selectedDateKey > getDateKey(new Date()) ? 'Add a habit to see it here.' : 'No habits on this day.'}</Text>}
             </View>
 
             <View style={styles.sectionHeader}>
@@ -224,7 +230,7 @@ export default function InsightsScreen() {
                   <View style={styles.guideLine} />
                 </View>
                 <View style={styles.chartRow}>
-                  {visibleHabits.length ? weekOverview.map((day) => (
+                  {weekDue ? weekOverview.map((day) => (
                     <View key={day.dateKey} style={styles.chartColumn} accessible accessibilityLabel={`${day.label}: ${day.done} of ${day.due} habits done`}>
                       <View style={[styles.chartBar, day.dateKey !== selectedDateKey && styles.chartBarOther, day.share === 1 && styles.chartBarPerfect, { height: day.done ? Math.max(8, Math.round(day.share * 110)) : 4 }]} />
                       <Text style={[styles.chartLabel, day.dateKey === selectedDateKey && styles.chartLabelSelected]}>{day.label}</Text>
@@ -252,8 +258,8 @@ export default function InsightsScreen() {
                 <Ionicons name="flame" size={17} color={themeColor('#E68D3D')} />
               </View>
               <View style={styles.streakTextWrap}>
-                <Text style={styles.streakTitle}>{maxStreak > 0 ? `You're on a ${maxStreak}-day streak!` : 'Start a streak today'}</Text>
-                <Text style={styles.streakSubtitle}>{maxStreak > 0 ? 'Keep the momentum going.' : 'Check off one habit to begin.'}</Text>
+                <Text style={styles.streakTitle}>{streak > 0 ? `You're on a ${streak}-day streak!` : 'Start a streak today'}</Text>
+                <Text style={styles.streakSubtitle}>{streak > 0 ? 'Keep the momentum going.' : 'Check off one habit to begin.'}</Text>
               </View>
               <Ionicons name="chevron-forward" size={16} color={themeColor('#B4B0BE')} />
             </View>
@@ -272,7 +278,7 @@ export default function InsightsScreen() {
               <View>
                 <Text style={styles.calendarEyebrow}>SELECT DATE</Text>
                 <Text style={styles.calendarTitle}>{formatDate(selectedDate)}</Text>
-                <Text style={styles.calendarSummary}>{selectedCompletedCount} of {visibleHabits.length} habits completed</Text>
+                <Text style={styles.calendarSummary}>{selectedCompletedCount} of {selectedDay.due} habits completed</Text>
               </View>
               <Pressable style={styles.closeButton} onPress={() => setCalendarVisible(false)} accessibilityLabel="Close calendar">
                 <Ionicons name="close" size={22} color={themeColor('#4C4858')} />

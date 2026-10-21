@@ -27,7 +27,9 @@ export default function HabitsScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const appTheme = useAppTheme();
-  const { isDarkMode, habits: habitList, toggleHabit, reorderHabits, canUndoCheckIn, isFaculty } = useAppColorScheme();
+  // Habits last one week: the list is this week's habits; those of past weeks stay in the history
+  // (`habits`, for this week's rate) and come back in stats, never here.
+  const { isDarkMode, habits, currentHabits: habitList, streak, toggleHabit, reorderHabits, canUndoCheckIn, isFaculty } = useAppColorScheme();
   const showAlert = useAppDialog();
   const [editingHabit, setEditingHabit] = useState<(typeof habitList)[number] | null>(null);
   const [selectedTab, setSelectedTab] = useState('All');
@@ -59,9 +61,10 @@ export default function HabitsScreen() {
   const completedCount = habitList.filter((habit) => habit.done).length;
   const openCount = habitList.length - completedCount;
   const donePercent = habitList.length ? Math.round((completedCount / habitList.length) * 100) : 0;
-  const bestCurrentStreak = Math.max(0, ...habitList.map((habit) => habit.streak));
   // This week's real rate (check-ins done of those due so far), not today's progress.
-  const weekRate = useMemo(() => historyStats(habitList).thisWeekRate, [habitList]);
+  const weekRate = useMemo(() => historyStats(habits).thisWeekRate, [habits]);
+  // Last week's habits ended: the empty list says it is a new week rather than "no habits yet".
+  const pastWeeksOnly = !habitList.length && habits.length > 0;
   const frequencyCount = (tab: string) => (tab === 'All' ? habitList.length : habitList.filter((habit) => habit.frequency === tab).length);
   const getSuggestion = () => {
     const candidates = isFaculty ? FACULTY_HABIT_IDEAS : HABIT_IDEAS;
@@ -209,13 +212,15 @@ export default function HabitsScreen() {
         ListEmptyComponent={
           <View style={[styles.card, styles.emptyState]}>
             <View style={styles.emptyIcon}><Ionicons name={search.trim() || filtersActive ? 'search-outline' : 'leaf-outline'} size={28} color={themeColor('#5B42D8')} /></View>
-            <Text style={styles.emptyTitle}>{search.trim() ? 'No matching habits' : habitList.length ? 'Nothing here' : 'No habits yet'}</Text>
+            <Text style={styles.emptyTitle}>{search.trim() ? 'No matching habits' : habitList.length ? 'Nothing here' : pastWeeksOnly ? 'No habits this week yet' : 'No habits yet'}</Text>
             <Text style={styles.emptyText}>
               {search.trim()
                 ? `Nothing matched "${search.trim()}". Try another name, schedule or reminder time.`
                 : habitList.length
                   ? filterMode === 'done' ? 'No habit is done yet today. Check one off to see it here.' : 'No habit matches these filters.'
-                  : 'Start with one small habit and build your rhythm from there.'}
+                  : pastWeeksOnly
+                    ? "Last week's habits ended; they stay in your history. Add this week's habits to keep going."
+                    : 'Start with one small habit and build your rhythm from there.'}
             </Text>
             {search.trim() ? (
               <Pressable style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]} onPress={() => setSearch('')} accessibilityRole="button"><Ionicons name="close-circle-outline" size={17} color={themeColor('#FFFFFF')} /><Text style={styles.primaryButtonText}>Clear search</Text></Pressable>
@@ -261,13 +266,13 @@ export default function HabitsScreen() {
                 </ProgressRing>
                 <View style={styles.heroCopy}>
                   <Text style={styles.heroLabel}>TODAY</Text>
-                  <Text style={styles.heroTitle}>{!habitList.length ? 'Add your first habit' : openCount === 0 ? 'Everything is done!' : `${openCount} habit${openCount === 1 ? '' : 's'} still open`}</Text>
+                  <Text style={styles.heroTitle}>{!habitList.length ? (pastWeeksOnly ? "Add this week's habits" : 'Add your first habit') : openCount === 0 ? 'Everything is done!' : `${openCount} habit${openCount === 1 ? '' : 's'} still open`}</Text>
                   <Text style={styles.heroSubtitle}>{!habitList.length ? 'Tap + to start small.' : openCount === 0 ? 'Great work. See you tomorrow.' : 'You can check in any time before midnight.'}</Text>
                 </View>
               </View>
               <View style={styles.heroStats}>
                 {[
-                  { icon: 'flame' as const, value: `${bestCurrentStreak}`, label: 'day streak' },
+                  { icon: 'flame' as const, value: `${streak}`, label: 'day streak' },
                   { icon: 'stats-chart' as const, value: `${weekRate}%`, label: 'this week' },
                   { icon: 'layers' as const, value: `${habitList.length}`, label: 'habits' },
                 ].map((stat) => (

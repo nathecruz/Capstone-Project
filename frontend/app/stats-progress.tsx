@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { periodShare, recentDayCompletion } from '@/components/week-strip';
 import { getHabitProgressSummary, getRecentCompletionHistory, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { historyStats } from '@/utils/achievements';
 import { getChartGeometry } from '@/utils/line-chart';
@@ -13,20 +14,24 @@ const tabs = ['Overview', 'Habits', 'Activity'] as const;
 export default function StatsProgressScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
-  const { isDarkMode, habits, preferences, streakFreeze } = useAppColorScheme();
+  // Habits last one week: today and the breakdown are this week's habits; the rates, the chart and
+  // the timeline are history (every habit, each counted only on its own week's days).
+  const { isDarkMode, habits, currentHabits, streak, bestStreak, preferences, streakFreeze } = useAppColorScheme();
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
-  const { completed, maxStreak } = getHabitProgressSummary(habits);
+  const { completed } = getHabitProgressSummary(currentHabits);
   const frozenDays = streakFreeze?.frozenDays;
   const history = useMemo(() => historyStats(habits, new Date(), frozenDays), [frozenDays, habits]);
   const consistency = history.last30Rate;
   const completionHistory = getRecentCompletionHistory(habits, 7);
   const maximumDailyCompletions = Math.max(1, ...completionHistory.map((entry) => entry.count));
-  const weekRate = habits.length ? Math.round((completionHistory.reduce((total, entry) => total + entry.count, 0) / (completionHistory.length * habits.length)) * 100) : 0;
+  // Each day's share of the habits due that day that were done (not of how many there are now).
+  const dailyCompletion = recentDayCompletion(habits, 7);
+  const weekRate = Math.round(periodShare(dailyCompletion) * 100);
   const [chartSize, setChartSize] = useState({ width: 0, height: 0 });
-  const chart = getChartGeometry(completionHistory.map((entry) => (entry.count / maximumDailyCompletions) * 100), chartSize.width, chartSize.height);
+  const chart = getChartGeometry(dailyCompletion.map((day) => day.share * 100), chartSize.width, chartSize.height);
   const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>('Overview');
-  const topHabits = [...habits].sort((a, b) => b.progress - a.progress).slice(0, 4);
+  const topHabits = [...currentHabits].sort((a, b) => b.progress - a.progress).slice(0, 4);
 
   return (
     <>
@@ -66,7 +71,7 @@ export default function StatsProgressScreen() {
                   <Text style={[styles.cardTitle, isDarkMode && styles.darkText]}>Completion, last 7 days</Text>
                   <View style={styles.metricRow}>
                     <Text style={styles.metric}>{weekRate}%</Text>
-                    <Text style={styles.positive}>{completed} of {habits.length} done today</Text>
+                    <Text style={styles.positive}>{completed} of {currentHabits.length} done today</Text>
                   </View>
                 </View>
                 <Ionicons name="trending-up" size={22} color={themeColor('#49A866')} />
@@ -78,7 +83,7 @@ export default function StatsProgressScreen() {
                   {chartSize.width > 0 && chart.points.map((point, index) => <View key={`point-${index}`} style={[styles.point, { left: point.x, top: point.y }]} />)}
                 </View>
                 <View style={styles.labels}>
-                  {completionHistory.map((entry, index) => <Text key={entry.dateKey} style={[styles.axisText, styles.label, isDarkMode && styles.darkMutedText, { left: chart.points[index]?.x ?? 0 }]}>{index === completionHistory.length - 1 ? 'Today' : entry.label}</Text>)}
+                  {dailyCompletion.map((entry, index) => <Text key={entry.dateKey} style={[styles.axisText, styles.label, isDarkMode && styles.darkMutedText, { left: chart.points[index]?.x ?? 0 }]}>{index === dailyCompletion.length - 1 ? 'Today' : entry.label}</Text>)}
                 </View>
               </View>
             </View>
@@ -99,8 +104,8 @@ export default function StatsProgressScreen() {
                   </View>
                 </View>
                 <View style={styles.summaryGrid}>
-                  <View style={[styles.smallCard, isDarkMode && styles.darkCard]}><Ionicons name="flame" size={18} color={themeColor('#E68D3D')} /><Text style={[styles.smallValue, isDarkMode && styles.darkText]}>{maxStreak}</Text><Text style={[styles.smallLabel, isDarkMode && styles.darkMutedText]}>Day Streak</Text></View>
-                  <View style={[styles.smallCard, isDarkMode && styles.darkCard]}><Ionicons name="trophy-outline" size={18} color={themeColor('#5B42D8')} /><Text style={[styles.smallValue, isDarkMode && styles.darkText]}>{history.bestStreak}</Text><Text style={[styles.smallLabel, isDarkMode && styles.darkMutedText]}>Best Streak</Text></View>
+                  <View style={[styles.smallCard, isDarkMode && styles.darkCard]}><Ionicons name="flame" size={18} color={themeColor('#E68D3D')} /><Text style={[styles.smallValue, isDarkMode && styles.darkText]}>{streak}</Text><Text style={[styles.smallLabel, isDarkMode && styles.darkMutedText]}>Day Streak</Text></View>
+                  <View style={[styles.smallCard, isDarkMode && styles.darkCard]}><Ionicons name="trophy-outline" size={18} color={themeColor('#5B42D8')} /><Text style={[styles.smallValue, isDarkMode && styles.darkText]}>{bestStreak}</Text><Text style={[styles.smallLabel, isDarkMode && styles.darkMutedText]}>Best Streak</Text></View>
                 </View>
                 <View style={[styles.consistencyCard, isDarkMode && styles.darkCard]}>
                   <View><Text style={[styles.cardTitle, isDarkMode && styles.darkText]}>Consistency Score</Text><Text style={styles.score}>{consistency} <Text style={styles.scoreLabel}>{consistency >= 80 ? 'Excellent' : consistency >= 50 ? 'Building' : 'Starting'}</Text></Text></View>

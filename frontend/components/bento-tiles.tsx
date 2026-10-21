@@ -8,7 +8,6 @@ import type { Habit } from '@/hooks/app-state/types';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useBuddy } from '@/hooks/use-buddy';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
-import { historyStats } from '@/utils/achievements';
 import { buddyGrowth, buddyMood } from '@/utils/buddy';
 import { levelProgress } from '@/utils/engagement';
 
@@ -43,19 +42,23 @@ export function BentoTile({ tone, label, value, unit, detail, icon, onPress, acc
   );
 }
 
+/**
+ * `habits` is every habit, also those of past weeks (habits last one week): their check-ins are
+ * history. The streak is the account streak (days in a row with a check-in), and Habi's mood comes
+ * from this week's habits.
+ */
 export function BentoTiles({ habits, onFreeze, style }: { habits: Habit[]; onFreeze: () => void; style?: object | false }) {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
-  const { points, tokens, streakFreeze, isFaculty } = useAppColorScheme();
+  const { points, tokens, streakFreeze, isFaculty, currentHabits, streak, bestStreak } = useAppColorScheme();
   const { buddy } = useBuddy();
   const frozenDays = streakFreeze?.frozenDays;
-  const history = useMemo(() => historyStats(habits, new Date(), frozenDays), [frozenDays, habits]);
-  const streak = Math.max(0, ...habits.map((habit) => habit.streak));
+  const totalCheckIns = useMemo(() => habits.reduce((sum, habit) => sum + habit.completionDates.length, 0), [habits]);
   const freezes = streakFreeze?.available ?? 0;
   const { level, xp, toNext, share } = levelProgress(points);
   const name = buddy?.name ?? 'Habi';
-  const checkIns = buddy?.checkIns ?? history.totalCheckIns;
-  const { mood, line } = buddyMood(habits, name, new Date(), frozenDays);
+  const checkIns = buddy?.checkIns ?? totalCheckIns;
+  const { mood, line } = buddyMood(currentHabits, name, new Date(), frozenDays);
   const growth = buddyGrowth(checkIns, buddy?.stages);
   const go = (href: Href) => () => router.push(href);
   const iconBubble = (name: keyof typeof Ionicons.glyphMap, color: string) => (
@@ -69,10 +72,10 @@ export function BentoTiles({ habits, onFreeze, style }: { habits: Habit[]; onFre
         label="Streak"
         value={String(streak)}
         unit={streak === 1 ? 'day' : 'days'}
-        detail={`Best ${history.bestStreak} · ${freezes} 🧊 ${freezes === 1 ? 'freeze' : 'freezes'}`}
+        detail={`Best ${bestStreak} · ${freezes} 🧊 ${freezes === 1 ? 'freeze' : 'freezes'}`}
         icon={iconBubble('flame', '#E8862A')}
         onPress={onFreeze}
-        accessibilityLabel={`${streak}-day streak, best ${history.bestStreak}, ${freezes} streak freezes. Open Streak Freeze`}
+        accessibilityLabel={`${streak}-day streak, best ${bestStreak}, ${freezes} streak freezes. Open Streak Freeze`}
       />
       <BentoTile
         tone="level"
@@ -90,11 +93,11 @@ export function BentoTiles({ habits, onFreeze, style }: { habits: Habit[]; onFre
         <BentoTile
           tone="tokens"
           label="Check-ins"
-          value={String(history.totalCheckIns)}
+          value={String(totalCheckIns)}
           detail="All the days you showed up"
           icon={iconBubble('checkmark-done', '#2E9D5C')}
           onPress={go('/progress')}
-          accessibilityLabel={`${history.totalCheckIns} check-ins. Open progress`}
+          accessibilityLabel={`${totalCheckIns} check-ins. Open progress`}
         />
       ) : (
         <BentoTile

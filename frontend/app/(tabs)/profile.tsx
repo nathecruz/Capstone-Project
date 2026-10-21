@@ -11,12 +11,12 @@ import { ClassPulseCard } from '@/components/class-pulse-card';
 import { FramedAvatar } from '@/components/framed-avatar';
 import { FrameSheet, TitleBadge, TitleSheet } from '@/components/reward-sheets';
 import { useAppDialog } from '@/components/ui/app-dialog';
-import { badgeProgress, badgeRemaining, historyStats, nextBadge } from '@/utils/achievements';
+import { badgeProgress, badgeRemaining, nextBadge } from '@/utils/achievements';
 import { toAvatarDataUri } from '@/utils/avatar-image';
 import { askAi } from '@/utils/ai-client';
 import { levelProgress } from '@/utils/engagement';
 import type { TranslationKey } from '@/constants/i18n';
-import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { CONTENT_MAX_WIDTH } from '@/hooks/use-responsive-layout';
 import { useRewards } from '@/hooks/use-rewards';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
@@ -43,7 +43,8 @@ export default function ProfileScreen() {
   const rewards = useRewards();
   const [titleOpen, setTitleOpen] = useState(false);
   const [frameOpen, setFrameOpen] = useState(false);
-  const { isDarkMode, avatarImage, setAvatarImage, habits, goals, profile, points, tokens, applyWallet, t, isFaculty, streakFreeze } = useAppColorScheme();
+  // `streak` is the account streak (days in a row with a check-in, across weeks), `bestStreak` its longest run.
+  const { isDarkMode, avatarImage, setAvatarImage, habits, goals, profile, points, tokens, applyWallet, t, isFaculty, streakFreeze, streak, bestStreak } = useAppColorScheme();
   // Faculty mode: no student leaderboards; a shortcut to their class's Class Pulse instead.
   const menuItems = isFaculty ? settings.filter((item) => item.key !== 'leaderboards') : settings;
   // The student's real place on the All Time leaderboard (it used to be a fixed "#24, Top 8%").
@@ -60,14 +61,12 @@ export default function ProfileScreen() {
   }, [isFaculty, points]);
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
-  const { maxStreak } = getHabitProgressSummary(habits);
   // Badges from the whole history: earned first, and the one closest to being earned.
   const frozenDays = streakFreeze?.frozenDays;
   const badges = useMemo(() => badgeProgress(habits, goals, new Date(), frozenDays), [frozenDays, habits, goals]);
   const earnedBadges = badges.filter((badge) => badge.earned).length;
   const badgeStrip = [...badges].sort((a, b) => Number(b.earned) - Number(a.earned) || b.share - a.share).slice(0, 6);
   const upcomingBadge = nextBadge(badges);
-  const bestStreak = useMemo(() => historyStats(habits, new Date(), frozenDays).bestStreak, [frozenDays, habits]);
   const displayName = profile.fullName?.trim() || 'Your profile';
   const displayUsername = profile.username?.trim() ? `@${profile.username.trim()}` : '';
   // Without a photo the avatar shows the student's initial.
@@ -132,7 +131,7 @@ export default function ProfileScreen() {
 
   const { level: xpLevel, xp, toNext, share: levelShare } = levelProgress(points);
   const stats: { label: string; value: string; icon: keyof typeof Ionicons.glyphMap; color: string; onPress: () => void; accessibilityLabel: string }[] = [
-    { label: 'day streak', value: String(maxStreak), icon: 'flame', color: '#E8862A', onPress: () => router.push('/stats-progress'), accessibilityLabel: `${maxStreak}-day streak, best ${bestStreak}. Open stats` },
+    { label: 'day streak', value: String(streak), icon: 'flame', color: '#E8862A', onPress: () => router.push('/stats-progress'), accessibilityLabel: `${streak}-day streak, best ${bestStreak}. Open stats` },
     { label: 'points', value: String(points), icon: 'star', color: '#5B42D8', onPress: () => router.push('/achievements'), accessibilityLabel: `${points} points, level ${xpLevel}. Open badges` },
     isFaculty
       ? { label: 'goals', value: String(goals.length), icon: 'flag', color: '#C98A0E', onPress: () => router.push('/goals'), accessibilityLabel: `${goals.length} goals. Open goals` }

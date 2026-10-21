@@ -1,8 +1,11 @@
+import { isHabitActiveOn } from './habit-week';
 import { isHabitScheduledOn } from './streaks';
 
 export type HabitVisibilityCandidate = {
   completionDates: string[];
   startDate?: string;
+  /** The last day of the habit's week (utils/habit-week.ts). */
+  activeUntil?: string;
   frequency?: string;
   meta?: string;
   reminderDays?: string[];
@@ -22,13 +25,13 @@ function previousDateKey(now: Date) {
 }
 
 /**
- * A habit is missed only once its day is over: it was scheduled that day (and already
- * started) and was not completed. During the day it can be completed at any time, even
- * after its reminder time.
+ * A habit is missed only once its day is over: it was scheduled that day (and active: already
+ * started, and its week not over) and was not completed. During the day it can be completed at any
+ * time, even after its reminder time. Days after a habit's week ended are never missed.
  */
 export function isHabitMissedOn(habit: HabitVisibilityCandidate, dateKey: string, now = new Date()) {
   if (dateKey >= getLocalDateKey(now)) return false;
-  if (habit.startDate && habit.startDate > dateKey) return false;
+  if (!isHabitActiveOn(habit, dateKey)) return false;
   if (habit.completionDates.includes(dateKey)) return false;
   return isHabitScheduledOn(habit, dateKey);
 }

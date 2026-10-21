@@ -13,6 +13,7 @@ import { weeklyQuests } from '@/utils/quests';
 
 type Tab = 'daily' | 'challenges' | 'quests';
 
+/** `habits` are this week's habits (habits last one week): the challenges load only when there are some. */
 export function RewardsHub({ habits, now }: { habits: Habit[]; now: Date }) {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();

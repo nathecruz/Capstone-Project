@@ -202,7 +202,7 @@ export function MysteryBoxCard({ habits, tokenHistory, onWallet, style }: { habi
   );
 }
 
-/** In the evening: habits still open today whose streak breaks at midnight. */
+/** In the evening: this week's habits still open today whose streak breaks at midnight. */
 export function StreakRiskBanner({ habits, now, onFreeze, style }: { habits: Habit[]; now: Date; onFreeze?: () => void; style?: object | false }) {
   const styles = useThemedStyles(themedStyles);
   const { streakFreeze } = useAppColorScheme();
@@ -213,7 +213,10 @@ export function StreakRiskBanner({ habits, now, onFreeze, style }: { habits: Hab
   const streakOf = (habit: Habit) => computeStreak(habit, habit.completionDates, today, frozenDays);
   const [first] = [...atRisk].sort((a, b) => streakOf(b) - streakOf(a));
   const days = streakOf(first);
+  // A freeze protects the account streak: it is used only for a day with no check-in at all, so
+  // once something is checked in today it would not save this habit's streak.
   const held = streakFreeze?.available ?? 0;
+  const freezeHelps = !habits.some((habit) => habit.completionDates.includes(today));
   const others = atRisk.length - 1;
   return (
     <View style={[styles.risk, style]} accessibilityRole="alert">
@@ -223,7 +226,7 @@ export function StreakRiskBanner({ habits, now, onFreeze, style }: { habits: Hab
         <Text style={styles.riskText}>
           {first.label} ({days} day{days === 1 ? '' : 's'}){others > 0 ? ` and ${others} more` : ''} will reset at midnight if not done.
         </Text>
-        {held > 0 ? (
+        {!freezeHelps ? null : held > 0 ? (
           <Text style={styles.riskFreeze}>🧊 Your streak freeze covers you if you miss tonight.</Text>
         ) : onFreeze ? (
           <Pressable onPress={onFreeze} accessibilityRole="button" hitSlop={6}>

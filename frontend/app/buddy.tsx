@@ -22,7 +22,7 @@ export default function BuddyScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const showAlert = useAppDialog();
-  const { habits, tokens, applyWallet, streakFreeze } = useAppColorScheme();
+  const { habits, currentHabits, tokens, applyWallet, streakFreeze } = useAppColorScheme();
   const { buddy } = useBuddy();
   const [slot, setSlot] = useState<Slot>('head');
   const [editingName, setEditingName] = useState<string | null>(null);
@@ -35,7 +35,9 @@ export default function BuddyScreen() {
   const name = buddy?.name ?? 'Habi';
   const checkIns = buddy?.checkIns ?? habits.reduce((sum, habit) => sum + habit.completionDates.length, 0);
   const growth = buddyGrowth(checkIns, buddy?.stages);
-  const { mood, line, energy } = buddyMood(habits, name, new Date(), streakFreeze?.frozenDays);
+  // Habits last one week: the mood is about this week's habits. The tips name only those too, but
+  // take every habit for the best day of the week; the buddy's week is history.
+  const { mood, line, energy } = buddyMood(currentHabits, name, new Date(), streakFreeze?.frozenDays);
   const stages = buddy?.stages ?? [];
   const tips = buddyTips(habits, { checkIns, stages: buddy?.stages });
   const week = buddyWeek(habits, new Date(), streakFreeze?.frozenDays);

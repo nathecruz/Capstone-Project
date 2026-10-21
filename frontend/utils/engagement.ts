@@ -2,6 +2,7 @@
 // streak milestones, streaks at risk, the daily challenge, the weekly recap and focus sessions.
 import type { Habit } from '@/hooks/app-state/types';
 import { getLocalDateKey } from '@/utils/habit-visibility';
+import { hasHabitEnded, isHabitActiveOn } from '@/utils/habit-week';
 import { computeStreak, isHabitScheduledOn } from '@/utils/streaks';
 
 export type TimeOfDay = 'morning' | 'afternoon' | 'evening' | 'anytime';
@@ -66,7 +67,8 @@ export function timeOfDayFor(habit: Pick<Habit, 'meta' | 'label'>): TimeOfDay {
   return KEYWORDS.find(([, pattern]) => pattern.test(habit.label))?.[0] ?? 'anytime';
 }
 
-const scheduledOn = (habit: Habit, dateKey: string) => (!habit.startDate || habit.startDate <= dateKey) && isHabitScheduledOn(habit, dateKey);
+/** Due on this day: active then (started, and its week not over; habits last one week) and scheduled. */
+const scheduledOn = (habit: Habit, dateKey: string) => isHabitActiveOn(habit, dateKey) && isHabitScheduledOn(habit, dateKey);
 const minutesNow = (now: Date) => now.getHours() * 60 + now.getMinutes();
 
 /**
@@ -96,7 +98,9 @@ export const LATE_SECTION = { label: 'Late', icon: 'alarm-outline' };
 
 /**
  * Today's habits: the late ones first (oldest planned time first), the rest still to do grouped by
- * time of day, the next one up, and the done ones.
+ * time of day, the next one up, and the done ones. The same whether it gets every habit or this
+ * week's: a habit whose week has ended is never due, and `notToday` counts only this week's habits
+ * that are not due today.
  */
 export function todayAgenda(habits: Habit[], now = new Date()) {
   const today = getLocalDateKey(now);
@@ -121,7 +125,8 @@ export function todayAgenda(habits: Habit[], now = new Date()) {
     .sort((a, b) => a.minutes - b.minutes);
   const currentPart: TimeOfDay = nowMinutes < 12 * 60 ? 'morning' : nowMinutes < 18 * 60 ? 'afternoon' : 'evening';
   const nextUp = late[0] ?? upcoming[0]?.habit ?? onTime.find((habit) => timeOfDayFor(habit) === currentPart) ?? actionable[0] ?? null;
-  return { scheduled, done, open, missed, late, sections, nextUp, notToday: habits.length - scheduled.length };
+  const thisWeek = habits.filter((habit) => !hasHabitEnded(habit, today)).length;
+  return { scheduled, done, open, missed, late, sections, nextUp, notToday: thisWeek - scheduled.length };
 }
 
 export const POINTS_PER_LEVEL = 100;
@@ -137,8 +142,9 @@ export function levelProgress(points: number) {
 export const STREAK_MILESTONES = [3, 7, 14, 21, 30, 50, 75, 100, 150, 200, 365];
 
 /**
- * Bonus tokens the server awards when a habit's streak reaches a milestone (once per habit and
- * milestone). Kept in sync with the server's copy (backend/services/wallet.js) so the celebration
+ * Bonus tokens the server awards when the account streak (days in a row with a check-in, across all
+ * habits and weeks: utils/account-streak.ts) reaches a milestone, once per run of the streak and
+ * milestone. Kept in sync with the server's copy (backend/services/wallet.js) so the celebration
  * can show the amount; the server is the source of truth for the balance.
  */
 export const STREAK_MILESTONE_BONUS: Record<number, number> = { 7: 15, 14: 25, 30: 50, 50: 80, 100: 150, 200: 300, 365: 500 };
@@ -151,7 +157,8 @@ export function streakMilestone(before: number, after: number) {
 /**
  * In the evening, habits due today that are still open, have a running streak, and can still be done
  * tonight. A habit already past its reminder deadline is missed (its streak is already broken), so it
- * is not "at risk tonight" and is left out — you can no longer act on it.
+ * is not "at risk tonight" and is left out — you can no longer act on it. One whose week has ended
+ * is never due, so every habit or this week's give the same list.
  */
 export function habitsAtRisk(habits: Habit[], now = new Date(), fromHour = 18, frozenDays: string[] = []) {
   if (now.getHours() < fromHour) return [];

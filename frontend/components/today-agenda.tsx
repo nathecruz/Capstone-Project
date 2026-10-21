@@ -1,6 +1,8 @@
 // Home's Today: a hero card with today's progress and what to do next, then the rest of today's
 // habits by time of day and what is already done. A tap checks a habit off (with a short Undo);
 // the timer button starts a focus session. Home can put its tiles between the two (`middle`).
+// It gets this week's habits only (habits last one week); with none, the hero invites the student
+// to plan the new week.
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -134,6 +136,39 @@ function MissedRow({ habit }: { habit: Habit }) {
   );
 }
 
+/**
+ * No habits this week (habits last one week, so a new week starts empty, and so does a new
+ * account): a fresh start, with the AI planner first and adding a habit by hand second.
+ */
+function FreshStartHero({ dateLabel }: { dateLabel: string }) {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
+  return (
+    <View style={styles.hero}>
+      <View style={styles.heroGlow} />
+      <View style={styles.heroTop}>
+        <View style={styles.heroCopy}>
+          <Text style={styles.heroEyebrow}>TODAY · {dateLabel.toUpperCase()}</Text>
+          <Text style={styles.heroEmptyTitle}>New week, fresh start.</Text>
+          <Text style={styles.freshText}>Plan this week&apos;s habits with AI or add your own.</Text>
+        </View>
+        <View style={styles.freshIcon}><Ionicons name="sparkles" size={30} color="#FFFFFF" /></View>
+      </View>
+      <View style={styles.nextActions}>
+        <Pressable style={({ pressed }) => [styles.heroButton, styles.freshButton, pressed && styles.pressed]} onPress={() => router.push('/(tabs)/goals')} accessibilityRole="button" accessibilityLabel="Plan this week's habits with AI">
+          <Ionicons name="sparkles" size={17} color={themeColor('#5B42D8')} />
+          <Text style={styles.heroButtonText}>Plan with AI</Text>
+        </Pressable>
+        <Pressable style={({ pressed }) => [styles.nextFocus, pressed && styles.pressed]} onPress={() => router.push('/(tabs)/add')} accessibilityRole="button" accessibilityLabel="Add your own habit">
+          <Ionicons name="add" size={18} color="#FFFFFF" />
+          <Text style={styles.nextFocusText}>Add a habit</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+/** `habits` are this week's habits. */
 export function TodayAgenda({ habits, now, onCheck, middle, style }: { habits: Habit[]; now: Date; onCheck: (habit: Habit) => void; middle?: React.ReactNode; style?: object | false }) {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
@@ -167,6 +202,15 @@ export function TodayAgenda({ habits, now, onCheck, middle, style }: { habits: H
     .filter((section) => section.rows.length > 0);
   const hasList = listSections.length > 0 || agenda.done.length > 0 || Boolean(justChecked) || agenda.notToday > 0 || agenda.missed.length > 0;
 
+  if (!habits.length) {
+    return (
+      <View style={[styles.stack, style]}>
+        <FreshStartHero dateLabel={dateLabel} />
+        {middle}
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.stack, style]}>
       <View style={styles.hero}>
@@ -183,18 +227,11 @@ export function TodayAgenda({ habits, now, onCheck, middle, style }: { habits: H
                 </Text>
               </>
             ) : (
-              <Text style={styles.heroEmptyTitle}>{habits.length ? 'Nothing scheduled today' : 'Start your first habit'}</Text>
+              <Text style={styles.heroEmptyTitle}>Nothing scheduled today</Text>
             )}
           </View>
           <ProgressRing share={share} label={`${percent}%`} />
         </View>
-
-        {habits.length === 0 && (
-          <Pressable style={({ pressed }) => [styles.heroButton, pressed && styles.pressed]} onPress={() => router.push('/add')} accessibilityRole="button">
-            <Ionicons name="add" size={18} color={themeColor('#5B42D8')} />
-            <Text style={styles.heroButtonText}>Add your first habit</Text>
-          </Pressable>
-        )}
 
         {total > 0 && agenda.open.length === 0 && (
           <View style={styles.heroPanel} accessible accessibilityLabel="All habits done for today">
@@ -232,68 +269,66 @@ export function TodayAgenda({ habits, now, onCheck, middle, style }: { habits: H
 
       {middle}
 
-      {habits.length > 0 && (
-        <View style={styles.card}>
-          <View style={styles.listHeader}>
-            <Text style={styles.listTitle}>Your habits today</Text>
-            <Pressable style={({ pressed }) => [styles.addChip, pressed && styles.pressed]} onPress={() => router.push('/add')} accessibilityRole="button" accessibilityLabel="Add a habit">
-              <Ionicons name="add" size={16} color={themeColor('#5B42D8')} />
-              <Text style={styles.addChipText}>Add</Text>
+      <View style={styles.card}>
+        <View style={styles.listHeader}>
+          <Text style={styles.listTitle}>Your habits today</Text>
+          <Pressable style={({ pressed }) => [styles.addChip, pressed && styles.pressed]} onPress={() => router.push('/add')} accessibilityRole="button" accessibilityLabel="Add a habit">
+            <Ionicons name="add" size={16} color={themeColor('#5B42D8')} />
+            <Text style={styles.addChipText}>Add</Text>
+          </Pressable>
+        </View>
+
+        {!hasList && <Text style={styles.empty}>{nextUp ? 'Only the habit above is left today.' : 'Nothing else for today.'}</Text>}
+
+        {listSections.map((section) => (
+          <View key={section.key} style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name={section.icon as keyof typeof Ionicons.glyphMap} size={14} color={section.key === 'late' ? themeColor('#D9662B') : '#8A8492'} />
+              <Text style={[styles.sectionTitle, section.key === 'late' && styles.lateText]}>{section.label}</Text>
+              <Text style={styles.sectionCount}>{section.rows.length}</Text>
+            </View>
+            <View style={styles.rows}>
+              {section.rows.map((habit) => <HabitRow key={habit.id} habit={habit} late={section.key === 'late'} onCheck={() => check(habit)} />)}
+            </View>
+          </View>
+        ))}
+
+        {justChecked && (
+          <View style={styles.undoBar} accessibilityLiveRegion="polite">
+            <Ionicons name="checkmark-circle" size={18} color="#3BAA74" />
+            <Text style={styles.undoText} numberOfLines={1}>{justChecked.label} done · +20 XP</Text>
+            <Pressable onPress={undo} accessibilityRole="button" accessibilityLabel={`Undo ${justChecked.label}`} hitSlop={8}>
+              <Text style={styles.undoAction}>Undo</Text>
             </Pressable>
           </View>
+        )}
 
-          {!hasList && <Text style={styles.empty}>{nextUp ? 'Only the habit above is left today.' : 'Nothing else for today.'}</Text>}
-
-          {listSections.map((section) => (
-            <View key={section.key} style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <Ionicons name={section.icon as keyof typeof Ionicons.glyphMap} size={14} color={section.key === 'late' ? themeColor('#D9662B') : '#8A8492'} />
-                <Text style={[styles.sectionTitle, section.key === 'late' && styles.lateText]}>{section.label}</Text>
-                <Text style={styles.sectionCount}>{section.rows.length}</Text>
-              </View>
-              <View style={styles.rows}>
-                {section.rows.map((habit) => <HabitRow key={habit.id} habit={habit} late={section.key === 'late'} onCheck={() => check(habit)} />)}
-              </View>
+        {agenda.missed.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="close-circle" size={14} color={themeColor('#C2541E')} />
+              <Text style={[styles.sectionTitle, styles.lateText]}>Missed today</Text>
+              <Text style={styles.sectionCount}>{agenda.missed.length}</Text>
             </View>
-          ))}
+            <View style={styles.rows}>{agenda.missed.map((habit) => <MissedRow key={habit.id} habit={habit} />)}</View>
+          </View>
+        )}
 
-          {justChecked && (
-            <View style={styles.undoBar} accessibilityLiveRegion="polite">
-              <Ionicons name="checkmark-circle" size={18} color="#3BAA74" />
-              <Text style={styles.undoText} numberOfLines={1}>{justChecked.label} done · +20 XP</Text>
-              <Pressable onPress={undo} accessibilityRole="button" accessibilityLabel={`Undo ${justChecked.label}`} hitSlop={8}>
-                <Text style={styles.undoAction}>Undo</Text>
-              </Pressable>
+        {agenda.done.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="checkmark-done" size={14} color="#3BAA74" />
+              <Text style={styles.sectionTitle}>Done today</Text>
+              <Text style={styles.sectionCount}>{agenda.done.length}</Text>
             </View>
-          )}
+            <View style={styles.doneWrap}>{agenda.done.map((habit) => <DoneChip key={habit.id} habit={habit} />)}</View>
+          </View>
+        )}
 
-          {agenda.missed.length > 0 && (
-            <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <Ionicons name="close-circle" size={14} color={themeColor('#C2541E')} />
-                <Text style={[styles.sectionTitle, styles.lateText]}>Missed today</Text>
-                <Text style={styles.sectionCount}>{agenda.missed.length}</Text>
-              </View>
-              <View style={styles.rows}>{agenda.missed.map((habit) => <MissedRow key={habit.id} habit={habit} />)}</View>
-            </View>
-          )}
-
-          {agenda.done.length > 0 && (
-            <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <Ionicons name="checkmark-done" size={14} color="#3BAA74" />
-                <Text style={styles.sectionTitle}>Done today</Text>
-                <Text style={styles.sectionCount}>{agenda.done.length}</Text>
-              </View>
-              <View style={styles.doneWrap}>{agenda.done.map((habit) => <DoneChip key={habit.id} habit={habit} />)}</View>
-            </View>
-          )}
-
-          {agenda.notToday > 0 && (
-            <Text style={styles.restNote}>{agenda.notToday} habit{agenda.notToday === 1 ? '' : 's'} not scheduled today</Text>
-          )}
-        </View>
-      )}
+        {agenda.notToday > 0 && (
+          <Text style={styles.restNote}>{agenda.notToday} habit{agenda.notToday === 1 ? '' : 's'} not scheduled today</Text>
+        )}
+      </View>
     </View>
   );
 }
@@ -313,6 +348,10 @@ const themedStyles = createThemedStyles({
   heroEmptyTitle: { marginTop: 6, fontSize: 22, fontWeight: '900', color: '#FFFFFF' },
   heroButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 46, borderRadius: 16, backgroundColor: '#FFFFFF' },
   heroButtonText: { fontSize: 15, fontWeight: '800', color: '#5B42D8' },
+  // The fresh-start hero (no habits this week): its line, icon and two buttons side by side.
+  freshText: { marginTop: 4, fontSize: 14, lineHeight: 20, fontWeight: '700', color: '#EEEAFF' },
+  freshIcon: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.14)' },
+  freshButton: { flex: 1, height: 44, borderRadius: 14 },
   heroPanel: { borderRadius: 20, padding: 14, backgroundColor: 'rgba(255,255,255,0.14)' },
   heroPanelTitle: { fontSize: 16, fontWeight: '900', color: '#FFFFFF' },
   heroPanelText: { marginTop: 3, fontSize: 13, lineHeight: 18, fontWeight: '600', color: '#EEEAFF' },
@@ -382,6 +421,7 @@ const themedStyles = createThemedStyles({
   heroEyebrow: { fontSize: 11, fontWeight: '900', letterSpacing: 1, color: '#DCD5FF' },
   heroHint: { fontSize: 14, fontWeight: '700', color: '#EEEAFF' },
   heroPanelText: { marginTop: 3, fontSize: 13, lineHeight: 18, fontWeight: '600', color: '#EEEAFF' },
+  freshText: { marginTop: 4, fontSize: 14, lineHeight: 20, fontWeight: '700', color: '#EEEAFF' },
   nextWhen: { fontSize: 12, fontWeight: '800', color: '#E4DDFF' },
   nextMeta: { marginTop: 2, fontSize: 12, fontWeight: '700', color: '#E4DDFF' },
   nextDone: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 44, borderRadius: 14, backgroundColor: '#FFFFFF' },

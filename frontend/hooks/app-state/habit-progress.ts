@@ -3,6 +3,8 @@ import { normalizeHabitFields } from '@/utils/habit-data';
 import { computeStreak } from '@/utils/streaks';
 import type { Habit, Preferences } from './types';
 
+const isDateKey = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+
 export function getHabitProgressSummary(habits: Habit[]) {
   const completed = habits.filter((habit) => habit.done).length;
   const completionPercent = habits.length ? Math.round((completed / habits.length) * 100) : 0;
@@ -74,6 +76,20 @@ export function applyRemoteCompletionDates(habit: Habit, remoteDates: string[], 
     total: `${done ? goal : 0}/${goal}`,
     streak: computeStreak(habit, completionDates, today, frozenDays),
   }) as Habit;
+}
+
+/**
+ * Takes the last active day (habits last one week, utils/habit-week.ts) the server gave a habit this
+ * device has without one: the server stamps habits made by older app versions when it saves them.
+ * Returns `habits` itself when nothing changes, so React keeps the same state.
+ */
+export function withServerActiveUntil<T extends { id: string; activeUntil?: string }>(habits: T[], serverHabits: unknown) {
+  const stamped = new Map<string, string>();
+  for (const habit of (Array.isArray(serverHabits) ? serverHabits : []) as { id?: unknown; activeUntil?: unknown }[]) {
+    if (typeof habit?.id === 'string' && isDateKey(habit.activeUntil)) stamped.set(habit.id, habit.activeUntil);
+  }
+  const takes = (habit: T) => !isDateKey(habit.activeUntil) && stamped.has(habit.id);
+  return habits.some(takes) ? habits.map((habit) => (takes(habit) ? { ...habit, activeUntil: stamped.get(habit.id) } : habit)) : habits;
 }
 
 /**

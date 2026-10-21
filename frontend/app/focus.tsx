@@ -26,7 +26,8 @@ function clock(ms: number) {
 
 export default function FocusScreen() {
   const params = useLocalSearchParams<{ id?: string }>();
-  const { habits, toggleHabit } = useAppColorScheme();
+  // Only this week's habits can be focused on and checked in (habits last one week).
+  const { currentHabits: habits, toggleHabit } = useAppColorScheme();
   const [habitId, setHabitId] = useState(typeof params.id === 'string' ? params.id : '');
   const habit = habits.find((item) => item.id === habitId) ?? null;
   const today = getLocalDateKey();
