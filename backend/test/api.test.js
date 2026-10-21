@@ -14,9 +14,9 @@ import pg from 'pg';
 import { goalPlanSchema } from '../schemas.js';
 import { normalizeAppState } from '../services/app-state-sync.js';
 import { isValidCompletionDate } from '../services/completion-date.js';
+import { weekEndKey } from '../services/habit-week.js';
 import { weeklyQuests } from '../services/quests.js';
 import { retireRewards } from '../services/rewards.js';
-import { awardStreakMilestones } from '../services/wallet.js';
 import { doneActionSecret, makeDoneToken } from '../services/web-push-actions.js';
 import { getSupportEmailConfig } from '../services/support-email.js';
 
@@ -768,16 +768,89 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(tooMany.response.status, 409, 'two is the most you can hold');
     const synced = await request('/api/streak-freezes/sync', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
     assert.deepEqual({ used: synced.body.used, available: synced.body.available, frozenDays: synced.body.frozenDays }, { used: [], available: 2, frozenDays: [dayBefore(1)] });
+  });
 
-    // Streak milestone bonuses: crossing 7 days pays once, the same milestone never pays twice,
-    // and a jump pays every milestone it clears.
-    const streakBonus = async () => (await db.query('SELECT COALESCE(SUM(amount),0)::int AS total, COUNT(*)::int AS n FROM token_transactions WHERE id LIKE $1', [`${userId}:token:streak:%`])).rows[0];
-    await awardStreakMilestones(db, userId, 'walk', 'Morning walk', 6, 7);
-    assert.deepEqual(await streakBonus(), { total: 15, n: 1 }, 'reaching 7 days pays 15 once');
-    await awardStreakMilestones(db, userId, 'walk', 'Morning walk', 6, 7);
-    assert.deepEqual(await streakBonus(), { total: 15, n: 1 }, 'the same milestone never pays twice');
-    await awardStreakMilestones(db, userId, 'walk', 'Morning walk', 7, 30);
-    assert.deepEqual(await streakBonus(), { total: 90, n: 3 }, 'a jump past 14 and 30 adds both bonuses');
+  await t.test('habits last one week: stamped when saved, closed after their week, account streak bonuses', async () => {
+    const password = 'Amber!Harbor3!Fjord7!Lark';
+    await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, firstName: 'Week', lastName: 'Runner', username: 'week_runner', email: 'week@example.com', password, privacyConsent: true }) });
+    await db.query('UPDATE users SET email_verified_at = 1 WHERE email = $1', ['week@example.com']);
+    const login = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'week@example.com', password }) });
+    const headers = { Authorization: `Bearer ${login.body.token}` };
+    const userId = (await db.query('SELECT id FROM users WHERE email=$1', ['week@example.com'])).rows[0].id;
+    const habitById = (state, id) => state.habits.find((habit) => habit.id === id);
+    const dayBefore = (days) => new Date(Date.parse(`${today}T00:00:00Z`) - days * 86_400_000).toISOString().slice(0, 10);
+    // A habit with no time zone yet is stamped with the end of its week in Manila.
+    const manilaToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+
+    // Habits saved without a last active day (made by an older app) get the end of this week; one
+    // whose week ended long ago keeps its day and stays in the state as history.
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [
+      { ...appState.habits[0], id: 'walk', label: 'Morning walk' },
+      { ...appState.habits[0], id: 'read', label: 'Read' },
+      { ...appState.habits[0], id: 'old', label: 'Old habit', startDate: '2026-01-05', activeUntil: '2026-01-11' },
+    ] }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    assert.deepEqual(saved.body.state.habits.map((habit) => habit.activeUntil), [weekEndKey(manilaToday), weekEndKey(manilaToday), '2026-01-11']);
+    const column = (await db.query('SELECT active_until AS "activeUntil" FROM habits WHERE id=$1', [`${userId}:habit:walk`])).rows[0];
+    assert.equal(column.activeUntil, weekEndKey(manilaToday), 'the habits table has it too');
+
+    // An app version that drops the field cannot move the ended habit into this week.
+    const dropped = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...saved.body.state, habits: saved.body.state.habits.map(({ activeUntil, ...habit }) => habit), ringInterval: 25, baseUpdatedAt: saved.body.updatedAt, baseState: saved.body.state }) });
+    assert.equal(dropped.response.status, 200, JSON.stringify(dropped.body));
+    assert.deepEqual(dropped.body.state.habits.map((habit) => habit.activeUntil), [weekEndKey(manilaToday), weekEndKey(manilaToday), '2026-01-11']);
+
+    // The ended habit cannot be checked in, from the app or from a reminder's Done button.
+    const ended = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'old', date: today, completed: true, timeZone: 'UTC' }) });
+    assert.equal(ended.response.status, 409, JSON.stringify(ended.body));
+    assert.deepEqual([ended.body.code, ended.body.message], ['HABIT_ENDED', "This habit's week has ended. It stays in your history; add a new habit for this week."]);
+    const secret = doneActionSecret({ WEB_PUSH_VAPID_PUBLIC_KEY: 'test-vapid-public-key', WEB_PUSH_VAPID_PRIVATE_KEY: 'test-vapid-private-key', WEB_PUSH_VAPID_SUBJECT: 'mailto:test@example.com' });
+    const endedDone = await request('/api/web-push/done', { method: 'POST', body: JSON.stringify({ token: makeDoneToken({ userId, habitId: 'old', date: today, timeZone: 'UTC' }, secret) }) });
+    assert.equal(endedDone.response.status, 409, JSON.stringify(endedDone.body));
+    assert.equal(endedDone.body.code, 'HABIT_ENDED');
+    const synced = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...dropped.body.state, habits: dropped.body.state.habits.map((habit) => (habit.id === 'old' ? { ...habit, completionDates: [manilaToday] } : habit)), baseUpdatedAt: dropped.body.updatedAt, baseState: dropped.body.state }) });
+    assert.equal(synced.response.status, 200, JSON.stringify(synced.body));
+    assert.deepEqual(habitById(synced.body.state, 'old').completionDates, [], 'nor by a synced (offline) check-in');
+    assert.ok(!(await request('/api/habit-completions', { headers })).body.completions.some((row) => row.habitId === 'old'), 'nothing was checked in');
+
+    // Account streak: six days in a row (on any habit), then today's first check-in makes seven and
+    // pays the 7-day bonus once for this run, whatever else is checked in or undone today.
+    for (const days of [1, 2, 3, 4, 5, 6]) {
+      await db.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4)', [userId, days % 2 ? 'walk' : 'read', dayBefore(days), Date.now()]);
+    }
+    const streakBonuses = async () => (await db.query('SELECT id, amount, label FROM token_transactions WHERE user_id=$1 AND id LIKE $2', [userId, `${userId}:token:streak:%`])).rows;
+    const walked = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'walk', date: today, completed: true, timeZone: 'UTC' }) });
+    assert.equal(walked.response.status, 200, JSON.stringify(walked.body));
+    assert.deepEqual(await streakBonuses(), [{ id: `${userId}:token:streak:account:${dayBefore(6)}:7`, amount: 15, label: '7-day streak' }]);
+    assert.equal(walked.body.tokenHistory.find((item) => item.label === '7-day streak')?.amount, 15, 'the app sees the bonus');
+    await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'read', date: today, completed: true, timeZone: 'UTC' }) });
+    await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'walk', date: today, completed: false, timeZone: 'UTC' }) });
+    await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'walk', date: today, completed: true, timeZone: 'UTC' }) });
+    assert.equal((await streakBonuses()).length, 1, 'paid once');
+
+    // The one-time migration: a snapshot saved before weekly habits gets the end of the week on
+    // its habits (a stamped one keeps its day), as a newer snapshot with every check-in kept.
+    // (The server's own modules need DATABASE_URL to load; only the test's connection is used.)
+    process.env.DATABASE_URL ||= urlForSchema(testDatabaseUrl, schema);
+    const { stampLatestSnapshot } = await import('../services/app-state-store.js');
+    const latest = (await request('/api/app-state', { headers })).body;
+    const legacyState = { ...latest.state, habits: latest.state.habits.map(({ activeUntil, ...habit }) => (habit.id === 'old' ? { ...habit, activeUntil } : habit)) };
+    await db.query('INSERT INTO user_app_state(id,user_id,state_json,updated_at) VALUES($1,$2,$3,$4)', [crypto.randomUUID(), userId, legacyState, latest.updatedAt + 1]);
+    await db.query("UPDATE habits SET active_until='' WHERE user_id=$1", [userId]);
+    const connection = await db.connect();
+    try {
+      await connection.query('BEGIN');
+      assert.equal(await stampLatestSnapshot(userId, connection), true);
+      assert.equal(await stampLatestSnapshot(userId, connection), false, 'stamped once');
+      await connection.query('COMMIT');
+    } finally {
+      connection.release();
+    }
+    const migrated = (await request('/api/app-state', { headers })).body;
+    assert.ok(migrated.updatedAt > latest.updatedAt + 1, 'a newer snapshot the apps rebase on');
+    // Walk and read were checked in with the UTC time zone, so their week ends in UTC.
+    assert.deepEqual(migrated.state.habits.map((habit) => habit.activeUntil), [weekEndKey(today), weekEndKey(today), '2026-01-11']);
+    assert.deepEqual((await db.query('SELECT active_until AS "activeUntil" FROM habits WHERE user_id=$1 ORDER BY sort_order', [userId])).rows.map((row) => row.activeUntil), [weekEndKey(today), weekEndKey(today), '2026-01-11']);
+    assert.equal(migrated.completions.length, latest.completions.length, 'every check-in is kept');
   });
 
   await t.test('token rewards: real ones on sale, retired ones refunded, and the custom title', async () => {

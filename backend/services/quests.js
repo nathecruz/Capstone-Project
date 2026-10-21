@@ -1,6 +1,7 @@
 // Weekly quests: three missions each Monday-to-Sunday week, paid in tokens by the server when
 // they are complete and taken back if an undo drops them below the target. The app shows the
 // same rules (frontend/utils/quests.ts), so the card and the tokens agree.
+import { isHabitActiveOn } from './habit-week.js';
 import { habitFromRow, habitSchedule, isScheduledDay } from './streaks.js';
 
 function shiftDay(dateKey, days) {
@@ -20,12 +21,22 @@ function weekNumber(weekStart) {
 }
 
 /**
- * The week's quests and their progress up to `today`.
- * `habits`: [{ id, frequency, startDate, reminderDays, meta }]; `doneByDate`: Map(date -> Set(habit id)).
+ * Whether a habit counts for the week starting `weekStart`: it was active at some point in it
+ * (habits last one week, services/habit-week.js), so last week's habits do not count this week.
  */
-export function weeklyQuests(habits, doneByDate, today) {
-  if (!habits.length) return [];
+export function isHabitInWeek(habit, weekStart) {
+  const weekEnd = shiftDay(weekStart, 6);
+  return (!habit.startDate || habit.startDate <= weekEnd) && (!habit.activeUntil || habit.activeUntil >= weekStart);
+}
+
+/**
+ * The week's quests and their progress up to `today`, for the habits that count for that week.
+ * `habits`: [{ id, frequency, startDate, activeUntil, reminderDays, meta }]; `doneByDate`: Map(date -> Set(habit id)).
+ */
+export function weeklyQuests(allHabits, doneByDate, today) {
   const weekStart = weekStartOf(today);
+  const habits = allHabits.filter((habit) => isHabitInWeek(habit, weekStart));
+  if (!habits.length) return [];
   let checkIns = 0;
   let perfectDays = 0;
   let challengeDays = 0;
@@ -39,7 +50,7 @@ export function weeklyQuests(habits, doneByDate, today) {
     checkIns += doneHabits.length;
     if (doneHabits.length) activeDays += 1;
     for (const habit of doneHabits) habitsDone.add(habit.id);
-    const due = habits.filter((habit) => (!habit.startDate || habit.startDate <= day) && isScheduledDay(habitSchedule(habit), day));
+    const due = habits.filter((habit) => isHabitActiveOn(habit, day) && isScheduledDay(habitSchedule(habit), day));
     const dueDone = due.filter((habit) => done.has(habit.id)).length;
     if (due.length && dueDone === due.length) perfectDays += 1;
     if (due.length && dueDone >= Math.min(3, due.length)) challengeDays += 1;
@@ -61,7 +72,7 @@ const questTokenId = (userId, weekStart, questId) => `${userId}:token:quest:${we
 
 /** Pays (or takes back) the week's quest bonuses after a check-in on `date`. Call inside the check-in transaction. */
 export async function syncWeeklyQuests(db, userId, date, now = Date.now()) {
-  const rows = (await db.query('SELECT id, meta, frequency, start_date, reminder_days FROM habits WHERE user_id=$1', [userId])).rows;
+  const rows = (await db.query('SELECT id, meta, frequency, start_date, active_until, reminder_days FROM habits WHERE user_id=$1', [userId])).rows;
   const habits = rows.map((row) => ({ ...habitFromRow(row), id: String(row.id).replace(`${userId}:habit:`, '') }));
   const weekStart = weekStartOf(date);
   const completions = await db.query(

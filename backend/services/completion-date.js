@@ -1,3 +1,4 @@
+import { hasHabitEnded } from './habit-week.js';
 import { getHabitReminderTimes } from './web-push-reminders.js';
 
 export function getDateKeyInTimeZone(date, timeZone = 'UTC') {
@@ -71,10 +72,12 @@ function utcOffsetMinutes(date, timeZone) {
 
 /**
  * Seconds until a check-in of the habit for `date` (today) closes at `now`: the end of its last
- * reminder minute, or the end of the day without a reminder; 0 once closed. A reminder push lives
- * only that long, so a phone that was offline or asleep never shows it after the habit is missed.
+ * reminder minute, or the end of the day without a reminder; 0 once closed (also after the habit's
+ * week). A reminder push lives only that long, so a phone that was offline or asleep never shows it
+ * after the habit is missed.
  */
 export function secondsUntilCheckInCloses(habit, date, timeZone = 'UTC', now = new Date()) {
+  if (hasHabitEnded(habit, date)) return 0;
   const open = (at) => isOpenCheckInDate(date, timeZone, at) && !isPastHabitDeadline(habit, date, timeZone, at);
   if (!open(now)) return 0;
   const minutes = getMinutesOfDayInTimeZone(now, timeZone);
@@ -91,11 +94,12 @@ export function secondsUntilCheckInCloses(habit, date, timeZone = 'UTC', now = n
 }
 
 /**
- * Whether a check-in of the habit for `date` would still be accepted at `now`: the day is today
- * and the habit's last reminder time has not passed. Otherwise the habit is missed for that day
- * (or done), so a reminder about it is not sent.
+ * Whether a check-in of the habit for `date` would still be accepted at `now`: the day is today,
+ * within the habit's week, and the habit's last reminder time has not passed. Otherwise the habit
+ * is missed for that day (or done, or only history), so a reminder about it is not sent.
  */
 export function canStillCheckIn(habit, date, timeZone = 'UTC', now = new Date()) {
   if (Array.isArray(habit?.completionDates) && habit.completionDates.includes(date)) return false;
+  if (hasHabitEnded(habit, date)) return false;
   return isOpenCheckInDate(date, timeZone, now) && !isPastHabitDeadline(habit, date, timeZone, now);
 }

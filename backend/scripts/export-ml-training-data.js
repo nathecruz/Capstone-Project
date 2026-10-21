@@ -49,7 +49,8 @@ try {
 
   const rowsByUser = [];
   for (const { id: userId } of users.rows) {
-    const rows = (habitsByUser.get(userId) || []).flatMap((habit) => buildTrainingRows(habit, datesByHabit.get(`${userId}\u0000${habit.id}`), { today }));
+    // Habits of past weeks are kept in the snapshot with their check-ins; their rows stop at the end of their week.
+    const rows = (habitsByUser.get(userId) || []).flatMap((habit) => buildTrainingRows(habit, datesByHabit.get(`${userId}\u0000${habit.id}`), { today, activeUntil: habit.activeUntil }));
     if (rows.length) rowsByUser.push(rows);
   }
 

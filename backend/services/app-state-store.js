@@ -5,7 +5,8 @@
 //   - check-ins live in habit_completions (PUT /api/habit-completions); a synced state
 //     can add offline check-ins but can never delete them,
 //   - streaks are recomputed from check-ins and each habit's schedule,
-//   - points and tokens come from the server ledger (services/wallet.js).
+//   - points and tokens come from the server ledger (services/wallet.js),
+//   - every habit gets the last day it is active (habits last one week, services/habit-week.js).
 // The latest `user_app_state` snapshot, with those server values applied, is what the
 // app reads; relational tables (habits, goals, achievements) mirror it for the
 // leaderboard, reminders, AI context and the Admin Panel.
@@ -15,9 +16,11 @@ import { query, withTransaction } from '../db/client.js';
 import { runAll } from '../db/run-all.js';
 import { sameState } from './app-state-sync.js';
 import { getDateKeyInTimeZone, isPastHabitDeadline } from './completion-date.js';
+import { hasHabitEnded, isDateKey } from './habit-week.js';
 import { computeStreak } from './streaks.js';
 import { getFrozenDays } from './streak-freeze.js';
 import { applyWallet, awardCheckIn, getWallet, POINTS_PER_CHECK_IN } from './wallet.js';
+import { weeklyResetSnapshot } from './weekly-reset.js';
 
 export { sameState, stableStringify } from './app-state-sync.js';
 
@@ -82,15 +85,16 @@ export function withServerProgress(habit, completionDates, frozenDays = []) {
 /** Habits rebuilt from the relational tables, used when no synced state exists yet. */
 export async function getCanonicalHabits(userId) {
   const [habitResult, completions, frozenDays] = await Promise.all([
-    query('SELECT id, label, meta, category, icon, color, goal, progress, total, streak, done, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime", sort_order AS "sortOrder", updated_at AS "updatedAt" FROM habits WHERE user_id=$1 ORDER BY sort_order ASC, id ASC', [userId]),
+    query('SELECT id, label, meta, category, icon, color, goal, progress, total, streak, done, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime", sort_order AS "sortOrder", updated_at AS "updatedAt", active_until AS "activeUntil" FROM habits WHERE user_id=$1 ORDER BY sort_order ASC, id ASC', [userId]),
     getServerCompletions(userId),
     getFrozenDays({ query }, userId),
   ]);
   const byHabit = completionsByHabit(completions);
-  return habitResult.rows.map((habit) => {
+  return habitResult.rows.map(({ activeUntil, ...habit }) => {
     const id = String(habit.id).replace(`${userId}:habit:`, '');
     const frequency = String(habit.meta || '').split('•')[0].trim();
-    return withServerProgress({ ...habit, id, frequency: ['Weekly', 'Monthly'].includes(frequency) ? frequency : 'Daily' }, byHabit.get(id) || [], frozenDays);
+    // '' is a habit not stamped yet: it has no last active day.
+    return withServerProgress({ ...habit, id, frequency: ['Weekly', 'Monthly'].includes(frequency) ? frequency : 'Daily', ...(isDateKey(activeUntil) ? { activeUntil } : {}) }, byHabit.get(id) || [], frozenDays);
   });
 }
 
@@ -147,6 +151,42 @@ export async function refreshSnapshot(userId, connection) {
   return { state, updatedAt };
 }
 
+/**
+ * Gives every habit of the account's latest snapshot a last active day (habits from before weekly
+ * habits have none) and saves it as a newer snapshot, which the apps rebase on. Returns true when
+ * it saved one. Call inside a transaction.
+ */
+export async function stampLatestSnapshot(userId, connection, now = Date.now()) {
+  // Serialises it with saves and check-ins from the student's devices, like PUT /api/app-state.
+  await connection.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [userId]);
+  const stamped = weeklyResetSnapshot(await getLatestAppState(userId, connection), now);
+  if (!stamped) return false;
+  await syncNormalizedState(userId, stamped.state, stamped.updatedAt, connection);
+  const state = await buildServerState(userId, stamped.state, connection);
+  await saveUserAppState(userId, state, stamped.updatedAt, connection);
+  return true;
+}
+
+/**
+ * One-time migration to weekly habits: stamps every account's latest snapshot, so the habits that
+ * exist today leave the lists when this week ends. One account's failure is logged and skipped.
+ */
+export async function stampAllSnapshots({ log = () => {} } = {}) {
+  const accounts = await query('SELECT DISTINCT user_id AS "userId" FROM user_app_state');
+  let stamped = 0;
+  let failed = 0;
+  for (const { userId } of accounts.rows) {
+    try {
+      if (await withTransaction((connection) => stampLatestSnapshot(userId, connection))) stamped += 1;
+    } catch (error) {
+      failed += 1;
+      console.error(`[habits-weekly-reset] ${userId} failed: ${String(error?.message ?? error).slice(0, 200)}`);
+    }
+  }
+  log(`Weekly habits: stamped ${stamped} of ${accounts.rows.length} snapshots${failed ? ` (${failed} failed)` : ''}.`);
+  return { stamped, failed };
+}
+
 /** One-off cleanup for databases that accumulated snapshots before pruning existed. */
 export async function pruneAllSnapshots() {
   const result = await query(
@@ -171,11 +211,13 @@ export function earnedAchievements(habits) {
 
 /** Valid, not-in-the-future check-in dates from a synced habit (offline check-ins). */
 /**
- * New check-ins a synced state may add: today's only (in the habit's time zone), the same rule
- * as PUT /api/habit-completions. A missed day cannot be filled in later, even offline.
+ * New check-ins a synced state may add: today's only (in the habit's time zone), and only within
+ * the habit's week, the same rules as PUT /api/habit-completions. A missed day cannot be filled in
+ * later, even offline.
  */
 function syncedCompletionDates(habit) {
   const today = todayFor(habit.completionTimeZone);
+  if (hasHabitEnded(habit, today)) return [];
   return (Array.isArray(habit.completionDates) ? habit.completionDates : []).map(String).includes(today) ? [today] : [];
 }
 
@@ -214,10 +256,11 @@ export async function syncNormalizedState(userId, state, updatedAt, connection) 
     const goal = Math.max(1, Number(habit.goal) || 1);
     const habitId = String(habit.id).trim();
     await connection.query(
-      `INSERT INTO habits(id,user_id,label,meta,category,icon,color,goal,progress,total,streak,done,reminder_enabled,reminder_time,sort_order,updated_at,frequency,start_date,reminder_days)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+      `INSERT INTO habits(id,user_id,label,meta,category,icon,color,goal,progress,total,streak,done,reminder_enabled,reminder_time,sort_order,updated_at,frequency,start_date,reminder_days,active_until)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
       [`${userId}:habit:${habitId}`, userId, habit.label || habit.name || habitId, habit.meta || '', habit.category || '', habit.icon || 'ellipse-outline', habit.color || '', goal, habit.progress, habit.total, habit.streak, habit.done, Boolean(habit.reminderEnabled), habit.reminderTime || '', sortOrder, updatedAt,
-        String(habit.frequency || ''), /^\d{4}-\d{2}-\d{2}$/.test(habit.startDate || '') ? habit.startDate : '', JSON.stringify(Array.isArray(habit.reminderDays) ? habit.reminderDays : [])],
+        String(habit.frequency || ''), /^\d{4}-\d{2}-\d{2}$/.test(habit.startDate || '') ? habit.startDate : '', JSON.stringify(Array.isArray(habit.reminderDays) ? habit.reminderDays : []),
+        isDateKey(habit.activeUntil) ? habit.activeUntil : ''],
     );
   }
 

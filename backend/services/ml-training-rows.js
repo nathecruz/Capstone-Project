@@ -25,15 +25,19 @@ export function goalTypeFor(category) {
 
 /**
  * One row per `stepDays` reference days, starting a week after the first check-in and ending
- * so that the full 7-day outcome window lies before `today` (today itself is still in progress).
+ * so that the full 7-day outcome window lies before `today` (today itself is still in progress)
+ * and within the habit's week (`activeUntil`, habits last one week): a habit that ended is not a
+ * student who stopped, so the days after it are never an outcome.
  * `sessionMinutes` is a constant: the app does not measure session length, and the ML service
  * uses the training mean when a prediction request omits it, so a constant keeps both sides equal.
  */
-export function buildTrainingRows(habit, completionDates, { today, stepDays = 7, sessionMinutes = 15 } = {}) {
+export function buildTrainingRows(habit, completionDates, { today, activeUntil = habit?.activeUntil, stepDays = 7, sessionMinutes = 15 } = {}) {
   const done = new Set((completionDates || []).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)));
   if (!done.size || !today) return [];
   const sorted = [...done].sort();
-  const lastReference = shiftDay(today, -8);
+  const beforeToday = shiftDay(today, -8);
+  const withinWeek = /^\d{4}-\d{2}-\d{2}$/.test(activeUntil || '') ? shiftDay(activeUntil, -7) : beforeToday;
+  const lastReference = withinWeek < beforeToday ? withinWeek : beforeToday;
   const rows = [];
   for (let reference = shiftDay(sorted[0], 6); reference <= lastReference; reference = shiftDay(reference, stepDays)) {
     const history = sorted.filter((date) => date <= reference);

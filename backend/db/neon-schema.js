@@ -5,6 +5,7 @@ import { seedCatalog } from './seed-data.js';
 import { retireRewards } from '../services/rewards.js';
 import { splitFullName } from '../lib/names.js';
 import { backfillActivityFromSnapshots } from '../services/activity.js';
+import { stampAllSnapshots } from '../services/app-state-store.js';
 
 /** Runs a data migration exactly once per database, recorded in app_migrations. */
 async function runOnce(name, migration) {
@@ -93,6 +94,10 @@ export async function ensureNeonSchema({ log = () => {} } = {}) {
 
   // Sessions last 30 days from sign-in instead of 7: those still open get the same 30 days (once).
   await runOnce('sessions-30-days', () => query('UPDATE sessions SET expires_at = expires_at + $1 WHERE expires_at > $2', [23 * 24 * 60 * 60 * 1000, Date.now()]));
+
+  // Habits last one week. Those made before have no last day yet: every account's latest snapshot
+  // gives them the end of this week, saved as a newer snapshot the apps rebase on (once).
+  await runOnce('habits-weekly-reset', () => stampAllSnapshots({ log }));
 
   // Keep day-level engagement history before services/maintenance.js trims old snapshots.
   await backfillActivityFromSnapshots();

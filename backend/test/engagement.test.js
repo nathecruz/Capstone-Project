@@ -89,7 +89,7 @@ test('a frozen day neither counts toward nor breaks a streak', () => {
 test('freezes cover the days missed before today, all of them or none', () => {
   const habits = [daily('a'), daily('b')];
   const done = (entries) => new Map(Object.entries(entries).map(([id, dates]) => [id, new Set(dates)]));
-  // Habit a ran from September 28 and missed yesterday (October 2); b never had a streak.
+  // The account streak ran from September 28 (habit a) and nothing was checked in yesterday (October 2).
   const missedYesterday = done({ a: ['2026-09-28', '2026-09-29', '2026-09-30', '2026-10-01'] });
   assert.deepEqual(daysToFreeze(habits, missedYesterday, new Set(), '2026-10-03', 1), ['2026-10-02']);
   assert.deepEqual(daysToFreeze(habits, missedYesterday, new Set(), '2026-10-03', 0), []);

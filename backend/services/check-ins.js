@@ -2,17 +2,30 @@
 // and the state snapshot change together. Used by the app (PUT /api/habit-completions) and by
 // the Done button on reminder notifications.
 import { config } from '../config/index.js';
-import { buildServerState, getLatestAppState, saveUserAppState, syncNormalizedState } from './app-state-store.js';
+import { accountStreakRun } from './account-streak.js';
+import { buildServerState, getLatestAppState, getServerCompletions, saveUserAppState, syncNormalizedState } from './app-state-store.js';
 import { isPastHabitDeadline } from './completion-date.js';
+import { hasHabitEnded } from './habit-week.js';
 import { syncWeeklyQuests } from './quests.js';
 import { syncDailyChallenges } from './daily-challenges.js';
-import { computeStreak } from './streaks.js';
-import { awardCheckIn, awardStreakMilestones, revokeCheckIn } from './wallet.js';
+import { getFrozenDays } from './streak-freeze.js';
+import { awardAccountStreakMilestones, awardCheckIn, revokeCheckIn } from './wallet.js';
+
+/** The snapshot's habits (also those of past weeks) with their check-ins from the database. */
+function withCompletionDates(habits, completions) {
+  const datesByHabit = new Map();
+  for (const completion of completions) {
+    if (!datesByHabit.has(completion.habitId)) datesByHabit.set(completion.habitId, []);
+    datesByHabit.get(completion.habitId).push(completion.date);
+  }
+  return habits.map((entry) => ({ ...entry, completionDates: datesByHabit.get(String(entry.id)) ?? [] }));
+}
 
 /**
- * Returns null when the habit does not exist, { locked: true } when an undo is too late, else
- * { serverState, updatedAt, label, dailyChallenges }. Call inside a transaction; the date must already be checked
- * to be the user's today.
+ * Returns null when the habit does not exist, { pastDeadline: true } or { ended: true } when a new
+ * check-in is closed, { locked: true } when an undo is too late, else { serverState, updatedAt,
+ * label, dailyChallenges }. Call inside a transaction; the date must already be checked to be the
+ * user's today.
  */
 export async function setCheckIn(connection, { userId, habitId, date, timeZone, completed, now = Date.now() }) {
   // Serialises concurrent check-ins and saves from several devices of the same user.
@@ -22,11 +35,12 @@ export async function setCheckIn(connection, { userId, habitId, date, timeZone, 
   if (!habit) return null;
 
   // A new check-in is closed once the habit's last reminder time has passed for today (one made
-  // before then stands, so Done tapped again later is not "missed"); an undo still follows the
-  // undo-window rule below.
-  if (completed && isPastHabitDeadline(habit, date, timeZone, new Date(now))) {
+  // before then stands, so Done tapped again later is not "missed"), and once the habit's week has
+  // ended (it is only history then); an undo still follows the undo-window rule below.
+  const ended = hasHabitEnded(habit, date);
+  if (completed && (ended || isPastHabitDeadline(habit, date, timeZone, new Date(now)))) {
     const done = await connection.query('SELECT 1 FROM habit_completions WHERE user_id=$1 AND habit_id=$2 AND completed_date=$3', [userId, habitId, date]);
-    if (!done.rowCount) return { pastDeadline: true };
+    if (!done.rowCount) return ended ? { ended: true } : { pastDeadline: true };
   }
 
   if (!completed) {
@@ -39,12 +53,12 @@ export async function setCheckIn(connection, { userId, habitId, date, timeZone, 
     const inserted = await connection.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING habit_id', [userId, habitId, date, now]);
     if (inserted.rowCount) {
       await awardCheckIn(connection, userId, habitId, date, habit.label, now);
-      // Bonus tokens when this check-in pushes the habit's streak past a milestone (once per habit and milestone).
-      const frozen = (await connection.query('SELECT freeze_date::text AS date FROM streak_freeze_days WHERE user_id=$1', [userId])).rows.map((row) => row.date);
-      const oldDates = Array.isArray(habit.completionDates) ? habit.completionDates : [];
-      const before = computeStreak(habit, oldDates, date, frozen);
-      const after = computeStreak(habit, [...oldDates, date], date, frozen);
-      await awardStreakMilestones(connection, userId, habitId, habit.label, before, after, now);
+      // Bonus tokens when this check-in pushes the account streak (days in a row with a check-in,
+      // across all habits and weeks) past a milestone: once per run of the streak and milestone.
+      const after = withCompletionDates(saved.state.habits, await getServerCompletions(userId, connection));
+      const before = after.map((entry) => (entry.id === habitId ? { ...entry, completionDates: entry.completionDates.filter((day) => day !== date) } : entry));
+      const frozen = await getFrozenDays(connection, userId);
+      await awardAccountStreakMilestones(connection, userId, accountStreakRun(before, date, frozen), accountStreakRun(after, date, frozen), now);
     }
   } else {
     const removed = await connection.query('DELETE FROM habit_completions WHERE user_id=$1 AND habit_id=$2 AND completed_date=$3', [userId, habitId, date]);

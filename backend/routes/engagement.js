@@ -182,6 +182,7 @@ export default function registerEngagementRoutes(app) {
     const result = await withTransaction((connection) => setCheckIn(connection, { ...action, completed: true }));
     if (!result) return response.status(404).json({ ok: false, message: 'This habit no longer exists.' });
     if (result.pastDeadline) return response.status(409).json({ ok: false, code: 'PAST_DEADLINE', message: 'This habit passed its reminder time for today, so it is missed. It opens again on its next scheduled day.' });
+    if (result.ended) return response.status(409).json({ ok: false, code: 'HABIT_ENDED', message: "This habit's week has ended. It stays in your history; add a new habit for this week." });
     response.json({ ok: true, label: result.label, tokens: result.serverState.tokens });
   });
 }
