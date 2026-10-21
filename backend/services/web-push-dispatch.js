@@ -92,7 +92,7 @@ function makeNotificationId(userId, habitId, date, time) {
  */
 async function makeSnoozeAction(db, snoozeUrl, subscriptionId, habitId, snoozeCount, state, { date, timeZone }) {
   if (!snoozeUrl) return null;
-  const settings = getWebPushSnoozeSettings(state, habitId, snoozeCount);
+  const settings = getWebPushSnoozeSettings(state, habitId, snoozeCount, date);
   if (!settings || settings.nextSnoozeCount > getSnoozeLimit(state.snoozeFrequency || 'Once')) return null;
   const createdAt = Date.now();
   if (!canStillCheckIn(settings.habit, date, timeZone, new Date(createdAt + settings.intervalMinutes * 60_000))) return null;
@@ -130,11 +130,12 @@ export async function dispatchDueSnoozes(db, { webpush, template = null, snoozeU
       continue;
     }
     const state = typeof appState === 'string' ? JSON.parse(appState) : appState;
-    const settings = getWebPushSnoozeSettings(state, row.habitId, Number(row.snoozeCount) - 1);
-    const habit = Array.isArray(state.habits) ? state.habits.find((item) => item.id === row.habitId) : null;
     // The snooze is for the day it was tapped. Once the habit is done, or missed (its last reminder
-    // time or its day has passed), it is dropped: it could no longer be checked in.
+    // time or its day has passed), or its week has ended, it is dropped: it could no longer be
+    // checked in.
     const date = localDateIn(subscription.timeZone, new Date(Number(row.createdAt) || now));
+    const settings = getWebPushSnoozeSettings(state, row.habitId, Number(row.snoozeCount) - 1, date);
+    const habit = Array.isArray(state.habits) ? state.habits.find((item) => item.id === row.habitId) : null;
     if (!settings || !habit || !canStillCheckIn(habit, date, subscription.timeZone, new Date())) {
       await db.query('UPDATE web_push_snooze_queue SET sent_at=$2,attempted_at=0 WHERE id=$1', [row.id, now]);
       continue;

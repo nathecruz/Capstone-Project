@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { hasHabitEnded } from './habit-week.js';
 import { getSmartReminderTimes } from './smart-reminders.js';
 
 const reminderDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -125,7 +126,8 @@ function getLocalParts(date, timeZone) {
 /**
  * Reminders due in the last `lookbackMinutes` (covers a late or skipped dispatcher run). A habit
  * with Smart Reminder on is still reminded at its set times, plus an early nudge when it is at
- * risk; those entries carry `smart: { riskLevel }` for the smart message.
+ * risk; those entries carry `smart: { riskLevel }` for the smart message. Only days from the
+ * habit's start date to the end of its week (`activeUntil`) have reminders.
  */
 export function getDueHabitReminders(habit, timeZone, now = new Date(), lookbackMinutes = 5) {
   const smart = habit?.smartReminderEnabled === true;
@@ -144,6 +146,7 @@ export function getDueHabitReminders(habit, timeZone, now = new Date(), lookback
     const local = getLocalParts(candidate, timeZone);
     if (!local || !isScheduledReminderDay(habit, local, days)) continue;
     if (habit.startDate && habit.startDate > local.date) continue;
+    if (hasHabitEnded(habit, local.date)) continue;
     if (Array.isArray(habit.completionDates) && habit.completionDates.includes(local.date)) continue;
     for (const time of timesOn(local.date)) {
       if (time.hour === local.hour && time.minute === local.minute) {
@@ -214,11 +217,17 @@ export function getWebPushSnoozeUrl(environment = process.env) {
   }
 }
 
-export function getWebPushSnoozeSettings(state, habitId, snoozeCount) {
+/**
+ * The snooze settings for a reminder of the habit on `date` (the reminder's day), or null when it
+ * cannot be snoozed: notifications or the habit's reminders are off, the snooze limit is reached,
+ * or the habit's week ended by `date`.
+ */
+export function getWebPushSnoozeSettings(state, habitId, snoozeCount, date = null) {
   const savedState = typeof state === 'string' ? JSON.parse(state) : state;
   if (!savedState || savedState.preferences?.notificationsEnabled === false) return null;
   const habit = Array.isArray(savedState.habits) ? savedState.habits.find((item) => item.id === habitId) : null;
   if (!habit?.reminderEnabled && habit?.smartReminderEnabled !== true) return null;
+  if (date && hasHabitEnded(habit, date)) return null;
   const snoozeLimit = getSnoozeLimit(savedState.snoozeFrequency || 'Once');
   const count = Number(snoozeCount);
   if (!Number.isInteger(count) || count < 0 || count >= snoozeLimit) return null;

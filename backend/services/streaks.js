@@ -37,7 +37,7 @@ export function isScheduledDay(schedule, dateKey) {
 }
 
 /**
- * A `habits` table row (frequency, start_date, reminder_days, meta) as the habit shape used
+ * A `habits` table row (frequency, start_date, active_until, reminder_days, meta) as the habit shape used
  * here. Rows synced before those columns existed fall back to the frequency in `meta`.
  */
 export function habitFromRow(row) {
@@ -45,6 +45,7 @@ export function habitFromRow(row) {
   return {
     frequency: row?.frequency || (['Weekly', 'Monthly', 'Custom'].includes(metaFrequency) ? metaFrequency : 'Daily'),
     startDate: row?.start_date || row?.startDate || '',
+    activeUntil: row?.active_until || row?.activeUntil || '',
     reminderDays: Array.isArray(row?.reminder_days) ? row.reminder_days : Array.isArray(row?.reminderDays) ? row.reminderDays : [],
     meta: row?.meta || '',
   };
@@ -55,9 +56,12 @@ export function habitFromRow(row) {
  * Today only extends the streak once done; an unfinished today never breaks it unless `todayMissed`
  * is set (its last reminder time passed with no check-in).
  * Unscheduled days are skipped, so a Mon/Wed/Fri habit is not broken on Tuesday, and so are days
- * covered by a streak freeze (`frozenDays`): they neither count nor break the streak.
+ * covered by a streak freeze (`frozenDays`): they neither count nor break the streak. A habit whose
+ * week has ended (services/habit-week.js) keeps the streak it had on its last day.
  */
 export function computeStreak(habit, completionDates, today, frozenDays = [], todayMissed = false) {
+  const activeUntil = /^\d{4}-\d{2}-\d{2}$/.test(habit?.activeUntil || '') ? habit.activeUntil : null;
+  if (activeUntil && today > activeUntil) return computeStreak({ ...habit, activeUntil: undefined }, completionDates, activeUntil, frozenDays, true);
   const done = new Set((completionDates || []).filter((date) => typeof date === 'string'));
   if (!done.size) return 0;
   const frozen = new Set(frozenDays);

@@ -3,19 +3,22 @@ import { query, withTransaction } from '../db/client.js';
 import { aiLimiter, habitAdviceLimiter, predictionLimiter } from '../http/rate-limits.js';
 import { parse } from '../lib/http.js';
 import { assistantSchema, goalGenerationSchema, goalPlanSchema, habitAnalysisRequestSchema, habitClassificationSchema } from '../schemas.js';
+import { accountStreak } from '../services/account-streak.js';
 import { requireAuth } from '../services/accounts.js';
 import { buildHabitContext, dateKeyInZone, shiftDay } from '../services/ai-context.js';
 import {
   BAD_HABIT_SYSTEM,
+  DEFAULT_HABIT_CATEGORIES,
   GOAL_PLANNER_SYSTEM,
   badHabitJsonSchema,
   badHabitPrompt,
   buildUserPrompt,
   forAudience,
   cleanAnswer,
-  goalPlanJsonSchema,
+  goalPlanJsonSchemaFor,
   goalPlannerPrompt,
   normalizeGoalPlan,
+  plannedHabitCount,
   systemPromptFor,
 } from '../services/ai-prompts.js';
 import { adviceKey, habitAdviceCache } from '../services/advice-cache.js';
@@ -23,17 +26,21 @@ import { refreshSnapshot } from '../services/app-state-store.js';
 import { forecastFor } from '../services/forecast-rules.js';
 import { HABIT_ANALYSIS_SYSTEM, habitAnalysisJsonSchema, habitAnalysisPrompt, habitAnalysisSchema, habitStats, mlSignal, mlSummary } from '../services/habit-analysis.js';
 import { generateAiText, isAiConfigured } from '../services/groq.js';
+import { loadPlannerCategories, loadPlannerHistory } from '../services/planner-history.js';
 import { computeStreak, habitFromRow } from '../services/streaks.js';
 import { getFrozenDays } from '../services/streak-freeze.js';
 import { COACH_TOKEN_COST, getWallet, spendTokens, tokenBalance } from '../services/wallet.js';
 
 const DEFAULT_TIME_ZONE = 'Asia/Manila';
 
-/** The student's habits, last 4 weeks of check-ins and goals, read from the database. */
+/**
+ * The student's habits (each with its last active day, `activeUntil`: habits last one week), last
+ * 4 weeks of check-ins and goals, read from the database.
+ */
 export async function loadAiContext(userId, timeZone = DEFAULT_TIME_ZONE) {
   const today = dateKeyInZone(new Date(), timeZone);
   const [habits, completions, goals] = await Promise.all([
-    query('SELECT id, label, category, meta, frequency, start_date, reminder_days, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime" FROM habits WHERE user_id=$1 ORDER BY sort_order, id', [userId]),
+    query('SELECT id, label, category, meta, frequency, start_date, reminder_days, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime", active_until AS "activeUntil" FROM habits WHERE user_id=$1 ORDER BY sort_order, id', [userId]),
     query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1', [userId]),
     query('SELECT title, category, progress, status, details_json AS details FROM goals WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 5', [userId]),
   ]);
@@ -44,15 +51,16 @@ export async function loadAiContext(userId, timeZone = DEFAULT_TIME_ZONE) {
     datesByHabit.get(completion.habitId).push(completion.date);
   }
   const recentStart = shiftDay(today, -27);
+  const habitRows = habits.rows.map((row) => ({ row, id: String(row.id).replace(`${userId}:habit:`, '') }));
   return buildHabitContext({
     // The stored streak is only as fresh as the last sync; compute it from check-ins instead.
-    habits: habits.rows.map((row) => {
-      const id = String(row.id).replace(`${userId}:habit:`, '');
-      return { ...row, id, streak: computeStreak(habitFromRow(row), datesByHabit.get(id) || [], today, frozenDays) };
-    }),
+    habits: habitRows.map(({ row, id }) => ({ ...row, id, streak: computeStreak(habitFromRow(row), datesByHabit.get(id) || [], today, frozenDays) })),
     completions: completions.rows.filter((completion) => completion.date >= recentStart),
     goals: goals.rows,
     timeZone,
+    // The account streak needs every check-in, not only the last 4 weeks' (services/account-streak.js).
+    accountStreakDays: accountStreak(habitRows.map(({ row, id }) => ({ ...habitFromRow(row), completionDates: datesByHabit.get(id) || [] })), today, frozenDays),
+    frozenDays,
   });
 }
 
@@ -143,11 +151,12 @@ export default function registerAiRoutes(app) {
     if (!input) return;
     const timeZone = input.timeZone || DEFAULT_TIME_ZONE;
     const [habitResult, completionResult] = await Promise.all([
-      query('SELECT label, category, meta, frequency, start_date, reminder_days, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime" FROM habits WHERE user_id=$1 AND id=$2', [session.userId, `${session.userId}:habit:${input.habitId}`]),
+      query('SELECT label, category, meta, frequency, start_date, active_until, reminder_days, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime" FROM habits WHERE user_id=$1 AND id=$2', [session.userId, `${session.userId}:habit:${input.habitId}`]),
       query('SELECT completed_date::text AS date, completed_at AS "completedAt" FROM habit_completions WHERE user_id=$1 AND habit_id=$2', [session.userId, input.habitId]),
     ]);
     const row = habitResult.rows[0];
     if (!row) return response.status(404).json({ ok: false, error: 'Habit not found.' });
+    // habitFromRow carries activeUntil: an ended habit's facts stop at its last day.
     const habit = { ...habitFromRow(row), label: row.label, category: row.category, reminderEnabled: row.reminderEnabled, reminderTime: row.reminderTime };
     const stats = habitStats({ habit, completions: completionResult.rows, timeZone });
     const { ml, status: mlStatus } = await mlForecast(mlSignal(stats));
@@ -188,6 +197,8 @@ export default function registerAiRoutes(app) {
     });
   });
 
+  // Plans a goal and this week's habits from the student's history (the habits of the last 4 weeks,
+  // how they went, the ML forecasts and the account streak), so the app can add them in one step.
   app.post('/api/goals/generate', aiLimiter, async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
@@ -195,12 +206,31 @@ export default function registerAiRoutes(app) {
     const input = parse(goalGenerationSchema, request, response);
     if (!input) return;
     const timeline = input.timeline || '30-60 days';
-    const prompt = goalPlannerPrompt({ goal: input.goal, focusTarget: input.focusTarget || '4 habits', timeline });
+    const focusTarget = input.focusTarget || '4 habits';
+    const timeZone = input.timeZone || DEFAULT_TIME_ZONE;
+    const habitCount = plannedHabitCount(focusTarget);
+    // Without the history (it could not be read) the plan comes from the goal text alone.
+    const [history, categories] = await Promise.all([
+      loadPlannerHistory({ query }, session.userId, timeZone, { ml: config.ml }).catch((error) => {
+        logAiError('goal planner history', error);
+        return null;
+      }),
+      loadPlannerCategories({ query }).catch((error) => {
+        logAiError('goal planner categories', error);
+        return [...DEFAULT_HABIT_CATEGORIES];
+      }),
+    ]);
+    const prompt = goalPlannerPrompt({ goal: input.goal, focusTarget, timeline, habitCount, history });
+    const schema = goalPlanJsonSchemaFor({ habitCount, categories });
+    const normalizeOptions = { timeline, timeZone, habitCount, categories, currentHabitNames: history?.currentHabitNames ?? [] };
 
     try {
-      // JSON mode plus the schema makes invalid plans rare; one retry covers the rest.
+      // JSON mode plus the schema makes invalid plans rare; one retry covers the rest. A plan whose
+      // habits were all unusable is retried too, and is only sent (with habitSuggestions) when the
+      // retry fails.
+      let planWithoutHabits = null;
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        const text = await generateAiText(prompt, { system: forAudience(GOAL_PLANNER_SYSTEM, session.role), schema: goalPlanJsonSchema, maxOutputTokens: 1200, temperature: 0.7 });
+        const text = await generateAiText(prompt, { system: forAudience(GOAL_PLANNER_SYSTEM, session.role), schema, maxOutputTokens: 1800, temperature: 0.7 });
         let raw;
         try {
           raw = JSON.parse(text);
@@ -212,9 +242,11 @@ export default function registerAiRoutes(app) {
           const feedback = (typeof raw.feedback === 'string' && raw.feedback.trim()) || 'That does not look like a goal we can plan for. Try a real, achievable goal.';
           return response.status(422).json({ ok: false, code: 'UNACHIEVABLE_GOAL', error: feedback.slice(0, 300), message: feedback.slice(0, 300) });
         }
-        const plan = goalPlanSchema.safeParse(normalizeGoalPlan(raw, { timeline, timeZone: input.timeZone || DEFAULT_TIME_ZONE }));
-        if (plan.success) return response.json({ ok: true, plan: plan.data });
+        const plan = goalPlanSchema.safeParse(normalizeGoalPlan(raw, normalizeOptions));
+        if (plan.success && plan.data.habits?.length) return response.json({ ok: true, plan: plan.data });
+        if (plan.success) planWithoutHabits = plan.data;
       }
+      if (planWithoutHabits) return response.json({ ok: true, plan: planWithoutHabits });
       response.status(502).json({ ok: false, error: 'The AI goal planner returned an invalid plan. Please try again.' });
     } catch (error) {
       logAiError('goals', error);

@@ -101,6 +101,9 @@ CREATE INDEX IF NOT EXISTS habits_user_sort_idx ON habits(user_id, sort_order);
 ALTER TABLE habits ADD COLUMN IF NOT EXISTS frequency TEXT NOT NULL DEFAULT '';
 ALTER TABLE habits ADD COLUMN IF NOT EXISTS start_date TEXT NOT NULL DEFAULT '';
 ALTER TABLE habits ADD COLUMN IF NOT EXISTS reminder_days JSONB NOT NULL DEFAULT '[]'::jsonb;
+-- Habits last one week: the last day a habit is active (YYYY-MM-DD, the Sunday of its week; '' for
+-- none yet). After it the habit is only history (services/habit-week.js).
+ALTER TABLE habits ADD COLUMN IF NOT EXISTS active_until TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS goals (
   id TEXT PRIMARY KEY,

@@ -2,6 +2,7 @@
 // service's forecast for those facts, and the AI's advice grounded in both.
 import { z } from 'zod';
 import { dateKeyInZone, shiftDay } from './ai-context.js';
+import { hasHabitEnded } from './habit-week.js';
 import { computeStreak, habitSchedule, isScheduledDay } from './streaks.js';
 
 const LOOKBACK_DAYS = 28;
@@ -22,15 +23,19 @@ function formatHour(hour) {
 }
 
 /**
- * Facts about one habit over the last 4 weeks. `completions` are its check-ins
- * ({ date: 'YYYY-MM-DD', completedAt: ms }); days before the habit started are not counted.
+ * Facts about one habit over the last 4 weeks of its life. `completions` are its check-ins
+ * ({ date: 'YYYY-MM-DD', completedAt: ms }); days before the habit started are not counted, and
+ * neither are days after its week ended (`activeUntil`): an ended habit's 4 weeks (and its last
+ * 7 days) end on its last day.
  */
 export function habitStats({ habit, completions, now = new Date(), timeZone = 'Asia/Manila' }) {
   const today = dateKeyInZone(now, timeZone);
+  const ended = hasHabitEnded(habit, today);
+  const lastDay = ended ? habit.activeUntil : today;
   const done = new Set(completions.map((item) => item.date));
   const schedule = habitSchedule(habit);
   const startDate = /^\d{4}-\d{2}-\d{2}$/.test(habit.startDate || '') ? habit.startDate : null;
-  const days = Array.from({ length: LOOKBACK_DAYS }, (_, index) => shiftDay(today, index - (LOOKBACK_DAYS - 1)))
+  const days = Array.from({ length: LOOKBACK_DAYS }, (_, index) => shiftDay(lastDay, index - (LOOKBACK_DAYS - 1)))
     .filter((day) => !startDate || day >= startDate);
   // Today is still open, so it only counts once it is done.
   const scheduled = days.filter((day) => isScheduledDay(schedule, day) && (day !== today || done.has(day)));
@@ -61,7 +66,9 @@ export function habitStats({ habit, completions, now = new Date(), timeZone = 'A
     completionRate: scheduled.length ? completed.length / scheduled.length : 0,
     streak: computeStreak(habit, [...done], today),
     doneToday: done.has(today),
-    last7Days: Array.from({ length: 7 }, (_, index) => (done.has(shiftDay(today, index - 6)) ? 1 : 0)),
+    // The habit's week is over: these facts are its history (null while it is current).
+    weekEnded: ended ? habit.activeUntil : null,
+    last7Days: Array.from({ length: 7 }, (_, index) => (done.has(shiftDay(lastDay, index - 6)) ? 1 : 0)),
     strongestWeekday: rated.length >= 2 && rated[0].rate > rated.at(-1).rate ? rated[0].day : null,
     weakestWeekday: rated.length >= 2 && rated[0].rate > rated.at(-1).rate ? rated.at(-1).day : null,
     usualCheckInTime: hours.length >= 3 ? formatHour(hours[Math.floor(hours.length / 2)]) : null,
@@ -96,6 +103,7 @@ export function mlSummary(result) {
 export const HABIT_ANALYSIS_SYSTEM = `You are the HabitAI habit analyst inside HabitAI, a habit tracker used by PSAU students in the Philippines.
 You get read-only facts about ONE habit, computed from the student's check-ins, and the machine-learning forecast for it.
 Explain the best way for this student to keep doing this habit: what is going well, when to do it, how to make it easier, what to watch out for, and a word of encouragement.
+Habits last one week (Monday to Sunday). When weekEnded is set, that habit's week is over and the facts are its history up to that day: say how its week went and how to do better if the student adds it again for a new week.
 Rules:
 - Use only the facts given. Never invent numbers, days or times. If there is little data (fewer than 4 scheduled days), say it is early and keep the advice general.
 - Be specific, warm and realistic for a busy university student. Each step is one concrete action.

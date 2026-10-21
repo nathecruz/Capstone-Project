@@ -5,6 +5,7 @@ import { parse } from '../lib/http.js';
 import { notificationReadSchema, webPushSnoozeRequestSchema, webPushSubscriptionRequestSchema, webPushTestSchema, webPushUnsubscribeSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
 import { canStillCheckIn, habitDeadlineMinutes } from '../services/completion-date.js';
+import { hasHabitEnded } from '../services/habit-week.js';
 import { localDateIn } from '../services/web-push-actions.js';
 import { notifyReminderChange } from '../services/web-push-clock.js';
 import { getConfiguredVapidDetails, getConfiguredVapidPublicKey, getWebPushSnoozeSettings, hashWebPushSnoozeToken, isAllowedWebPushEndpoint } from '../services/web-push-reminders.js';
@@ -13,7 +14,7 @@ const TEST_PUSH_COOLDOWN_MS = 15_000;
 
 /**
  * Why a snooze tapped at `now` for a reminder on `reminderDate` would be no use, or null. It has
- * to come back (at `followUpAt`) while the habit can still be checked in that day.
+ * to come back (at `followUpAt`) while the habit can still be checked in that day, within its week.
  */
 function snoozeRefusal(habit, reminderDate, timeZone, now, followUpAt) {
   if (canStillCheckIn(habit, reminderDate, timeZone, new Date(followUpAt))) return null;
@@ -22,6 +23,9 @@ function snoozeRefusal(habit, reminderDate, timeZone, now, followUpAt) {
   }
   if (reminderDate !== localDateIn(timeZone, new Date(now))) {
     return { code: 'DAY_OVER', message: 'This reminder is from a day that is over, so it cannot be snoozed.' };
+  }
+  if (hasHabitEnded(habit, reminderDate)) {
+    return { code: 'HABIT_ENDED', message: "This habit's week has ended, so it cannot be snoozed. It stays in your history." };
   }
   // Still open now: only the snooze would come back after the last reminder time (or midnight).
   if (canStillCheckIn(habit, reminderDate, timeZone, new Date(now))) {

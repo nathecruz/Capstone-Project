@@ -1,8 +1,9 @@
 // Streak Freeze: bought with tokens (up to two held) and used automatically for missed days, so
-// one bad day does not wipe out a long streak. A frozen day neither counts toward nor breaks a
-// streak (services/streaks.js). Used freezes are in streak_freeze_days, held ones in
-// user_streak_freezes.
-import { computeStreak, habitFromRow, habitSchedule, isScheduledDay } from './streaks.js';
+// one bad day does not wipe out a long account streak (services/account-streak.js). A frozen day
+// neither counts toward nor breaks a streak (also a habit's own, services/streaks.js). Used
+// freezes are in streak_freeze_days, held ones in user_streak_freezes.
+import { isHabitActiveOn } from './habit-week.js';
+import { habitFromRow, habitSchedule, isScheduledDay } from './streaks.js';
 import { spendTokens } from './wallet.js';
 
 export const STREAK_FREEZE_COST = 30;
@@ -14,27 +15,29 @@ function shiftDay(dateKey, days) {
 }
 
 /**
- * The days to freeze before `today`: the run of days, counting back from yesterday, on which a
- * habit with a running streak was missed. All of them are frozen or none, so a freeze is never
- * spent on a streak it cannot save. `habits`: [{ id, frequency, startDate, reminderDays, meta }];
- * `doneByHabit`: Map(id -> Set(date)); `frozen`: Set of days already frozen.
+ * The days to freeze before `today`: the days, counting back from yesterday, that broke a running
+ * account streak (some habit was active and scheduled, and nothing was checked in). Days with
+ * nothing due and days already frozen neither count nor break it, so they are passed over; the
+ * first day with a check-in is where the streak runs on. All of the days are frozen or none, so a
+ * freeze is never spent on a streak it cannot save. `habits`: [{ id, frequency, startDate,
+ * activeUntil, reminderDays, meta }] (also past weeks'); `doneByHabit`: Map(id -> Set(date));
+ * `frozen`: Set of days already frozen.
  */
 export function daysToFreeze(habits, doneByHabit, frozen, today, available) {
   if (available <= 0) return [];
+  const checkedIn = new Set([...doneByHabit.values()].flatMap((dates) => [...dates]));
+  const firstCheckIn = [...checkedIn].reduce((first, day) => (!first || day < first ? day : first), null);
+  if (!firstCheckIn) return [];
+  const schedules = habits.map((habit) => ({ habit, schedule: habitSchedule(habit) }));
   const misses = [];
-  for (let back = 1; back <= available + 1; back += 1) {
-    const day = shiftDay(today, -back);
-    if (frozen.has(day)) continue;
-    const before = shiftDay(day, -1);
-    const breaks = habits.some((habit) => {
-      const done = doneByHabit.get(habit.id) ?? new Set();
-      if ((habit.startDate && habit.startDate > day) || !isScheduledDay(habitSchedule(habit), day) || done.has(day)) return false;
-      return computeStreak(habit, [...done], before, [...frozen]) > 0;
-    });
-    if (!breaks) break;
+  for (let day = shiftDay(today, -1); day >= firstCheckIn; day = shiftDay(day, -1)) {
+    if (checkedIn.has(day)) return misses;
+    if (frozen.has(day) || !schedules.some(({ habit, schedule }) => isHabitActiveOn(habit, day) && isScheduledDay(schedule, day))) continue;
     misses.push(day);
+    if (misses.length > available) return [];
   }
-  return misses.length <= available ? misses : [];
+  // No check-in before the misses: there is no streak to save.
+  return [];
 }
 
 export async function getFrozenDays(db, userId) {
@@ -57,7 +60,7 @@ export async function applyStreakFreezes(db, userId, today, now = Date.now()) {
   const available = Number(held.rows[0]?.available ?? 0);
   if (available <= 0) return [];
   const [rows, completions, frozenDays] = await Promise.all([
-    db.query('SELECT id, meta, frequency, start_date, reminder_days FROM habits WHERE user_id=$1', [userId]),
+    db.query('SELECT id, meta, frequency, start_date, active_until, reminder_days FROM habits WHERE user_id=$1', [userId]),
     db.query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1', [userId]),
     getFrozenDays(db, userId),
   ]);

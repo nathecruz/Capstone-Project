@@ -9,13 +9,16 @@ export const COACH_TOKEN_COST = 10;
 export const DAILY_CHALLENGE_BONUS = 10;
 const HISTORY_LIMIT = 100;
 
-// Bonus tokens for reaching a habit streak milestone. Awarded once per habit and milestone (ever),
-// so rebuilding a broken streak cannot farm it. Keep this in sync with the app's copy
+// Bonus tokens for reaching an account streak milestone (days in a row with a check-in, across all
+// habits and weeks: services/account-streak.js). Awarded once per run of the streak and milestone,
+// so an undo-and-recheck never pays twice. Keep this in sync with the app's copy
 // (frontend/utils/engagement.ts STREAK_MILESTONE_BONUS) so the celebration shows the right amount.
 export const STREAK_MILESTONE_BONUS = { 7: 15, 14: 25, 30: 50, 50: 80, 100: 150, 200: 300, 365: 500 };
 
 const checkInId = (userId, habitId, date) => `${userId}:token:check-in:${habitId}:${date}`;
-const streakBonusId = (userId, habitId, milestone) => `${userId}:token:streak:${habitId}:${milestone}`;
+// A run is known by the day it started. (Bonuses paid per habit before weekly habits were
+// `${userId}:token:streak:${habitId}:${milestone}`.)
+const streakBonusId = (userId, runStart, milestone) => `${userId}:token:streak:account:${runStart}:${milestone}`;
 
 /** The milestones a streak crossed going from `before` to `after` (before < m <= after). */
 export function crossedStreakMilestones(before, after) {
@@ -42,17 +45,18 @@ export async function revokeCheckIn(db, userId, habitId, date, habitLabel, now =
 }
 
 /**
- * Awards bonus tokens for streak milestones newly crossed by a check-in (before < m <= after).
- * Idempotent per habit and milestone, so an undo-and-recheck or a rebuilt streak never pays twice.
- * Returns the total tokens awarded.
+ * Awards bonus tokens for account streak milestones newly crossed by a check-in. `before` and
+ * `after` are the streak runs ({ streak, start }, services/account-streak.js) without and with it;
+ * a milestone m is crossed when before.streak < m <= after.streak. Idempotent per run and
+ * milestone. Returns the total tokens awarded.
  */
-export async function awardStreakMilestones(db, userId, habitId, habitLabel, before, after, now = Date.now()) {
+export async function awardAccountStreakMilestones(db, userId, before, after, now = Date.now()) {
   let awarded = 0;
-  for (const milestone of crossedStreakMilestones(before, after)) {
+  for (const milestone of crossedStreakMilestones(before.streak, after.streak)) {
     const bonus = STREAK_MILESTONE_BONUS[milestone];
     const inserted = await db.query(
       'INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING RETURNING id',
-      [streakBonusId(userId, habitId, milestone), userId, bonus, `${milestone}-day streak: ${habitLabel || 'habit'}`, new Date(now).toISOString(), now],
+      [streakBonusId(userId, after.start, milestone), userId, bonus, `${milestone}-day streak`, new Date(now).toISOString(), now],
     );
     if (inserted.rowCount) awarded += bonus;
   }

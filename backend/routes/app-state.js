@@ -18,6 +18,7 @@ import { setCheckIn } from '../services/check-ins.js';
 import { isOpenCheckInDate } from '../services/completion-date.js';
 import { applyWallet, getWallet } from '../services/wallet.js';
 import { notifyReminderChange } from '../services/web-push-clock.js';
+import { stampActiveUntil } from '../services/weekly-reset.js';
 
 /** The app's blank startup state: sent before an account's state loaded, it has no email and no habits. */
 const isBlankStartupState = (state, storedState) =>
@@ -66,10 +67,11 @@ export default function registerAppStateRoutes(app) {
       // a cold start) must not replace it: an empty or stale habit list would delete other
       // devices' habits and their check-ins. Merge it instead, with the server winning conflicts.
       const merged = Boolean(existing && (!baseState || Number(baseUpdatedAt) !== existingUpdatedAt));
-      // Done goal steps stay done, whatever the device sends.
-      const state = keepCompletedGoalSteps(merged
+      // Done goal steps stay done, whatever the device sends. Every habit gets its last active day
+      // (habits last one week); one it already has is kept, even if an older app version drops it.
+      const state = stampActiveUntil(keepCompletedGoalSteps(merged
         ? withNewIncomingCheckIns(mergeAppState(baseState || {}, currentState, incomingState), baseState, incomingState)
-        : normalizeAppState(incomingState), currentState);
+        : normalizeAppState(incomingState), currentState), currentState);
 
       // Nothing the app owns changed (points, tokens and streaks are the server's): skip the write.
       if (existing && sameClientState(state, currentState)) return { state: currentState, updatedAt: existingUpdatedAt, merged, unchanged: true };
@@ -109,6 +111,7 @@ export default function registerAppStateRoutes(app) {
     if (!result) return response.status(404).json({ ok: false, message: 'Habit not found.' });
     if (result.pastDeadline) return response.status(409).json({ ok: false, code: 'PAST_DEADLINE', message: 'This habit passed its reminder time for today, so it is missed. It opens again on its next scheduled day.' });
     if (result.locked) return response.status(409).json({ ok: false, code: 'CHECK_IN_LOCKED', message: 'This check-in is locked. A check-in can only be undone right after it is made.' });
+    if (result.ended) return response.status(409).json({ ok: false, code: 'HABIT_ENDED', message: "This habit's week has ended. It stays in your history; add a new habit for this week." });
 
     const { serverState, updatedAt } = result;
     const habit = serverState.habits.find((entry) => entry.id === input.habitId);

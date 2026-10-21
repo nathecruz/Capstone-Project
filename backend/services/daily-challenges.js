@@ -2,6 +2,7 @@
 // (check in before 10 AM, twice before noon, bounce back after a miss, keep every streak alive,
 // have a perfect day), picked so that each one makes sense for the student's habits that day.
 // The server works them out from the check-ins and pays them in tokens; the app shows its answer.
+import { isHabitActiveOn } from './habit-week.js';
 import { getFrozenDays } from './streak-freeze.js';
 import { computeStreak, habitFromRow, habitSchedule, isScheduledDay } from './streaks.js';
 import { DAILY_CHALLENGE_BONUS } from './wallet.js';
@@ -15,12 +16,14 @@ function shiftDay(dateKey, days) {
 }
 
 const dayNumber = (dateKey) => Math.floor(Date.parse(`${dateKey}T00:00:00Z`) / 86_400_000);
-const dueOn = (habit, dateKey) => (!habit.startDate || habit.startDate <= dateKey) && isScheduledDay(habitSchedule(habit), dateKey);
+// Due: active that day (from its start date to the end of its week) and scheduled.
+const dueOn = (habit, dateKey) => isHabitActiveOn(habit, dateKey) && isScheduledDay(habitSchedule(habit), dateKey);
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
 /**
- * Today's challenges and their progress.
- * - habits: [{ id, label, frequency, startDate, reminderDays, meta }]
+ * Today's challenges and their progress, for the habits due today (so never last week's habits:
+ * the comeback and streak-keeper challenges only look at habits active today).
+ * - habits: [{ id, label, frequency, startDate, activeUntil, reminderDays, meta }]
  * - doneToday: Map(habit id -> minute of the day it was checked in, in the student's time zone)
  * - doneYesterday: Set(habit id)
  * - streaksBefore: Map(habit id -> streak up to yesterday)
@@ -82,7 +85,7 @@ export function minuteOfDay(time, timeZone = 'UTC') {
 
 /** Works out the student's challenges for `date` from the database. */
 export async function getDailyChallenges(db, userId, date, timeZone = 'UTC') {
-  const rows = (await db.query('SELECT id, label, meta, frequency, start_date, reminder_days FROM habits WHERE user_id=$1', [userId])).rows;
+  const rows = (await db.query('SELECT id, label, meta, frequency, start_date, active_until, reminder_days FROM habits WHERE user_id=$1', [userId])).rows;
   const habits = rows.map((row) => ({ ...habitFromRow(row), id: String(row.id).replace(`${userId}:habit:`, ''), label: row.label }));
   const yesterday = shiftDay(date, -1);
   const [completions, frozenDays] = await Promise.all([
