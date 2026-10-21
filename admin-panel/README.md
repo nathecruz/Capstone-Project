@@ -18,6 +18,16 @@ HabitAI habit-tracking system. It lives in `admin-panel/` of the HabitAI reposit
 | **Audit log** | Every admin action and sign-in, searchable and exportable to CSV. |
 | **Settings** | Change your password, privacy threshold (k), inactivity window, and system health (database latency, table sizes, sessions). |
 
+### Weekly habits
+
+Habits last one week in the app (Monday to Sunday, until the habit's `active_until` day). A habit
+whose week has ended stays in the database as history: check-ins, completion rates and trends keep
+it, and it is only counted as due up to the end of its week (the analytics category card counts the
+habits due in its period). Habit counts, reminder adoption, the frequency mix, current streaks (an
+ended habit keeps the streak of its last day and leaves these lists), `{{habit_count}}`,
+`{{best_streak}}` and the *students without habits* audience use the habits students track this
+week. Category rename and delete guards still count every habit.
+
 ### Roles
 
 | Role | Access |

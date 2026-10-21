@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { config } from '../config.js';
 import { query } from '../db.js';
+import { hasHabitEnded } from '../lib/habit-week.js';
 import { activityEventsSql, addDays, dateRange, expectedCheckIns, ratio, todayInZone } from '../lib/metrics.js';
 import { hasPermission } from '../lib/permissions.js';
 import { requirePermission } from '../middleware/auth.js';
@@ -81,7 +82,7 @@ router.get('/', requirePermission('dashboard:view'), async (request, response) =
       [prevStart, today],
     ),
     query(
-      `SELECT h.id, h.user_id AS "userId", h.meta, h.category
+      `SELECT h.id, h.user_id AS "userId", h.meta, h.category, h.start_date, h.active_until
          FROM habits h JOIN users u ON u.id = h.user_id AND u.role = 'user'`,
     ),
     query(
@@ -130,11 +131,14 @@ router.get('/', requirePermission('dashboard:view'), async (request, response) =
   const sumCompletions = (from, to) => completions.rows.filter((row) => row.day >= from && row.day <= to).reduce((sum, row) => sum + row.n, 0);
   const completionsInRange = sumCompletions(start, today);
   const completionsPrev = sumCompletions(prevStart, prevEnd);
+  // Completion rates are history and use every habit (each only up to its week's end); the habit
+  // counts are the habits students track now: those whose week has not ended.
   const expected = habits.rows.reduce((sum, habit) => sum + expectedCheckIns(habit, start, today, tz), 0);
   const expectedPrev = habits.rows.reduce((sum, habit) => sum + expectedCheckIns(habit, prevStart, prevEnd, tz), 0);
-  const studentsWithHabits = new Set(habits.rows.map((habit) => habit.userId)).size;
+  const currentHabits = habits.rows.filter((habit) => !hasHabitEnded(habit, today));
+  const studentsWithHabits = new Set(currentHabits.map((habit) => habit.userId)).size;
 
-  const categoryBreakdown = buildCategoryRows(categories, habits.rows, categoryCompletions.rows);
+  const categoryBreakdown = buildCategoryRows(categories, currentHabits, categoryCompletions.rows);
 
   const heat = heatmap.rows.map((row) => ({ dow: row.dow, hour: row.hour, count: row.n }));
 
@@ -154,8 +158,8 @@ router.get('/', requirePermission('dashboard:view'), async (request, response) =
       wau: act.wau,
       mau: act.mau,
       stickiness: act.mau ? act.dau / act.mau : null,
-      habits: habits.rowCount,
-      habitsPerStudent: account.students ? habits.rowCount / account.students : 0,
+      habits: currentHabits.length,
+      habitsPerStudent: account.students ? currentHabits.length / account.students : 0,
       studentsWithHabits,
       completions: completionsInRange,
       completionsPrev,

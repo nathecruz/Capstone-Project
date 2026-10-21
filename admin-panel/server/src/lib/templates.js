@@ -2,8 +2,8 @@ export const TEMPLATE_VARIABLES = [
   { key: 'first_name', description: "Recipient's first name", sample: 'Juan' },
   { key: 'full_name', description: "Recipient's full name", sample: 'Juan Dela Cruz' },
   { key: 'username', description: "Recipient's username", sample: 'juandc' },
-  { key: 'habit_count', description: 'Number of habits the recipient tracks', sample: '4' },
-  { key: 'best_streak', description: "Recipient's best current streak (days)", sample: '6' },
+  { key: 'habit_count', description: 'Number of habits the recipient tracks this week', sample: '4' },
+  { key: 'best_streak', description: "Recipient's best current streak among this week's habits (days)", sample: '6' },
   { key: 'app_name', description: 'Application name', sample: 'HabitAI' },
   { key: 'habit', description: 'Habit name (automatic habit reminder only)', sample: 'Drink Water' },
 ];

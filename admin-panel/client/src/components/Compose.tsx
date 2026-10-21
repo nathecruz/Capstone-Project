@@ -38,7 +38,7 @@ export const AUDIENCES: { value: Exclude<Audience['kind'], 'users'>; label: stri
   { value: 'all', label: 'All active students' },
   { value: 'active', label: 'Recently active students' },
   { value: 'inactive', label: 'Inactive students (re-engagement)' },
-  { value: 'no_habits', label: 'Students without any habit' },
+  { value: 'no_habits', label: 'Students without habits this week' },
 ];
 
 export function ComposeModal({ open, onClose, onSent, fixedAudience, initialTemplateId }: {

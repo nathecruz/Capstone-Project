@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { config } from '../config.js';
 import { query, withTransaction } from '../db.js';
 import { audit } from '../lib/audit.js';
+import { currentHabitSql } from '../lib/habit-week.js';
 import { HttpError, validate } from '../lib/http.js';
 import { addDays, todayInZone } from '../lib/metrics.js';
 import { getSettings } from '../lib/settings.js';
@@ -124,13 +125,17 @@ const audienceSchema = z.discriminatedUnion('kind', [
 
 async function resolveAudience(audience) {
   const { inactiveDays } = await getSettings();
-  const since = addDays(todayInZone(config.timeZone), -(inactiveDays - 1));
+  const today = todayInZone(config.timeZone);
+  const since = addDays(today, -(inactiveDays - 1));
+  // Habits last one week: {{habit_count}}, {{best_streak}} and "without habits" use the habits a
+  // student tracks now, not the ones whose week has ended. $1 is always today.
+  const current = currentHabitSql('h', '$1');
   const activeSql = `EXISTS (
-      SELECT 1 FROM login_activity la WHERE la.user_id = u.id AND la.login_date_time >= ($1::date::timestamp AT TIME ZONE $2)
+      SELECT 1 FROM login_activity la WHERE la.user_id = u.id AND la.login_date_time >= ($2::date::timestamp AT TIME ZONE $3)
     ) OR EXISTS (
-      SELECT 1 FROM user_app_state s WHERE s.user_id = u.id AND s.updated_at >= extract(epoch FROM ($1::date::timestamp AT TIME ZONE $2)) * 1000
+      SELECT 1 FROM user_app_state s WHERE s.user_id = u.id AND s.updated_at >= extract(epoch FROM ($2::date::timestamp AT TIME ZONE $3)) * 1000
     ) OR EXISTS (
-      SELECT 1 FROM habit_completions hc WHERE hc.user_id = u.id AND hc.completed_date >= $1::date
+      SELECT 1 FROM habit_completions hc WHERE hc.user_id = u.id AND hc.completed_date >= $2::date
     )`;
 
   const activityParams = [since, config.timeZone];
@@ -138,17 +143,17 @@ async function resolveAudience(audience) {
     all: { sql: "u.role = 'user'", params: [], label: 'All students' },
     active: { sql: `u.role = 'user' AND (${activeSql})`, params: activityParams, label: `Students active in the last ${inactiveDays} days` },
     inactive: { sql: `u.role = 'user' AND NOT (${activeSql})`, params: activityParams, label: `Students inactive for ${inactiveDays}+ days` },
-    no_habits: { sql: "u.role = 'user' AND NOT EXISTS (SELECT 1 FROM habits h WHERE h.user_id = u.id)", params: [], label: 'Students without habits' },
-    users: { sql: 'u.id = ANY($1::text[])', params: [audience.userIds], label: '' },
+    no_habits: { sql: `u.role = 'user' AND NOT EXISTS (SELECT 1 FROM habits h WHERE h.user_id = u.id AND ${current})`, params: [], label: 'Students without habits this week' },
+    users: { sql: 'u.id = ANY($2::text[])', params: [audience.userIds], label: '' },
   };
   const filter = filters[audience.kind];
   const { rows } = await query(
     `SELECT u.id, u.full_name AS "fullName", u.first_name AS "firstName", u.username,
-            (SELECT count(*)::int FROM habits h WHERE h.user_id = u.id) AS "habitCount",
-            ARRAY(SELECT h.id FROM habits h WHERE h.user_id = u.id) AS "habitIds"
+            (SELECT count(*)::int FROM habits h WHERE h.user_id = u.id AND ${current}) AS "habitCount",
+            ARRAY(SELECT h.id FROM habits h WHERE h.user_id = u.id AND ${current}) AS "habitIds"
        FROM users u
       WHERE u.status = 'active' AND (${filter.sql})`,
-    filter.params,
+    [today, ...filter.params],
   );
   // {{best_streak}} uses live streaks, not the value stored at the student's last sync.
   const liveStreaks = rows.length ? await loadLiveStreaks(config.timeZone) : new Map();

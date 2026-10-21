@@ -107,6 +107,7 @@ router.patch('/:id', canManage, async (request, response) => {
   if (input.label && input.label.toLowerCase() !== before.label.toLowerCase()) {
     await assertLabelFree(input.label, before.id);
     // Habits store the category label, so renaming a category that is in use would orphan them.
+    // Habits whose week has ended count too: they stay in the history and analytics.
     const used = await query('SELECT count(*)::int AS count FROM habits WHERE lower(category) = lower($1)', [before.label]);
     if (used.rows[0].count > 0) {
       throw new HttpError(409, `"${before.label}" is used by ${used.rows[0].count} habit(s) and cannot be renamed. Deactivate it and create a new category instead.`);

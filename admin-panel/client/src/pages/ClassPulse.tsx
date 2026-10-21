@@ -177,9 +177,10 @@ export function ClassPulsePage() {
               <p className="text-sm font-semibold opacity-85">{greeting()}, {title}!</p>
               <h2 className="mt-1 text-2xl font-extrabold sm:text-3xl">Your class this month</h2>
               <p className="mt-2 max-w-xl text-sm opacity-90">
-                {pulse.kpis.studentsWithHabits
+                {/* Habits last one week, so early in a week few students may have this week's habits yet. */}
+                {pulse.kpis.studentsWithHabits || pulse.kpis.consistency !== null
                   ? `${formatNumber(pulse.kpis.activeThisWeek)} of ${formatNumber(pulse.kpis.students)} students checked in this week. Consistency is the share of scheduled habit days that were completed in the last ${pulse.windowDays} days.`
-                  : 'No student has created a habit yet. The pulse fills in as students start checking in.'}
+                  : 'No student is tracking habits yet. The pulse fills in as students start checking in.'}
               </p>
               <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold"><ShieldCheck className="size-3.5" /> Groups under {pulse.anonymityThreshold} students are merged</p>
             </div>
@@ -189,7 +190,7 @@ export function ClassPulsePage() {
           <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
             <Tile icon={<Users className="size-4" />} label="Active this week" value={formatNumber(pulse.kpis.activeThisWeek)} hint={`of ${formatNumber(pulse.kpis.students)} students`} />
             <Tile icon={<CalendarCheck className="size-4" />} label="Check-ins today" value={formatNumber(pulse.kpis.checkInsToday)} hint={`by ${formatNumber(pulse.kpis.studentsCheckedInToday)} students`} />
-            <Tile icon={<Activity className="size-4" />} label="Students with habits" value={formatNumber(pulse.kpis.studentsWithHabits)} hint={`${formatNumber(pulse.kpis.habits)} habits tracked`} />
+            <Tile icon={<Activity className="size-4" />} label="Students with habits" value={formatNumber(pulse.kpis.studentsWithHabits)} hint={`${formatNumber(pulse.kpis.habits)} habits this week`} />
             <Tile icon={<Clock className="size-4" />} label="Busiest check-in time" value={pulse.peakHours ? `${pulse.peakHours.from}–${pulse.peakHours.to}` : '—'} hint={pulse.peakHours ? `${formatPercent(pulse.peakHours.share)} of check-ins` : 'Not enough check-ins yet'} />
           </div>
 

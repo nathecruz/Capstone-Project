@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { config } from '../config.js';
 import { query, withTransaction } from '../db.js';
 import { audit } from '../lib/audit.js';
+import { activeUntilOf, currentHabitSql, hasHabitEnded } from '../lib/habit-week.js';
 import { HttpError, validate } from '../lib/http.js';
 import { addDays, dateRange, habitFrequency, todayInZone } from '../lib/metrics.js';
 import { generatePassword, hashPassword, passwordProblem } from '../lib/passwords.js';
@@ -72,6 +73,7 @@ router.get('/', canView, async (request, response) => {
   const input = validate(listSchema, request.query);
   const offset = (input.page - 1) * input.pageSize;
   const search = input.search ? likePattern(input.search) : '';
+  const today = todayInZone(config.timeZone);
 
   const [list, summary] = await Promise.all([
     query(
@@ -82,7 +84,7 @@ router.get('/', canView, async (request, response) => {
                 (SELECT (extract(epoch FROM max(la.login_date_time)) * 1000)::bigint FROM login_activity la WHERE la.user_id = u.id),
                 (SELECT max(s.updated_at) FROM user_app_state s WHERE s.user_id = u.id)
               ) AS last_active,
-              (SELECT count(*)::int FROM habits h WHERE h.user_id = u.id) AS "habitCount",
+              (SELECT count(*)::int FROM habits h WHERE h.user_id = u.id AND ${currentHabitSql('h', '$6')}) AS "habitCount",
               (SELECT count(*)::int FROM habit_completions c WHERE c.user_id = u.id) AS "completionCount",
               count(*) OVER ()::int AS total
          FROM users u
@@ -91,7 +93,7 @@ router.get('/', canView, async (request, response) => {
           AND ($3 = 'all' OR u.status = $3)
         ORDER BY ${SORT_SQL[input.sort]}, u.id
         LIMIT $4 OFFSET $5`,
-      [search, input.role, input.status, input.pageSize, offset],
+      [search, input.role, input.status, input.pageSize, offset, today],
     ),
     query(
       `SELECT count(*)::int AS total,
@@ -126,6 +128,32 @@ async function loadUser(id, runner = { query }) {
   return rows[0];
 }
 
+/**
+ * A student's habits for the detail page. The habits they track now come first and are the ones
+ * counted (`habitCount`, `bestStreak`); habits whose week ended stay listed as history, most recent
+ * first, with the streak they had on their last day.
+ */
+export function userHabits(rows, liveStreaks, userId, today) {
+  const current = rows.filter((habit) => !hasHabitEnded(habit, today));
+  const ended = rows.filter((habit) => hasHabitEnded(habit, today)).sort((a, b) => b.active_until.localeCompare(a.active_until));
+  return {
+    habitCount: current.length,
+    totalHabitCount: rows.length,
+    bestStreak: Math.max(0, ...current.map((habit) => liveStreaks.get(habit.id) ?? 0)),
+    habits: [...current, ...ended].map((habit) => {
+      const { active_until: _activeUntil, ...fields } = habit;
+      return {
+        ...fields,
+        id: habit.id.replace(`${userId}:habit:`, ''),
+        streak: liveStreaks.get(habit.id) ?? 0,
+        frequency: habitFrequency(habit.meta),
+        activeUntil: activeUntilOf(habit),
+        ended: hasHabitEnded(habit, today),
+      };
+    }),
+  };
+}
+
 router.get('/:id', canView, async (request, response) => {
   const user = await loadUser(request.params.id);
   const today = todayInZone(config.timeZone);
@@ -133,7 +161,7 @@ router.get('/:id', canView, async (request, response) => {
 
   const [habits, stats, logins, daily, achievements] = await Promise.all([
     query(
-      `SELECT h.id, h.label, h.category, h.meta, h.streak, h.reminder_enabled AS "reminderEnabled", h.reminder_time AS "reminderTime",
+      `SELECT h.id, h.label, h.category, h.meta, h.streak, h.active_until, h.reminder_enabled AS "reminderEnabled", h.reminder_time AS "reminderTime",
               (SELECT count(*)::int FROM habit_completions c WHERE c.user_id = h.user_id AND h.id = h.user_id || ':habit:' || c.habit_id) AS completions,
               (SELECT max(c.completed_date) FROM habit_completions c WHERE c.user_id = h.user_id AND h.id = h.user_id || ':habit:' || c.habit_id) AS "lastCompleted"
          FROM habits h WHERE h.user_id = $1 ORDER BY h.sort_order, h.id`,
@@ -174,17 +202,12 @@ router.get('/:id', canView, async (request, response) => {
 
   const byDay = new Map(daily.rows.map((row) => [row.day, row.completions]));
   const liveStreaks = await loadLiveStreaks(config.timeZone, user.id);
-  const bestStreak = Math.max(0, ...habits.rows.map((habit) => liveStreaks.get(habit.id) ?? 0));
+  const { habits: habitList, ...habitStats } = userHabits(habits.rows, liveStreaks, user.id, today);
   response.json({
     ok: true,
     user: { ...serializeUser(user), about: user.about ?? '' },
-    stats: { ...stats.rows[0], bestStreak, habitCount: habits.rowCount },
-    habits: habits.rows.map((habit) => ({
-      ...habit,
-      streak: liveStreaks.get(habit.id) ?? 0,
-      id: habit.id.replace(`${user.id}:habit:`, ''),
-      frequency: habitFrequency(habit.meta),
-    })),
+    stats: { ...stats.rows[0], ...habitStats },
+    habits: habitList,
     loginHistory: logins.rows,
     dailyCompletions: dateRange(start, today).map((day) => ({ day, completions: byDay.get(day) ?? 0 })),
     achievements: achievements.rows,

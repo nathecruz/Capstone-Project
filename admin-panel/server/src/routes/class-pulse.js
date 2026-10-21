@@ -82,7 +82,7 @@ async function computePulse() {
   const [{ anonymityThreshold: k }, students, habits, completions] = await Promise.all([
     getSettings(),
     query(`SELECT u.id FROM users u WHERE ${activeStudent}`),
-    query(`SELECT h.id, h.user_id AS "userId", h.category, h.meta, h.frequency, h.start_date, h.reminder_days FROM habits h JOIN users u ON u.id = h.user_id WHERE ${activeStudent}`),
+    query(`SELECT h.id, h.user_id AS "userId", h.category, h.meta, h.frequency, h.start_date, h.active_until, h.reminder_days FROM habits h JOIN users u ON u.id = h.user_id WHERE ${activeStudent}`),
     query(
       `SELECT hc.user_id AS "userId", hc.user_id || ':habit:' || hc.habit_id AS "habitId", hc.completed_date::text AS date, hc.completed_at AS "completedAt"
          FROM habit_completions hc JOIN users u ON u.id = hc.user_id WHERE ${activeStudent} AND hc.completed_date >= $1::date`,
