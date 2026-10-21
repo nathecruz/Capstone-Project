@@ -67,10 +67,16 @@ const intBetween = (value, min, max, fallback) => {
   const number = Number(value);
   return Number.isInteger(number) && number >= min && number <= max ? number : fallback;
 };
-const dateKeyOr = (value, fallback) => {
+/**
+ * A real calendar day (YYYY-MM-DD), else `fallback`. Date.parse rolls 2026-02-30 over to March 2,
+ * but the database refuses it, so the day must come back unchanged.
+ */
+export function dateKeyOr(value, fallback) {
   const text = value?.trim() ?? '';
-  return /^\d{4}-\d{2}-\d{2}$/.test(text) && !Number.isNaN(Date.parse(`${text}T00:00:00Z`)) ? text : fallback;
-};
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return fallback;
+  const parsed = new Date(`${text}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === text ? text : fallback;
+}
 
 const allowedOrigins = list(env.ALLOWED_ORIGINS, 'http://localhost:19006,http://localhost:19080,http://localhost:8081');
 

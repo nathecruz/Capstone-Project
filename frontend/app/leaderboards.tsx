@@ -70,13 +70,18 @@ export default function LeaderboardsScreen() {
   // The "Earn more tokens" list needs room; on phones the balance keeps the space.
   const showTokenRules = width >= 440;
 
-  // The reset countdown moves every minute; once the period is over, the new one is loaded.
+  // The reset countdown moves every minute; once the period is over, the new one is loaded (once,
+  // so a phone clock ahead of the server's does not reload the same board every minute).
   const resetsAt = leaderboard.range?.resetsAt;
+  const reloadedForRef = useRef<number | null>(null);
   useEffect(() => {
     const tick = () => {
       const now = new Date();
       setDeviceDate(now);
-      if (resetsAt && now.getTime() >= resetsAt) setRefreshKey((key) => key + 1);
+      if (resetsAt && now.getTime() >= resetsAt && reloadedForRef.current !== resetsAt) {
+        reloadedForRef.current = resetsAt;
+        setRefreshKey((key) => key + 1);
+      }
     };
     const interval = setInterval(tick, 60 * 1000);
     return () => clearInterval(interval);
@@ -146,8 +151,9 @@ export default function LeaderboardsScreen() {
   const getDateLabel = (selectedPeriod: LeaderboardPeriod) => leaderboardDateLabel(selectedPeriod, leaderboard, deviceDate, boardTimeZone);
   const liveDate = getDateLabel(period);
   const resetText = period !== 'All Time' && leaderboard.period === period && leaderboard.range ? resetCountdownText(period, leaderboard.range, deviceDate.getTime()) : '';
-  // The server marks the signed-in student's row (other students only see initials).
-  const userStanding = allLeaders.find((entry) => entry.isYou) ?? allLeaders.find((entry) => entry.name === profile.fullName) ?? { rank: 0, name: '', points: 0, avatar: '' };
+  // The server marks the signed-in student's row (it is named like the others, 'Maria R. (You)').
+  const isMe = (entry: Leader) => entry.isYou ?? entry.name === profile.fullName;
+  const userStanding = allLeaders.find(isMe) ?? { rank: 0, name: '', points: 0, avatar: '' };
   const effectiveLeaderboardStatus = !profile.fullName.trim() ? 'unavailable' : leaderboardStatus;
   const hasLeaderboard = effectiveLeaderboardStatus === 'connected';
   const hasUserPosition = hasLeaderboard && points > 0 && Boolean(userStanding);
@@ -355,7 +361,7 @@ export default function LeaderboardsScreen() {
           <View style={styles.rankingHeader}><View style={styles.rankingTitleBlock}><Text style={styles.sectionKicker}>FULL STANDINGS</Text><Text style={styles.sectionTitle}>Rankings</Text><Text style={styles.sectionSubtitle}>Your place among the most consistent.</Text><View style={styles.risingSmall}><Ionicons name="swap-vertical" size={11} color={themeColor('#5B42D8')} /><Text style={styles.risingSmallText}>Showing: {sortLabel}</Text></View></View><View style={styles.rankingActions}><Pressable style={[styles.sortButton, styles.sortButtonTouch]} onPress={() => setSortDropdownOpen((open) => !open)} accessibilityRole="button" accessibilityLabel="Sort full standings" accessibilityState={{ expanded: sortDropdownOpen }}><Ionicons name="swap-vertical" size={15} color={themeColor('#5B42D8')} /><Text style={styles.sortText}>{sortLabel}</Text><Ionicons name={sortDropdownOpen ? 'chevron-up' : 'chevron-down'} size={13} color={themeColor('#5B42D8')} /></Pressable><Pressable style={[styles.sortButton, styles.sortButtonTouch]} onPress={() => setShowAllRankings((visible) => !visible)} accessibilityRole="button" accessibilityLabel={showAllRankings ? 'Show fewer rankings' : 'View all rankings'} accessibilityState={{ expanded: showAllRankings }}><Text style={styles.sortText}>{showAllRankings ? 'View less' : 'View all'}</Text><Ionicons name={showAllRankings ? 'chevron-up' : 'chevron-down'} size={13} color={themeColor('#5B42D8')} /></Pressable></View></View>
           {sortDropdownOpen && <View style={styles.dateDropdown}>{([{ value: 'points-desc', label: 'Points: high to low' }, { value: 'points-asc', label: 'Points: low to high' }, { value: 'rank', label: 'Sort by rank' }] as const).map((option) => <Pressable key={option.value} style={[styles.dateOption, sortMode === option.value && styles.dateOptionActive]} onPress={() => { setSortMode(option.value); setSortDropdownOpen(false); }} accessibilityRole="button" accessibilityState={{ selected: sortMode === option.value }}><Text style={[styles.dateOptionTitle, sortMode === option.value && styles.dateOptionTextActive]}>{option.label}</Text>{sortMode === option.value && <Ionicons name="checkmark-circle" size={16} color={themeColor('#FFFFFF')} />}</Pressable>)}</View>}
           <View style={styles.rankingMetaRow}><View style={styles.rankingCount}><Ionicons name="people-outline" size={14} color={themeColor('#5B42D8')} /><Text style={styles.rankingMetaText}>{visibleRankingCount} of {sortedLeaders.length} members</Text></View><Text style={styles.rankingMetaHint}>{showAllRankings ? 'Complete leaderboard' : 'Top results'}</Text></View>
-          <View style={styles.rankingTable}><View style={styles.rankingColumns}><Text style={styles.columnRank}>RANK</Text><Text style={styles.columnMember}>MEMBER</Text><Text style={styles.columnPoints}>POINTS{pointsSortIndicator}</Text></View><View style={styles.rankingList}>{sortedLeaders.slice(0, visibleRankingCount).map((leader, index) => <View key={leaderKey(leader)} style={[styles.rankingRow, index % 2 === 1 && styles.alternateRow, leader.name === profile.fullName && styles.currentRow]}><Text style={[styles.rankCircle, leader.name === profile.fullName && styles.currentRank]}>{leader.rank}</Text><View style={styles.memberCell}><View style={styles.listAvatarSlot}><FramedAvatar frame={leader.frame} size={38}><View style={[styles.listAvatarWrap, leader.frame ? styles.listAvatarFramed : null, leader.name === profile.fullName && styles.currentAvatarWrap]}><Text style={styles.listAvatar}>{leader.avatar}</Text></View></FramedAvatar></View><View style={styles.memberCopy}><Text style={[styles.playerName, leader.name === profile.fullName && styles.currentPlayerName]}>{leader.name}</Text>{leader.title ? <Text style={styles.playerTitle} numberOfLines={1}>{leader.title}</Text> : null}{leader.name === profile.fullName && <View style={styles.risingSmall}><Ionicons name="star" size={10} color={themeColor('#6248D7')} /><Text style={styles.risingSmallText}>You</Text></View>}</View></View><View style={styles.pointsCell}><Text style={styles.playerPoints}>{leader.points}</Text><Ionicons name="chevron-forward" size={16} color={themeColor('#5B42D8')} /></View></View>)}</View></View></>}
+          <View style={styles.rankingTable}><View style={styles.rankingColumns}><Text style={styles.columnRank}>RANK</Text><Text style={styles.columnMember}>MEMBER</Text><Text style={styles.columnPoints}>POINTS{pointsSortIndicator}</Text></View><View style={styles.rankingList}>{sortedLeaders.slice(0, visibleRankingCount).map((leader, index) => <View key={leaderKey(leader)} style={[styles.rankingRow, index % 2 === 1 && styles.alternateRow, isMe(leader) && styles.currentRow]}><Text style={[styles.rankCircle, isMe(leader) && styles.currentRank]}>{leader.rank}</Text><View style={styles.memberCell}><View style={styles.listAvatarSlot}><FramedAvatar frame={leader.frame} size={38}><View style={[styles.listAvatarWrap, leader.frame ? styles.listAvatarFramed : null, isMe(leader) && styles.currentAvatarWrap]}><Text style={styles.listAvatar}>{leader.avatar}</Text></View></FramedAvatar></View><View style={styles.memberCopy}><Text style={[styles.playerName, isMe(leader) && styles.currentPlayerName]}>{leader.name}</Text>{leader.title ? <Text style={styles.playerTitle} numberOfLines={1}>{leader.title}</Text> : null}{isMe(leader) && <View style={styles.risingSmall}><Ionicons name="star" size={10} color={themeColor('#6248D7')} /><Text style={styles.risingSmallText}>You</Text></View>}</View></View><View style={styles.pointsCell}><Text style={styles.playerPoints}>{leader.points}</Text><Ionicons name="chevron-forward" size={16} color={themeColor('#5B42D8')} /></View></View>)}</View></View></>}
         </View>
       </ScrollView>
 

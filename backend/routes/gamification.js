@@ -21,7 +21,8 @@ function displayName(row) {
  * The board for `range` ({ start, end } or null for all time): students only, staff accounts are
  * excluded, and students who turned off "Show me on leaderboards" are hidden from everyone but
  * themselves. Points are 20 for each counted check-in (at most 6 a day, services/wallet.js) dated
- * inside the range; one dated after its end never counts.
+ * inside the range; one dated after its end never counts. Ties go by name, then by public id, so
+ * two students with the same name and points keep their ranks between loads.
  */
 export async function leaderboardRows(db, userId, range) {
   const result = await db.query(
@@ -40,7 +41,7 @@ export async function leaderboardRows(db, userId, range) {
        LEFT JOIN user_preferences p ON p.user_id=u.id
       WHERE u.role = 'user' AND u.status = 'active'
         AND (u.id = $3 OR (p.preferences_json->'showOnLeaderboard') IS DISTINCT FROM 'false'::jsonb)
-      ORDER BY points DESC, u.full_name ASC`,
+      ORDER BY points DESC, u.full_name ASC, u.public_id`,
     [range?.start ?? null, range?.end ?? null, userId, POINTS_PER_CHECK_IN],
   );
   return result.rows;

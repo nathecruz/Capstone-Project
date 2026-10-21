@@ -99,6 +99,23 @@ describe('AI chat', () => {
     expect(applyWallet).toHaveBeenCalledWith({ ok: true, answer: 'Walk after dinner today.', tokens: 0, tokenHistory: [] });
   });
 
+  it('does not promise the tokens back when no answer reached the phone, as the Coach may have been charged', async () => {
+    mockApiRequest.mockRejectedValueOnce(new TypeError('Network request failed'));
+    const applyWallet = jest.fn();
+    const screen = render(<Chat ask={(question) => askCoach(question, { tokens: 40, applyWallet })} />);
+    fireEvent.press(screen.getByLabelText('Ask: What should I focus on today?'));
+    await waitFor(() => expect(screen.getByText('Could not reach the AI service. Check your connection and try again.')).toBeTruthy());
+    expect(screen.queryByText(/were not spent/)).toBeNull();
+
+    // A failure the server answered before charging still says so.
+    const { ApiRequestError } = jest.requireMock('@/authentication/authService');
+    mockApiRequest.mockRejectedValueOnce(new ApiRequestError('Invalid request.', 400, { ok: false }));
+    fireEvent.changeText(screen.getByLabelText('Ask about your habits...'), 'And now?');
+    fireEvent.press(screen.getByLabelText('Send question'));
+    await waitFor(() => expect(screen.getByText('The AI service is temporarily unavailable. Please try again. Your tokens were not spent.')).toBeTruthy());
+    expect(applyWallet).not.toHaveBeenCalled();
+  });
+
   it('does not send an empty question', () => {
     const ask = jest.fn();
     const screen = render(<Chat ask={ask} />);

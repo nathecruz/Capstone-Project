@@ -69,7 +69,10 @@ export async function askCoach(question: string, wallet: { tokens: number; apply
     wallet.applyWallet({ tokens: result.tokens });
     return { ok: false, message: `The AI Coach is unavailable right now. Your ${COACH_COST} tokens were returned.` };
   }
-  return { ok: false, message: result.status === 402 ? result.message : `${result.message} Your tokens were not spent.` };
+  // 402: the server's own reason. 0: no answer reached the phone (the connection dropped or timed
+  // out), and the server may still have charged and answered, so the tokens are not promised back.
+  if (result.status === 0 || result.status === 402) return { ok: false, message: result.message };
+  return { ok: false, message: `${result.message} Your tokens were not spent.` };
 }
 
 export async function classifyHabit(name: string, options: { category?: string; categories?: string[] } = {}): Promise<{ ok: true; isHabit: boolean; isBadHabit: boolean; categoryFits: boolean; suggestedCategory: string; reason: string } | AiFailure> {

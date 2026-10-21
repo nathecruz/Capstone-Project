@@ -10,7 +10,7 @@ import type { EditableHabitFields } from '@/utils/habit-edit';
 import { namesOf } from '@/utils/names';
 import { badgeProgress } from '@/utils/achievements';
 import { buddyGrowth } from '@/utils/buddy';
-import { isHabitLockedMissed, levelProgress, streakMilestone, STREAK_MILESTONE_BONUS, todayAgenda } from '@/utils/engagement';
+import { CHECK_INS_CAPPED_FROM, checkInCounts, isHabitLockedMissed, levelProgress, streakMilestone, STREAK_MILESTONE_BONUS, todayAgenda } from '@/utils/engagement';
 import { weeklyQuests } from '@/utils/quests';
 import { computeStreak } from '@/utils/streaks';
 import { accountStreak, longestAccountStreak } from '@/utils/account-streak';
@@ -22,7 +22,7 @@ import { loadRewards } from './use-rewards';
 import { emitLive, setUnreadCount } from '@/utils/live-events';
 import { getKnownChallenges, loadDailyChallenges, publishDailyChallenges } from './use-daily-challenges';
 import { isAppTheme } from './use-themed-styles';
-import { APP_STATE_KEY_PREFIX, clearSyncMeta, loadSyncMeta, persistSyncBase, persistUnsaved } from './app-state/sync-storage';
+import { APP_STATE_KEY_PREFIX, clearSyncMeta, loadSyncMeta, persistSyncBase, persistUnsaved, TOKEN_CAP_SHOWN_KEY_PREFIX } from './app-state/sync-storage';
 import { useHabitReminders } from './app-state/use-habit-reminders';
 import { useHomeWidget } from '@/widgets/use-home-widget';
 import { initialPreferences, initialProfile, type Goal, type Habit, type PersistedAppState, type Preferences, type Profile, type TokenTransaction } from './app-state/types';
@@ -156,8 +156,8 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     }, Math.max(0, Math.min(...ends) - Date.now()) + 50);
     return () => clearTimeout(timer);
   }, [undoUntil]);
-  // Check-ins of this session past the day's paid limit, by day: they paid no tokens and did not
-  // grow Habi, so undoing one there leaves Habi as it is.
+  // Check-ins of this session past the day's counted limit, by day (from CHECK_INS_CAPPED_FROM):
+  // they paid no tokens and did not grow Habi, so undoing one there leaves Habi as it is.
   const cappedCheckInsRef = useRef<Record<string, number>>({});
   // Celebrations: each moment shows once per session, so an undo and a new tap do not repeat it.
   // Several at once (a streak and a challenge from one check-in) show one after the other.
@@ -298,7 +298,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         savedState = {};
       }
       const syncMeta = await loadSyncMeta(email);
+      const capShownOn = await AsyncStorage.getItem(`${TOKEN_CAP_SHOWN_KEY_PREFIX}${email}`).catch(() => null);
       if (cancelled || version !== sessionLoadVersion) return;
+      if (capShownOn) celebrated.current.add(`token-cap:${capShownOn}`);
 
       const remoteState = await getRemoteAppState();
       if (cancelled || version !== sessionLoadVersion) return;
@@ -678,8 +680,10 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     // The account streak (days in a row with a check-in, across all habits and weeks) without and
     // with this check-in, as the server counts it for the milestone bonus (services/check-ins.js).
     const milestone = streakMilestone(accountStreak(habitsBefore, dateKey, frozen), accountStreak(habitsAfter, dateKey, frozen));
+    // Past the day's counted check-ins it adds no points and does not grow Habi (the server's cap).
+    const counts = checkInCounts(dateKey, habitsBefore.filter((item) => item.completionDates.includes(dateKey)).length);
     const levelBefore = levelProgress(points).level;
-    const levelAfter = levelProgress(points + 20).level;
+    const levelAfter = levelProgress(points + (counts ? 20 : 0)).level;
     // "All done" is about this week's habits; those of past weeks are only history.
     const agendaAfter = todayAgenda(habitsOfThisWeek(habitsAfter, dateKey), now);
     const earnedBefore = new Set(badgeProgress(habits, goals, now, frozen).filter((badge) => badge.earned).map((badge) => badge.id));
@@ -690,7 +694,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     const buddy = getCachedBuddy();
     const checkInsBefore = buddy?.checkIns ?? habits.reduce((sum, item) => sum + item.completionDates.length, 0);
     const grownBefore = buddyGrowth(checkInsBefore, buddy?.stages);
-    const grownAfter = buddyGrowth(checkInsBefore + 1, buddy?.stages);
+    const grownAfter = buddyGrowth(checkInsBefore + (counts ? 1 : 0), buddy?.stages);
     if (grownAfter.index > grownBefore.index) {
       const name = buddy?.name ?? 'Habi';
       celebrate({ id: `buddy:${grownAfter.stage.id}`, kind: 'buddy', icon: 'paw', title: `${name} grew into a ${grownAfter.stage.name}!`, message: `${checkInsBefore + 1} check-ins together. New looks are waiting in ${name}'s shop.` });
@@ -757,6 +761,11 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     if (undoesCapped) cappedCheckInsRef.current[dateKey] = capped - 1;
     const buddyChange = completed ? 1 : undoesCapped ? 0 : -1;
     if (buddyChange) adjustBuddyCheckIns(buddyChange);
+    // What the server did not do: Habi's change and the capped check-in's undo are taken back.
+    const takeBackBuddyChange = () => {
+      if (buddyChange) adjustBuddyCheckIns(-buddyChange);
+      if (undoesCapped) cappedCheckInsRef.current[dateKey] = (cappedCheckInsRef.current[dateKey] ?? 0) + 1;
+    };
     void saveRemoteHabitCompletion({ habitId: id, date: dateKey, completed }).then((result) => {
       if (result && 'rejected' in result) {
         // The server refused this check-in (day closed, habit missed, its week ended, undo locked,
@@ -764,8 +773,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         // instead of silently reverting on sync.
         applyLocalCheckIn(id, dateKey, !completed);
         setUndoUntil((current) => { const next = { ...current }; delete next[id]; return next; });
-        if (buddyChange) adjustBuddyCheckIns(-buddyChange);
-        if (undoesCapped) cappedCheckInsRef.current[dateKey] = capped;
+        takeBackBuddyChange();
         // The account's day is not the phone's (its time zone changed): say which day it is.
         if (result.code === 'DAY_CLOSED' && result.today && result.today !== dateKey) {
           celebrate({ id: `day-closed:${result.today}`, kind: 'info', icon: 'time-outline', title: 'That day is closed', message: `Your HabitAI day is ${result.today}${result.timeZone ? ` (${result.timeZone})` : ''}. A day that already started cannot be reopened.` });
@@ -773,16 +781,27 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         return;
       }
       if (!result) {
-        // The server keeps a check-in it would not undo (locked, or unreachable): show it again.
-        if (!completed) applyLocalCheckIn(id, dateKey, true);
+        // The server keeps a check-in it would not undo (locked, or unreachable): show it again,
+        // and Habi as it was.
+        if (!completed) {
+          applyLocalCheckIn(id, dateKey, true);
+          takeBackBuddyChange();
+        }
         return;
       }
       if (completed && result.tokenCapped) {
         // Saved, and it counts for the streak, challenges and quests, but past the day's paid
-        // check-ins it pays no tokens and does not grow Habi.
-        adjustBuddyCheckIns(-1);
-        cappedCheckInsRef.current[dateKey] = (cappedCheckInsRef.current[dateKey] ?? 0) + 1;
-        celebrate({ id: `token-cap:${dateKey}`, kind: 'info', icon: 'wallet-outline', title: 'Daily token limit reached', message: `You have earned tokens for ${result.paidCheckInsLimit ?? 6} check-ins today. This one still counts for your streak, challenges and quests.` });
+        // check-ins it pays no tokens. From CHECK_INS_CAPPED_FROM it does not grow Habi either.
+        if (dateKey >= CHECK_INS_CAPPED_FROM) {
+          adjustBuddyCheckIns(-1);
+          cappedCheckInsRef.current[dateKey] = (cappedCheckInsRef.current[dateKey] ?? 0) + 1;
+        }
+        const capNotice = `token-cap:${dateKey}`;
+        // Once a day: remembered on the device, so opening the app again does not repeat it.
+        if (!celebrated.current.has(capNotice) && activeEmailRef.current) {
+          void AsyncStorage.setItem(`${TOKEN_CAP_SHOWN_KEY_PREFIX}${activeEmailRef.current}`, dateKey).catch(() => undefined);
+        }
+        celebrate({ id: capNotice, kind: 'info', icon: 'wallet-outline', title: 'Daily token limit reached', message: `You have earned tokens for ${result.paidCheckInsLimit ?? 6} check-ins today. This one still counts for your streak, challenges and quests.` });
       }
       applyWallet(result);
       // Daily challenges as the server counted them: announce any this check-in completed.

@@ -21,6 +21,12 @@ test('a western time zone cannot reopen a day that already started', () => {
   const decision = decideAccountDay({ storedZone: 'Asia/Manila', floor: null, date: '2026-10-20', requestedZone: 'Pacific/Pago_Pago', now });
   assert.equal(decision.ok, false);
   assert.deepEqual([decision.today, decision.timeZone, decision.store], ['2026-10-21', 'Asia/Manila', null], 'the account is still on its Manila day');
+  // Any other date sent with that zone is told the same day, not Pago Pago's (which is refused too).
+  const stale = decideAccountDay({ storedZone: 'Asia/Manila', floor: null, date: '2026-10-19', requestedZone: 'Pacific/Pago_Pago', now });
+  assert.deepEqual([stale.ok, stale.today, stale.timeZone], [false, '2026-10-21', 'Asia/Manila']);
+  // A new zone whose today is open reports that day.
+  const east = decideAccountDay({ storedZone: 'Asia/Manila', floor: null, date: '2026-10-19', requestedZone: 'Pacific/Kiritimati', now });
+  assert.deepEqual([east.ok, east.today, east.timeZone], [false, '2026-10-21', 'Pacific/Kiritimati']);
 });
 
 test('moving east is accepted and raises the floor; switching back west waits for the next local day', () => {

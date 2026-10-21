@@ -108,6 +108,8 @@ describe('the Leaderboards screen', () => {
       // Both "Maria R." are on the podium and in the rankings, each under its own key.
       expect(screen.getAllByText('Maria R.')).toHaveLength(4);
       expect(consoleError.mock.calls.some((args) => String(args[0]).includes('same key'))).toBe(false);
+      // The student's own row is the one the server marks (its name is 'Maria R. (You)', not the profile's).
+      expect(screen.getAllByText('You')).toHaveLength(1);
 
       fireEvent.press(screen.getByLabelText('Choose leaderboard date'));
       fireEvent.press(screen.getByText('This Month'));
@@ -132,5 +134,19 @@ describe('the Leaderboards screen', () => {
     await waitFor(() => expect(screen.getAllByText('Nov 2 - Nov 8').length).toBeGreaterThan(0));
     expect(calls('/api/leaderboard?period=This%20Week')).toBe(2);
     expect(calls('/api/leaderboard/sync')).toBe(1);
+  });
+
+  it('reloads once when the server still has the old week (a phone clock ahead of it)', async () => {
+    mockRange = { ...week, resetsAt: NOW + 90_000 };
+    const screen = render(React.createElement(LeaderboardsScreen));
+    await waitFor(() => expect(screen.getByText('Resets Monday 12:00 AM Manila time · in 1m')).toBeTruthy());
+    await act(async () => {
+      jest.advanceTimersByTime(2 * 60_000);
+    });
+    await waitFor(() => expect(calls('/api/leaderboard?period=This%20Week')).toBe(2));
+    await act(async () => {
+      jest.advanceTimersByTime(5 * 60_000);
+    });
+    expect(calls('/api/leaderboard?period=This%20Week')).toBe(2);
   });
 });

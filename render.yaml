@@ -34,6 +34,10 @@ services:
         value: https://project-b3gc.vercel.app,https://capstone-project-b3gc.vercel.app,https://capstone-project-indol-five.vercel.app,https://capstone-project-*-team-c14.vercel.app,https://habitai-frontend.onrender.com
       - key: EXTERNAL_REQUEST_TIMEOUT_MS
         value: 15000
+      # The account day, leaderboard weeks and months, and the daily token limit follow this zone
+      # until the app sends the student's own. The Admin Panel uses the same one.
+      - key: APP_TIME_ZONE
+        value: Asia/Manila
       # AI Coach, assistants and goal planner. GROQ_API_KEY comes from console.groq.com
       # (API Keys); set it in the Render dashboard. GROQ_MODEL is any Groq chat model; when
       # the key may not use it, the backend picks an available one and says so in the log.

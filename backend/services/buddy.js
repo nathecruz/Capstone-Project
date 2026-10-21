@@ -1,6 +1,7 @@
 // Habit Buddy: the student's mascot. It grows through stages with every check-in, wears items and
 // lives in a room, all bought with tokens. The server owns what was bought and the prices; the app
 // shows them.
+import { runAll } from '../db/run-all.js';
 import { countedCheckIns, spendTokens } from './wallet.js';
 
 export const BUDDY_STAGES = [
@@ -84,12 +85,13 @@ const stageIndexOf = (id) => BUDDY_STAGES.findIndex((stage) => stage.id === id);
 
 /** Name, what it wears, what was bought, the treats fed, and the catalogs. */
 export async function getBuddy(db, userId) {
-  const [buddy, owned, treats, checkIns] = await Promise.all([
-    db.query('SELECT name, head_item AS head, hand_item AS hand, room_item AS room, accessory_item AS accessory FROM user_buddy WHERE user_id=$1', [userId]),
-    db.query('SELECT item_id AS "itemId" FROM buddy_items WHERE user_id=$1 ORDER BY bought_at', [userId]),
-    db.query('SELECT treat_id AS "treatId", fed_count AS "count" FROM buddy_treats WHERE user_id=$1', [userId]),
+  // One query at a time on a transaction client (buying, feeding), side by side on the pool.
+  const [buddy, owned, treats, checkIns] = await runAll(db, [
+    () => db.query('SELECT name, head_item AS head, hand_item AS hand, room_item AS room, accessory_item AS accessory FROM user_buddy WHERE user_id=$1', [userId]),
+    () => db.query('SELECT item_id AS "itemId" FROM buddy_items WHERE user_id=$1 ORDER BY bought_at', [userId]),
+    () => db.query('SELECT treat_id AS "treatId", fed_count AS "count" FROM buddy_treats WHERE user_id=$1', [userId]),
     // Habi grows on the check-ins that count toward points (at most 6 a day from CHECK_IN_CAP_FROM).
-    countedCheckIns(db, userId),
+    () => countedCheckIns(db, userId),
   ]);
   const row = buddy.rows[0];
   const fedTreats = treats.rows.map((treat) => ({ treatId: treat.treatId, count: Number(treat.count) }));

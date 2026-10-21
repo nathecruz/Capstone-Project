@@ -1087,6 +1087,19 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.deepEqual(over.body, { ok: false, message: 'Too many check-ins. Please wait a few minutes and try again.' });
     assert.equal((await request('/api/habit-completions', { headers })).response.status, 200, 'reading check-ins is not limited');
     assert.equal((await send(capped.headers)).response.status, 404, 'the limit is per session');
+
+    // Token actions share one budget of 60 per session.
+    const walletHeaders = await capped.session();
+    const closedDay = JSON.stringify({ date: '2000-01-01', timeZone: 'UTC' });
+    const spend = (url, body = closedDay) => request(url, { method: 'POST', headers: walletHeaders, body });
+    for (let sent = 0; sent < 60; sent += 20) {
+      const answers = await Promise.all(Array.from({ length: 20 }, (_, index) => spend(['/api/daily-claim', '/api/mystery-box/open', '/api/streak-freezes/buy', '/api/buddy/treats', '/api/rewards/redeem'][index % 5], index % 5 >= 3 ? '{}' : closedDay)));
+      assert.ok(answers.every((answer) => [400, 409].includes(answer.response.status)), answers.map((answer) => answer.response.status).join(', '));
+      // Every closed day says which day the account is on.
+      assert.ok(answers.filter((answer) => answer.response.status === 409).every((answer) => answer.body.code === 'DAY_CLOSED' && answer.body.today === today && answer.body.timeZone === 'UTC'));
+    }
+    const overWallet = await spend('/api/buddy/items', JSON.stringify({ itemId: 'cap' }));
+    assert.deepEqual([overWallet.response.status, overWallet.body], [429, { ok: false, message: 'Too many token actions. Please wait a few minutes and try again.' }]);
   });
 
   await t.test('from the cap date a day counts 6 check-ins toward points, the leaderboard and Habi', async () => {
@@ -1183,6 +1196,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
   await t.test('the AI Coach is charged once under the lock and gives the tokens back when the AI fails', async () => {
     // A second API with an AI key, whose Groq calls go to a local stub.
     let groqStatus = 200;
+    let groqAnswer = 'Do Trip journal at 9 PM tonight, before Sunday.';
     const asked = [];
     const groq = createServer(async (incoming, outgoing) => {
       let body = '';
@@ -1193,7 +1207,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
       // Slow enough for a second question to arrive while the first is answered.
       await new Promise((resolve) => setTimeout(resolve, 300));
       outgoing.statusCode = groqStatus;
-      outgoing.end(JSON.stringify(groqStatus === 200 ? { choices: [{ message: { role: 'assistant', content: 'Do Trip journal at 9 PM tonight, before Sunday.' } }] } : { error: { message: 'The stub refused.' } }));
+      outgoing.end(JSON.stringify(groqStatus === 200 ? { choices: [{ message: { role: 'assistant', content: groqAnswer } }] } : { error: { message: 'The stub refused.' } }));
     });
     const groqPort = port + 4000;
     await new Promise((resolve) => groq.listen(groqPort, '127.0.0.1', resolve));
@@ -1244,6 +1258,15 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
       const spends = rows.filter((row) => row.id.includes(':token:spend:coach:'));
       assert.equal(spends.length, 2);
       assert.deepEqual(rows.filter((row) => row.id.includes(':token:refund:coach:')), [{ id: `${userId}:token:refund:coach:${spends[1].id.split(':').at(-1)}`, amount: 10 }], 'the refund names the charge it gives back');
+
+      // An empty answer is refunded the same way.
+      groqStatus = 200;
+      groqAnswer = '   ';
+      const empty = await ask();
+      assert.deepEqual([empty.status, empty.body], [502, { ok: false, error: 'The AI service is temporarily unavailable.', refunded: true, tokens: 10 }]);
+      assert.equal((await coachRows()).filter((row) => row.id.includes(':token:refund:coach:')).length, 2);
+      assert.equal(await balance(), 10);
+      groqAnswer = 'Do Trip journal at 9 PM tonight, before Sunday.';
 
       // The free assistant costs nothing and gets no planner history.
       groqStatus = 200;

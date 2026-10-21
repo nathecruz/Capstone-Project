@@ -27,8 +27,9 @@ export function decideAccountDay({ storedZone, floor, date, requestedZone, now =
   const nextFloor = storedToday && (!storedFloor || storedToday > storedFloor) ? storedToday : storedFloor;
   const ok = date === today && (!nextFloor || date >= nextFloor);
   if (ok) return { ok, today, timeZone, store: requested && requested !== stored ? { timeZone: requested, floor: nextFloor } : null };
-  // Today in the new zone, but before the floor: the account is still on the stored zone's day.
-  if (date === today && storedToday) return { ok, today: storedToday, timeZone: stored, store: null };
+  // The new zone's today is before the floor, so that zone would be refused whatever the date: the
+  // account is still on the stored zone's day.
+  if (storedToday && today < nextFloor) return { ok, today: storedToday, timeZone: stored, store: null };
   return { ok, today, timeZone, store: null };
 }
 

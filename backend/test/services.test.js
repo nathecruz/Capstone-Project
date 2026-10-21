@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { isTemplateValue, loadEnvironment } from '../config/env.js';
-import { originMatcher } from '../config/index.js';
+import { dateKeyOr, isTimeZone, originMatcher } from '../config/index.js';
 import { getPeriodRange, periodLabel, periodResetsAt } from '../lib/http.js';
 import { goalPlanSchema } from '../schemas.js';
 import { buildHabitContext, habitFrequency } from '../services/ai-context.js';
@@ -36,6 +36,14 @@ test('ALLOWED_ORIGINS entries match whatever their case or trailing slash', () =
   assert.equal(allowed('https://capstone-project-indol-five.vercel.app'), true);
   assert.equal(allowed('https://capstone-project-git-main-team-c14.vercel.app'), true);
   assert.equal(allowed('https://evil.example.org'), false);
+});
+
+test('CHECK_IN_CAP_FROM and APP_TIME_ZONE only take real values', () => {
+  assert.equal(dateKeyOr(' 2026-11-02 ', '2026-10-26'), '2026-11-02');
+  // Date.parse rolls these over to another day, but the database refuses them in every points query.
+  for (const value of ['2026-02-30', '2026-13-01', '2026-10-32', '26-10-26', '', undefined]) assert.equal(dateKeyOr(value, '2026-10-26'), '2026-10-26', String(value));
+  assert.equal(isTimeZone('Asia/Manila'), true);
+  for (const value of ['Mars/Olympus', '', ' ', null]) assert.equal(isTimeZone(value), false, String(value));
 });
 
 test('a real value in the root .env wins over a placeholder in backend/.env', async () => {
