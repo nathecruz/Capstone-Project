@@ -1,25 +1,39 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { TypingDots } from '@/components/ai-chat';
 import { ProgressRing } from '@/components/progress-ring';
 import { useAppDialog } from '@/components/ui/app-dialog';
+import type { HabitCategory } from '@/authentication';
 import { generateGoalPlan } from '@/utils/ai-client';
 import { FadeIn } from '@/components/fade-in';
-import { useAppColorScheme, type Goal } from '@/hooks/color-scheme-context';
+import { useAppColorScheme, type Goal, type PlannedHabit } from '@/hooks/color-scheme-context';
 import { useAppTheme } from '@/hooks/dark-mode-context';
+import { useHabitCategories } from '@/hooks/use-habit-categories';
 import { CONTENT_MAX_WIDTH } from '@/hooks/use-responsive-layout';
 import { createThemedStyles, themedColor, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
+import { getLocalDateKey } from '@/utils/habit-visibility';
+import { weekEndKey } from '@/utils/habit-week';
+import { habitFromPlan, newPlannedHabits, plannedDaysText, plannedHabitLook } from '@/utils/planned-habits';
 
 type GoalTab = 'Planner' | 'My Goals';
 
-type GoalInsight = Goal;
+/**
+ * A goal as the planner keeps it. With `habitPlan` (this week's habits from the AI), it also keeps
+ * the Sunday ending the week they were planned for and the day they were added to Habits, so a
+ * plan is added once and an old week's plan is not added to a new week.
+ */
+type GoalInsight = Goal & { habitPlanWeekEnds?: string; habitPlanAddedOn?: string };
 
-/** Starter goals: a tap fills the goal field with a full example. */
+/** "Sunday, Oct 26" for a date key. */
+const sundayText = (dateKey: string) => new Date(`${dateKey}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+
+/** Starter goals: a tap fills the goal field with a full example. An open request works too. */
 const STARTERS: { label: string; icon: keyof typeof Ionicons.glyphMap; prompt: string }[] = [
+  { label: 'Plan my week', icon: 'calendar-outline', prompt: 'I want to create my habits for this week. What would you recommend based on my progress?' },
   { label: 'Get fit', icon: 'barbell-outline', prompt: 'I want to become healthier by being more consistent with exercise, sleep, and meal planning.' },
   { label: 'Study better', icon: 'school-outline', prompt: 'I want to become more disciplined and focused in my studies and personal growth.' },
   { label: 'Save money', icon: 'wallet-outline', prompt: 'I want to save more money and build a better financial routine this year.' },
@@ -172,12 +186,43 @@ function StepRow({ step, due, done, index, last, onPress }: { step: string; due?
   );
 }
 
+/** One habit the AI planned for this week: what, when, and why (from the student's history). */
+function PlannedHabitCard({ planned, categories, inHabits }: { planned: PlannedHabit; categories: HabitCategory[]; inHabits: boolean }) {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
+  const { category, icon, color } = plannedHabitLook(planned, categories);
+  const days = plannedDaysText(planned);
+  return (
+    <View style={styles.plannedCard} accessible accessibilityLabel={`${planned.name}. ${category}, ${days.toLowerCase()} at ${planned.time}.${planned.reason ? ` ${planned.reason}` : ''}${inHabits ? ' Already in your habits.' : ''}`}>
+      <View style={[styles.plannedIcon, { backgroundColor: `${color}26` }]}><Ionicons name={icon} size={18} color={color} /></View>
+      <View style={styles.plannedCopy}>
+        <View style={styles.plannedTitleRow}>
+          <Text style={styles.plannedName}>{planned.name}</Text>
+          {inHabits ? (
+            <View style={styles.inHabitsChip}>
+              <Ionicons name="checkmark" size={11} color={themeColor('#23774A')} />
+              <Text style={styles.inHabitsText}>In Habits</Text>
+            </View>
+          ) : null}
+        </View>
+        <View style={styles.plannedFacts}>
+          <Text style={styles.plannedCategory}>{category}</Text>
+          <View style={styles.plannedFact}><Ionicons name="calendar-outline" size={12} color={themeColor('#6E6887')} /><Text style={styles.plannedFactText}>{days}</Text></View>
+          <View style={styles.plannedFact}><Ionicons name="alarm-outline" size={12} color={themeColor('#6E6887')} /><Text style={styles.plannedFactText}>{planned.time}</Text></View>
+        </View>
+        {planned.reason ? <Text style={styles.plannedReason}>{planned.reason}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
 export default function GoalsScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const appTheme = useAppTheme();
   const showAlert = useAppDialog();
-  const { isDarkMode, getAppStateSnapshot, syncAppState, goals: savedGoals, updateGoals } = useAppColorScheme();
+  const { isDarkMode, getAppStateSnapshot, syncAppState, goals: savedGoals, updateGoals, currentHabits, addHabit } = useAppColorScheme();
+  const categories = useHabitCategories();
   const { width } = useWindowDimensions();
   const [activeTab, setActiveTab] = useState<GoalTab>('Planner');
   const [goalInput, setGoalInput] = useState('');
@@ -192,7 +237,7 @@ export default function GoalsScreen() {
   // The hero is purple in both modes; its ring needs the same colour in the middle.
   const heroBackground = themedColor(isDarkMode ? '#30215A' : '#5B42D8', appTheme);
 
-  const activeGoal = useMemo(() => {
+  const activeGoal = useMemo((): GoalInsight | null => {
     const currentGoal = generatedGoal ?? savedGoals[0] ?? null;
     if (!currentGoal) return null;
     return savedGoals.find((goal) => goal.id === currentGoal.id) ?? currentGoal;
@@ -200,6 +245,21 @@ export default function GoalsScreen() {
   const activeGoalSaved = Boolean(activeGoal && savedGoals.some((goal) => goal.id === activeGoal.id));
   const averageProgress = savedGoals.length ? Math.round(savedGoals.reduce((total, goal) => total + goal.progress, 0) / savedGoals.length) : 0;
   const completedGoals = savedGoals.filter((goal) => goal.progress >= 100).length;
+
+  // This week's habits planned by the AI: the ones not in Habits yet can be added in one step,
+  // once, and only in the week they were planned for (an old plan's reasons are about an old week).
+  const today = getLocalDateKey();
+  const weekEnds = weekEndKey(today);
+  const habitPlan = activeGoal?.habitPlan ?? [];
+  const planWeekEnds = activeGoal?.habitPlanWeekEnds ?? weekEnds;
+  const planIsPast = planWeekEnds < weekEnds;
+  const planAdded = Boolean(activeGoal?.habitPlanAddedOn);
+  const habitsToAdd = newPlannedHabits(habitPlan, currentHabits);
+  // A sync may bring habits while the confirmation is open; adding checks the latest ones.
+  const currentHabitsRef = useRef(currentHabits);
+  useEffect(() => {
+    currentHabitsRef.current = currentHabits;
+  }, [currentHabits]);
 
   useEffect(() => {
     if (!clearUndoText) return;
@@ -223,11 +283,13 @@ export default function GoalsScreen() {
         else showAlert('AI planner unavailable', `${result.message} Nothing was saved.`);
         return;
       }
-      const plan = result.plan;
+      const { habits: plannedHabits, ...plan } = result.plan;
       const fallback = buildGoalInsight(input, timelineOption, focusTarget);
       setGeneratedGoal({
         ...fallback,
         ...plan,
+        // This week's habits, planned from the student's history (older servers send none).
+        ...(plannedHabits ? { habitPlan: plannedHabits, habitPlanWeekEnds: weekEndKey(getLocalDateKey()) } : {}),
         id: `${Date.now()}`,
         title: goalTitle(input),
         focusTarget,
@@ -263,6 +325,44 @@ export default function GoalsScreen() {
     } finally {
       setIsSavingGoal(false);
     }
+  };
+
+  // The planned habits go into Habits after one confirmation. They start today and end with the
+  // week (addHabit stamps `activeUntil`); ones already in this week are skipped, and the plan is
+  // marked as added so it cannot be added twice.
+  const addPlannedHabits = (goal: GoalInsight) => {
+    const plan = goal.habitPlan ?? [];
+    const toAdd = newPlannedHabits(plan, currentHabits);
+    if (!toAdd.length) return;
+    const skipped = plan.filter((planned) => !toAdd.includes(planned)).map((planned) => planned.name);
+    const one = toAdd.length === 1;
+    const message = [
+      `${one ? 'It starts today and runs' : 'They start today and run'} until ${sundayText(weekEnds)}. You can edit or delete ${one ? 'it' : 'them'} in Habits.`,
+      toAdd.map((planned) => `• ${planned.name}`).join('\n'),
+      skipped.length ? `Already in your habits this week, so not added again: ${skipped.join(', ')}.` : '',
+    ].filter(Boolean).join('\n\n');
+
+    const confirmAdd = () => {
+      const day = getLocalDateKey();
+      const added = newPlannedHabits(toAdd, currentHabitsRef.current);
+      for (const planned of added) addHabit(habitFromPlan(planned, categories, day));
+      const markAdded = (item: GoalInsight): GoalInsight => (item.id === goal.id ? { ...item, habitPlanAddedOn: day } : item);
+      setGeneratedGoal((current) => (current ? markAdded(current) : current));
+      if (savedGoals.some((item) => item.id === goal.id)) updateGoals((previous) => previous.map(markAdded));
+      if (!added.length) {
+        showAlert('Already in your habits', 'These habits are already in Habits for this week.');
+        return;
+      }
+      showAlert(added.length === 1 ? 'Habit added' : `${added.length} habits added`, `${added.length === 1 ? 'It is' : 'They are'} on Home and in Habits until ${sundayText(weekEndKey(day))}. Your check-ins stay in your history after that.`, [
+        { text: 'Stay here', style: 'cancel' },
+        { text: 'Go to Home', onPress: () => router.push('/(tabs)') },
+      ], 'success');
+    };
+
+    showAlert(one ? 'Add this habit?' : `Add these ${toAdd.length} habits?`, message, [
+      { text: 'Not now', style: 'cancel' },
+      { text: one ? 'Add habit' : `Add ${toAdd.length} habits`, onPress: confirmAdd },
+    ]);
   };
 
   const clearGoalText = () => {
@@ -383,7 +483,7 @@ export default function GoalsScreen() {
                   <View style={styles.inputMeta}>
                     <View style={styles.privacyNote}>
                       <Ionicons name="lock-closed" size={11} color={themeColor('#8A8294')} />
-                      <Text style={styles.metaText}>Only this text is sent to the AI.</Text>
+                      <Text style={styles.metaText}>Your text and your recent habit history are sent to the AI.</Text>
                     </View>
                     <Text style={styles.metaText}>{goalInput.length}/500</Text>
                   </View>
@@ -418,7 +518,7 @@ export default function GoalsScreen() {
                       <View style={styles.buildingIcon}><Ionicons name="sparkles" size={17} color={themeColor('#FFFFFF')} /></View>
                       <View style={styles.buildingCopy}>
                         <Text style={styles.cardTitle}>Building your plan</Text>
-                        <Text style={styles.cardHint}>Picking 4 steps for {timelineLabel(timelineOption).toLowerCase()}</Text>
+                        <Text style={styles.cardHint}>{`Reading your habit history to pick ${focusTarget} for this week`}</Text>
                       </View>
                       <TypingDots />
                     </View>
@@ -456,6 +556,39 @@ export default function GoalsScreen() {
                       <View style={styles.fact}><Ionicons name="layers-outline" size={14} color={themeColor('#6E6887')} /><Text style={styles.factText}>{activeGoal.focusTarget}</Text></View>
                       <View style={styles.fact}><Ionicons name="calendar-outline" size={14} color={themeColor('#6E6887')} /><Text style={styles.factText}>Check in {activeGoal.nextCheckIn}</Text></View>
                     </View>
+
+                    {habitPlan.length > 0 && (
+                      <>
+                        <View style={styles.sectionRow}>
+                          <Text style={styles.subheading}>This week&apos;s habits</Text>
+                          <Text style={styles.sectionHint}>{planIsPast ? `Week ending ${sundayText(planWeekEnds)}` : `Until ${sundayText(weekEnds)}`}</Text>
+                        </View>
+                        {habitPlan.map((planned, index) => (
+                          <PlannedHabitCard key={`${activeGoal.id}-habit-${index}`} planned={planned} categories={categories} inHabits={!planIsPast && !habitsToAdd.includes(planned)} />
+                        ))}
+                        {planAdded ? (
+                          <View style={[styles.savedRow, styles.planStatusRow]} accessibilityRole="text">
+                            <Ionicons name="checkmark-circle" size={18} color={themeColor('#2E9D5C')} />
+                            <Text style={styles.savedText}>{planIsPast ? `Added to the week ending ${sundayText(planWeekEnds)}` : 'Added to this week'}</Text>
+                          </View>
+                        ) : planIsPast ? (
+                          <View style={styles.planNote}>
+                            <Ionicons name="information-circle-outline" size={16} color={themeColor('#6E6887')} />
+                            <Text style={styles.planNoteText}>These habits were planned for an earlier week. Generate a new plan to get habits for this week from your latest progress.</Text>
+                          </View>
+                        ) : habitsToAdd.length ? (
+                          <Pressable style={({ pressed }) => [styles.primaryButton, styles.addPlanButton, pressed && styles.pressed]} onPress={() => addPlannedHabits(activeGoal)} accessibilityRole="button">
+                            <Ionicons name="add-circle" size={18} color={themeColor('#FFFFFF')} />
+                            <Text style={styles.primaryButtonText}>{`Add ${habitsToAdd.length} ${habitsToAdd.length === 1 ? 'habit' : 'habits'} to this week`}</Text>
+                          </Pressable>
+                        ) : (
+                          <View style={[styles.savedRow, styles.planStatusRow]} accessibilityRole="text">
+                            <Ionicons name="checkmark-circle" size={18} color={themeColor('#2E9D5C')} />
+                            <Text style={styles.savedText}>Already in your habits this week</Text>
+                          </View>
+                        )}
+                      </>
+                    )}
 
                     <Text style={styles.subheading}>Focus areas</Text>
                     <View style={styles.pillRow}>
@@ -507,7 +640,8 @@ export default function GoalsScreen() {
                       </View>
                     </View>
 
-                    {activeGoal.habitSuggestions && activeGoal.habitSuggestions.length > 0 && (
+                    {/* Plans without planned habits (older plans and servers): the names, added one at a time. */}
+                    {!habitPlan.length && activeGoal.habitSuggestions && activeGoal.habitSuggestions.length > 0 && (
                       <>
                         <View style={styles.sectionRow}>
                           <Text style={styles.subheading}>Habits to build</Text>
@@ -549,8 +683,8 @@ export default function GoalsScreen() {
                     <Text style={styles.cardTitle}>How it works</Text>
                     {[
                       { icon: 'create-outline' as const, title: 'Describe your goal', text: 'In English, Filipino or Taglish.' },
-                      { icon: 'sparkles-outline' as const, title: 'Get 4 clear steps', text: 'With due dates, focus areas and what to watch out for.' },
-                      { icon: 'checkmark-done-outline' as const, title: 'Tick them off', text: 'Save the plan and track it in My Goals.' },
+                      { icon: 'sparkles-outline' as const, title: 'Get 4 clear steps', text: 'With due dates, focus areas, and habits for this week picked from your progress.' },
+                      { icon: 'checkmark-done-outline' as const, title: 'Tick them off', text: 'Add the habits to this week in one tap, save the plan and track it in My Goals.' },
                     ].map((item, index) => (
                       <View key={item.title} style={styles.howRow}>
                         <View style={styles.howIcon}><Ionicons name={item.icon} size={17} color={themeColor('#5B42D8')} /></View>
@@ -749,6 +883,22 @@ const themedStyles = createThemedStyles({
   savedRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, minHeight: 48, paddingHorizontal: 14, borderRadius: 14, backgroundColor: '#EAF8F0' },
   savedText: { flex: 1, fontSize: 14, fontWeight: '800', color: '#23774A' },
   savedLink: { fontSize: 13, fontWeight: '800', color: '#5B42D8' },
+  plannedCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 12, marginBottom: 8, borderRadius: 16, borderWidth: 1, borderColor: '#EEEAF6', backgroundColor: '#FAF9FD' },
+  plannedIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  plannedCopy: { flex: 1, minWidth: 0 },
+  plannedTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  plannedName: { flex: 1, fontSize: 14, lineHeight: 19, fontWeight: '800', color: '#2D2A3D' },
+  plannedFacts: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 10, rowGap: 4, marginTop: 5 },
+  plannedCategory: { fontSize: 11, fontWeight: '800', color: '#5B42D8', letterSpacing: 0.3 },
+  plannedFact: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  plannedFactText: { fontSize: 12, fontWeight: '700', color: '#5C5670' },
+  plannedReason: { fontSize: 12, lineHeight: 17, fontWeight: '600', color: '#8A8294', marginTop: 5 },
+  inHabitsChip: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: '#EAF8F0' },
+  inHabitsText: { fontSize: 11, fontWeight: '800', color: '#23774A' },
+  addPlanButton: { flex: 0, marginTop: 6 },
+  planStatusRow: { marginTop: 6 },
+  planNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginTop: 6, padding: 12, borderRadius: 14, backgroundColor: '#F6F5FA' },
+  planNoteText: { flex: 1, fontSize: 12, lineHeight: 18, fontWeight: '600', color: '#5C5670' },
   howRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginTop: 14 },
   howIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F0EBFF' },
   howTitle: { fontSize: 14, fontWeight: '800', color: '#2D2A3D' },
