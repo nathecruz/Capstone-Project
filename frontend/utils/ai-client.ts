@@ -1,12 +1,14 @@
 // One client for every AI feature. The backend builds the student's habit context
 // from the database, so screens only send the question (and the device time zone).
 import { ApiRequestError, apiRequest, getAuthenticatedHeaders } from '@/authentication/authService';
+import type { ChatAnswer } from '@/components/ai-chat';
 import type { PlannedHabit } from '@/hooks/app-state/types';
 import { readPlannedHabits } from '@/utils/planned-habits';
 
 export type AiMode = 'assistant' | 'coach' | 'support';
 
-export type AiFailure = { ok: false; status: number; message: string };
+/** `refunded`: the AI Coach was charged, then the AI failed, so the server returned the tokens (balance `tokens`). */
+export type AiFailure = { ok: false; status: number; message: string; refunded?: boolean; tokens?: number };
 export type AiAnswer = { ok: true; answer: string; tokens?: number; tokenHistory?: object[] } | AiFailure;
 
 const AI_TIMEOUT_MS = 70000;
@@ -24,7 +26,11 @@ function toFailure(error: unknown): AiFailure {
     if (error.status === 401) return { ok: false, status: 401, message: 'Please sign in again to use AI features.' };
     if (error.status === 503) return { ok: false, status: 503, message: 'AI features are not available right now.' };
     if (error.status === 429 || error.status === 402) return { ok: false, status: error.status, message: error.message };
-    return { ok: false, status: error.status, message: 'The AI service is temporarily unavailable. Please try again.' };
+    // The AI Coach was charged and the AI then failed: the server returned the tokens.
+    const refund = error.status === 502 && error.payload.refunded === true
+      ? { refunded: true, tokens: typeof error.payload.tokens === 'number' ? error.payload.tokens : undefined }
+      : {};
+    return { ok: false, status: error.status, message: 'The AI service is temporarily unavailable. Please try again.', ...refund };
   }
   return { ok: false, status: 0, message: 'Could not reach the AI service. Check your connection and try again.' };
 }
@@ -41,6 +47,29 @@ export async function askAi(mode: AiMode, question: string): Promise<AiAnswer> {
   } catch (error) {
     return toFailure(error);
   }
+}
+
+/** Tokens one AI Coach answer costs. */
+export const COACH_COST = 10;
+
+/**
+ * One AI Coach answer, as the chat shows it. The server charges the tokens before it asks the AI
+ * and returns them when the AI fails, so the balance shown is always the server's.
+ */
+export async function askCoach(question: string, wallet: { tokens: number; applyWallet: (wallet: { tokens?: number; tokenHistory?: object[] }) => void }): Promise<ChatAnswer> {
+  if (wallet.tokens < COACH_COST) {
+    return { ok: false, tone: 'warning', message: `A Coach answer costs ${COACH_COST} tokens and you have ${wallet.tokens}. Check in your habits or claim your daily reward to earn more.` };
+  }
+  const result = await askAi('coach', question);
+  if (result.ok) {
+    wallet.applyWallet(result);
+    return { ok: true, answer: result.answer, note: `${COACH_COST} tokens used` };
+  }
+  if (result.refunded) {
+    wallet.applyWallet({ tokens: result.tokens });
+    return { ok: false, message: `The AI Coach is unavailable right now. Your ${COACH_COST} tokens were returned.` };
+  }
+  return { ok: false, message: result.status === 402 ? result.message : `${result.message} Your tokens were not spent.` };
 }
 
 export async function classifyHabit(name: string, options: { category?: string; categories?: string[] } = {}): Promise<{ ok: true; isHabit: boolean; isBadHabit: boolean; categoryFits: boolean; suggestedCategory: string; reason: string } | AiFailure> {

@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Image, Modal, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getMyLeaderboardRank } from '@/authentication';
-import { AiChatSheet, useAiChat, type ChatAnswer } from '@/components/ai-chat';
+import { AiChatSheet, useAiChat } from '@/components/ai-chat';
 import { FadeIn } from '@/components/fade-in';
 import { ClassPulseCard } from '@/components/class-pulse-card';
 import { FramedAvatar } from '@/components/framed-avatar';
@@ -13,7 +13,7 @@ import { FrameSheet, TitleBadge, TitleSheet } from '@/components/reward-sheets';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { badgeProgress, badgeRemaining, nextBadge } from '@/utils/achievements';
 import { toAvatarDataUri } from '@/utils/avatar-image';
-import { askAi } from '@/utils/ai-client';
+import { askCoach, COACH_COST } from '@/utils/ai-client';
 import { levelProgress } from '@/utils/engagement';
 import type { TranslationKey } from '@/constants/i18n';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
@@ -31,9 +31,6 @@ const settings = [
   { key: 'settingsPreferences', icon: 'settings-outline', route: '/settings-preferences', group: 'account', color: '#4A4458', tint: '#F0EEF5' },
   { key: 'helpSupport', icon: 'help-circle-outline', route: '/help-support', group: 'account', color: '#2E9D5C', tint: '#E3F6EC' },
 ] as const;
-
-/** Tokens one AI Coach answer costs (the server charges it). */
-const COACH_COST = 10;
 
 export default function ProfileScreen() {
   const styles = useThemedStyles(themedStyles);
@@ -73,16 +70,8 @@ export default function ProfileScreen() {
   const avatarInitial = (profile.firstName || profile.fullName || 'H').trim().charAt(0).toUpperCase();
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [coachOpen, setCoachOpen] = useState(false);
-  // AI Coach: each answer costs COACH_COST tokens, charged by the server only when it answers.
-  const coachChat = useAiChat(async (question): Promise<ChatAnswer> => {
-    if (tokens < COACH_COST) {
-      return { ok: false, tone: 'warning', message: `A Coach answer costs ${COACH_COST} tokens and you have ${tokens}. Check in your habits or claim your daily reward to earn more.` };
-    }
-    const result = await askAi('coach', question);
-    if (!result.ok) return { ok: false, message: result.status === 402 ? result.message : `${result.message} Your tokens were not spent.` };
-    applyWallet(result);
-    return { ok: true, answer: result.answer, note: `${COACH_COST} tokens used` };
-  });
+  // AI Coach: each answer costs COACH_COST tokens; the server returns them when the AI fails.
+  const coachChat = useAiChat((question) => askCoach(question, { tokens, applyWallet }));
 
   const chooseFromGallery = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -250,7 +239,7 @@ export default function ProfileScreen() {
             <View style={styles.coachIcon}><Ionicons name="sparkles" size={20} color="#FFFFFF" /></View>
             <View style={styles.coachCopy}>
               <Text style={styles.coachTitle}>{t('aiCoach')}</Text>
-              <Text style={styles.coachText}>One specific next step from your habits · {COACH_COST} tokens per answer</Text>
+              <Text style={styles.coachText}>One next step from your last 4 weeks, usual check-in times and forecasts · {COACH_COST} tokens per answer</Text>
             </View>
             <View style={styles.coachButton}><Text style={styles.coachButtonText}>Ask</Text></View>
           </Pressable>

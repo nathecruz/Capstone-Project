@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, StatusBar, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
@@ -11,6 +11,7 @@ import { getApiBaseUrl, getAuthenticatedHeaders, redeemReward } from '@/authenti
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { loadRewards, markRewardOwned, useRewards } from '@/hooks/use-rewards';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
+import { leaderboardDateLabel, leaderKey, resetCountdownText, type Leader, type LeaderboardPeriod, type LeaderboardRange } from '@/utils/leaderboard-range';
 
 // Every reward here does something. 'permanent' ones (from the server's catalog) are bought once
 // and then opened from their card; Streak Freeze and Buddy Outfits have their own screens.
@@ -34,11 +35,10 @@ const REWARD_LOOKS: Record<string, { detail: string; icon: keyof typeof Ionicons
 const REWARD_SHEET: Record<string, 'theme' | 'title' | 'frame'> = { 'premium-theme': 'theme', 'custom-title': 'title', 'profile-frames': 'frame' };
 const BUDDY_SHOP_FROM = 40;
 
-type Leader = { rank: number; name: string; points: number; avatar: string; title?: string; frame?: string; isYou?: boolean };
 type Spotlight = Leader & { tone: 'gold' | 'silver' | 'bronze' };
-type LeaderboardPeriod = 'This Week' | 'This Month' | 'All Time';
 type LeaderboardSort = 'points-desc' | 'points-asc' | 'rank';
-type LeaderboardResponse = { date: string; leaders: Leader[] };
+/** The board of one period: the server's label ('Oct 26 - Nov 1') and range (null for All Time and older servers). */
+type LeaderboardResponse = { period: LeaderboardPeriod; date: string; range?: LeaderboardRange | null; leaders: Leader[] };
 
 export default function LeaderboardsScreen() {
   const styles = useThemedStyles(themedStyles);
@@ -57,7 +57,11 @@ export default function LeaderboardsScreen() {
   const [toast, setToast] = useState('');
   const [leaderboardStatus, setLeaderboardStatus] = useState<'idle' | 'loading' | 'connected' | 'unavailable'>('idle');
   const [refreshKey, setRefreshKey] = useState(0);
-  const [leaderboard, setLeaderboard] = useState<LeaderboardResponse>({ date: '', leaders: [] });
+  const [leaderboard, setLeaderboard] = useState<LeaderboardResponse>({ period: 'This Week', date: '', range: null, leaders: [] });
+  // The board's calendar (the campus time zone) from the last range the server sent.
+  const [boardTimeZone, setBoardTimeZone] = useState<string | null>(null);
+  // The student's own row (name and avatar) is saved once per visit, not on every period switch.
+  const syncRef = useRef<Promise<void> | null>(null);
   const { tokens, applyWallet, points, profile, tokenHistory, isFaculty, streakFreeze } = useAppColorScheme();
   const catalog = useRewards();
   const insets = useSafeAreaInsets();
@@ -66,11 +70,17 @@ export default function LeaderboardsScreen() {
   // The "Earn more tokens" list needs room; on phones the balance keeps the space.
   const showTokenRules = width >= 440;
 
+  // The reset countdown moves every minute; once the period is over, the new one is loaded.
+  const resetsAt = leaderboard.range?.resetsAt;
   useEffect(() => {
-    const refreshDate = () => setDeviceDate(new Date());
-    const interval = setInterval(refreshDate, 60 * 1000);
+    const tick = () => {
+      const now = new Date();
+      setDeviceDate(now);
+      if (resetsAt && now.getTime() >= resetsAt) setRefreshKey((key) => key + 1);
+    };
+    const interval = setInterval(tick, 60 * 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [resetsAt]);
 
   useEffect(() => {
     if (!toast) return;
@@ -83,30 +93,44 @@ export default function LeaderboardsScreen() {
     if (!profile.fullName.trim()) {
       return;
     }
+    // A slower answer for the period picked before must not replace this one.
+    let active = true;
+    const avatar = profile.fullName.charAt(0).toUpperCase();
     const syncAndLoadLeaderboard = async () => {
       setLeaderboardStatus('loading');
       try {
         const authHeaders = await getAuthenticatedHeaders();
         if (!authHeaders.Authorization) throw new Error('Leaderboard authentication required');
-        const syncResponse = await fetch(`${apiUrl}/api/leaderboard/sync`, {
+        syncRef.current ??= fetch(`${apiUrl}/api/leaderboard/sync`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...authHeaders },
-          body: JSON.stringify({
-            avatar: profile.fullName.charAt(0).toUpperCase(),
-          }),
+          body: JSON.stringify({ avatar }),
+        }).then((syncResponse) => {
+          if (!syncResponse.ok) throw new Error('Leaderboard sync failed');
+        }).catch((error: unknown) => {
+          // Sent again with the next load (Retry connection).
+          syncRef.current = null;
+          throw error;
         });
-        if (!syncResponse.ok) throw new Error('Leaderboard sync failed');
+        await syncRef.current;
         const response = await fetch(`${apiUrl}/api/leaderboard?period=${encodeURIComponent(period)}`, { headers: authHeaders });
         if (!response.ok) throw new Error('Leaderboard service unavailable');
-        setLeaderboard(await response.json() as LeaderboardResponse);
+        const board = await response.json() as Omit<LeaderboardResponse, 'period'>;
+        if (!active) return;
+        setLeaderboard({ ...board, period });
+        if (board.range?.timeZone) setBoardTimeZone(board.range.timeZone);
         setLeaderboardStatus('connected');
       } catch {
-        setLeaderboard({ date: '', leaders: [] });
+        if (!active) return;
+        setLeaderboard({ period, date: '', range: null, leaders: [] });
         setLeaderboardStatus('unavailable');
       }
     };
     void syncAndLoadLeaderboard();
-  }, [apiUrl, period, points, profile.email, profile.fullName, profile.username, refreshKey]);
+    return () => {
+      active = false;
+    };
+  }, [apiUrl, period, points, profile.fullName, refreshKey]);
 
   const { leaders } = leaderboard;
   const podium: Spotlight[] = leaders.slice(0, 3).map((leader, index) => ({
@@ -118,22 +142,10 @@ export default function LeaderboardsScreen() {
     ...leaders,
   ].map((leader) => [leader.rank, leader]));
   const allLeaders = Array.from(rankingByRank.values());
-  const getDateLabel = (selectedPeriod: LeaderboardPeriod) => {
-    if (selectedPeriod === 'All Time') return 'Since joining';
-    if (selectedPeriod === 'This Month') {
-      const start = new Date(deviceDate.getFullYear(), deviceDate.getMonth(), 1);
-      const end = new Date(deviceDate.getFullYear(), deviceDate.getMonth() + 1, 0);
-      return `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
-    }
-    const start = new Date(deviceDate);
-    const day = start.getDay();
-    const mondayOffset = day === 0 ? -6 : 1 - day;
-    start.setDate(start.getDate() + mondayOffset);
-    const end = new Date(start);
-    end.setDate(start.getDate() + 6);
-    return `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
-  };
+  // The server's dates for the period on show; the other options on the board's calendar.
+  const getDateLabel = (selectedPeriod: LeaderboardPeriod) => leaderboardDateLabel(selectedPeriod, leaderboard, deviceDate, boardTimeZone);
   const liveDate = getDateLabel(period);
+  const resetText = period !== 'All Time' && leaderboard.period === period && leaderboard.range ? resetCountdownText(period, leaderboard.range, deviceDate.getTime()) : '';
   // The server marks the signed-in student's row (other students only see initials).
   const userStanding = allLeaders.find((entry) => entry.isYou) ?? allLeaders.find((entry) => entry.name === profile.fullName) ?? { rank: 0, name: '', points: 0, avatar: '' };
   const effectiveLeaderboardStatus = !profile.fullName.trim() ? 'unavailable' : leaderboardStatus;
@@ -334,7 +346,8 @@ export default function LeaderboardsScreen() {
 
           <View style={styles.podiumHeader}><View><Text style={styles.sectionKicker}>LEADERBOARD SPOTLIGHT</Text><Text style={styles.sectionTitle}>Top 3 {period}</Text><Text style={styles.sectionSubtitle}>Consistency gets rewarded. Keep climbing!</Text></View><Pressable style={styles.datePill} onPress={() => setDateDropdownOpen((open) => !open)} accessibilityRole="button" accessibilityLabel="Choose leaderboard date" accessibilityState={{ expanded: dateDropdownOpen }}><Ionicons name="calendar-outline" size={12} color={themeColor('#5B42D8')} /><Text style={styles.datePillText}>{liveDate}</Text><Ionicons name={dateDropdownOpen ? 'chevron-up' : 'chevron-down'} size={12} color={themeColor('#5B42D8')} /></Pressable></View>
           {dateDropdownOpen && <View style={styles.dateDropdown}>{(['This Week', 'This Month', 'All Time'] as LeaderboardPeriod[]).map((option) => <Pressable key={option} style={[styles.dateOption, period === option && styles.dateOptionActive]} onPress={() => { setPeriod(option); setDateDropdownOpen(false); }} accessibilityRole="button" accessibilityState={{ selected: period === option }}><View><Text style={[styles.dateOptionTitle, period === option && styles.dateOptionTextActive]}>{option}</Text><Text style={[styles.dateOptionSubtitle, period === option && styles.dateOptionTextActive]}>{getDateLabel(option)}</Text></View>{period === option && <Ionicons name="checkmark-circle" size={16} color={themeColor('#FFFFFF')} />}</Pressable>)}</View>}
-          {podium.length && hasLeaderboard ? <View style={[styles.podiumRow, compact && styles.compactPodium]}>{podium.map((player) => <View key={player.name} style={[styles.podiumPlayer, styles[player.tone]]}><Text style={styles.podiumRank}>{player.rank === 1 ? '1ST' : player.rank === 2 ? '2ND' : '3RD'}</Text><Text style={styles.medal}>{player.tone === 'gold' ? '♛' : '◆'}</Text><View style={styles.podiumAvatarWrap}><FramedAvatar frame={player.frame} size={58}><View style={styles.podiumAvatar}><Text style={styles.avatarText}>{player.avatar}</Text></View></FramedAvatar></View><Text style={styles.podiumName}>{player.name}</Text>{player.title ? <Text style={styles.podiumTitle} numberOfLines={1}>{player.title}</Text> : null}<Text style={styles.podiumPoints}>✦ {player.points} pts</Text></View>)}</View> : <View style={styles.noCommunityCard}><Ionicons name={effectiveLeaderboardStatus === 'loading' ? 'sync-outline' : 'people-outline'} size={25} color={themeColor('#5B42D8')} /><Text style={styles.noCommunityTitle}>{effectiveLeaderboardStatus === 'loading' ? 'Connecting to the community...' : 'Community rankings are unavailable'}</Text><Text style={styles.noCommunityText}>{effectiveLeaderboardStatus === 'loading' ? 'We are checking the leaderboard service.' : 'Start a daily habit to earn your first points, then connect to compare with other members.'}</Text><Pressable style={styles.connectButton} onPress={() => { if (!apiUrl) showAlert('Connect Leaderboard Service', 'Set EXPO_PUBLIC_AI_API_URL and start the backend service to enable community rankings.'); else setRefreshKey((key) => key + 1); } }><Ionicons name="link-outline" size={15} color={themeColor('#FFFFFF')} /><Text style={styles.connectButtonText}>{apiUrl ? 'Retry connection' : 'Connect Leaderboard Service'}</Text></Pressable></View>}
+          {resetText ? <View style={styles.resetRow}><Ionicons name="time-outline" size={12} color={themeColor('#8A7BD5')} /><Text style={styles.resetText}>{resetText}</Text></View> : null}
+          {podium.length && hasLeaderboard ? <View style={[styles.podiumRow, compact && styles.compactPodium]}>{podium.map((player) => <View key={leaderKey(player)} style={[styles.podiumPlayer, styles[player.tone]]}><Text style={styles.podiumRank}>{player.rank === 1 ? '1ST' : player.rank === 2 ? '2ND' : '3RD'}</Text><Text style={styles.medal}>{player.tone === 'gold' ? '♛' : '◆'}</Text><View style={styles.podiumAvatarWrap}><FramedAvatar frame={player.frame} size={58}><View style={styles.podiumAvatar}><Text style={styles.avatarText}>{player.avatar}</Text></View></FramedAvatar></View><Text style={styles.podiumName}>{player.name}</Text>{player.title ? <Text style={styles.podiumTitle} numberOfLines={1}>{player.title}</Text> : null}<Text style={styles.podiumPoints}>✦ {player.points} pts</Text></View>)}</View> : <View style={styles.noCommunityCard}><Ionicons name={effectiveLeaderboardStatus === 'loading' ? 'sync-outline' : 'people-outline'} size={25} color={themeColor('#5B42D8')} /><Text style={styles.noCommunityTitle}>{effectiveLeaderboardStatus === 'loading' ? 'Connecting to the community...' : 'Community rankings are unavailable'}</Text><Text style={styles.noCommunityText}>{effectiveLeaderboardStatus === 'loading' ? 'We are checking the leaderboard service.' : 'Start a daily habit to earn your first points, then connect to compare with other members.'}</Text><Pressable style={styles.connectButton} onPress={() => { if (!apiUrl) showAlert('Connect Leaderboard Service', 'Set EXPO_PUBLIC_AI_API_URL and start the backend service to enable community rankings.'); else setRefreshKey((key) => key + 1); } }><Ionicons name="link-outline" size={15} color={themeColor('#FFFFFF')} /><Text style={styles.connectButtonText}>{apiUrl ? 'Retry connection' : 'Connect Leaderboard Service'}</Text></Pressable></View>}
 
           {hasUserPosition ? <View style={styles.positionCard}><FramedAvatar frame={userStanding.frame} size={58}><View style={styles.positionAvatar}><Text style={styles.avatarText}>{userStanding.avatar}</Text></View></FramedAvatar><View style={styles.positionCopy}><Text style={styles.positionLabel}>Your Position</Text><Text style={styles.positionRank}>#{userStanding.rank}</Text><View style={styles.risingPill}><Ionicons name="star" size={12} color={themeColor('#FFFFFF')} /><Text style={styles.risingText}>Keep climbing</Text></View><View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${rankProgress}%` }]} /></View><Text style={styles.progressNote}>{nextLeader ? `${pointsToNextRank} points to reach #${nextLeader.rank}` : 'You are at the top of this community.'}</Text></View><View style={styles.positionScore}><Text style={styles.scoreValue}>{periodPoints}</Text><Text style={styles.scoreLabel}>points</Text><Text style={styles.weekMuted}>{period === 'All Time' ? 'Live total' : period}</Text></View></View> : null}
 
@@ -342,7 +355,7 @@ export default function LeaderboardsScreen() {
           <View style={styles.rankingHeader}><View style={styles.rankingTitleBlock}><Text style={styles.sectionKicker}>FULL STANDINGS</Text><Text style={styles.sectionTitle}>Rankings</Text><Text style={styles.sectionSubtitle}>Your place among the most consistent.</Text><View style={styles.risingSmall}><Ionicons name="swap-vertical" size={11} color={themeColor('#5B42D8')} /><Text style={styles.risingSmallText}>Showing: {sortLabel}</Text></View></View><View style={styles.rankingActions}><Pressable style={[styles.sortButton, styles.sortButtonTouch]} onPress={() => setSortDropdownOpen((open) => !open)} accessibilityRole="button" accessibilityLabel="Sort full standings" accessibilityState={{ expanded: sortDropdownOpen }}><Ionicons name="swap-vertical" size={15} color={themeColor('#5B42D8')} /><Text style={styles.sortText}>{sortLabel}</Text><Ionicons name={sortDropdownOpen ? 'chevron-up' : 'chevron-down'} size={13} color={themeColor('#5B42D8')} /></Pressable><Pressable style={[styles.sortButton, styles.sortButtonTouch]} onPress={() => setShowAllRankings((visible) => !visible)} accessibilityRole="button" accessibilityLabel={showAllRankings ? 'Show fewer rankings' : 'View all rankings'} accessibilityState={{ expanded: showAllRankings }}><Text style={styles.sortText}>{showAllRankings ? 'View less' : 'View all'}</Text><Ionicons name={showAllRankings ? 'chevron-up' : 'chevron-down'} size={13} color={themeColor('#5B42D8')} /></Pressable></View></View>
           {sortDropdownOpen && <View style={styles.dateDropdown}>{([{ value: 'points-desc', label: 'Points: high to low' }, { value: 'points-asc', label: 'Points: low to high' }, { value: 'rank', label: 'Sort by rank' }] as const).map((option) => <Pressable key={option.value} style={[styles.dateOption, sortMode === option.value && styles.dateOptionActive]} onPress={() => { setSortMode(option.value); setSortDropdownOpen(false); }} accessibilityRole="button" accessibilityState={{ selected: sortMode === option.value }}><Text style={[styles.dateOptionTitle, sortMode === option.value && styles.dateOptionTextActive]}>{option.label}</Text>{sortMode === option.value && <Ionicons name="checkmark-circle" size={16} color={themeColor('#FFFFFF')} />}</Pressable>)}</View>}
           <View style={styles.rankingMetaRow}><View style={styles.rankingCount}><Ionicons name="people-outline" size={14} color={themeColor('#5B42D8')} /><Text style={styles.rankingMetaText}>{visibleRankingCount} of {sortedLeaders.length} members</Text></View><Text style={styles.rankingMetaHint}>{showAllRankings ? 'Complete leaderboard' : 'Top results'}</Text></View>
-          <View style={styles.rankingTable}><View style={styles.rankingColumns}><Text style={styles.columnRank}>RANK</Text><Text style={styles.columnMember}>MEMBER</Text><Text style={styles.columnPoints}>POINTS{pointsSortIndicator}</Text></View><View style={styles.rankingList}>{sortedLeaders.slice(0, visibleRankingCount).map((leader, index) => <View key={leader.name} style={[styles.rankingRow, index % 2 === 1 && styles.alternateRow, leader.name === profile.fullName && styles.currentRow]}><Text style={[styles.rankCircle, leader.name === profile.fullName && styles.currentRank]}>{leader.rank}</Text><View style={styles.memberCell}><View style={styles.listAvatarSlot}><FramedAvatar frame={leader.frame} size={38}><View style={[styles.listAvatarWrap, leader.frame ? styles.listAvatarFramed : null, leader.name === profile.fullName && styles.currentAvatarWrap]}><Text style={styles.listAvatar}>{leader.avatar}</Text></View></FramedAvatar></View><View style={styles.memberCopy}><Text style={[styles.playerName, leader.name === profile.fullName && styles.currentPlayerName]}>{leader.name}</Text>{leader.title ? <Text style={styles.playerTitle} numberOfLines={1}>{leader.title}</Text> : null}{leader.name === profile.fullName && <View style={styles.risingSmall}><Ionicons name="star" size={10} color={themeColor('#6248D7')} /><Text style={styles.risingSmallText}>You</Text></View>}</View></View><View style={styles.pointsCell}><Text style={styles.playerPoints}>{leader.points}</Text><Ionicons name="chevron-forward" size={16} color={themeColor('#5B42D8')} /></View></View>)}</View></View></>}
+          <View style={styles.rankingTable}><View style={styles.rankingColumns}><Text style={styles.columnRank}>RANK</Text><Text style={styles.columnMember}>MEMBER</Text><Text style={styles.columnPoints}>POINTS{pointsSortIndicator}</Text></View><View style={styles.rankingList}>{sortedLeaders.slice(0, visibleRankingCount).map((leader, index) => <View key={leaderKey(leader)} style={[styles.rankingRow, index % 2 === 1 && styles.alternateRow, leader.name === profile.fullName && styles.currentRow]}><Text style={[styles.rankCircle, leader.name === profile.fullName && styles.currentRank]}>{leader.rank}</Text><View style={styles.memberCell}><View style={styles.listAvatarSlot}><FramedAvatar frame={leader.frame} size={38}><View style={[styles.listAvatarWrap, leader.frame ? styles.listAvatarFramed : null, leader.name === profile.fullName && styles.currentAvatarWrap]}><Text style={styles.listAvatar}>{leader.avatar}</Text></View></FramedAvatar></View><View style={styles.memberCopy}><Text style={[styles.playerName, leader.name === profile.fullName && styles.currentPlayerName]}>{leader.name}</Text>{leader.title ? <Text style={styles.playerTitle} numberOfLines={1}>{leader.title}</Text> : null}{leader.name === profile.fullName && <View style={styles.risingSmall}><Ionicons name="star" size={10} color={themeColor('#6248D7')} /><Text style={styles.risingSmallText}>You</Text></View>}</View></View><View style={styles.pointsCell}><Text style={styles.playerPoints}>{leader.points}</Text><Ionicons name="chevron-forward" size={16} color={themeColor('#5B42D8')} /></View></View>)}</View></View></>}
         </View>
       </ScrollView>
 
@@ -486,4 +499,6 @@ const themedStyles = createThemedStyles({
   rankingHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 22, marginBottom: 8 }, sortButton: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: '#E0DDF3', borderRadius: 14, paddingHorizontal: 9, paddingVertical: 7 }, sortText: { color: '#5B42D8', fontSize: 10, fontWeight: '800' }, rankingTable: { backgroundColor: '#FFFFFF', borderRadius: 18, padding: 8, borderWidth: 1, borderColor: '#ECECF5' }, rankingColumns: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 7, paddingBottom: 7, borderBottomWidth: 1, borderBottomColor: '#F0EFF7' }, columnRank: { width: 64, color: '#8A8492', fontSize: 9, fontWeight: '900', letterSpacing: 0.7 }, columnMember: { flex: 1, color: '#8A8492', fontSize: 9, fontWeight: '900', letterSpacing: 0.7 }, columnPoints: { width: 66, color: '#8A8492', fontSize: 9, fontWeight: '900', textAlign: 'right', letterSpacing: 0.7 }, rankingList: { gap: 5, paddingTop: 7 }, rankingRow: { minHeight: 60, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FBFBFE', borderRadius: 13, paddingHorizontal: 7, borderWidth: 1, borderColor: '#F0F0F7' }, currentRow: { backgroundColor: '#EAE5FF', borderColor: '#B9AAFF' }, rankCircle: { width: 29, height: 29, borderRadius: 15, textAlign: 'center', textAlignVertical: 'center', color: '#6A6573', backgroundColor: '#F1F3FA', fontSize: 11, fontWeight: '900', marginRight: 7 }, currentRank: { color: '#5B42D8', backgroundColor: '#D6CBFF' }, memberCell: { flex: 1, flexDirection: 'row', alignItems: 'center', minWidth: 0 }, listAvatarSlot: { marginRight: 8 }, listAvatarWrap: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F0F1FA' }, listAvatarFramed: { marginRight: 0 }, currentAvatarWrap: { backgroundColor: '#D6CBFF' }, listAvatar: { fontSize: 23 }, memberCopy: { flex: 1, minWidth: 0 }, playerName: { color: '#1F1C26', fontSize: 12, fontWeight: '800' }, currentPlayerName: { color: '#5B42D8' }, risingSmall: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 3, backgroundColor: '#F1EEFF', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 4, marginTop: 3 }, risingSmallText: { color: '#5B42D8', fontSize: 9, fontWeight: '800' }, pointsCell: { width: 66, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 3 }, playerPoints: { color: '#1F1C26', backgroundColor: '#F0F1F8', borderRadius: 9, paddingHorizontal: 7, paddingVertical: 5, fontSize: 11, fontWeight: '900', textAlign: 'right' },
   rankingTitleBlock: { flex: 1, minWidth: 0 }, rankingActions: { alignItems: 'flex-end', gap: 6 }, rankingMetaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#F4F1FF', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 8 }, rankingCount: { flexDirection: 'row', alignItems: 'center', gap: 5 }, rankingMetaText: { color: '#5B42D8', fontSize: 10, fontWeight: '800' }, rankingMetaHint: { color: '#8A8492', fontSize: 10, fontWeight: '700' }, alternateRow: { backgroundColor: '#F8F8FD' },
   sortButtonTouch: { minHeight: 44 },
+  resetRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: -3, marginBottom: 9 },
+  resetText: { color: '#6A6573', fontSize: 10, fontWeight: '700', flexShrink: 1, textAlign: 'right' },
 });

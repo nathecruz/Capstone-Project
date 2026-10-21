@@ -1,30 +1,33 @@
 // The weekly reset of habits (services/habit-week.js): every saved habit gets the last day it is
 // active, and keeps it. Pure helpers for PUT /api/app-state and the one-time migration of the
 // snapshots saved before weekly habits (services/app-state-store.js stampLatestSnapshot).
-import { isDateKey, withActiveUntil } from './habit-week.js';
+import { config } from '../config/index.js';
+import { getDateKeyInTimeZone } from './completion-date.js';
+import { allowedActiveUntil, hasHabitEnded, withActiveUntil } from './habit-week.js';
 
 /**
- * A habit sent without a last active day keeps the one the server already gave it. App versions
- * from before weekly habits may send a habit without it; stamping it again would move an ended
- * habit into the current week and bring it back to the lists.
+ * The state to save: every habit gets the last active day the server allows for the account's
+ * `today` (allowedActiveUntil): the end of the week it starts in, or an earlier day the app sent; a
+ * habit sent without one (older app versions) keeps the stored one. A habit whose stored week has
+ * ended keeps its stored start date and last day, so no app can move it back into this week.
  */
-export function keepActiveUntil(state, current) {
-  const stored = new Map((Array.isArray(current?.habits) ? current.habits : [])
-    .filter((habit) => habit?.id && isDateKey(habit.activeUntil))
-    .map((habit) => [habit.id, habit.activeUntil]));
-  if (!Array.isArray(state?.habits) || !stored.size) return state;
+export function stampActiveUntil(state, current, now = new Date(), today = getDateKeyInTimeZone(now, config.appTimeZone)) {
+  if (!Array.isArray(state?.habits)) return state;
+  const stored = new Map((Array.isArray(current?.habits) ? current.habits : []).filter((habit) => habit?.id).map((habit) => [habit.id, habit]));
   let changed = false;
   const habits = state.habits.map((habit) => {
-    if (!habit || isDateKey(habit.activeUntil) || !stored.has(habit.id)) return habit;
+    if (!habit || typeof habit !== 'object') return habit;
+    const previous = stored.get(habit.id) ?? null;
+    const startDate = previous && hasHabitEnded(previous, today) ? previous.startDate : habit.startDate;
+    const activeUntil = allowedActiveUntil(habit, previous, today);
+    if (startDate === habit.startDate && activeUntil === habit.activeUntil) return habit;
     changed = true;
-    return { ...habit, activeUntil: stored.get(habit.id) };
+    const next = { ...habit, activeUntil };
+    if (startDate === undefined) delete next.startDate;
+    else next.startDate = startDate;
+    return next;
   });
   return changed ? { ...state, habits } : state;
-}
-
-/** The state to save: stored last active days kept, the end of their week for habits without one. */
-export function stampActiveUntil(state, current, now = new Date()) {
-  return withActiveUntil(keepActiveUntil(state, current), now);
 }
 
 /**

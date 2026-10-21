@@ -4,13 +4,23 @@ import { BUDDY_ITEMS, BUDDY_STAGES, BUDDY_TREATS, buddyStageIndex } from '../ser
 import { MYSTERY_REWARDS, pickMysteryReward } from '../services/mystery-box.js';
 import { weekStartOf, weeklyQuests } from '../services/quests.js';
 import { daysToFreeze, STREAK_FREEZE_COST, STREAK_FREEZE_MAX } from '../services/streak-freeze.js';
-import { crossedStreakMilestones, STREAK_MILESTONE_BONUS } from '../services/wallet.js';
+import { CHECK_IN_CAP_FROM, countedDaySql, countedOnDay, crossedStreakMilestones, PAID_CHECK_INS_PER_DAY, STREAK_MILESTONE_BONUS } from '../services/wallet.js';
 import { computeStreak } from '../services/streaks.js';
 import { doneActionSecret, getWebPushDoneUrl, localDateIn, makeDoneToken, readDoneToken } from '../services/web-push-actions.js';
 import { dailyChallenges, minuteOfDay, ROTATING_CHALLENGES } from '../services/daily-challenges.js';
 
 const daily = (id) => ({ id, frequency: 'Daily', startDate: '2026-09-01', reminderDays: [], meta: 'Daily • Anytime' });
 const done = (entries) => new Map(Object.entries(entries).map(([date, ids]) => [date, new Set(ids)]));
+
+test('from the cap date a day counts at most 6 check-ins toward points; earlier days count them all', () => {
+  assert.deepEqual([PAID_CHECK_INS_PER_DAY, CHECK_IN_CAP_FROM], [6, '2026-10-26'], 'the Monday after the release, so no week is split');
+  assert.equal(countedOnDay('2026-10-26', 8), 6);
+  assert.equal(countedOnDay('2026-11-03', 8), 6);
+  assert.equal(countedOnDay('2026-10-25', 8), 8, 'points already shown are never taken away');
+  assert.equal(countedOnDay('2026-10-27', 4), 4);
+  // The SQL the points, the leaderboard and Habi's growth share says the same.
+  assert.equal(countedDaySql('d', 'n'), "CASE WHEN d >= '2026-10-26'::date THEN LEAST(n, 6) ELSE n END");
+});
 
 test('weekly quests count the Monday-to-Sunday week up to today', () => {
   assert.equal(weekStartOf('2026-10-03'), '2026-09-28');

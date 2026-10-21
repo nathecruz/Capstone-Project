@@ -35,6 +35,20 @@ export function hasHabitEnded(habit, today) {
   return isDateKey(habit?.activeUntil) && today > habit.activeUntil;
 }
 
+/**
+ * The last active day the server keeps for a saved habit (`stored` is the server's copy, or null for
+ * a new habit; `today` is the account's day). A habit whose week has ended stays ended, whatever the
+ * app sends. Otherwise it is the end of the week the habit starts in, or the app's own day when that
+ * is earlier (the app sends none in older builds: then the stored one): ending early is allowed,
+ * extending never is. Honest app builds already send exactly this day.
+ */
+export function allowedActiveUntil(habit, stored, today) {
+  if (stored && hasHabitEnded(stored, today)) return stored.activeUntil;
+  const limit = habitActiveUntil(habit?.startDate, today);
+  const sent = isDateKey(habit?.activeUntil) ? habit.activeUntil : isDateKey(stored?.activeUntil) ? stored.activeUntil : null;
+  return sent && sent < limit ? sent : limit;
+}
+
 /** `date`'s day (YYYY-MM-DD) in the time zone, or in Manila for an unknown one. */
 function dateKeyIn(date, timeZone) {
   const format = (zone) => new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);

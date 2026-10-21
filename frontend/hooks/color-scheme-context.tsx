@@ -129,7 +129,8 @@ type ColorSchemeContextValue = {
 
 export type StreakFreeze = { available: number; max: number; cost: number; frozenDays: string[] };
 
-export type Celebration = { id: string; kind: 'buddy' | 'streak' | 'freeze' | 'badge' | 'quest' | 'level' | 'challenge' | 'allDone'; icon: string; title: string; message: string; color?: string };
+/** 'info' is a notice about a check-in (the daily token limit, a closed day), shown without confetti. */
+export type Celebration = { id: string; kind: 'buddy' | 'streak' | 'freeze' | 'badge' | 'quest' | 'level' | 'challenge' | 'allDone' | 'info'; icon: string; title: string; message: string; color?: string };
 
 const ColorSchemeContext = createContext<ColorSchemeContextValue | undefined>(undefined);
 
@@ -155,6 +156,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     }, Math.max(0, Math.min(...ends) - Date.now()) + 50);
     return () => clearTimeout(timer);
   }, [undoUntil]);
+  // Check-ins of this session past the day's paid limit, by day: they paid no tokens and did not
+  // grow Habi, so undoing one there leaves Habi as it is.
+  const cappedCheckInsRef = useRef<Record<string, number>>({});
   // Celebrations: each moment shows once per session, so an undo and a new tap do not repeat it.
   // Several at once (a streak and a challenge from one check-in) show one after the other.
   const [celebrations, setCelebrations] = useState<Celebration[]>([]);
@@ -748,20 +752,37 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     });
     applyLocalCheckIn(id, dateKey, completed);
     if (completed) celebrateCheckIn(currentHabit, dateKey);
-    adjustBuddyCheckIns(completed ? 1 : -1);
+    const capped = cappedCheckInsRef.current[dateKey] ?? 0;
+    const undoesCapped = !completed && capped > 0;
+    if (undoesCapped) cappedCheckInsRef.current[dateKey] = capped - 1;
+    const buddyChange = completed ? 1 : undoesCapped ? 0 : -1;
+    if (buddyChange) adjustBuddyCheckIns(buddyChange);
     void saveRemoteHabitCompletion({ habitId: id, date: dateKey, completed }).then((result) => {
       if (result && 'rejected' in result) {
-        // The server refused this check-in (day closed, habit missed, its week ended, or undo
-        // locked): undo the optimistic change so the screen matches the server instead of silently
-        // reverting on sync.
+        // The server refused this check-in (day closed, habit missed, its week ended, undo locked,
+        // or too many check-ins): undo the optimistic change so the screen matches the server
+        // instead of silently reverting on sync.
         applyLocalCheckIn(id, dateKey, !completed);
         setUndoUntil((current) => { const next = { ...current }; delete next[id]; return next; });
+        if (buddyChange) adjustBuddyCheckIns(-buddyChange);
+        if (undoesCapped) cappedCheckInsRef.current[dateKey] = capped;
+        // The account's day is not the phone's (its time zone changed): say which day it is.
+        if (result.code === 'DAY_CLOSED' && result.today && result.today !== dateKey) {
+          celebrate({ id: `day-closed:${result.today}`, kind: 'info', icon: 'time-outline', title: 'That day is closed', message: `Your HabitAI day is ${result.today}${result.timeZone ? ` (${result.timeZone})` : ''}. A day that already started cannot be reopened.` });
+        }
         return;
       }
       if (!result) {
         // The server keeps a check-in it would not undo (locked, or unreachable): show it again.
         if (!completed) applyLocalCheckIn(id, dateKey, true);
         return;
+      }
+      if (completed && result.tokenCapped) {
+        // Saved, and it counts for the streak, challenges and quests, but past the day's paid
+        // check-ins it pays no tokens and does not grow Habi.
+        adjustBuddyCheckIns(-1);
+        cappedCheckInsRef.current[dateKey] = (cappedCheckInsRef.current[dateKey] ?? 0) + 1;
+        celebrate({ id: `token-cap:${dateKey}`, kind: 'info', icon: 'wallet-outline', title: 'Daily token limit reached', message: `You have earned tokens for ${result.paidCheckInsLimit ?? 6} check-ins today. This one still counts for your streak, challenges and quests.` });
       }
       applyWallet(result);
       // Daily challenges as the server counted them: announce any this check-in completed.

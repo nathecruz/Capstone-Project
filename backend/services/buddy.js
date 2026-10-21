@@ -1,7 +1,7 @@
 // Habit Buddy: the student's mascot. It grows through stages with every check-in, wears items and
 // lives in a room, all bought with tokens. The server owns what was bought and the prices; the app
 // shows them.
-import { spendTokens } from './wallet.js';
+import { countedCheckIns, spendTokens } from './wallet.js';
 
 export const BUDDY_STAGES = [
   { id: 'baby', name: 'Baby', min: 0 },
@@ -82,17 +82,14 @@ export function buddyStageIndex(checkIns) {
 
 const stageIndexOf = (id) => BUDDY_STAGES.findIndex((stage) => stage.id === id);
 
-async function checkInCount(db, userId) {
-  return (await db.query('SELECT COUNT(*)::int AS count FROM habit_completions WHERE user_id=$1', [userId])).rows[0].count;
-}
-
 /** Name, what it wears, what was bought, the treats fed, and the catalogs. */
 export async function getBuddy(db, userId) {
   const [buddy, owned, treats, checkIns] = await Promise.all([
     db.query('SELECT name, head_item AS head, hand_item AS hand, room_item AS room, accessory_item AS accessory FROM user_buddy WHERE user_id=$1', [userId]),
     db.query('SELECT item_id AS "itemId" FROM buddy_items WHERE user_id=$1 ORDER BY bought_at', [userId]),
     db.query('SELECT treat_id AS "treatId", fed_count AS "count" FROM buddy_treats WHERE user_id=$1', [userId]),
-    checkInCount(db, userId),
+    // Habi grows on the check-ins that count toward points (at most 6 a day from CHECK_IN_CAP_FROM).
+    countedCheckIns(db, userId),
   ]);
   const row = buddy.rows[0];
   const fedTreats = treats.rows.map((treat) => ({ treatId: treat.treatId, count: Number(treat.count) }));
@@ -133,7 +130,7 @@ export async function buyBuddyItem(db, userId, itemId, now = Date.now()) {
     const stage = BUDDY_STAGES[stageIndexOf(item.stage)];
     return { status: 403, message: `${current.name} needs to reach the ${stage.name} stage (${stage.min} check-ins) first.` };
   }
-  const spent = await spendTokens(db, userId, item.cost, `Buddy: ${item.name}`, now);
+  const spent = await spendTokens(db, userId, item.cost, `Buddy: ${item.name}`, { kind: 'buddy-item', now });
   if (!spent.ok) return { status: 402, message: `You need ${item.cost - spent.balance} more tokens for the ${item.name}.` };
   await db.query('INSERT INTO buddy_items(user_id,item_id,bought_at) VALUES($1,$2,$3)', [userId, item.id, now]);
   // Put it on (or move in) right away.
@@ -165,7 +162,7 @@ export async function saveBuddy(db, userId, { name, head, hand, room, accessory 
 export async function feedTreat(db, userId, treatId, now = Date.now()) {
   const treat = BUDDY_TREATS.find((entry) => entry.id === treatId);
   if (!treat) return { status: 404, message: 'That treat is not in the shop.' };
-  const spent = await spendTokens(db, userId, treat.cost, `Buddy treat: ${treat.name}`, now);
+  const spent = await spendTokens(db, userId, treat.cost, `Buddy treat: ${treat.name}`, { kind: 'buddy-treat', now });
   if (!spent.ok) return { status: 402, message: `You need ${treat.cost - spent.balance} more tokens for the ${treat.name}.` };
   await db.query(
     `INSERT INTO buddy_treats(user_id,treat_id,fed_count,last_fed_at) VALUES($1,$2,1,$3)

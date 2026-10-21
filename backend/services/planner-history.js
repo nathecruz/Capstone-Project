@@ -20,6 +20,7 @@ export const PLANNER_FORECAST_CAP_MS = 6000;
 const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 const round2 = (value) => Math.round(value * 100) / 100;
+const weekDayOf = (dateKey) => WEEK_DAYS[(new Date(`${dateKey}T00:00:00Z`).getUTCDay() + 6) % 7];
 
 /** The local day and minute of the day of a check-in time (ms), in the time zone. */
 function localClock(timeZone) {
@@ -56,8 +57,8 @@ export function usualCheckInTime(completions, timeZone) {
 /**
  * One habit's last 4 weeks, counted from its start date to today or its last day, whichever is
  * first (days after a habit's week never count as missed). Today is still open, so it only counts
- * once it is done. Returns the facts for the planner and the ML signal (null without a counted
- * day yet, when a forecast would say nothing).
+ * once it is done. Returns the facts for the planner, the ML signal (null without a counted
+ * day yet, when a forecast would say nothing) and the counted days by weekday.
  */
 function habitHistory(row, completions, { today, windowStart, timeZone, frozenDays }) {
   const habit = habitFromRow(row);
@@ -69,10 +70,13 @@ function habitHistory(row, completions, { today, windowStart, timeZone, frozenDa
   const done = new Set(inRange.map((item) => item.date));
   let scheduledDays = 0;
   let checkIns = 0;
+  const weekdays = new Map();
   for (let day = firstDay; day <= lastDay; day = shiftDay(day, 1)) {
     if (!isScheduledDay(schedule, day) || (day === today && !done.has(day))) continue;
     scheduledDays += 1;
     if (done.has(day)) checkIns += 1;
+    const tally = weekdays.get(weekDayOf(day)) ?? { scheduled: 0, done: 0 };
+    weekdays.set(weekDayOf(day), { scheduled: tally.scheduled + 1, done: tally.done + (done.has(day) ? 1 : 0) });
   }
   const completionRate = scheduledDays ? checkIns / scheduledDays : 0;
   const name = String(row.label || 'Habit').slice(0, 60);
@@ -99,7 +103,27 @@ function habitHistory(row, completions, { today, windowStart, timeZone, frozenDa
     missedDays: scheduledDays - checkIns,
     last7Days: Array.from({ length: 7 }, (_, index) => (done.has(shiftDay(lastDay, index - 6)) ? 1 : 0)),
   }) : null;
-  return { facts, signal };
+  return { facts, signal, weekdays };
+}
+
+/**
+ * The weekdays with the best and the worst check-in rate over these habits' counted days, in week
+ * order on a tie; null for both when fewer than two weekdays have two scheduled days, or all rates
+ * are the same.
+ */
+export function weekdayStrengths(tallies) {
+  const totals = new Map();
+  for (const weekdays of tallies) {
+    for (const [day, { scheduled, done }] of weekdays) {
+      const total = totals.get(day) ?? { scheduled: 0, done: 0 };
+      totals.set(day, { scheduled: total.scheduled + scheduled, done: total.done + done });
+    }
+  }
+  const rated = WEEK_DAYS.filter((day) => (totals.get(day)?.scheduled ?? 0) >= 2).map((day) => ({ day, rate: totals.get(day).done / totals.get(day).scheduled }));
+  if (rated.length < 2) return { strongestWeekday: null, weakestWeekday: null };
+  const strongest = rated.reduce((best, entry) => (entry.rate > best.rate ? entry : best));
+  const weakest = rated.reduce((worst, entry) => (entry.rate < worst.rate ? entry : worst));
+  return strongest.rate > weakest.rate ? { strongestWeekday: strongest.day, weakestWeekday: weakest.day } : { strongestWeekday: null, weakestWeekday: null };
 }
 
 /**
@@ -131,10 +155,11 @@ export function buildPlannerHistory({ habits = [], completions = [], frozenDays 
       today,
       weekEnds: weekEndKey(today),
       note: listed.length
-        ? 'habits: the last 4 weeks, current ones first. Habits last one week (Monday to Sunday): status "ended" habits finished with their week and are history only; "current" ones run this week. scheduledDays and checkIns count from the start date to today or the habit\'s last day. completionRate is checkIns / scheduledDays (null before any counted day). usualCheckInTime is when the student usually checked it in. mlForecast is the machine-learning forecast for continuing it.'
+        ? 'habits: the last 4 weeks, current ones first. Habits last one week (Monday to Sunday): status "ended" habits finished with their week and are history only; "current" ones run this week. scheduledDays and checkIns count from the start date to today or the habit\'s last day. completionRate is checkIns / scheduledDays (null before any counted day). usualCheckInTime is when the student usually checked it in. mlForecast is the machine-learning forecast for continuing it. strongestWeekday and weakestWeekday are the weekdays with the best and worst check-in rate over these habits (null with too little data).'
         : 'No habits in the last 4 weeks (for example a new student): plan from the goal alone.',
       accountStreakDays: accountStreak(rows.map(({ habit, completions: habitCompletions }) => ({ ...habit, completionDates: habitCompletions.map((item) => item.date) })), today, frozenDays),
       currentHabitNames: current.map(({ row }) => String(row.label || '').trim()).filter(Boolean),
+      ...weekdayStrengths(listed.map(({ weekdays }) => weekdays)),
       habits: listed.map(({ facts }) => facts),
     },
     signals: listed.map(({ signal }) => signal),

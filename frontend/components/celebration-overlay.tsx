@@ -1,5 +1,6 @@
 // Shows the latest celebration (streak milestone, level up, daily challenge, all done) with
-// confetti. Rendered once at the root, so it works on every screen where a habit is checked.
+// confetti, or a notice about a check-in (kind 'info') without it. Rendered once at the root, so it
+// works on every screen where a habit is checked.
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import React, { useEffect } from 'react';
@@ -8,21 +9,23 @@ import { Confetti } from '@/components/confetti';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { createThemedStyles, useThemedStyles } from '@/hooks/use-themed-styles';
 
-const ACCENT: Record<string, string> = { buddy: '#D2588F', streak: '#F2A93B', freeze: '#4BA3FF', badge: '#E7A72F', quest: '#4BA3FF', level: '#5B42D8', challenge: '#3BAA74', allDone: '#5B42D8' };
+const ACCENT: Record<string, string> = { buddy: '#D2588F', streak: '#F2A93B', freeze: '#4BA3FF', badge: '#E7A72F', quest: '#4BA3FF', level: '#5B42D8', challenge: '#3BAA74', allDone: '#5B42D8', info: '#4BA3FF' };
 
 export function CelebrationOverlay() {
   const styles = useThemedStyles(themedStyles);
   const { celebration, dismissCelebration } = useAppColorScheme();
 
   useEffect(() => {
-    if (celebration && Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    // A notice is not a success, so it does not buzz like one.
+    if (celebration && celebration.kind !== 'info' && Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   }, [celebration]);
 
   if (!celebration) return null;
   const accent = celebration.color ?? ACCENT[celebration.kind] ?? '#5B42D8';
+  const notice = celebration.kind === 'info';
   return (
     <Modal visible transparent animationType="fade" onRequestClose={dismissCelebration}>
-      <Pressable style={styles.backdrop} onPress={dismissCelebration} accessibilityLabel="Close celebration">
+      <Pressable style={styles.backdrop} onPress={dismissCelebration} accessibilityLabel={notice ? 'Close notice' : 'Close celebration'}>
         <Pressable style={styles.card} onPress={() => undefined} accessibilityViewIsModal>
           <View style={[styles.badge, { backgroundColor: accent }]}>
             <Ionicons name={celebration.icon as keyof typeof Ionicons.glyphMap} size={34} color="#FFFFFF" />
@@ -30,11 +33,11 @@ export function CelebrationOverlay() {
           <Text style={styles.title}>{celebration.title}</Text>
           <Text style={styles.message}>{celebration.message}</Text>
           <Pressable style={[styles.button, { backgroundColor: accent }]} onPress={dismissCelebration} accessibilityRole="button">
-            <Text style={styles.buttonText}>Keep going</Text>
+            <Text style={styles.buttonText}>{notice ? 'Got it' : 'Keep going'}</Text>
           </Pressable>
         </Pressable>
         {/* In front of the card, so the burst falls over it; it ignores touches. */}
-        <Confetti burstKey={celebration.id} />
+        {notice ? null : <Confetti burstKey={celebration.id} />}
       </Pressable>
     </Modal>
   );

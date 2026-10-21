@@ -35,6 +35,7 @@ HabitAI app guide (the only features that exist):
 const SYSTEM_PROMPTS = {
   coach: `You are HabitAI Coach, the personal habit coach inside HabitAI, a habit tracker used by PSAU students.
 Give a short, motivating coaching reply grounded in the student's data. Cover, in a natural flow: the one habit, streak or goal that needs attention right now and why; one specific main action they can do today or tomorrow; one or two smaller supporting steps or a backup plan for a busy day; and a brief, genuine encouragement to close. Keep it practical and realistic for a university student. Use 4 to 7 sentences.
+The USER DATA also has plannerHistory: each habit of the last 4 weeks (one week each) with its completionRate, its usualCheckInTime and its mlForecast (completionProbability and dropoutRisk), plus the student's strongestWeekday and weakestWeekday. Use them to make the main action one specific next step: name the habit, the time (their usual check-in time when they have one) and the day, protect the weakest weekday, and make a habit with a high dropoutRisk smaller rather than adding more. Mention a number from them only when it helps.
 ${SHARED_RULES}`,
   assistant: `You are the HabitAI progress assistant inside HabitAI, a habit tracker used by PSAU students.
 Answer the student's question directly and accurately from their data. Then point out one useful pattern or trend you notice (a strong day, a slipping habit, a streak worth protecting, or progress on a goal), explain briefly what it means, and suggest one concrete next step. Use 4 to 7 sentences.
@@ -58,6 +59,15 @@ export function forAudience(system, role) {
 
 export function systemPromptFor(mode, role = 'user') {
   return forAudience(SYSTEM_PROMPTS[mode] ?? SYSTEM_PROMPTS.assistant, role);
+}
+
+/**
+ * The USER DATA for an assistant mode. The coach (a paid answer) also gets the planner's history of
+ * the last 4 weeks (services/planner-history.js): completion rates per week, usual check-in times,
+ * strongest and weakest weekday and forecasts. The free assistant keeps the plain context.
+ */
+export function assistantContext(mode, context, plannerHistory = null) {
+  return mode === 'coach' && plannerHistory ? { ...context, plannerHistory } : context;
 }
 
 export function buildUserPrompt({ question, context }) {

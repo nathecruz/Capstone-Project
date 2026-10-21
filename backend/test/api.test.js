@@ -96,30 +96,27 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
   });
   await new Promise((resolve) => mockMlService.listen(mlPort, '127.0.0.1', resolve));
 
-  const server = spawn(process.execPath, ['server.js'], {
-    cwd: path.resolve(import.meta.dirname, '..'),
-    env: {
-      ...process.env,
-      NODE_ENV: 'test',
-      DATABASE_URL: urlForSchema(testDatabaseUrl, schema),
-      PORT: String(port),
-      GROQ_API_KEY: '',
-      // Short, so the test can see a check-in lock without waiting 30 seconds.
-      CHECK_IN_UNDO_WINDOW_MS: '4000',
-      ML_SERVICE_API_KEY: 'dev-only-local-key',
-      ML_SERVICE_URL: `http://127.0.0.1:${mlPort}`,
-      WEB_PUSH_VAPID_PUBLIC_KEY: 'test-vapid-public-key',
-      WEB_PUSH_VAPID_PRIVATE_KEY: 'test-vapid-private-key',
-      WEB_PUSH_VAPID_SUBJECT: 'mailto:test@example.com',
-      // "Configured" SMTP that refuses connections: exercises verification and failure paths without sending mail.
-      SMTP_HOST: '127.0.0.1',
-      SMTP_PORT: String(deadSmtpPort),
-      SMTP_SECURE: 'false',
-      SMTP_USER: 'mailer@habitai.test',
-      SMTP_PASSWORD: 'not-a-real-password',
-    },
-    stdio: ['ignore', 'ignore', 'pipe'],
-  });
+  const serverEnv = {
+    ...process.env,
+    NODE_ENV: 'test',
+    DATABASE_URL: urlForSchema(testDatabaseUrl, schema),
+    PORT: String(port),
+    GROQ_API_KEY: '',
+    // Short, so the test can see a check-in lock without waiting 30 seconds.
+    CHECK_IN_UNDO_WINDOW_MS: '4000',
+    ML_SERVICE_API_KEY: 'dev-only-local-key',
+    ML_SERVICE_URL: `http://127.0.0.1:${mlPort}`,
+    WEB_PUSH_VAPID_PUBLIC_KEY: 'test-vapid-public-key',
+    WEB_PUSH_VAPID_PRIVATE_KEY: 'test-vapid-private-key',
+    WEB_PUSH_VAPID_SUBJECT: 'mailto:test@example.com',
+    // "Configured" SMTP that refuses connections: exercises verification and failure paths without sending mail.
+    SMTP_HOST: '127.0.0.1',
+    SMTP_PORT: String(deadSmtpPort),
+    SMTP_SECURE: 'false',
+    SMTP_USER: 'mailer@habitai.test',
+    SMTP_PASSWORD: 'not-a-real-password',
+  };
+  const server = spawn(process.execPath, ['server.js'], { cwd: path.resolve(import.meta.dirname, '..'), env: serverEnv, stdio: ['ignore', 'ignore', 'pipe'] });
   let serverErrors = '';
   server.stderr.on('data', (chunk) => { serverErrors += chunk; });
   const serverExit = new Promise((resolve) => server.once('exit', resolve));
@@ -134,16 +131,19 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
   });
 
   const baseUrl = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 90_000;
-  for (;;) {
-    try {
-      if ((await fetch(`${baseUrl}/healthz`)).ok) break;
-    } catch {
-      // still starting
+  const waitUntilUp = async (url, errors) => {
+    const deadline = Date.now() + 90_000;
+    for (;;) {
+      try {
+        if ((await fetch(`${url}/healthz`)).ok) return;
+      } catch {
+        // still starting
+      }
+      if (Date.now() > deadline) throw new Error(`Server did not start:\n${errors()}`);
+      await new Promise((resolve) => setTimeout(resolve, 250));
     }
-    if (Date.now() > deadline) throw new Error(`Server did not start:\n${serverErrors}`);
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
+  };
+  await waitUntilUp(baseUrl, () => serverErrors);
 
   /** Tokens from the rotating daily challenges (not "Finish N habits") in an answer's history. */
   const extraDailyTokens = (body) => body.tokenHistory.filter((item) => item.label.startsWith('Daily challenge: ')).reduce((sum, item) => sum + item.amount, 0);
@@ -390,7 +390,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
     const late = await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'habit-1', date: yesterday, completed: true, timeZone: 'UTC' }) });
     assert.equal(late.response.status, 409);
-    assert.equal(late.body.code, 'DAY_CLOSED');
+    assert.deepEqual([late.body.code, late.body.today, late.body.timeZone], ['DAY_CLOSED', today, 'UTC'], 'with the account\'s day, for the app to show');
 
     // habit-1 was checked in by the offline sync above; once the window has passed it is locked.
     await new Promise((resolve) => setTimeout(resolve, 4500));
@@ -501,7 +501,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     await db.query('UPDATE users SET email_verified_at = 1 WHERE email = $1', ['second@example.com']);
     const secondHeaders = { Authorization: `Bearer ${second.body.token}` };
     await request('/api/app-state', { method: 'PUT', headers: secondHeaders, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], label: 'Second user habit' }] }) });
-    const crossUser = await request('/api/habit-completions', { method: 'PUT', headers: secondHeaders, body: JSON.stringify({ habitId: 'habit-1', date: today, completed: true }) });
+    const crossUser = await request('/api/habit-completions', { method: 'PUT', headers: secondHeaders, body: JSON.stringify({ habitId: 'habit-1', date: today, completed: true, timeZone: 'UTC' }) });
     assert.equal(crossUser.body.points, 20, 'habit ids are scoped per user');
 
     const board = await request('/api/leaderboard?period=All%20Time', { headers: authHeaders });
@@ -1001,6 +1001,261 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const beforeTreat = await live();
     await request('/api/buddy/treats', { method: 'POST', headers, body: JSON.stringify({ treatId: 'apple' }) });
     assert.deepEqual(changed(beforeTreat, await live()), ['buddy', 'wallet'], 'a treat feed syncs the buddy collection and the wallet');
+  });
+
+  /** A verified student made directly in the database, with a session (sign-ups are rate-limited per network). */
+  const student = async (firstName, lastName) => {
+    const id = crypto.randomUUID();
+    const handle = `${firstName}_${lastName}`.toLowerCase();
+    await db.query(
+      `INSERT INTO users(id, full_name, first_name, last_name, username, email, password_hash, created_at, email_verified_at, privacy_consent_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'not-a-password', $7, 1, 1)`,
+      [id, `${firstName} ${lastName}`, firstName, lastName, handle, `${handle}@example.com`, Date.now()],
+    );
+    const session = async () => {
+      const secret = crypto.randomBytes(32).toString('hex');
+      await db.query('INSERT INTO sessions(token_hash, user_id, expires_at) VALUES ($1, $2, $3)', [crypto.createHash('sha256').update(secret).digest('hex'), id, Date.now() + 60 * 60 * 1000]);
+      return { Authorization: `Bearer ${secret}` };
+    };
+    return { userId: id, headers: await session(), session };
+  };
+  const dateIn = (zone) => new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const grant = (userId, amount, id) => db.query("INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,$3,'Test grant',$4,$5)", [`${userId}:token:${id}`, userId, amount, new Date().toISOString(), Date.now()]);
+  let capped;
+
+  await t.test('tokens are paid for 6 check-ins a day; undoing, deleting and re-creating never pay more', async () => {
+    capped = await student('Cap', 'Tester');
+    const { headers, userId } = capped;
+    const ids = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7', 'h8'];
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: ids.map((id) => ({ ...appState.habits[0], id, label: `Habit ${id}` })) }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    const checkIn = (habitId, completed = true) => request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId, date: today, completed, timeZone: 'UTC' }) });
+    // Today's check-in tokens (and any undo row, which must never be written again).
+    const checkInRows = async () => (await db.query("SELECT amount FROM token_transactions WHERE user_id=$1 AND (id LIKE '%:token:check-in:%:' || $2::text OR id LIKE '%:token:undo:%')", [userId, today])).rows.map((row) => row.amount);
+    const paid = async () => (await checkInRows()).reduce((sum, amount) => sum + amount, 0);
+
+    for (const [index, habitId] of ids.slice(0, 6).entries()) {
+      const done = await checkIn(habitId);
+      assert.equal(done.response.status, 200, JSON.stringify(done.body));
+      assert.deepEqual([done.body.tokenCapped, done.body.paidCheckInsToday, done.body.paidCheckInsLimit], [false, index + 1, 6], habitId);
+    }
+    const seventh = await checkIn('h7');
+    assert.deepEqual([seventh.body.tokenCapped, seventh.body.paidCheckInsToday, seventh.body.paidCheckInsLimit], [true, 6, 6], 'the 7th check-in pays 0');
+    assert.deepEqual(seventh.body.habit.completionDates, [today], 'but it is kept, for the streak, challenges and quests');
+    assert.equal(await paid(), 30);
+
+    // Undoing the unpaid check-in takes nothing (it used to write -5); undoing a paid one frees its slot.
+    const undoCapped = await checkIn('h7', false);
+    assert.deepEqual([undoCapped.response.status, undoCapped.body.tokenCapped], [200, false]);
+    assert.deepEqual(await checkInRows(), [5, 5, 5, 5, 5, 5], 'undoing a capped check-in writes no negative row');
+    const undo = await checkIn('h6', false);
+    assert.equal(undo.body.paidCheckInsToday, 5, 'an undo frees a slot');
+    const eighth = await checkIn('h8');
+    assert.deepEqual([eighth.body.tokenCapped, eighth.body.paidCheckInsToday], [false, 6]);
+    assert.equal(await paid(), 30);
+
+    // Deleting a habit checked in today takes its +5 back, so delete + re-create + check-in pays 0.
+    // Earlier days keep theirs, so cleaning up history never makes a balance negative.
+    const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+    await db.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4)', [userId, 'h1', yesterday, Date.now()]);
+    await db.query("INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,5,'Completed Habit h1',$3,$4)", [`${userId}:token:check-in:h1:${yesterday}`, userId, new Date().toISOString(), Date.now()]);
+    const deleted = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...eighth.body.state, habits: eighth.body.state.habits.filter((habit) => habit.id !== 'h1'), baseUpdatedAt: eighth.body.updatedAt, baseState: eighth.body.state }) });
+    assert.deepEqual([deleted.response.status, deleted.body.merged], [200, false], JSON.stringify(deleted.body));
+    assert.equal(await paid(), 25, 'deleting a habit checked in today removes its +5');
+    assert.equal((await db.query('SELECT 1 FROM token_transactions WHERE id=$1', [`${userId}:token:check-in:h1:${yesterday}`])).rowCount, 1, "yesterday's +5 stays");
+    const recreated = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...deleted.body.state, habits: [...deleted.body.state.habits, { ...appState.habits[0], id: 'h1', label: 'Habit h1' }], baseUpdatedAt: deleted.body.updatedAt, baseState: deleted.body.state }) });
+    assert.equal(recreated.response.status, 200, JSON.stringify(recreated.body));
+    const again = await checkIn('h1');
+    assert.equal(again.response.status, 200, JSON.stringify(again.body));
+    assert.equal(await paid(), 30, 'after 6 paid check-ins, delete + re-create + check-in pays 0');
+    const renamed = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...again.body.state, habits: [...again.body.state.habits.filter((habit) => habit.id !== 'h2'), { ...appState.habits[0], id: 'h2-new', label: 'Habit h2' }], baseUpdatedAt: again.body.updatedAt, baseState: again.body.state }) });
+    assert.equal(renamed.response.status, 200, JSON.stringify(renamed.body));
+    assert.equal((await checkIn('h2-new')).body.tokenCapped, false);
+    assert.equal(await paid(), 30, 'the same under a new habit id');
+    assert.equal((await db.query('SELECT 1 FROM token_transactions WHERE user_id=$1 AND amount < 0', [userId])).rowCount, 0, 'nothing was ever charged back');
+  });
+
+  await t.test('the 121st check-in request in 15 minutes gets 429', async () => {
+    const headers = await capped.session();
+    const send = (sessionHeaders = headers) => request('/api/habit-completions', { method: 'PUT', headers: sessionHeaders, body: JSON.stringify({ habitId: 'missing', date: today, completed: true, timeZone: 'UTC' }) });
+    for (let sent = 0; sent < 120; sent += 20) {
+      const answers = await Promise.all(Array.from({ length: 20 }, () => send()));
+      assert.ok(answers.every((answer) => answer.response.status === 404), 'within the limit');
+    }
+    const over = await send();
+    assert.equal(over.response.status, 429);
+    assert.deepEqual(over.body, { ok: false, message: 'Too many check-ins. Please wait a few minutes and try again.' });
+    assert.equal((await request('/api/habit-completions', { headers })).response.status, 200, 'reading check-ins is not limited');
+    assert.equal((await send(capped.headers)).response.status, 404, 'the limit is per session');
+  });
+
+  await t.test('from the cap date a day counts 6 check-ins toward points, the leaderboard and Habi', async () => {
+    const { headers, userId } = await student('Ivy', 'Ocampo');
+    // 2026-10-27 is on or after CHECK_IN_CAP_FROM (2026-10-26); the check-ins are made in the database.
+    for (let index = 0; index < 8; index += 1) await db.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4)', [userId, `h${index}`, '2026-10-27', Date.now()]);
+    const points = async () => (await request('/api/leaderboard?period=All%20Time', { headers })).body.leaders.find((leader) => leader.isYou).points;
+    assert.equal(await points(), 120, 'a day with 8 check-ins after the cap date shows 120 points');
+    assert.equal((await request('/api/buddy', { headers })).body.buddy.checkIns, 6, 'Habi grows on the same 6');
+    // A day before the cap date keeps all 8, so no points already shown are lost.
+    for (let index = 0; index < 8; index += 1) await db.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4)', [userId, `h${index}`, '2026-10-25', Date.now()]);
+    assert.equal(await points(), 280);
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: Array.from({ length: 8 }, (_, index) => ({ ...appState.habits[0], id: `h${index}`, label: `Habit ${index}` })) }) });
+    assert.equal(saved.body.state.points, 280, 'the profile shows the same points');
+    assert.equal((await request('/api/leaderboard/sync', { method: 'POST', headers, body: JSON.stringify({}) })).body.points, 280);
+  });
+
+  await t.test('the account day: a western time zone or a habit\'s own zone cannot reopen a day', async () => {
+    const { headers, userId } = await student('Zoe', 'Travel');
+    const east = dateIn('Pacific/Kiritimati');
+    // Always one or two days before Kiritimati's.
+    const west = dateIn('Pacific/Pago_Pago');
+    const zone = async () => (await db.query('SELECT time_zone AS "timeZone", day_floor::text AS floor FROM users WHERE id=$1', [userId])).rows[0];
+    // The app opens in Kiritimati: the first zone is stored with no floor.
+    assert.equal((await request(`/api/daily-claim?date=${east}&timeZone=Pacific/Kiritimati`, { headers })).response.status, 200);
+    assert.deepEqual(await zone(), { timeZone: 'Pacific/Kiritimati', floor: null });
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], id: 'trip', label: 'Trip journal' }, { ...appState.habits[0], id: 'forever', label: 'Forever', activeUntil: '2030-01-01' }] }) });
+    assert.deepEqual(saved.body.state.habits.map((habit) => habit.activeUntil), [weekEndKey(east), weekEndKey(east)], 'a habit cannot be stamped past its week');
+    const first = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'trip', date: east, completed: true, timeZone: 'Pacific/Kiritimati' }) });
+    assert.equal(first.response.status, 200, JSON.stringify(first.body));
+
+    // Switching the phone to Pago Pago cannot reopen a day before Kiritimati's, for check-ins or claims.
+    const reopened = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'trip', date: west, completed: true, timeZone: 'Pacific/Pago_Pago' }) });
+    assert.equal(reopened.response.status, 409, JSON.stringify(reopened.body));
+    assert.deepEqual([reopened.body.code, reopened.body.today, reopened.body.timeZone], ['DAY_CLOSED', east, 'Pacific/Kiritimati']);
+    const claim = await request('/api/daily-claim', { method: 'POST', headers, body: JSON.stringify({ date: west, timeZone: 'Pacific/Pago_Pago' }) });
+    assert.deepEqual([claim.response.status, claim.body.code, claim.body.today], [409, 'DAY_CLOSED', east]);
+    assert.deepEqual(await zone(), { timeZone: 'Pacific/Kiritimati', floor: null }, 'a refused request changes nothing');
+
+    // An offline save whose habits claim another time zone cannot add that zone's day either.
+    const latest = (await request('/api/app-state', { headers })).body;
+    const forged = latest.state.habits.map((habit) => ({ ...habit, completionTimeZone: 'Pacific/Pago_Pago', completionDates: [...habit.completionDates, west] }));
+    const offline = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...latest.state, habits: forged, baseUpdatedAt: latest.updatedAt, baseState: latest.state }) });
+    assert.equal(offline.response.status, 200, JSON.stringify(offline.body));
+    const days = (await db.query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1 ORDER BY habit_id', [userId])).rows;
+    assert.deepEqual(days, [{ habitId: 'trip', date: east }], 'offline sync with a forged completionTimeZone cannot add yesterday');
+    // A forged last day sent later is cut back to the habit's week too.
+    const extended = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...offline.body.state, habits: offline.body.state.habits.map((habit) => ({ ...habit, activeUntil: '2030-01-01' })), baseUpdatedAt: offline.body.updatedAt, baseState: offline.body.state }) });
+    assert.deepEqual(extended.body.state.habits.map((habit) => habit.activeUntil), [weekEndKey(east), weekEndKey(east)]);
+  });
+
+  await t.test('the leaderboard follows the Manila calendar, with public row ids and no write-only rows', async () => {
+    const { headers, userId } = await student('Lea', 'Board');
+    process.env.DATABASE_URL ||= urlForSchema(testDatabaseUrl, schema);
+    const { getPeriodRange, periodLabel, periodResetsAt } = await import('../lib/http.js');
+    const { leaderboardRows } = await import('../routes/gamification.js');
+    for (const [habitId, date] of [['sunday', '2026-10-25'], ['monday', '2026-10-26'], ['later', '2026-11-02']]) {
+      await db.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4)', [userId, habitId, date, Date.now()]);
+    }
+    // Monday Oct 26, 02:00 in Manila (Sunday 18:00 UTC): the UTC week still ran from Oct 19.
+    const mondayRange = getPeriodRange('This Week', new Date('2026-10-25T18:00:00Z'));
+    assert.deepEqual(mondayRange, { start: '2026-10-26', end: '2026-11-01' });
+    const pointsIn = async (range) => (await leaderboardRows(db, userId, range)).find((row) => row.id === userId).points;
+    assert.equal(await pointsIn(mondayRange), 20, "only Monday counts: Sunday was last week's, and a check-in dated after the range never counts");
+    assert.equal(await pointsIn(getPeriodRange('This Week', new Date('2026-10-25T15:59:00Z'))), 20, 'Sunday 23:59 is still the week of Oct 19');
+    assert.equal(await pointsIn(null), 60);
+
+    const board = await request('/api/leaderboard?period=This%20Week', { headers });
+    assert.equal(board.response.status, 200, JSON.stringify(board.body));
+    const week = getPeriodRange('This Week');
+    assert.deepEqual(board.body.range, { ...week, timeZone: 'Asia/Manila', resetsAt: periodResetsAt(week) });
+    assert.equal(board.body.date, periodLabel(week));
+    const all = await request('/api/leaderboard?period=All%20Time', { headers });
+    assert.deepEqual([all.body.date, all.body.range], ['Since joining', null]);
+    const ids = all.body.leaders.map((leader) => leader.id);
+    assert.ok(ids.length >= 2 && ids.every((id) => /^[0-9a-f]{12}$/.test(id)), ids.join(', '));
+    assert.equal(new Set(ids).size, ids.length, 'every row has its own id');
+    const internal = (await db.query('SELECT id FROM users')).rows.map((row) => row.id);
+    assert.ok(internal.every((id) => !JSON.stringify(all.body).includes(id)), 'no internal user ids');
+    assert.ok(all.body.leaders.every((leader) => leader.canGift === false && leader.buddy === null));
+
+    // Sync keeps only the student's own row, and writes nothing when it is already current.
+    const synced = await request('/api/leaderboard/sync', { method: 'POST', headers, body: JSON.stringify({ avatar: 'L' }) });
+    assert.deepEqual([synced.response.status, synced.body.points], [200, 60]);
+    const row = async () => (await db.query('SELECT points, avatar, xmin::text AS version FROM leaderboard_users WHERE user_id=$1', [userId])).rows[0];
+    const before = await row();
+    assert.deepEqual([before.points, before.avatar], [60, 'L']);
+    await request('/api/leaderboard/sync', { method: 'POST', headers, body: JSON.stringify({ avatar: 'L' }) });
+    assert.equal((await row()).version, before.version, 'nothing changed: no write');
+    const counts = (await db.query('SELECT (SELECT COUNT(*) FROM leaderboard_snapshots)::int AS snapshots, (SELECT COUNT(*) FROM leaderboard_daily_points)::int AS daily')).rows[0];
+    assert.deepEqual(counts, { snapshots: 0, daily: 0 }, '/sync writes no snapshot or daily-points rows');
+  });
+
+  await t.test('the AI Coach is charged once under the lock and gives the tokens back when the AI fails', async () => {
+    // A second API with an AI key, whose Groq calls go to a local stub.
+    let groqStatus = 200;
+    const asked = [];
+    const groq = createServer(async (incoming, outgoing) => {
+      let body = '';
+      for await (const chunk of incoming) body += chunk;
+      outgoing.setHeader('Content-Type', 'application/json');
+      if (incoming.url.endsWith('/models')) return outgoing.end(JSON.stringify({ object: 'list', data: [{ id: 'llama-3.3-70b-versatile', object: 'model', active: true }] }));
+      asked.push(JSON.parse(body));
+      // Slow enough for a second question to arrive while the first is answered.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      outgoing.statusCode = groqStatus;
+      outgoing.end(JSON.stringify(groqStatus === 200 ? { choices: [{ message: { role: 'assistant', content: 'Do Trip journal at 9 PM tonight, before Sunday.' } }] } : { error: { message: 'The stub refused.' } }));
+    });
+    const groqPort = port + 4000;
+    await new Promise((resolve) => groq.listen(groqPort, '127.0.0.1', resolve));
+    const redirect = `globalThis.fetch = ((send) => (url, init) => send(String(url).replace('https://api.groq.com/openai/v1', 'http://127.0.0.1:${groqPort}'), init))(globalThis.fetch);`;
+    const aiPort = port + 3000;
+    const aiServer = spawn(process.execPath, ['--import', `data:text/javascript,${encodeURIComponent(redirect)}`, 'server.js'], {
+      cwd: path.resolve(import.meta.dirname, '..'),
+      env: { ...serverEnv, PORT: String(aiPort), GROQ_API_KEY: `gsk_${'stub'.repeat(13)}` },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let aiErrors = '';
+    aiServer.stderr.on('data', (chunk) => { aiErrors += chunk; });
+    const aiExit = new Promise((resolve) => aiServer.once('exit', resolve));
+    try {
+      const aiBase = `http://127.0.0.1:${aiPort}`;
+      await waitUntilUp(aiBase, () => aiErrors);
+      const { headers, userId } = await student('Cole', 'Coach');
+      await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], id: 'trip', label: 'Trip journal' }] }) });
+      const ask = async (mode = 'coach') => {
+        const response = await fetch(`${aiBase}/api/insights/assistant`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify({ question: 'What should I do next?', mode, timeZone: 'UTC' }) });
+        return { status: response.status, body: await response.json() };
+      };
+      const coachRows = async () => (await db.query("SELECT id, amount FROM token_transactions WHERE user_id=$1 AND id LIKE '%:coach:%' ORDER BY created_at, id", [userId])).rows;
+      const balance = async () => (await db.query('SELECT COALESCE(SUM(amount),0)::int AS sum FROM token_transactions WHERE user_id=$1', [userId])).rows[0].sum;
+
+      // Two questions at once with tokens for one: one answer and one 402.
+      await grant(userId, 10, 'coach-grant-1');
+      const both = await Promise.all([ask(), ask()]);
+      assert.deepEqual(both.map((answer) => answer.status).sort(), [200, 402], JSON.stringify(both.map((answer) => answer.body)));
+      const answered = both.find((answer) => answer.status === 200).body;
+      assert.deepEqual([answered.answer, answered.tokens], ['Do Trip journal at 9 PM tonight, before Sunday.', 0]);
+      assert.equal(both.find((answer) => answer.status === 402).body.error, 'You need 10 tokens to ask the AI Coach. Complete habits to earn more.');
+      assert.equal(asked.length, 1, 'the AI was asked once');
+      assert.deepEqual((await coachRows()).map((row) => [row.id.replace(/[0-9a-f-]{36}$/, '<uuid>'), row.amount]), [[`${userId}:token:spend:coach:<uuid>`, -10]]);
+      // The coach reads the planner history; its instructions say how to use it.
+      const [system, user] = asked[0].messages;
+      assert.match(system.content, /plannerHistory/);
+      assert.ok(JSON.parse(user.content.split('\n')[1]).plannerHistory.habits.some((habit) => habit.name === 'Trip journal'));
+
+      // The AI fails after the charge: the 10 tokens come back, once.
+      await grant(userId, 10, 'coach-grant-2');
+      groqStatus = 400;
+      const failed = await ask();
+      assert.equal(failed.status, 502);
+      assert.deepEqual(failed.body, { ok: false, error: 'The AI service is temporarily unavailable.', refunded: true, tokens: 10 });
+      assert.equal(await balance(), 10, 'a failing AI call leaves the balance unchanged');
+      const rows = await coachRows();
+      const spends = rows.filter((row) => row.id.includes(':token:spend:coach:'));
+      assert.equal(spends.length, 2);
+      assert.deepEqual(rows.filter((row) => row.id.includes(':token:refund:coach:')), [{ id: `${userId}:token:refund:coach:${spends[1].id.split(':').at(-1)}`, amount: 10 }], 'the refund names the charge it gives back');
+
+      // The free assistant costs nothing and gets no planner history.
+      groqStatus = 200;
+      const free = await ask('assistant');
+      assert.equal(free.status, 200, JSON.stringify(free.body));
+      assert.equal(JSON.parse(asked.at(-1).messages[1].content.split('\n')[1]).plannerHistory, undefined);
+      assert.equal(await balance(), 10);
+    } finally {
+      aiServer.kill();
+      await aiExit;
+      await new Promise((resolve) => groq.close(resolve));
+    }
   });
 
   await t.test('issue reports store attachments in the database and validate content', async () => {

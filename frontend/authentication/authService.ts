@@ -855,19 +855,32 @@ export async function getRemoteHabitCompletions() {
   }
 }
 
+/**
+ * Why the server refused a check-in: its code (DAY_CLOSED, PAST_DEADLINE, CHECK_IN_LOCKED,
+ * HABIT_ENDED; none for a rate limit) and, for DAY_CLOSED, the account's own today and time zone.
+ */
+export type CheckInRejection = { rejected: true; code?: string; message: string; today?: string; timeZone?: string };
+
+const textField = (payload: Record<string, unknown>, key: string) => (typeof payload[key] === 'string' ? payload[key] as string : undefined);
+
 export async function saveRemoteHabitCompletion(completion: HabitCompletion & { completed: boolean }) {
   const token = await getSessionToken();
   if (!token) return null;
   try {
-    return await apiRequest<{ ok: boolean; updatedAt?: number; state?: AppStateSyncPayload; completions?: HabitCompletion[]; points?: number; tokens?: number; tokenHistory?: object[]; habit?: { id: string; streak: number; done: boolean } | null; dailyChallenges?: DailyChallenge[] }>('/api/habit-completions', {
+    // tokenCapped: this check-in was saved (and counts for streaks, challenges and quests) but
+    // paid no tokens, as the day's paid check-ins (paidCheckInsLimit) were already used.
+    return await apiRequest<{ ok: boolean; updatedAt?: number; state?: AppStateSyncPayload; completions?: HabitCompletion[]; points?: number; tokens?: number; tokenHistory?: object[]; habit?: { id: string; streak: number; done: boolean } | null; dailyChallenges?: DailyChallenge[]; tokenCapped?: boolean; paidCheckInsToday?: number; paidCheckInsLimit?: number }>('/api/habit-completions', {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({ ...completion, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }),
     });
   } catch (error) {
-    // A definitive client rejection (the day is closed, the habit is missed, or an undo is locked)
-    // must undo the optimistic change; a network error keeps it so it can sync later.
-    if (error instanceof ApiRequestError && error.status >= 400 && error.status < 500) return { rejected: true };
+    // A definitive client rejection (the day is closed, the habit is missed, an undo is locked, or
+    // too many check-ins) must undo the optimistic change; a network error keeps it so it can sync later.
+    if (error instanceof ApiRequestError && error.status >= 400 && error.status < 500) {
+      const rejection: CheckInRejection = { rejected: true, code: textField(error.payload, 'code'), message: error.message, today: textField(error.payload, 'today'), timeZone: textField(error.payload, 'timeZone') };
+      return rejection;
+    }
     return null;
   }
 }

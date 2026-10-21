@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { isTemplateValue, loadEnvironment } from '../config/env.js';
 import { originMatcher } from '../config/index.js';
+import { getPeriodRange, periodLabel, periodResetsAt } from '../lib/http.js';
 import { goalPlanSchema } from '../schemas.js';
 import { buildHabitContext, habitFrequency } from '../services/ai-context.js';
 import { FACULTY_CONTEXT, buildUserPrompt, cleanAnswer, forAudience, normalizeGoalPlan, systemPromptFor } from '../services/ai-prompts.js';
@@ -344,4 +345,35 @@ test('faculty accounts get AI advice for a teacher, students keep theirs', () =>
   assert.equal(systemPromptFor('coach', 'user'), systemPromptFor('coach'));
   assert.equal(forAudience('Plan goals.', 'admin'), 'Plan goals.');
   assert.equal(forAudience('Plan goals.', 'faculty'), `Plan goals.\n${FACULTY_CONTEXT}`);
+});
+
+test('leaderboard weeks and months follow the Manila calendar, not UTC', () => {
+  const manila = (local) => new Date(`${local}+08:00`);
+  // Sunday 23:59 is still last week; Monday 00:00 (Sunday 16:00 UTC) starts the new one.
+  assert.deepEqual(getPeriodRange('This Week', manila('2026-10-25T23:59:00')), { start: '2026-10-19', end: '2026-10-25' });
+  assert.deepEqual(getPeriodRange('This Week', manila('2026-10-26T00:00:00')), { start: '2026-10-26', end: '2026-11-01' });
+  assert.deepEqual(getPeriodRange('This Week', manila('2026-10-26T01:00:00')), { start: '2026-10-26', end: '2026-11-01' }, 'the old UTC week still started Oct 19 here');
+  // Oct 31 to Nov 1, and Dec 31 to Jan 1 (a week that spans two years).
+  assert.deepEqual(getPeriodRange('This Month', manila('2026-10-31T23:59:00')), { start: '2026-10-01', end: '2026-10-31' });
+  assert.deepEqual(getPeriodRange('This Month', manila('2026-11-01T00:00:00')), { start: '2026-11-01', end: '2026-11-30' });
+  assert.deepEqual(getPeriodRange('This Week', manila('2026-11-01T00:00:00')), { start: '2026-10-26', end: '2026-11-01' }, 'Sunday Nov 1 ends the week of Oct 26');
+  assert.deepEqual(getPeriodRange('This Month', manila('2026-12-31T23:59:00')), { start: '2026-12-01', end: '2026-12-31' });
+  assert.deepEqual(getPeriodRange('This Month', manila('2027-01-01T00:00:00')), { start: '2027-01-01', end: '2027-01-31' });
+  assert.deepEqual(getPeriodRange('This Week', manila('2026-12-31T23:59:00')), { start: '2026-12-28', end: '2027-01-03' });
+  assert.deepEqual(getPeriodRange('This Week', manila('2027-01-01T00:00:00')), { start: '2026-12-28', end: '2027-01-03' });
+  assert.deepEqual(getPeriodRange('This Month', manila('2028-02-10T12:00:00')), { start: '2028-02-01', end: '2028-02-29' }, 'a leap year');
+  assert.equal(getPeriodRange('All Time', manila('2026-10-26T00:00:00')), null);
+  assert.deepEqual(getPeriodRange('This Week', new Date('2026-10-25T20:00:00Z'), 'America/Los_Angeles'), { start: '2026-10-19', end: '2026-10-25' }, 'another campus zone');
+
+  assert.deepEqual([periodLabel({ start: '2026-10-26', end: '2026-11-01' }), periodLabel({ start: '2026-10-01', end: '2026-10-31' })], ['Oct 26 - Nov 1', 'Oct 1 - Oct 31']);
+});
+
+test('a leaderboard period resets at midnight after its last day, in the zone', () => {
+  assert.equal(periodResetsAt({ start: '2026-10-26', end: '2026-11-01' }), Date.parse('2026-11-02T00:00:00+08:00'));
+  assert.equal(periodResetsAt({ start: '2026-12-01', end: '2026-12-31' }, 'Asia/Manila'), Date.parse('2027-01-01T00:00:00+08:00'));
+  // Daylight saving: New York's clocks go back on Nov 1, 2026 and forward on Mar 14, 2027.
+  assert.equal(periodResetsAt({ start: '2026-10-26', end: '2026-10-31' }, 'America/New_York'), Date.parse('2026-11-01T00:00:00-04:00'));
+  assert.equal(periodResetsAt({ start: '2026-11-02', end: '2026-11-08' }, 'America/New_York'), Date.parse('2026-11-09T00:00:00-05:00'));
+  assert.equal(periodResetsAt({ start: '2027-03-01', end: '2027-03-13' }, 'America/New_York'), Date.parse('2027-03-14T00:00:00-05:00'));
+  assert.equal(periodResetsAt({ start: '2027-03-01', end: '2027-03-14' }, 'America/New_York'), Date.parse('2027-03-15T00:00:00-04:00'));
 });

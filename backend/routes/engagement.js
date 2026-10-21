@@ -1,10 +1,11 @@
 import { query, withTransaction } from '../db/client.js';
+import { walletLimiter } from '../http/rate-limits.js';
 import { parse } from '../lib/http.js';
 import { buddyItemSchema, buddySaveSchema, buddyTreatSchema, dayInputSchema, mysteryBoxSchema, streakFreezeSchema, webPushDoneSchema } from '../schemas.js';
+import { dayClosedBody, resolveAccountDay } from '../services/account-day.js';
 import { requireAuth } from '../services/accounts.js';
 import { buyBuddyItem, feedTreat, getBuddy, saveBuddy } from '../services/buddy.js';
 import { setCheckIn } from '../services/check-ins.js';
-import { isOpenCheckInDate } from '../services/completion-date.js';
 import { getDailyChallenges } from '../services/daily-challenges.js';
 import { claimDaily, getDailyClaim } from '../services/daily-claims.js';
 import { getLiveVersions } from '../services/live.js';
@@ -14,6 +15,14 @@ import { wakeMlService } from '../services/ml-wake.js';
 import { getWallet } from '../services/wallet.js';
 import { doneActionSecret, readDoneToken } from '../services/web-push-actions.js';
 
+/** The account day of a GET with ?date&timeZone (services/account-day.js), or null when the query is not the account's today. */
+async function queryDay(request, userId) {
+  const input = dayInputSchema.safeParse({ date: request.query.date, ...(request.query.timeZone ? { timeZone: request.query.timeZone } : {}) });
+  if (!input.success) return null;
+  const day = await resolveAccountDay({ query }, userId, input.data);
+  return day.ok ? day : null;
+}
+
 export default function registerEngagementRoutes(app) {
   // Habit Buddy: what it wears, what was bought, the shop and how many check-ins it has grown on.
   app.get('/api/buddy', async (request, response) => {
@@ -22,7 +31,7 @@ export default function registerEngagementRoutes(app) {
     response.json({ ok: true, buddy: await getBuddy({ query }, session.userId) });
   });
 
-  app.post('/api/buddy/items', async (request, response) => {
+  app.post('/api/buddy/items', walletLimiter, async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
     const input = parse(buddyItemSchema, request, response);
@@ -48,7 +57,7 @@ export default function registerEngagementRoutes(app) {
   });
 
   // Feeds a treat to the buddy: spends its tokens and returns the line it says.
-  app.post('/api/buddy/treats', async (request, response) => {
+  app.post('/api/buddy/treats', walletLimiter, async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
     const input = parse(buddyTreatSchema, request, response);
@@ -78,28 +87,27 @@ export default function registerEngagementRoutes(app) {
   app.get('/api/daily-challenges', async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
-    const input = dayInputSchema.safeParse({ date: request.query.date, ...(request.query.timeZone ? { timeZone: request.query.timeZone } : {}) });
-    if (!input.success || !isOpenCheckInDate(input.data.date, input.data.timeZone)) return response.status(400).json({ ok: false, message: 'Send your today and time zone.' });
-    response.json({ ok: true, challenges: await getDailyChallenges({ query }, session.userId, input.data.date, input.data.timeZone || 'UTC') });
+    const day = await queryDay(request, session.userId);
+    if (!day) return response.status(400).json({ ok: false, message: 'Send your today and time zone.' });
+    response.json({ ok: true, challenges: await getDailyChallenges({ query }, session.userId, day.today, day.timeZone) });
   });
 
   // The daily claim calendar, and claiming today's reward (once a day).
   app.get('/api/daily-claim', async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
-    const input = dayInputSchema.safeParse({ date: request.query.date, ...(request.query.timeZone ? { timeZone: request.query.timeZone } : {}) });
-    if (!input.success || !isOpenCheckInDate(input.data.date, input.data.timeZone)) return response.status(400).json({ ok: false, message: 'Send your today and time zone.' });
-    response.json({ ok: true, ...await getDailyClaim({ query }, session.userId, input.data.date) });
+    const day = await queryDay(request, session.userId);
+    if (!day) return response.status(400).json({ ok: false, message: 'Send your today and time zone.' });
+    response.json({ ok: true, ...await getDailyClaim({ query }, session.userId, day.today) });
   });
 
-  app.post('/api/daily-claim', async (request, response) => {
+  app.post('/api/daily-claim', walletLimiter, async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
     const input = parse(dayInputSchema, request, response);
     if (!input) return;
-    if (!isOpenCheckInDate(input.date, input.timeZone)) {
-      return response.status(409).json({ ok: false, code: 'DAY_CLOSED', message: 'That day is over. Claim today\'s reward instead.' });
-    }
+    const day = await resolveAccountDay({ query }, session.userId, input);
+    if (!day.ok) return response.status(409).json(dayClosedBody(day, 'That day is over. Claim today\'s reward instead.'));
     const result = await withTransaction(async (db) => {
       await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
       const claim = await claimDaily(db, session.userId, input.date);
@@ -110,14 +118,13 @@ export default function registerEngagementRoutes(app) {
   });
 
   // The daily mystery box, opened once after the day's first check-in.
-  app.post('/api/mystery-box/open', async (request, response) => {
+  app.post('/api/mystery-box/open', walletLimiter, async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
     const input = parse(mysteryBoxSchema, request, response);
     if (!input) return;
-    if (!isOpenCheckInDate(input.date, input.timeZone)) {
-      return response.status(409).json({ ok: false, code: 'DAY_CLOSED', message: 'That day is over. A new box waits after today\'s first check-in.' });
-    }
+    const day = await resolveAccountDay({ query }, session.userId, input);
+    if (!day.ok) return response.status(409).json(dayClosedBody(day, 'That day is over. A new box waits after today\'s first check-in.'));
     const result = await withTransaction(async (db) => {
       await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
       const opened = await openMysteryBox(db, session.userId, input.date);
@@ -141,7 +148,8 @@ export default function registerEngagementRoutes(app) {
     if (!session) return;
     const input = parse(streakFreezeSchema, request, response);
     if (!input) return;
-    if (!isOpenCheckInDate(input.date, input.timeZone)) return response.status(409).json({ ok: false, code: 'DAY_CLOSED', message: 'Send the device\'s today.' });
+    const day = await resolveAccountDay({ query }, session.userId, input);
+    if (!day.ok) return response.status(409).json(dayClosedBody(day, 'Send the device\'s today.'));
     const result = await withTransaction(async (db) => {
       await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
       const used = await applyStreakFreezes(db, session.userId, input.date);
@@ -150,12 +158,13 @@ export default function registerEngagementRoutes(app) {
     response.json({ ok: true, ...result });
   });
 
-  app.post('/api/streak-freezes/buy', async (request, response) => {
+  app.post('/api/streak-freezes/buy', walletLimiter, async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
     const input = parse(streakFreezeSchema, request, response);
     if (!input) return;
-    if (!isOpenCheckInDate(input.date, input.timeZone)) return response.status(409).json({ ok: false, code: 'DAY_CLOSED', message: 'Send the device\'s today.' });
+    const day = await resolveAccountDay({ query }, session.userId, input);
+    if (!day.ok) return response.status(409).json(dayClosedBody(day, 'Send the device\'s today.'));
     const result = await withTransaction(async (db) => {
       await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
       const refused = await buyStreakFreeze(db, session.userId);
@@ -176,10 +185,10 @@ export default function registerEngagementRoutes(app) {
     if (!action) return response.status(410).json({ ok: false, message: 'This reminder has expired. Open HabitAI to check in.' });
     const account = (await query('SELECT status, role FROM users WHERE id=$1', [action.userId])).rows[0];
     if (!account || account.status === 'deactivated' || account.role === 'admin') return response.status(403).json({ ok: false, message: 'This account cannot check in.' });
-    if (!isOpenCheckInDate(action.date, action.timeZone)) {
-      return response.status(409).json({ ok: false, code: 'DAY_CLOSED', message: 'That day is over. A missed day stays missed.' });
-    }
-    const result = await withTransaction((connection) => setCheckIn(connection, { ...action, completed: true }));
+    // A reminder never changes the account's time zone: only the app does.
+    const day = await resolveAccountDay({ query }, action.userId, action, { write: false });
+    if (!day.ok) return response.status(409).json(dayClosedBody(day, 'That day is over. A missed day stays missed.'));
+    const result = await withTransaction((connection) => setCheckIn(connection, { ...action, timeZone: day.timeZone, completed: true }));
     if (!result) return response.status(404).json({ ok: false, message: 'This habit no longer exists.' });
     if (result.pastDeadline) return response.status(409).json({ ok: false, code: 'PAST_DEADLINE', message: 'This habit passed its reminder time for today, so it is missed. It opens again on its next scheduled day.' });
     if (result.ended) return response.status(409).json({ ok: false, code: 'HABIT_ENDED', message: "This habit's week has ended. It stays in your history; add a new habit for this week." });

@@ -1,6 +1,8 @@
 import { query, withTransaction } from '../db/client.js';
+import { checkInLimiter } from '../http/rate-limits.js';
 import { parse } from '../lib/http.js';
 import { habitCompletionSchema, stateSchema } from '../schemas.js';
+import { dayClosedBody, getAccountDay, resolveAccountDay } from '../services/account-day.js';
 import { requireAuth } from '../services/accounts.js';
 import { recordActivity } from '../services/activity.js';
 import { keepCompletedGoalSteps, mergeAppState, normalizeAppState, withNewIncomingCheckIns } from '../services/app-state-sync.js';
@@ -15,8 +17,7 @@ import {
   syncNormalizedState,
 } from '../services/app-state-store.js';
 import { setCheckIn } from '../services/check-ins.js';
-import { isOpenCheckInDate } from '../services/completion-date.js';
-import { applyWallet, getWallet } from '../services/wallet.js';
+import { applyWallet, getWallet, PAID_CHECK_INS_PER_DAY } from '../services/wallet.js';
 import { notifyReminderChange } from '../services/web-push-clock.js';
 import { stampActiveUntil } from '../services/weekly-reset.js';
 
@@ -68,10 +69,12 @@ export default function registerAppStateRoutes(app) {
       // devices' habits and their check-ins. Merge it instead, with the server winning conflicts.
       const merged = Boolean(existing && (!baseState || Number(baseUpdatedAt) !== existingUpdatedAt));
       // Done goal steps stay done, whatever the device sends. Every habit gets its last active day
-      // (habits last one week); one it already has is kept, even if an older app version drops it.
+      // (habits last one week) for the account's today: one it already has is kept, even if an older
+      // app version drops it, and no app can extend a habit past its week or revive an ended one.
+      const { today } = await getAccountDay(connection, session.userId);
       const state = stampActiveUntil(keepCompletedGoalSteps(merged
         ? withNewIncomingCheckIns(mergeAppState(baseState || {}, currentState, incomingState), baseState, incomingState)
-        : normalizeAppState(incomingState), currentState), currentState);
+        : normalizeAppState(incomingState), currentState), currentState, new Date(), today);
 
       // Nothing the app owns changed (points, tokens and streaks are the server's): skip the write.
       if (existing && sameClientState(state, currentState)) return { state: currentState, updatedAt: existingUpdatedAt, merged, unchanged: true };
@@ -96,17 +99,16 @@ export default function registerAppStateRoutes(app) {
   });
 
   // The authoritative way to check in or undo: updates check-ins, tokens, streak and the snapshot together.
-  app.put('/api/habit-completions', async (request, response) => {
+  app.put('/api/habit-completions', checkInLimiter, async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
     const input = parse(habitCompletionSchema, request, response);
     if (!input) return;
-    if (!isOpenCheckInDate(input.date, input.timeZone)) {
-      return response.status(409).json({ ok: false, code: 'DAY_CLOSED', message: 'Only today can be checked in. A missed day stays missed.' });
-    }
+    const day = await resolveAccountDay({ query }, session.userId, input);
+    if (!day.ok) return response.status(409).json(dayClosedBody(day, 'Only today can be checked in. A missed day stays missed.'));
 
     const result = await withTransaction((connection) => setCheckIn(connection, {
-      userId: session.userId, habitId: input.habitId, date: input.date, timeZone: input.timeZone, completed: input.completed,
+      userId: session.userId, habitId: input.habitId, date: input.date, timeZone: day.timeZone, completed: input.completed,
     }));
     if (!result) return response.status(404).json({ ok: false, message: 'Habit not found.' });
     if (result.pastDeadline) return response.status(409).json({ ok: false, code: 'PAST_DEADLINE', message: 'This habit passed its reminder time for today, so it is missed. It opens again on its next scheduled day.' });
@@ -126,6 +128,11 @@ export default function registerAppStateRoutes(app) {
       tokenHistory: serverState.tokenHistory,
       habit: habit ? { id: habit.id, streak: habit.streak, done: habit.done, completionDates: habit.completionDates } : null,
       dailyChallenges: result.dailyChallenges,
+      // Tokens are paid for the day's first paidCheckInsLimit check-ins; later ones still count for
+      // streaks, challenges and quests.
+      tokenCapped: result.tokenCapped,
+      paidCheckInsToday: result.paidCheckInsToday,
+      paidCheckInsLimit: PAID_CHECK_INS_PER_DAY,
     });
   });
 }
