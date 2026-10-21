@@ -1,3 +1,5 @@
+import { activeUntilOf, isDateKey } from './habit-week.js';
+
 const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export function todayInZone(timeZone, now = new Date()) {
@@ -48,21 +50,26 @@ export function habitCreatedAt(habitId) {
   return match ? Number(match[1]) : null;
 }
 
+/** The first day a habit can be due: the later of its creation day and its start date (null if neither is known). */
+export function habitFirstDay(habit, timeZone) {
+  const created = habitCreatedAt(habit.id);
+  const days = [isDateKey(habit.start_date) ? habit.start_date : null, created ? todayInZone(timeZone, new Date(created)) : null].filter(Boolean);
+  return days.length ? days.sort().at(-1) : null;
+}
+
 /**
  * Scheduled check-ins a habit was expected to have in [startKey, endKey].
- * Habits created inside the window only count the days since creation.
+ * A habit is only expected from its first day (habitFirstDay) to its last active day: habits
+ * created inside the window only count the days since then, and ended ones stop at their week's end.
  */
 export function expectedCheckIns(habit, startKey, endKey, timeZone) {
   const perDay = expectedPerWeek(habit.meta) / 7;
-  const created = habitCreatedAt(habit.id);
-  let from = startKey;
-  if (created) {
-    const createdKey = todayInZone(timeZone, new Date(created));
-    if (createdKey > endKey) return 0;
-    if (createdKey > from) from = createdKey;
-  }
-  const days = dateRange(from, endKey).length;
-  return perDay * days;
+  const firstDay = habitFirstDay(habit, timeZone);
+  const activeUntil = activeUntilOf(habit);
+  const from = firstDay && firstDay > startKey ? firstDay : startKey;
+  const to = activeUntil && activeUntil < endKey ? activeUntil : endKey;
+  if (from > to) return 0;
+  return perDay * dateRange(from, to).length;
 }
 
 export function ratio(numerator, denominator) {

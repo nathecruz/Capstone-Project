@@ -14,7 +14,9 @@ import { RoleBadge, StatusBadge } from './Users';
 interface UserDetail {
   user: UserRow & { about: string };
   stats: {
+    /** Habits tracked now; `totalHabitCount` also counts habits whose week has ended. */
     habitCount: number;
+    totalHabitCount: number;
     completionCount: number;
     completions30d: number;
     bestStreak: number;
@@ -27,7 +29,8 @@ interface UserDetail {
     unreadNotifications: number;
     lastActiveAt: number | null;
   };
-  habits: { id: string; label: string; category: string; frequency: string; streak: number; reminderEnabled: boolean; reminderTime: string; completions: number; lastCompleted: string | null }[];
+  /** Current habits first, then ended ones (history) with the streak of their last day. */
+  habits: { id: string; label: string; category: string; frequency: string; streak: number; reminderEnabled: boolean; reminderTime: string; completions: number; lastCompleted: string | null; activeUntil: string | null; ended: boolean }[];
   loginHistory: { device: string; loginAt: string }[];
   dailyCompletions: { day: string; completions: number }[];
   achievements: { name: string; description: string; earnedAt: number }[];
@@ -94,7 +97,7 @@ export function UserDetailPage() {
       )}
 
       <div className="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
-        <StatTile label="Habits" value={formatNumber(stats.habitCount)} hint={`Best streak ${stats.bestStreak} day${stats.bestStreak === 1 ? '' : 's'}`} />
+        <StatTile label="Habits this week" value={formatNumber(stats.habitCount)} hint={`Best streak ${stats.bestStreak} day${stats.bestStreak === 1 ? '' : 's'} · ${stats.totalHabitCount} all time`} />
         <StatTile label="Check-ins (30 days)" value={formatNumber(stats.completions30d)} hint={`${stats.completionCount} all time`} />
         <StatTile label="Token balance" value={formatNumber(stats.tokenBalance)} />
         <StatTile label="Goals" value={formatNumber(stats.goalCount)} hint={stats.goalCount ? `${stats.goalAvgProgress}% average progress` : undefined} />
@@ -104,20 +107,23 @@ export function UserDetailPage() {
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
         <div className="flex flex-col gap-5 xl:col-span-2">
-          <Card title="Habits" subtitle="As last synced from the app" bodyClassName="!px-0 !pb-0">
+          <Card title="Habits" subtitle="As last synced from the app. Habits last one week; ended ones stay as history." bodyClassName="!px-0 !pb-0">
             {data.habits.length ? (
               <Table>
                 <thead>
-                  <tr><Th>Habit</Th><Th>Category</Th><Th>Frequency</Th><Th align="right">Streak</Th><Th>Reminder</Th><Th align="right">Check-ins</Th><Th>Last check-in</Th></tr>
+                  <tr><Th>Habit</Th><Th>Category</Th><Th>Frequency</Th><Th>Week ends</Th><Th align="right">Streak</Th><Th>Reminder</Th><Th align="right">Check-ins</Th><Th>Last check-in</Th></tr>
                 </thead>
                 <tbody>
                   {data.habits.map((habit) => (
                     <tr key={habit.id}>
-                      <Td className="font-medium">{habit.label}</Td>
+                      <Td className="font-medium">
+                        <span className="inline-flex flex-wrap items-center gap-2">{habit.label}{habit.ended && <Badge>Ended</Badge>}</span>
+                      </Td>
                       <Td>{habit.category || '—'}</Td>
                       <Td>{habit.frequency}</Td>
+                      <Td className="whitespace-nowrap">{habit.activeUntil ? formatDate(habit.activeUntil) : <span className="text-muted">Not set</span>}</Td>
                       <Td align="right">{habit.streak}</Td>
-                      <Td className="whitespace-nowrap">{habit.reminderEnabled ? habit.reminderTime || 'On' : <span className="text-muted">Off</span>}</Td>
+                      <Td className="whitespace-nowrap">{habit.ended ? <span className="text-muted">—</span> : habit.reminderEnabled ? habit.reminderTime || 'On' : <span className="text-muted">Off</span>}</Td>
                       <Td align="right">{habit.completions}</Td>
                       <Td className="whitespace-nowrap">{habit.lastCompleted ? formatDate(habit.lastCompleted) : <span className="text-muted">Never</span>}</Td>
                     </tr>

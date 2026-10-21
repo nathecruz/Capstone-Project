@@ -47,6 +47,8 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE habits ADD COLUMN IF NOT EXISTS frequency TEXT NOT NULL DEFAULT '';
 ALTER TABLE habits ADD COLUMN IF NOT EXISTS start_date TEXT NOT NULL DEFAULT '';
 ALTER TABLE habits ADD COLUMN IF NOT EXISTS reminder_days JSONB NOT NULL DEFAULT '[]'::jsonb;
+-- The last day of a habit's week (YYYY-MM-DD, '' for none yet): habits last one week (lib/habit-week.js).
+ALTER TABLE habits ADD COLUMN IF NOT EXISTS active_until TEXT NOT NULL DEFAULT '';
 
 -- Admin panel sessions (separate from mobile app sessions) ---------------------
 CREATE TABLE IF NOT EXISTS admin_sessions (

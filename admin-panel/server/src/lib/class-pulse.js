@@ -2,7 +2,8 @@
 // module: no names, ids or per-student rows, and categories with fewer students than the
 // anonymity threshold are folded together.
 import { z } from 'zod';
-import { addDays, dateRange, habitCreatedAt, todayInZone } from './metrics.js';
+import { activeUntilOf, hasHabitEnded } from './habit-week.js';
+import { addDays, dateRange, habitFirstDay, todayInZone } from './metrics.js';
 import { computeStreak, habitSchedule, isScheduledDay } from './streaks.js';
 
 export const WINDOW_DAYS = 28;
@@ -18,10 +19,14 @@ function hourLabel(hour) {
   return `${hour % 12 || 12} ${hour < 12 ? 'AM' : 'PM'}`;
 }
 
-/** Risk from the last 7 days when the ML service is not available. */
+/**
+ * Risk from the last 7 days when the ML service is not available. With nothing due in those days,
+ * a student whose habits are current is new; one whose habits all ended without new ones for the
+ * week has stopped tracking.
+ */
 export function ruleRisk(student) {
   if (!student.habits) return 'notStarted';
-  if (!student.scheduled7) return 'new';
+  if (!student.scheduled7) return student.currentHabits ? 'new' : 'high';
   const recent = student.completed7 / student.scheduled7;
   if (recent < 0.3) return 'high';
   if (recent < 0.6) return 'medium';
@@ -51,8 +56,11 @@ export function studentSignal(student) {
 /**
  * @param {object} input
  * @param {{id:string}[]} input.students          active students
- * @param {{id:string,userId:string,category:string,meta:string,frequency:string,start_date:string,reminder_days:string[]}[]} input.habits
+ * @param {{id:string,userId:string,category:string,meta:string,frequency:string,start_date:string,active_until:string,reminder_days:string[]}[]} input.habits
  * @param {{userId:string,habitId:string,date:string,completedAt:number}[]} input.completions  last WINDOW_DAYS days
+ *
+ * Habits last one week (lib/habit-week.js). An ended habit is history: its days up to its last
+ * active day still count, but it is not one of the habits students track now.
  */
 export function buildClassPulse({ students, habits, completions, timeZone, k, now = new Date() }) {
   const today = todayInZone(timeZone, now);
@@ -67,7 +75,8 @@ export function buildClassPulse({ students, habits, completions, timeZone, k, no
     doneByHabit.get(row.habitId).add(row.date);
   }
 
-  const perStudent = new Map(students.map((student) => [student.id, { habits: 0, scheduled: 0, completed: 0, scheduled7: 0, completed7: 0, streak: 0, last7Days: [0, 0, 0, 0, 0, 0, 0] }]));
+  // `habits`: every habit the student made; `currentHabits`: the ones not ended, tracked now.
+  const perStudent = new Map(students.map((student) => [student.id, { habits: 0, currentHabits: 0, scheduled: 0, completed: 0, scheduled7: 0, completed7: 0, streak: 0, last7Days: [0, 0, 0, 0, 0, 0, 0] }]));
   const byDay = new Map(days.map((day) => [day, { scheduled: 0, completed: 0 }]));
   const byWeekday = WEEKDAYS.map(() => ({ scheduled: 0, completed: 0 }));
   const byCategory = new Map();
@@ -76,18 +85,24 @@ export function buildClassPulse({ students, habits, completions, timeZone, k, no
     const student = perStudent.get(habit.userId);
     if (!student) continue;
     student.habits += 1;
+    if (!hasHabitEnded(habit, today)) student.currentHabits += 1;
+    const activeUntil = activeUntilOf(habit);
+    // A habit that ended before the window has no part in its numbers.
+    if (activeUntil && activeUntil < start) continue;
     const schedule = habitSchedule(habit);
     const done = doneByHabit.get(habit.id) ?? new Set();
-    const created = habitCreatedAt(habit.id);
-    const firstDay = [habit.start_date, created ? todayInZone(timeZone, new Date(created)) : null].filter(Boolean).sort().at(-1) ?? start;
+    const firstDay = habitFirstDay(habit, timeZone) ?? start;
     const categoryName = String(habit.category || '').trim() || 'Other';
     if (!byCategory.has(categoryName)) byCategory.set(categoryName, { students: new Set(), scheduled: 0, completed: 0 });
     const category = byCategory.get(categoryName);
     category.students.add(habit.userId);
-    student.streak = Math.max(student.streak, computeStreak(habit, [...done], today));
+    // The student's streak for the ML signal: current habits, and habits that ended in the last
+    // 7 days with the streak of their last day (so a new week does not look like a broken streak).
+    if (!activeUntil || activeUntil >= days.at(-7)) student.streak = Math.max(student.streak, computeStreak(habit, [...done], today));
 
     for (const day of days) {
-      if (day < firstDay || !isScheduledDay(schedule, day)) continue;
+      // Due only from the habit's first day to its last active day.
+      if (day < firstDay || (activeUntil && day > activeUntil) || !isScheduledDay(schedule, day)) continue;
       const isDone = done.has(day);
       // Today is still open: it only counts once it is done.
       if (day === today && !isDone) continue;
@@ -150,12 +165,12 @@ export function buildClassPulse({ students, habits, completions, timeZone, k, no
     windowDays: WINDOW_DAYS,
     kpis: {
       students: students.length,
-      studentsWithHabits: studentList.filter((student) => student.habits > 0).length,
+      studentsWithHabits: studentList.filter((student) => student.currentHabits > 0).length,
       activeThisWeek: activeThisWeek.size,
       checkInsToday,
       studentsCheckedInToday: checkedInToday.size,
       consistency: rate(totals.completed, totals.scheduled),
-      habits: habits.filter((habit) => perStudent.has(habit.userId)).length,
+      habits: studentList.reduce((sum, student) => sum + student.currentHabits, 0),
     },
     trend: last14.map((day) => ({ day, rate: rate(byDay.get(day).completed, byDay.get(day).scheduled), completed: byDay.get(day).completed, scheduled: byDay.get(day).scheduled })),
     weekdays: WEEKDAYS.map((label, index) => ({ weekday: label, rate: rate(byWeekday[index].completed, byWeekday[index].scheduled), scheduled: byWeekday[index].scheduled })),
@@ -212,8 +227,9 @@ export function classSummaryPrompt(pulse, risk) {
   const percent = (value) => (value === null || value === undefined ? 'no data' : `${Math.round(value * 100)}%`);
   const facts = {
     period: `last ${pulse.windowDays} days, as of ${pulse.today}`,
+    note: 'Habits last one week (Monday to Sunday); students add new ones each week, and ended habits still count in the consistency figures.',
     students: pulse.kpis.students,
-    studentsWithHabits: pulse.kpis.studentsWithHabits,
+    studentsWithHabitsThisWeek: pulse.kpis.studentsWithHabits,
     activeThisWeek: pulse.kpis.activeThisWeek,
     checkInsToday: pulse.kpis.checkInsToday,
     classConsistency: percent(pulse.kpis.consistency),

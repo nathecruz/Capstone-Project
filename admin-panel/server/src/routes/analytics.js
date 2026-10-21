@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { config } from '../config.js';
 import { query } from '../db.js';
 import { audit } from '../lib/audit.js';
+import { activeUntilOf, hasHabitEnded } from '../lib/habit-week.js';
 import { toCsv, validate } from '../lib/http.js';
 import {
   AGE_BRACKET_ORDER,
@@ -12,7 +13,7 @@ import {
   addDays,
   ageBracket,
   expectedPerWeek,
-  habitCreatedAt,
+  habitFirstDay,
   habitFrequency,
   ratio,
   reminderPeriod,
@@ -38,26 +39,33 @@ function mondayOf(key) {
   return addDays(key, -offset);
 }
 
-/** Pre-computes each habit's daily expectation so period sums are cheap. */
-function prepareHabits(habits, timeZone) {
+/**
+ * Pre-computes each habit's daily expectation and the days it can be due (from its first day to
+ * the end of its week, lib/habit-week.js) so period sums are cheap. `current`: not ended by `today`.
+ */
+export function prepareHabits(habits, timeZone, today) {
   return habits.map((habit) => {
-    const created = habitCreatedAt(habit.id);
+    const firstDay = habitFirstDay(habit, timeZone);
+    const activeUntil = activeUntilOf(habit);
     return {
       ...habit,
       perDay: expectedPerWeek(habit.meta) / 7,
-      createdDay: created ? dayNumber(todayInZone(timeZone, new Date(created))) : null,
+      firstDay: firstDay ? dayNumber(firstDay) : null,
+      lastDay: activeUntil ? dayNumber(activeUntil) : null,
+      current: !hasHabitEnded(habit, today),
     };
   });
 }
 
-function expectedBetween(prepared, fromKey, toKey) {
+export function expectedBetween(prepared, fromKey, toKey) {
   const from = dayNumber(fromKey);
   const to = dayNumber(toKey);
   let total = 0;
   for (const habit of prepared) {
-    const start = habit.createdDay && habit.createdDay > from ? habit.createdDay : from;
-    if (start > to) continue;
-    total += habit.perDay * (to - start + 1);
+    const start = habit.firstDay !== null && habit.firstDay > from ? habit.firstDay : from;
+    const end = habit.lastDay !== null && habit.lastDay < to ? habit.lastDay : to;
+    if (start > end) continue;
+    total += habit.perDay * (end - start + 1);
   }
   return total;
 }
@@ -84,7 +92,8 @@ export async function computeAnalytics(range) {
   const [students, habitRows, perUser, perWeek, perDow, perCategory, weeklyActive, activeCount, goals, tokens, redemptions, achievements, categories] = await Promise.all([
     query(`SELECT id, gender, region, date_of_birth AS "dateOfBirth", created_at AS "createdAt" FROM users WHERE role = 'user'`),
     query(
-      `SELECT h.id, h.user_id AS "userId", h.meta, h.category, h.streak, h.reminder_enabled AS "reminderEnabled", h.reminder_time AS "reminderTime"
+      `SELECT h.id, h.user_id AS "userId", h.meta, h.category, h.streak, h.start_date, h.active_until,
+              h.reminder_enabled AS "reminderEnabled", h.reminder_time AS "reminderTime"
          FROM habits h JOIN users u ON u.id = h.user_id AND u.role = 'user'`,
     ),
     query(
@@ -153,7 +162,10 @@ export async function computeAnalytics(range) {
   // Stored streaks are only as fresh as each student's last sync; use live ones.
   const liveStreaks = await loadLiveStreaks(tz);
   for (const habit of habitRows.rows) habit.streak = liveStreaks.get(habit.id) ?? 0;
-  const prepared = prepareHabits(habitRows.rows, tz);
+  // Every habit is history for the completion rates (each up to its week's end); the habit counts,
+  // reminders, frequencies and current streaks are about the habits students track now.
+  const prepared = prepareHabits(habitRows.rows, tz, today);
+  const current = prepared.filter((habit) => habit.current);
   const completionsByUser = new Map(perUser.rows.map((row) => [row.userId, row.n]));
   const totalCompletions = perUser.rows.reduce((sum, row) => sum + row.n, 0);
   const totalExpected = expectedBetween(prepared, start, today);
@@ -188,13 +200,17 @@ export async function computeAnalytics(range) {
   }
 
   // Habit behaviour -----------------------------------------------------------------
-  const categoryRows = buildCategoryRows(categories, habitRows.rows, perCategory.rows).map((row) => {
-    const inCategory = prepared.filter((habit) => (habit.category || 'Uncategorized').toLowerCase() === row.category.toLowerCase());
-    const streaks = inCategory.map((habit) => Number(habit.streak) || 0);
+  // The category card is about the period: its habits and students are the ones due in it (current
+  // habits, and habits whose week ended in it), while the average streak is over current habits.
+  const inPeriod = prepared.filter((habit) => habit.current || expectedBetween([habit], start, today) > 0);
+  const inCategory = (habits, row) => habits.filter((habit) => (habit.category || 'Uncategorized').toLowerCase() === row.category.toLowerCase());
+  const categoryRows = buildCategoryRows(categories, inPeriod, perCategory.rows).map((row) => {
+    const habits = inCategory(inPeriod, row);
+    const streaks = inCategory(current, row).map((habit) => Number(habit.streak) || 0);
     return {
       ...row,
-      students: new Set(inCategory.map((habit) => habit.userId)).size,
-      completionRate: ratio(row.completions, expectedBetween(inCategory, start, today)),
+      students: new Set(habits.map((habit) => habit.userId)).size,
+      completionRate: ratio(row.completions, expectedBetween(habits, start, today)),
       avgStreak: streaks.length ? streaks.reduce((a, b) => a + b, 0) / streaks.length : 0,
     };
   });
@@ -202,10 +218,10 @@ export async function computeAnalytics(range) {
   const dowCounts = new Map(perDow.rows.map((row) => [row.dow, row.n]));
   const dayOfWeek = WEEKDAY_LABELS.map((label, index) => ({ label, completions: dowCounts.get(index + 1) ?? 0 }));
 
-  const withReminders = prepared.filter((habit) => habit.reminderEnabled);
+  const withReminders = current.filter((habit) => habit.reminderEnabled);
   const reminders = {
     habitsWithReminders: withReminders.length,
-    adoption: prepared.length ? withReminders.length / prepared.length : null,
+    adoption: current.length ? withReminders.length / current.length : null,
     byPeriod: countBy(withReminders, (habit) => reminderPeriod(habit.reminderTime), REMINDER_PERIOD_ORDER),
   };
 
@@ -221,7 +237,7 @@ export async function computeAnalytics(range) {
       gender: student.gender?.trim() || 'Not specified',
       region: student.region?.trim() || 'Not specified',
       age: ageBracket(student.dateOfBirth),
-      habits: own.length,
+      habits: own.filter((habit) => habit.current).length,
       completions: completionsByUser.get(student.id) ?? 0,
       expected: expectedBetween(own, start, today),
     };
@@ -269,9 +285,10 @@ export async function computeAnalytics(range) {
     cohorts.push({ week: cohortWeek, size: suppressed ? null : members.length, suppressed: suppressed && members.length > 0, retention });
   }
 
-  const streaks = prepared.map((habit) => Number(habit.streak) || 0);
+  // Current streaks: ended habits keep their last day's streak, so they are left out here.
+  const streaks = current.map((habit) => Number(habit.streak) || 0);
   const bestStreakByUser = new Map();
-  for (const habit of prepared) bestStreakByUser.set(habit.userId, Math.max(bestStreakByUser.get(habit.userId) ?? 0, Number(habit.streak) || 0));
+  for (const habit of current) bestStreakByUser.set(habit.userId, Math.max(bestStreakByUser.get(habit.userId) ?? 0, Number(habit.streak) || 0));
   const bestStreaks = [...bestStreakByUser.values()];
 
   return {
@@ -286,7 +303,7 @@ export async function computeAnalytics(range) {
     summary: {
       students: students.rowCount,
       activeStudents: activeInRange,
-      habits: prepared.length,
+      habits: current.length,
       completions: totalCompletions,
       completionRate: ratio(totalCompletions, totalExpected),
       weeklyCheckInsPerActiveStudent: activeInRange ? totalCompletions / activeInRange / weeksInRange : 0,
@@ -296,8 +313,8 @@ export async function computeAnalytics(range) {
     },
     weeklyTrend,
     categories: categoryRows,
-    frequencyMix: countBy(prepared, (habit) => habitFrequency(habit.meta), ['Daily', 'Weekly', 'Monthly', 'Custom']),
-    streakDistribution: countBy(prepared, (habit) => streakBucket(habit.streak), STREAK_BUCKET_ORDER),
+    frequencyMix: countBy(current, (habit) => habitFrequency(habit.meta), ['Daily', 'Weekly', 'Monthly', 'Custom']),
+    streakDistribution: countBy(current, (habit) => streakBucket(habit.streak), STREAK_BUCKET_ORDER),
     dayOfWeek,
     reminders,
     demographics: {
