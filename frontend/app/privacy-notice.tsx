@@ -30,7 +30,8 @@ const SECTIONS: { title: string; items: string[] }[] = [
     title: 'Why we use it',
     items: [
       'To run the app: sign you in, sync your data across devices, send reminders and verification codes, and show progress, rewards and leaderboards.',
-      'To give AI guidance: when you ask the AI Coach, assistants or goal planner, your question and a summary of your habits and check-ins (without your name or email) are sent to Groq, our AI provider, to generate the answer.',
+      'To give AI guidance: when you ask the AI Coach or assistants, your question and a summary of your habits and check-ins (without your name or email) are sent to Groq, our AI provider, to generate the answer.',
+      'To plan your goals: when you use the AI goal planner, your text and your recent habit history are sent to Groq, without your name or email. The history covers the habits of your last 4 weeks (names, categories, schedules and reminder times), how often you checked in and at what time of day, their forecasts from our prediction model, and your streak. It is used only to make your plan and this week\'s habits.',
       'To keep accounts secure and to answer support requests.',
       'For research on the app\'s effect on student habits: PSAU faculty only see aggregated, anonymized statistics. Groups too small to hide individuals are combined or withheld.',
     ],
@@ -112,7 +113,7 @@ export default function PrivacyNoticeScreen() {
             <Text style={styles.bannerText}>We updated how HabitAI explains the data it uses. Please review and accept this notice to continue.</Text>
           </View>
         )}
-        <Text style={styles.updated}>Effective October 2, 2026</Text>
+        <Text style={styles.updated}>Effective October 21, 2026</Text>
         {SECTIONS.map((section) => (
           <View key={section.title} style={styles.section}>
             <Text style={styles.sectionTitle}>{section.title}</Text>

@@ -1,6 +1,8 @@
 // One client for every AI feature. The backend builds the student's habit context
 // from the database, so screens only send the question (and the device time zone).
 import { ApiRequestError, apiRequest, getAuthenticatedHeaders } from '@/authentication/authService';
+import type { PlannedHabit } from '@/hooks/app-state/types';
+import { readPlannedHabits } from '@/utils/planned-habits';
 
 export type AiMode = 'assistant' | 'coach' | 'support';
 
@@ -63,15 +65,27 @@ export async function classifyHabit(name: string, options: { category?: string; 
   }
 }
 
-export async function generateGoalPlan<Plan>(request: { goal: string; focusTarget: string; timeline: string }): Promise<{ ok: true; plan: Plan } | (AiFailure & { unachievable?: boolean })> {
+/**
+ * A goal plan from the server. `habits` are this week's habits, planned from the student's
+ * history (exactly the "Habits to focus on" count); missing when the AI gave none usable, or from
+ * an older server, which only sends the `habitSuggestions` names. Screens store them on the goal
+ * as `habitPlan`.
+ */
+export type GoalPlan<Plan> = Omit<Plan, 'habits'> & { habits?: PlannedHabit[] };
+
+export async function generateGoalPlan<Plan>(request: { goal: string; focusTarget: string; timeline: string }): Promise<{ ok: true; plan: GoalPlan<Plan> } | (AiFailure & { unachievable?: boolean })> {
   try {
-    const result = await apiRequest<{ plan?: Plan }>('/api/goals/generate', {
+    // The server reads the student's habit history itself; only the goal text and choices go up.
+    const result = await apiRequest<{ plan?: Plan & { habits?: unknown } }>('/api/goals/generate', {
       method: 'POST',
       headers: await getAuthenticatedHeaders(),
       body: JSON.stringify({ ...request, timeZone: deviceTimeZone() }),
       timeoutMs: AI_TIMEOUT_MS,
     });
-    return result.plan ? { ok: true, plan: result.plan } : { ok: false, status: 502, message: 'The AI planner returned an empty plan. Please try again.' };
+    if (!result.plan) return { ok: false, status: 502, message: 'The AI planner returned an empty plan. Please try again.' };
+    const { habits, ...plan } = result.plan;
+    const planned = readPlannedHabits(habits);
+    return { ok: true, plan: { ...plan, ...(planned ? { habits: planned } : {}) } as GoalPlan<Plan> };
   } catch (error) {
     // An impossible or nonsensical goal: surface the AI's short reason instead of a generic error.
     if (error instanceof ApiRequestError && error.status === 422) {
