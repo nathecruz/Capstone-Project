@@ -851,6 +851,17 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.deepEqual(migrated.state.habits.map((habit) => habit.activeUntil), [weekEndKey(today), weekEndKey(today), '2026-01-11']);
     assert.deepEqual((await db.query('SELECT active_until AS "activeUntil" FROM habits WHERE user_id=$1 ORDER BY sort_order', [userId])).rows.map((row) => row.activeUntil), [weekEndKey(today), weekEndKey(today), '2026-01-11']);
     assert.equal(migrated.completions.length, latest.completions.length, 'every check-in is kept');
+
+    // The seven-day streak achievement follows the account streak, across habits and weeks, like
+    // the app's badge: seven days in a row with any check-in earn it, and it stays earned.
+    const { earnedAchievements } = await import('../services/app-state-store.js');
+    const weekDays = Array.from({ length: 7 }, (_, index) => new Date(Date.UTC(2026, 9, 12 + index)).toISOString().slice(0, 10));
+    const split = [
+      { id: 'a', frequency: 'Daily', startDate: '2026-10-12', activeUntil: '2026-10-18', streak: 0, completionDates: weekDays.slice(0, 4) },
+      { id: 'b', frequency: 'Daily', startDate: '2026-10-15', activeUntil: '2026-10-18', streak: 3, completionDates: weekDays.slice(4) },
+    ];
+    assert.ok(earnedAchievements(split, { today: '2026-10-21' }).includes('streak-week'));
+    assert.ok(!earnedAchievements(split.slice(0, 1), { today: '2026-10-21' }).includes('streak-week'), 'four days are not seven');
   });
 
   await t.test('token rewards: real ones on sale, retired ones refunded, and the custom title', async () => {

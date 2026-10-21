@@ -55,3 +55,16 @@ export function accountStreakRun(habits, today, frozenDays = []) {
 export function accountStreak(habits, today, frozenDays = []) {
   return accountStreakRun(habits, today, frozenDays).streak;
 }
+
+/** The longest run of days with a check-in, up to `today`, under the same rules. */
+export function longestAccountStreak(habits, today, frozenDays = []) {
+  const kind = dayKinds(habits, today, frozenDays);
+  let best = 0;
+  let run = 0;
+  for (let day = firstDay(habits, today); day <= today; day = shiftDay(day, 1)) {
+    const result = kind(day);
+    if (result === 'counts') best = Math.max(best, (run += 1));
+    else if (result === 'breaks') run = 0;
+  }
+  return best;
+}

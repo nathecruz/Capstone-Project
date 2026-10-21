@@ -10,7 +10,7 @@ import '../config/index.js';
 import { backendRoot } from '../config/env.js';
 import { closeDatabase, query } from '../db/client.js';
 import { getDateKeyInTimeZone } from '../services/completion-date.js';
-import { buildTrainingRows, toCsv } from '../services/ml-training-rows.js';
+import { buildTrainingRows, toCsv, trainingSeries } from '../services/ml-training-rows.js';
 
 function option(name, fallback) {
   const index = process.argv.indexOf(`--${name}`);
@@ -49,8 +49,10 @@ try {
 
   const rowsByUser = [];
   for (const { id: userId } of users.rows) {
-    // Habits of past weeks are kept in the snapshot with their check-ins; their rows stop at the end of their week.
-    const rows = (habitsByUser.get(userId) || []).flatMap((habit) => buildTrainingRows(habit, datesByHabit.get(`${userId}\u0000${habit.id}`), { today, activeUntil: habit.activeUntil }));
+    // Habits of past weeks are kept in the snapshot with their check-ins. A habit kept week after
+    // week (the same name) is one series; its rows stop at the end of its last week.
+    const series = trainingSeries(habitsByUser.get(userId) || [], (habit) => datesByHabit.get(`${userId}\u0000${habit.id}`));
+    const rows = series.flatMap(({ habit, completionDates }) => buildTrainingRows(habit, completionDates, { today, activeUntil: habit.activeUntil }));
     if (rows.length) rowsByUser.push(rows);
   }
 
