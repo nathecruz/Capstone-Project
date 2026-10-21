@@ -32,7 +32,9 @@ function formatDateLabel(dateKey: string) {
 export default function AllHabitsScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
-  const { isDarkMode, habits, isFaculty } = useAppColorScheme();
+  // This week's habits only (habits last one week): "missed yesterday, you can still do it today"
+  // is never said of a habit whose week has ended.
+  const { isDarkMode, currentHabits: habits, isFaculty } = useAppColorScheme();
   const groups = useMemo(() => (isFaculty ? [FACULTY_GROUP, BAD_HABIT_GROUP, ...HABIT_GROUPS] : [BAD_HABIT_GROUP, ...HABIT_GROUPS]), [isFaculty]);
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');

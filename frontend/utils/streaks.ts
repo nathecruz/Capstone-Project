@@ -8,6 +8,8 @@ export type StreakHabit = {
   meta?: string;
   reminderDays?: string[];
   startDate?: string;
+  /** The last day of the habit's week (utils/habit-week.ts): it is not due after it. */
+  activeUntil?: string;
 };
 
 type Schedule = { type: 'daily' } | { type: 'weekly'; days: string[] } | { type: 'monthly'; day: number };
@@ -51,8 +53,9 @@ function isScheduledDay(schedule: Schedule, dateKey: string) {
   return true;
 }
 
-/** Whether the habit is due on this day (YYYY-MM-DD) according to its schedule. */
+/** Whether the habit is due on this day (YYYY-MM-DD) according to its schedule (never after its week ended). */
 export function isHabitScheduledOn(habit: StreakHabit, dateKey: string) {
+  if (isDateKey(habit.activeUntil) && dateKey > habit.activeUntil) return false;
   return isScheduledDay(habitSchedule(habit), dateKey);
 }
 
@@ -60,9 +63,11 @@ export function isHabitScheduledOn(habit: StreakHabit, dateKey: string) {
  * Consecutive scheduled days completed, counting back from `today` (YYYY-MM-DD).
  * An unfinished today never breaks the streak unless `todayMissed` is set (its deadline passed with
  * no check-in); unscheduled days are skipped, and so are days covered by a streak freeze
- * (`frozenDays`): they neither count nor break the streak.
+ * (`frozenDays`): they neither count nor break the streak. A habit whose week has ended keeps the
+ * streak it had on its last day.
  */
 export function computeStreak(habit: StreakHabit, completionDates: string[], today: string, frozenDays: string[] = [], todayMissed = false) {
+  if (isDateKey(habit.activeUntil) && today > habit.activeUntil) return computeStreak({ ...habit, activeUntil: undefined }, completionDates, habit.activeUntil, frozenDays, true);
   const done = new Set(completionDates);
   if (!done.size) return 0;
   const frozen = new Set(frozenDays);

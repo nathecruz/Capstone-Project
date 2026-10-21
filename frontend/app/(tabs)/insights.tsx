@@ -5,11 +5,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { getApiBaseUrl, getAuthenticatedHeaders } from '@/authentication';
 import { AiChatSheet, AskAiCard, useAiChat, type ChatAnswer } from '@/components/ai-chat';
 import { FadeIn } from '@/components/fade-in';
-import { HabitAnalysisPanel } from '@/components/habit-analysis-panel';
+import { analysableHabits, HabitAnalysisPanel } from '@/components/habit-analysis-panel';
 import { ProgressRing } from '@/components/progress-ring';
-import { getHabitProgressSummary, getRecentCompletionHistory, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { dayCompletion, periodShare, recentDayCompletion } from '@/components/week-strip';
+import { getHabitProgressSummary, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { getChartGeometry } from '@/utils/line-chart';
-import { historyStats } from '@/utils/achievements';
 import { getPredictionPresentation } from '@/utils/ai-presentation';
 import { askAi } from '@/utils/ai-client';
 import { useAppTheme } from '@/hooks/dark-mode-context';
@@ -50,16 +50,32 @@ function getHabitMachineLearningSignal(habit: { completionDates: string[]; progr
   };
 }
 
-function getHeatmapData(view: HeatmapView, selectedMonth: number, selectedWeekOffset: number, completionDates: Set<string>, today = new Date()) {
-  const getDayValue = (date: Date) => completionDates.has(getLocalDateKey(date)) ? 4 : 1;
+/**
+ * `dayTotals` gives a day's habits due and done (habits last one week, so each day counts the habits
+ * of its own week, components/week-strip.tsx). Days still ahead have nothing due yet.
+ */
+function getHeatmapData(view: HeatmapView, selectedMonth: number, selectedWeekOffset: number, dayTotals: (dateKey: string) => { due: number; done: number }, today = new Date()) {
+  const todayKey = getLocalDateKey(today);
+  const totalsOn = (date: Date) => {
+    const dateKey = getLocalDateKey(date);
+    return dateKey > todayKey ? { due: 0, done: 0 } : dayTotals(dateKey);
+  };
+  // 4 levels: nothing done (or nothing due), some, at least half, all of the day's habits.
+  const getDayValue = (date: Date) => {
+    const { due, done } = totalsOn(date);
+    const share = due ? done / due : 0;
+    return share >= 1 ? 4 : share >= 0.5 ? 3 : share > 0 ? 2 : 1;
+  };
   const getWeekValues = (start: Date) => Array.from({ length: 7 }, (_, index) => {
     const date = new Date(start);
     date.setDate(start.getDate() + index);
     return getDayValue(date);
   });
+  // Check-ins done of those due over the days; "—" when nothing was due.
   const getAverage = (dates: Date[]) => {
-    const completedDays = dates.filter((date) => completionDates.has(getLocalDateKey(date))).length;
-    return `${Math.round((completedDays / Math.max(1, dates.length)) * 100)}%`;
+    const totals = dates.map(totalsOn);
+    const due = totals.reduce((sum, day) => sum + day.due, 0);
+    return due ? `${Math.round((totals.reduce((sum, day) => sum + day.done, 0) / due) * 100)}%` : '—';
   };
   let rows: HeatmapRow[];
   let subtitle: string;
@@ -72,12 +88,10 @@ function getHeatmapData(view: HeatmapView, selectedMonth: number, selectedWeekOf
     const firstDay = Math.max(1, lastDay - 6);
     rows = Array.from({ length: lastDay - firstDay + 1 }, (_, index) => {
       const date = new Date(today.getFullYear(), selectedMonth, firstDay + index);
-      const values = [getDayValue(date)];
-      const average = values[0] * 25;
       return {
         label: formatDate(date, { weekday: 'short', month: 'short', day: 'numeric' }),
-        average: `${average}%`,
-        values,
+        average: getAverage([date]),
+        values: [getDayValue(date)],
         isToday: selectedMonth === today.getMonth() && date.getDate() === today.getDate(),
       };
     });
@@ -134,10 +148,11 @@ export default function InsightsScreen() {
   const themeColor = useThemeColor();
   const appTheme = useAppTheme();
   const heatmapColors = ['#F0ECFF', '#DCD2FF', '#A998F2', '#5B42D8'].map((color) => themedColor(color, appTheme));
-  const { isDarkMode, habits, streakFreeze } = useAppColorScheme();
-  const frozenDays = streakFreeze?.frozenDays;
-  const bestStreak = useMemo(() => historyStats(habits, new Date(), frozenDays).bestStreak, [frozenDays, habits]);
+  // Habits last one week: what is about today (done, open, strongest, weakest, the forecast) uses
+  // this week's habits; the trend and the heatmap use every habit, each counted on its own week's days.
+  const { isDarkMode, habits, currentHabits, streak, bestStreak } = useAppColorScheme();
   const deviceDate = useDeviceDate();
+  const todayKey = getLocalDateKey(deviceDate);
   const [activeTab, setActiveTab] = useState<'Insights' | 'Predictions'>('Insights');
   const [heatmapView, setHeatmapView] = useState<HeatmapView>('Weeks');
   const [selectedMonth, setSelectedMonth] = useState(deviceDate.getMonth());
@@ -150,18 +165,19 @@ export default function InsightsScreen() {
   const [mlPrediction, setMlPrediction] = useState<{ habit_name?: string; completion_probability?: number; dropout_risk?: number; confidence?: number; recommended_action?: string; suggested_reminder_time?: string; summary?: string; prediction_source?: 'model' | 'fallback'; is_fallback?: boolean } | null>(null);
   const [predictionError, setPredictionError] = useState<string | null>(null);
   const [predictionLoading, setPredictionLoading] = useState(false);
-  const { completed, averageProgress, maxStreak } = getHabitProgressSummary(habits);
-  const completionHistory = getRecentCompletionHistory(habits, 7);
-  const dailyRates = completionHistory.map((entry) => habits.length ? Math.round((entry.count / habits.length) * 100) : 0);
+  const { completed, averageProgress } = getHabitProgressSummary(currentHabits);
+  // Each day's share of the habits due that day that were done (not of how many there are now).
+  const completionHistory = useMemo(() => recentDayCompletion(habits, 7, deviceDate), [deviceDate, habits]);
+  const dailyRates = completionHistory.map((entry) => Math.round(entry.share * 100));
   const [chartSize, setChartSize] = useState({ width: 0, height: 0 });
   const trendChart = getChartGeometry(dailyRates, chartSize.width, chartSize.height);
   const trendChange = dailyRates.length > 1 ? dailyRates[dailyRates.length - 1] - dailyRates[0] : 0;
-  // The share of habits done per day over the last 7 days.
-  const weeklyRate = dailyRates.length ? Math.round(dailyRates.reduce((total, rate) => total + rate, 0) / dailyRates.length) : 0;
+  // The share of the check-ins due over the last 7 days that were done.
+  const weeklyRate = Math.round(periodShare(completionHistory) * 100);
   // Not missed yet: a habit can be completed until the day is over.
-  const openHabits = Math.max(0, habits.length - completed);
-  const strongestHabit = [...habits].sort((a, b) => b.progress - a.progress || b.streak - a.streak)[0];
-  const weakestHabit = [...habits].sort((a, b) => a.progress - b.progress || a.streak - b.streak)[0];
+  const openHabits = Math.max(0, currentHabits.length - completed);
+  const strongestHabit = [...currentHabits].sort((a, b) => b.progress - a.progress || b.streak - a.streak)[0];
+  const weakestHabit = [...currentHabits].sort((a, b) => a.progress - b.progress || a.streak - b.streak)[0];
   const insightMessages = weeklyRate >= 80
     ? ['You are building a reliable rhythm.', 'Your consistency is becoming a strength.', 'Small wins are turning into a strong routine.']
     : weeklyRate >= 40
@@ -172,7 +188,7 @@ export default function InsightsScreen() {
   const suggestionOptions = weakestHabit
     ? [`Give ${weakestHabit.label} a two-minute start today.`, `Try ${weakestHabit.label} before your next break.`, `A smaller version of ${weakestHabit.label} can keep your streak moving.`]
     : ['Add one simple habit to start your consistency data.', 'Pick one small action and repeat it tomorrow.', 'Your first habit is the beginning of your trend.'];
-  const suggestion = suggestionOptions[(deviceDate.getDate() + habits.length + completed) % suggestionOptions.length];
+  const suggestion = suggestionOptions[(deviceDate.getDate() + currentHabits.length + completed) % suggestionOptions.length];
   // The hero cards are purple in both modes; their rings need the same colour in the middle.
   const heroBackground = themedColor(isDarkMode ? '#30215A' : '#5B42D8', appTheme);
 
@@ -180,8 +196,8 @@ export default function InsightsScreen() {
   // The strongest habit is only an anchor once it has some progress or a streak.
   const anchorHabit = strongestHabit && (strongestHabit.progress > 0 || strongestHabit.streak > 0) ? strongestHabit : null;
   const focusHabit = weakestHabit && weakestHabit.id !== anchorHabit?.id ? weakestHabit : null;
-  const noticed: { icon: keyof typeof Ionicons.glyphMap; color: string; background: string; title: string; detail: string; ask: string }[] = habits.length === 0 ? [] : [
-    { icon: 'today', color: '#5B42D8', background: '#EEE9FF', title: `${completed} of ${habits.length} done today`, detail: openHabits ? `${openHabits} still open. There is time before the day ends.` : 'Everything is done today. Nice work!', ask: 'What should I focus on today?' },
+  const noticed: { icon: keyof typeof Ionicons.glyphMap; color: string; background: string; title: string; detail: string; ask: string }[] = currentHabits.length === 0 ? [] : [
+    { icon: 'today', color: '#5B42D8', background: '#EEE9FF', title: `${completed} of ${currentHabits.length} done today`, detail: openHabits ? `${openHabits} still open. There is time before the day ends.` : 'Everything is done today. Nice work!', ask: 'What should I focus on today?' },
     ...(anchorHabit ? [{ icon: 'trophy' as const, color: '#C98A0E', background: '#FFF4D9', title: `${anchorHabit.label} is your anchor`, detail: `${anchorHabit.progress}% progress · ${anchorHabit.streak}-day streak. Keep it at the same time each day.`, ask: `How do I keep ${anchorHabit.label} going?` }] : []),
     ...(focusHabit ? [{ icon: 'leaf' as const, color: '#2F9E6E', background: '#E3F6EC', title: `${focusHabit.label} needs a smaller step`, detail: suggestion, ask: `How can I improve ${focusHabit.label}?` }] : []),
   ];
@@ -204,9 +220,11 @@ export default function InsightsScreen() {
   };
   const assistantGreeting = habits.length === 0
     ? 'Hi! Add your first habit and I can turn your check-ins into a personal plan.'
-    : openHabits === 0
-      ? `All ${habits.length} habits are done today. Ask me how to keep this going, or about your streaks and goals.`
-      : `You have ${openHabits} habit${openHabits === 1 ? '' : 's'} left today${weakestHabit ? `, and ${weakestHabit.label} needs the most attention` : ''}. Ask me anything about your habits, streaks or goals.`;
+    : currentHabits.length === 0
+      ? "Hi! Last week's habits are in your history. Add this week's habits, or ask me what to focus on this week."
+      : openHabits === 0
+        ? `All ${currentHabits.length} habits are done today. Ask me how to keep this going, or about your streaks and goals.`
+        : `You have ${openHabits} habit${openHabits === 1 ? '' : 's'} left today${weakestHabit ? `, and ${weakestHabit.label} needs the most attention` : ''}. Ask me anything about your habits, streaks or goals.`;
   const assistantSuggestions = [
     'What should I focus on today?',
     ...(weakestHabit ? [`How can I improve ${weakestHabit.label}?`] : []),
@@ -216,10 +234,14 @@ export default function InsightsScreen() {
   const currentYear = deviceDate.getFullYear();
   const currentMonth = deviceDate.getMonth();
   const activeMonth = Math.min(selectedMonth, currentMonth);
-  const selectedHabit = habits.find((habit) => habit.id === selectedHabitId);
-  const predictionHabitId = selectedHabit?.id || weakestHabit?.id || strongestHabit?.id || habits[0]?.id;
-  const completionDates = new Set(selectedHabit ? selectedHabit.completionDates : habits.flatMap((habit) => habit.completionDates));
-  const selectedHeatmap = getHeatmapData(heatmapView, activeMonth, selectedWeekOffset, completionDates, deviceDate);
+  // The heatmap can show this week's habits and those of the last four weeks (marked with their week).
+  const heatmapHabits = useMemo(() => analysableHabits(habits, todayKey), [habits, todayKey]);
+  const selectedHabit = heatmapHabits.find(({ habit }) => habit.id === selectedHabitId)?.habit;
+  // The forecast is for one of this week's habits: one of a past week is only history.
+  const selectedCurrentHabit = currentHabits.find((habit) => habit.id === selectedHabitId);
+  const predictionHabitId = selectedCurrentHabit?.id || weakestHabit?.id || strongestHabit?.id || currentHabits[0]?.id;
+  const heatmapSource = selectedHabit ? [selectedHabit] : habits;
+  const selectedHeatmap = getHeatmapData(heatmapView, activeMonth, selectedWeekOffset, (dateKey) => dayCompletion(heatmapSource, dateKey), deviceDate);
   const apiUrl = getApiBaseUrl();
 
   useEffect(() => {
@@ -227,7 +249,7 @@ export default function InsightsScreen() {
     let latestRequestId = 0;
 
     const loadPrediction = async () => {
-      if (!apiUrl || habits.length === 0) {
+      if (!apiUrl || currentHabits.length === 0) {
         setMlPrediction(null);
         setPredictionError(null);
         setPredictionLoading(false);
@@ -235,7 +257,7 @@ export default function InsightsScreen() {
       }
 
       const requestId = ++latestRequestId;
-      const predictionHabit = habits.find((habit) => habit.id === predictionHabitId) || habits[0];
+      const predictionHabit = currentHabits.find((habit) => habit.id === predictionHabitId) || currentHabits[0];
       if (!predictionHabit) return;
       const habitSignal = getHabitMachineLearningSignal(predictionHabit);
 
@@ -278,7 +300,7 @@ export default function InsightsScreen() {
       clearInterval(refreshInterval);
       appStateSubscription.remove();
     };
-  }, [apiUrl, habits, predictionHabitId]);
+  }, [apiUrl, currentHabits, predictionHabitId]);
 
   const predictionPresentation = getPredictionPresentation(mlPrediction, predictionLoading);
   const displayedCompletionProbability = mlPrediction
@@ -336,7 +358,7 @@ export default function InsightsScreen() {
                       <Text style={styles.heroLabel}>AI WEEKLY OVERVIEW</Text>
                     </View>
                     <Text style={styles.heroTitle}>{weeklyInsight}</Text>
-                    <Text style={styles.heroSubtitle}>You did {weeklyRate}% of your habits over the last 7 days. Today: {completed} of {habits.length} done.</Text>
+                    <Text style={styles.heroSubtitle}>You did {weeklyRate}% of your habits over the last 7 days. Today: {completed} of {currentHabits.length} done.</Text>
                   </View>
                   <ProgressRing value={weeklyRate} size={96} thickness={9} color="#FFFFFF" trackColor="rgba(255,255,255,0.2)" innerColor={heroBackground}>
                     <Text style={styles.heroScoreValue}>{weeklyRate}%</Text>
@@ -345,7 +367,7 @@ export default function InsightsScreen() {
                 </View>
 
                 <View style={styles.metricsRow}>
-                  {[{ value: `${completed}/${habits.length}`, label: 'Done today', icon: 'checkmark-circle', color: '#46B883', background: '#E7F8F0' }, { value: String(maxStreak), label: 'Current streak', icon: 'flame', color: '#EE9B43', background: '#FFF2E2' }, { value: String(bestStreak), label: 'Best streak', icon: 'trophy', color: '#6B57D9', background: '#EEEAFF' }].map((metric) => (
+                  {[{ value: `${completed}/${currentHabits.length}`, label: 'Done today', icon: 'checkmark-circle', color: '#46B883', background: '#E7F8F0' }, { value: String(streak), label: 'Current streak', icon: 'flame', color: '#EE9B43', background: '#FFF2E2' }, { value: String(bestStreak), label: 'Best streak', icon: 'trophy', color: '#6B57D9', background: '#EEEAFF' }].map((metric) => (
                     <View key={metric.label} style={[styles.metricCard, isDarkMode && styles.darkCard]}>
                       <View style={[styles.metricIcon, { backgroundColor: isDarkMode ? '#2B263A' : metric.background }]}>
                         <Ionicons name={metric.icon as keyof typeof Ionicons.glyphMap} size={16} color={isDarkMode ? '#C8BFFF' : metric.color} />
@@ -426,7 +448,7 @@ export default function InsightsScreen() {
               </>
             ) : (
               <View style={styles.predictionScreen}>
-                <HabitAnalysisPanel habits={habits} />
+                <HabitAnalysisPanel habits={habits} now={deviceDate} />
                 <View style={[styles.forecastCard, isDarkMode && styles.darkHeroCard]}>
                   <View style={styles.heroLabelRow}>
                     <Ionicons name="sparkles" size={12} color={themedColor('#D8D0FF', appTheme)} />
@@ -473,7 +495,7 @@ export default function InsightsScreen() {
                   {([
                     { icon: 'git-compare', color: '#5B42D8', background: '#EEE9FF', value: displayedPredictionConfidence === null ? '--' : `${displayedPredictionConfidence}%`, label: 'Model agreement', hint: 'Uncalibrated' },
                     { icon: 'trending-up', color: '#2E9D5C', background: '#E3F6EC', value: `${averageProgress}%`, label: 'Average progress' },
-                    { icon: 'albums', color: '#C98A0E', background: '#FFF4D9', value: String(habits.length), label: 'Habits tracked' },
+                    { icon: 'albums', color: '#C98A0E', background: '#FFF4D9', value: String(currentHabits.length), label: 'Habits tracked' },
                     { icon: 'time', color: '#D56A6A', background: '#FFECEC', value: String(openHabits), label: 'Open today' },
                   ] as const).map((stat) => (
                     <View key={stat.label} style={[styles.statTile, isDarkMode && styles.darkCard]}>
@@ -581,7 +603,7 @@ export default function InsightsScreen() {
                       <View style={styles.habitDropdownHeader}>
                         <View>
                           <Text style={[styles.habitDropdownTitle, isDarkMode && styles.darkPrimaryText]}>Your habits</Text>
-                          <Text style={[styles.habitDropdownSubtitle, isDarkMode && styles.darkMutedText]}>{habits.length} habit{habits.length === 1 ? '' : 's'} tracked</Text>
+                          <Text style={[styles.habitDropdownSubtitle, isDarkMode && styles.darkMutedText]}>{currentHabits.length} this week{heatmapHabits.length > currentHabits.length ? ', then past weeks' : ''}</Text>
                         </View>
                         <Ionicons name="sparkles-outline" size={16} color={themeColor('#5B42D8')} />
                       </View>
@@ -590,14 +612,14 @@ export default function InsightsScreen() {
                         <View style={styles.habitOptionCopy}><Text style={[styles.habitOptionTitle, selectedHabitId === 'all' && styles.habitOptionTextActive]}>All habits</Text><Text style={[styles.habitOptionMeta, selectedHabitId === 'all' && styles.habitOptionMetaActive]}>Combined consistency</Text></View>
                         {selectedHabitId === 'all' && <Ionicons name="checkmark-circle" size={17} color={themeColor('#FFFFFF')} />}
                       </Pressable>
-                      {habits.map((habit) => (
+                      {heatmapHabits.map(({ habit, week }) => (
                         <Pressable key={habit.id} style={[styles.habitOption, selectedHabitId === habit.id && styles.habitOptionActive]} onPress={() => { setSelectedHabitId(habit.id); setHabitDropdownOpen(false); }} accessibilityRole="button" accessibilityState={{ selected: selectedHabitId === habit.id }}>
                           <View style={[styles.habitOptionIcon, { backgroundColor: selectedHabitId === habit.id ? 'rgba(255,255,255,0.2)' : `${habit.color}22` }]}><Ionicons name={habit.icon as keyof typeof Ionicons.glyphMap} size={16} color={selectedHabitId === habit.id ? themeColor('#FFFFFF') : habit.color} /></View>
-                          <View style={styles.habitOptionCopy}><Text style={[styles.habitOptionTitle, selectedHabitId === habit.id && styles.habitOptionTextActive]} numberOfLines={1}>{habit.label}</Text><Text style={[styles.habitOptionMeta, selectedHabitId === habit.id && styles.habitOptionMetaActive]}>{habit.progress}% progress{habit.done ? ' · Done today' : ''}</Text></View>
+                          <View style={styles.habitOptionCopy}><Text style={[styles.habitOptionTitle, selectedHabitId === habit.id && styles.habitOptionTextActive]} numberOfLines={1}>{habit.label}</Text><Text style={[styles.habitOptionMeta, selectedHabitId === habit.id && styles.habitOptionMetaActive]}>{week ? `${week} · ${habit.completionDates.length} check-in${habit.completionDates.length === 1 ? '' : 's'}` : `${habit.progress}% progress${habit.done ? ' · Done today' : ''}`}</Text></View>
                           {selectedHabitId === habit.id && <Ionicons name="checkmark-circle" size={17} color={themeColor('#FFFFFF')} />}
                         </Pressable>
                       ))}
-                      {habits.length === 0 && <Text style={[styles.habitEmptyText, isDarkMode && styles.darkMutedText]}>Add a habit to view its heatmap.</Text>}
+                      {heatmapHabits.length === 0 && <Text style={[styles.habitEmptyText, isDarkMode && styles.darkMutedText]}>Add a habit to view its heatmap.</Text>}
                     </View>
                   )}
 

@@ -5,10 +5,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 
 export default function ModalScreen() {
-  const { isDarkMode, habits } = useAppColorScheme();
+  // This week's habits: those of past weeks are only history (habits last one week).
+  const { isDarkMode, currentHabits: habits } = useAppColorScheme();
   const actions = [
     { title: 'Create a habit', subtitle: 'Start tracking something new', icon: 'add-circle-outline', route: '/add' },
-    { title: 'Review goals', subtitle: `${habits.length} habit${habits.length === 1 ? '' : 's'} in your routine`, icon: 'flag-outline', route: '/goals' },
+    { title: 'Review goals', subtitle: `${habits.length} habit${habits.length === 1 ? '' : 's'} in your routine this week`, icon: 'flag-outline', route: '/goals' },
     { title: 'Open settings', subtitle: 'Manage your preferences', icon: 'settings-outline', route: '/settings-preferences' },
   ] as const;
 

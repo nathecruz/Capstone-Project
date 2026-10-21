@@ -4,9 +4,14 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { dayCompletion, periodShare } from '@/components/week-strip';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
+/**
+ * Every check-in in the range, also those of past weeks' habits (habits last one week; they stay in
+ * the history). Rates count each day's habits due that day, never how many habits there are now.
+ */
 export default function ActivityHistoryScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
@@ -22,21 +27,22 @@ export default function ActivityHistoryScreen() {
   const formatShortDate = (date: Date) => date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   const rangeLabel = `${formatShortDate(startDate)} - ${today.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
   const normalizedSearch = search.trim().toLowerCase();
-  const activityEntries = habits.flatMap((habit) => habit.completionDates.map((dateKey) => ({ habit, dateKey })))
+  const matchingHabits = habits.filter((habit) => !normalizedSearch || `${habit.label} ${habit.category} ${habit.frequency} ${habit.meta}`.toLowerCase().includes(normalizedSearch));
+  const activityEntries = matchingHabits.flatMap((habit) => habit.completionDates.map((dateKey) => ({ habit, dateKey })))
     .filter(({ dateKey }) => dateKey >= getDateKey(startDate) && dateKey <= getDateKey(today))
-    .filter(({ habit }) => !normalizedSearch || `${habit.label} ${habit.category} ${habit.frequency} ${habit.meta}`.toLowerCase().includes(normalizedSearch))
     .sort((first, second) => oldestFirst
       ? first.dateKey.localeCompare(second.dateKey)
       : second.dateKey.localeCompare(first.dateKey));
+  const rangeCompletion = Array.from({ length: rangeDays }, (_, index) => dayCompletion(matchingHabits, getDateKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() - index))));
   const allDailyActivity = Array.from({ length: Math.min(rangeDays, 7) }, (_, index) => {
     const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (Math.min(rangeDays, 7) - 1 - index));
     const dateKey = getDateKey(date);
-    return { date, dateKey, count: activityEntries.filter((entry) => entry.dateKey === dateKey).length };
+    return { date, dateKey, count: activityEntries.filter((entry) => entry.dateKey === dateKey).length, share: dayCompletion(matchingHabits, dateKey).share };
   });
   const dailyActivity = showActiveDaysOnly ? allDailyActivity.filter((day) => day.count > 0) : allDailyActivity;
   const completed = activityEntries.length;
   const activeDays = new Set(activityEntries.map((entry) => entry.dateKey)).size;
-  const averageProgress = habits.length && rangeDays ? Math.round((completed / (habits.length * rangeDays)) * 100) : 0;
+  const averageProgress = Math.round(periodShare(rangeCompletion) * 100);
 
   return (
     <>
@@ -82,7 +88,7 @@ export default function ActivityHistoryScreen() {
               <View style={styles.chartRow}>
                 {dailyActivity.some((day) => day.count) ? dailyActivity.map((day) => (
                   <View key={day.dateKey} style={styles.barColumn}>
-                    <View style={styles.barTrack}><View style={[styles.bar, { height: `${habits.length ? Math.max((day.count / habits.length) * 100, 8) : 0}%` as `${number}%` }]} /></View>
+                    <View style={styles.barTrack}><View style={[styles.bar, { height: `${Math.max(day.share * 100, 8)}%` as `${number}%` }]} /></View>
                     <Text style={styles.dayLabel}>{day.date.toLocaleDateString('en-US', { weekday: 'short' })}</Text>
                   </View>
                 )) : <Text style={styles.emptyText}>Add habits to see your progress.</Text>}

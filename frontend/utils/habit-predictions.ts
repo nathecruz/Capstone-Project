@@ -1,4 +1,6 @@
 import type { Habit } from '@/hooks/color-scheme-context';
+import { getLocalDateKey } from '@/utils/habit-visibility';
+import { currentHabits } from '@/utils/habit-week';
 
 type HabitFeatures = { progress: number; streak: number; done: number; reminder: number };
 
@@ -31,8 +33,12 @@ function randomForestVote(featuresList: HabitFeatures[]) {
   return votes.reduce<number>((sum, vote) => sum + vote, 0) / featuresList.length;
 }
 
-export function predictHabitOutcomes(habits: Habit[]) {
-  const featuresList = habits.map(features);
+/**
+ * A forecast for this week's habits; those of past weeks (habits last one week) are only history,
+ * and their progress and `done` are not today's.
+ */
+export function predictHabitOutcomes(habits: Habit[], now = new Date()) {
+  const featuresList = currentHabits(habits, getLocalDateKey(now)).map(features);
   const averageSignal = featuresList.length
     ? featuresList.reduce((sum, item) => sum + (item.progress * 0.55 + item.streak * 0.25 + item.done * 0.15 + item.reminder * 0.05), 0) / featuresList.length
     : 0.5;

@@ -1,15 +1,53 @@
 // Insights > Predictions: each habit analysed by the machine-learning model (chance of doing it
-// next time, dropout risk) and the AI (best time, three steps, what to watch out for).
+// next time, dropout risk) and the AI (best time, three steps, what to watch out for). Habits last
+// one week: this week's come first, then those of the last four weeks, so their history can still
+// be analysed (the server counts an ended habit only up to its last day).
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { analyzeHabit, type HabitAnalysis } from '@/authentication';
 import type { Habit } from '@/hooks/app-state/types';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
+import { getLocalDateKey } from '@/utils/habit-visibility';
+import { hasHabitEnded, weekEndKey } from '@/utils/habit-week';
 
 const percent = (value: number) => `${Math.round(value * 100)}%`;
 
-export function HabitAnalysisPanel({ habits }: { habits: Habit[] }) {
+/** How many past weeks of ended habits can still be picked. */
+const PAST_WEEKS = 4;
+
+function shiftDay(dateKey: string, days: number) {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+
+const shortDate = (dateKey: string) => new Date(`${dateKey}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+/** "Last week", or the Monday-to-Sunday dates of an older week that ended on `weekEnd` (a Sunday). */
+export function pastWeekLabel(weekEnd: string, today: string) {
+  if (weekEnd === shiftDay(weekEndKey(today), -7)) return 'Last week';
+  return `${shortDate(shiftDay(weekEnd, -6))} – ${shortDate(weekEnd)}`;
+}
+
+/**
+ * The habits that can be analysed: this week's first, in the student's order, then those whose week
+ * ended in the last four weeks, the newest first, each with its week as `week`. Older ones only
+ * count in the history totals.
+ */
+export function analysableHabits(habits: Habit[], today: string): { habit: Habit; week: string | null }[] {
+  const oldest = shiftDay(weekEndKey(today), -7 * PAST_WEEKS);
+  const lastDay = (habit: Habit) => habit.activeUntil ?? '';
+  const ended = habits
+    .filter((habit) => hasHabitEnded(habit, today) && lastDay(habit) >= oldest)
+    .sort((a, b) => lastDay(b).localeCompare(lastDay(a)));
+  return [
+    ...habits.filter((habit) => !hasHabitEnded(habit, today)).map((habit) => ({ habit, week: null })),
+    ...ended.map((habit) => ({ habit, week: pastWeekLabel(lastDay(habit), today) })),
+  ];
+}
+
+/** `habits` is every habit, also those of past weeks. */
+export function HabitAnalysisPanel({ habits, now }: { habits: Habit[]; now?: Date }) {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -17,7 +55,10 @@ export function HabitAnalysisPanel({ habits }: { habits: Habit[] }) {
   const [results, setResults] = useState<Record<string, HabitAnalysis>>({});
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [error, setError] = useState<{ id: string; message: string } | null>(null);
-  const selected = habits.find((habit) => habit.id === selectedId) ?? habits[0] ?? null;
+  const today = getLocalDateKey(now ?? new Date());
+  const choices = useMemo(() => analysableHabits(habits, today), [habits, today]);
+  const choice = choices.find((item) => item.habit.id === selectedId) ?? choices[0] ?? null;
+  const selected = choice?.habit ?? null;
   const analysis = selected ? results[selected.id] : undefined;
 
   const run = useCallback(async (habit: Habit) => {
@@ -34,11 +75,11 @@ export function HabitAnalysisPanel({ habits }: { habits: Habit[] }) {
   useEffect(() => {
     if (!selectedHabitId || results[selectedHabitId] || loadingId) return;
     if (error?.id === selectedHabitId) return;
-    const habit = habits.find((item) => item.id === selectedHabitId);
+    const habit = choices.find((item) => item.habit.id === selectedHabitId)?.habit;
     // Deferred, so the request starts after this render instead of inside the effect.
     const timer = setTimeout(() => { if (habit) void run(habit); }, 0);
     return () => clearTimeout(timer);
-  }, [selectedHabitId, results, loadingId, error, habits, run]);
+  }, [selectedHabitId, results, loadingId, error, choices, run]);
 
   if (!selected) {
     return (
@@ -63,22 +104,31 @@ export function HabitAnalysisPanel({ habits }: { habits: Habit[] }) {
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-        {habits.map((habit) => {
+        {choices.map(({ habit, week }) => {
           const active = habit.id === selected.id;
           return (
             <Pressable
               key={habit.id}
-              style={[styles.chip, active && styles.chipActive]}
+              style={[styles.chip, week !== null && styles.chipPast, active && styles.chipActive]}
               onPress={() => setSelectedId(habit.id)}
               accessibilityRole="tab"
               accessibilityState={{ selected: active }}
+              accessibilityLabel={week ? `${habit.label}, ${week}` : habit.label}
             >
               <Ionicons name={habit.icon} size={14} color={active ? themeColor('#5B42D8') : themeColor('#85808D')} />
               <Text style={[styles.chipText, active && styles.chipTextActive]} numberOfLines={1}>{habit.label}</Text>
+              {week ? <Text style={[styles.chipWeek, active && styles.chipWeekActive]} numberOfLines={1}>{week}</Text> : null}
             </Pressable>
           );
         })}
       </ScrollView>
+
+      {choice?.week ? (
+        <View style={styles.pastNote}>
+          <Ionicons name="time-outline" size={14} color={themeColor('#6E6887')} />
+          <Text style={styles.pastNoteText}>{choice.week === 'Last week' ? "Last week's habit" : `A habit of ${choice.week}`}: its week has ended. Its check-ins stay in your history.</Text>
+        </View>
+      ) : null}
 
       {loading ? (
         <View style={styles.loading}>
@@ -182,8 +232,14 @@ const themedStyles = createThemedStyles({
   chips: { gap: 8, paddingRight: 4 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: 200, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: '#E4E0EC', backgroundColor: '#FFFFFF' },
   chipActive: { borderColor: '#5B42D8', backgroundColor: '#F1EEFF' },
-  chipText: { fontSize: 13, fontWeight: '600', color: '#5E5868' },
+  chipText: { flexShrink: 1, fontSize: 13, fontWeight: '600', color: '#5E5868' },
   chipTextActive: { color: '#5B42D8', fontWeight: '800' },
+  // A habit of a past week: dashed, with its week after the name.
+  chipPast: { maxWidth: 260, borderStyle: 'dashed' },
+  chipWeek: { flexShrink: 0, fontSize: 11, fontWeight: '700', color: '#8A8492' },
+  chipWeekActive: { color: '#6E58D8' },
+  pastNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, padding: 10, borderRadius: 12, backgroundColor: '#F7F5FC' },
+  pastNoteText: { flex: 1, fontSize: 12, lineHeight: 17, fontWeight: '600', color: '#5E5868' },
   loading: { alignItems: 'center', gap: 10, paddingVertical: 18 },
   errorText: { fontSize: 13, fontWeight: '600', color: '#C24456', textAlign: 'center' },
   retryButton: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 12, backgroundColor: '#5B42D8' },

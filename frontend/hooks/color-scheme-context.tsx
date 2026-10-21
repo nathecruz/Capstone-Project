@@ -13,7 +13,9 @@ import { buddyGrowth } from '@/utils/buddy';
 import { isHabitLockedMissed, levelProgress, streakMilestone, STREAK_MILESTONE_BONUS, todayAgenda } from '@/utils/engagement';
 import { weeklyQuests } from '@/utils/quests';
 import { computeStreak } from '@/utils/streaks';
-import { applyRemoteCompletionDates, applyVisibleOrder, getLocalDateKey } from './app-state/habit-progress';
+import { accountStreak, longestAccountStreak } from '@/utils/account-streak';
+import { currentHabits as habitsOfThisWeek, habitActiveUntil, hasHabitEnded } from '@/utils/habit-week';
+import { applyRemoteCompletionDates, applyVisibleOrder, getLocalDateKey, withServerActiveUntil } from './app-state/habit-progress';
 import { AppThemeContext, DarkModeContext } from './dark-mode-context';
 import { adjustBuddyCheckIns, getCachedBuddy, reloadBuddy } from './use-buddy';
 import { loadRewards } from './use-rewards';
@@ -82,7 +84,17 @@ type ColorSchemeContextValue = {
   preferences: Preferences;
   updatePreferences: (changes: Partial<Preferences>) => void;
   t: (key: Parameters<typeof translate>[1]) => string;
+  /**
+   * Every habit, also those of past weeks (only history now: they keep their check-ins for stats,
+   * streaks, the AI and ML). Lists and today's actions use `currentHabits`.
+   */
   habits: Habit[];
+  /** The habits whose week has not ended (utils/habit-week.ts): shown on Home and in the habit lists. */
+  currentHabits: Habit[];
+  /** Days in a row with at least one check-in, across all habits and weeks (utils/account-streak.ts). */
+  streak: number;
+  /** The longest such run. */
+  bestStreak: number;
   addHabit: (habit: Omit<Habit, 'id' | 'goal' | 'progress' | 'total' | 'streak' | 'done' | 'completionDates'> & { goal: number }) => void;
   toggleHabit: (id: string) => void;
   toggleHabitForDate: (id: string, date: Date) => void;
@@ -205,8 +217,15 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   const pendingSavesRef = useRef(0);
   // The app opened while the server did not answer (asleep): its state is loaded once it does.
   const startedWithoutServerRef = useRef(false);
-  useHabitReminders({ habits, preferences, ringInterval, snoozeFrequency, ready: stateHydrated });
-  useHomeWidget(habits);
+
+  // `dayKey` changes at midnight, so a new week hides last week's habits without a reload.
+  const currentHabits = useMemo(() => habitsOfThisWeek(habits, dayKey), [habits, dayKey]);
+  const frozenDays = streakFreeze?.frozenDays;
+  const streak = useMemo(() => accountStreak(habits, dayKey, frozenDays), [habits, dayKey, frozenDays]);
+  const bestStreak = useMemo(() => longestAccountStreak(habits, dayKey, frozenDays), [habits, dayKey, frozenDays]);
+  // Only this week's habits are reminded and shown on the home-screen widget.
+  useHabitReminders({ habits: currentHabits, preferences, ringInterval, snoozeFrequency, ready: stateHydrated });
+  useHomeWidget(currentHabits, streak);
 
   /** The last state the server confirmed; kept on the device so later saves merge correctly. */
   const setSyncBase = useCallback((base: AppStateSyncBase | null) => {
@@ -332,7 +351,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       });
       setAccountRegion(session.region || '');
       setPreferences({ ...initialPreferences, ...(savedState.preferences ?? {}), region: session.region || savedState.preferences?.region || initialPreferences.region });
-      const savedHabits = Array.isArray(savedState.habits) ? savedState.habits : [];
+      // Local changes kept: the server may have given habits made by older app versions their last
+      // active day since (habits last one week), which the next save would bring back anyway.
+      const savedHabits = withServerActiveUntil(Array.isArray(savedState.habits) ? savedState.habits : [], keepLocalChanges ? remoteState?.state?.habits : null);
       const completionsByHabit = new Map<string, string[]>();
       for (const completion of remoteCompletions ?? []) {
         completionsByHabit.set(completion.habitId, [...(completionsByHabit.get(completion.habitId) ?? []), completion.date]);
@@ -385,8 +406,13 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       goals,
     };
     void AsyncStorage.setItem(`${APP_STATE_KEY_PREFIX}${activeUserEmail}`, JSON.stringify(state));
-    // State just received from the server (or unchanged) does not need to be sent back.
-    if (syncBaseRef.current && clientOwnedKey(syncBaseRef.current.state) === clientOwnedKey(state)) return;
+    // State just received from the server (or unchanged) does not need to be sent back. Back to the
+    // server's copy (e.g. a check-in it confirmed), nothing is left unsaved either; otherwise the
+    // next live pulse sent the same state again.
+    if (syncBaseRef.current && clientOwnedKey(syncBaseRef.current.state) === clientOwnedKey(state)) {
+      setUnsaved(false);
+      return;
+    }
     setUnsaved(true);
     // Until the server's state is known it stays on the device; the poll sends it once it is.
     if (!remoteReadyRef.current) return;
@@ -399,7 +425,13 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         setSyncBase({ updatedAt: result.updatedAt, state: result.state });
         setUnsaved(false);
         applyWallet(result.state);
-        if (!result.merged) return;
+        if (!result.merged) {
+          // The server gives habits without a last active day one (habits last one week). Without
+          // it here too, this state never matched the saved one and every change was saved again.
+          const serverHabits = result.state.habits;
+          setHabits((current) => withServerActiveUntil(current, serverHabits));
+          return;
+        }
         const mergedGoals = result.state.goals;
         setAvatarImage(result.state.avatarImage);
         setProfile(result.state.profile as Profile);
@@ -627,19 +659,25 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       smartReminderEnabled: habit.smartReminderEnabled ?? false,
       isBadHabit: Boolean(habit.isBadHabit),
       badHabitReason: habit.badHabitReason || undefined,
+      // Habits last one week: it leaves the lists after the Sunday of the week it starts in.
+      activeUntil: habit.activeUntil ?? habitActiveUntil(habit.startDate, getLocalDateKey()),
     }]);
   };
 
   /** Picks the best thing to celebrate about a check-in: streak milestone, level, challenge, all done. */
   const celebrateCheckIn = (habit: Habit, dateKey: string) => {
     const now = new Date();
-    const datesAfter = [...habit.completionDates.filter((date) => date !== dateKey), dateKey];
-    const habitsAfter = habits.map((item) => (item.id === habit.id ? { ...item, completionDates: datesAfter } : item));
+    const withDates = (dates: string[]) => habits.map((item) => (item.id === habit.id ? { ...item, completionDates: dates } : item));
+    const habitsBefore = withDates(habit.completionDates.filter((date) => date !== dateKey));
+    const habitsAfter = withDates([...habit.completionDates.filter((date) => date !== dateKey), dateKey]);
     const frozen = frozenDaysRef.current;
-    const milestone = streakMilestone(computeStreak(habit, habit.completionDates, dateKey, frozen), computeStreak(habit, datesAfter, dateKey, frozen));
+    // The account streak (days in a row with a check-in, across all habits and weeks) without and
+    // with this check-in, as the server counts it for the milestone bonus (services/check-ins.js).
+    const milestone = streakMilestone(accountStreak(habitsBefore, dateKey, frozen), accountStreak(habitsAfter, dateKey, frozen));
     const levelBefore = levelProgress(points).level;
     const levelAfter = levelProgress(points + 20).level;
-    const agendaAfter = todayAgenda(habitsAfter, now);
+    // "All done" is about this week's habits; those of past weeks are only history.
+    const agendaAfter = todayAgenda(habitsOfThisWeek(habitsAfter, dateKey), now);
     const earnedBefore = new Set(badgeProgress(habits, goals, now, frozen).filter((badge) => badge.earned).map((badge) => badge.id));
     const newBadge = badgeProgress(habitsAfter, goals, now, frozen).find((badge) => badge.earned && !earnedBefore.has(badge.id));
     const questsBefore = new Set(weeklyQuests(habits, now).filter((quest) => quest.complete).map((quest) => quest.id));
@@ -654,7 +692,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       celebrate({ id: `buddy:${grownAfter.stage.id}`, kind: 'buddy', icon: 'paw', title: `${name} grew into a ${grownAfter.stage.name}!`, message: `${checkInsBefore + 1} check-ins together. New looks are waiting in ${name}'s shop.` });
     } else if (milestone) {
       const bonus = STREAK_MILESTONE_BONUS[milestone];
-      celebrate({ id: `streak:${habit.id}:${milestone}:${dateKey}`, kind: 'streak', icon: 'flame', title: `${milestone}-day streak!`, message: `${habit.label}: ${milestone} days in a row.${bonus ? ` +${bonus} tokens!` : ''} Keep the flame going!` });
+      celebrate({ id: `streak:account:${milestone}:${dateKey}`, kind: 'streak', icon: 'flame', title: `${milestone}-day streak!`, message: `${milestone} days in a row with a check-in.${bonus ? ` +${bonus} tokens!` : ''} Keep the flame going!` });
     } else if (newBadge) {
       celebrate({ id: `badge:${newBadge.id}`, kind: 'badge', icon: newBadge.icon, color: newBadge.color, title: `Badge unlocked: ${newBadge.title}`, message: `You did it: ${newBadge.goal.charAt(0).toLowerCase()}${newBadge.goal.slice(1)}. See all your badges in Achievements.` });
     } else if (newQuest) {
@@ -697,6 +735,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     // Past its last reminder time and still not done: the check-in is closed for the day (the server
     // enforces the same rule), so a missed habit cannot be checked in late.
     if (completed && isHabitLockedMissed(currentHabit, new Date())) return;
+    // A habit whose week has ended is only history: it takes no new check-ins (the server answers
+    // 409 HABIT_ENDED, handled below like its other refusals).
+    if (completed && hasHabitEnded(currentHabit, dateKey)) return;
     // A check-in can be undone only right after the tap; then it is locked for the day.
     if (!completed && !canUndoCheckIn(id)) return;
     setUndoUntil((current) => {
@@ -710,8 +751,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     adjustBuddyCheckIns(completed ? 1 : -1);
     void saveRemoteHabitCompletion({ habitId: id, date: dateKey, completed }).then((result) => {
       if (result && 'rejected' in result) {
-        // The server refused this check-in (day closed, habit missed, or undo locked): undo the
-        // optimistic change so the screen matches the server instead of silently reverting on sync.
+        // The server refused this check-in (day closed, habit missed, its week ended, or undo
+        // locked): undo the optimistic change so the screen matches the server instead of silently
+        // reverting on sync.
         applyLocalCheckIn(id, dateKey, !completed);
         setUndoUntil((current) => { const next = { ...current }; delete next[id]; return next; });
         return;
@@ -737,10 +779,13 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       if (result.state && result.updatedAt && (!syncBaseRef.current || result.updatedAt > syncBaseRef.current.updatedAt)) {
         setSyncBase({ updatedAt: result.updatedAt, state: result.state });
       }
-      if (result.habit) {
-        const serverHabit = result.habit;
-        setHabits((current) => current.map((habit) => (habit.id === serverHabit.id ? { ...habit, streak: serverHabit.streak } : habit)));
-      }
+      // The snapshot's last active days too (the server sets them on habits of older app versions),
+      // so this state matches the sync base again.
+      const serverHabits = result.state?.habits;
+      const serverHabit = result.habit;
+      setHabits((current) => withServerActiveUntil(serverHabit
+        ? current.map((habit) => (habit.id === serverHabit.id ? { ...habit, streak: serverHabit.streak } : habit))
+        : current, serverHabits));
     });
   };
 
@@ -842,6 +887,8 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     } else if (!syncBaseRef.current || clientOwnedKey(syncBaseRef.current.state) !== clientOwnedKey(state)) {
       setUnsaved(true);
     }
+    // Not merged: the state stays, with the last active days the server gave habits without one.
+    if (savedState && !result?.merged) setHabits((current) => withServerActiveUntil(current, savedState.habits));
     if (savedState && result?.merged) {
       setAvatarImage(savedState.avatarImage ?? null);
       setProfile(savedState.profile as Profile);
@@ -874,6 +921,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       updatePreferences,
       t: (key: Parameters<typeof translate>[1]) => translate(preferences.language, key),
       habits,
+      currentHabits,
+      streak,
+      bestStreak,
       addHabit,
       toggleHabit,
       toggleHabitForDate,
@@ -915,7 +965,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       clearLocalData,
       isFaculty: accountRole === 'faculty',
     }),
-    [avatarImage, colorScheme, darkModeOverride, getAppStateSnapshot, goals, habits, points, preferences, profile, ringInterval, snoozeFrequency, syncAppState, tokenHistory, tokens, undoUntil, accountRole, celebration, streakFreeze],
+    [avatarImage, colorScheme, darkModeOverride, getAppStateSnapshot, goals, habits, currentHabits, streak, bestStreak, points, preferences, profile, ringInterval, snoozeFrequency, syncAppState, tokenHistory, tokens, undoUntil, accountRole, celebration, streakFreeze],
   );
 
   const appTheme = isAppTheme(preferences.appTheme) ? preferences.appTheme : 'classic';

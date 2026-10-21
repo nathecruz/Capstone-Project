@@ -4,6 +4,7 @@
 import type { NotificationResponse } from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
+import { isHabitActiveOn } from '@/utils/habit-week';
 import { getLocalDateKey } from './habit-progress';
 import { planReminders, type PlannedReminder } from './native-reminders';
 import { canRemindAt, enableWebReminders, getBrowserNotificationRegistration, getHabitReminderTimes, getNotificationsModule, isHabitReminderDay, playReminderSound, requestWebNotificationPermission, type NotificationsModule } from './reminders';
@@ -12,8 +13,10 @@ import { keepsSnooze, loadSnoozeSettings, SNOOZE_CATEGORY, snoozeReminder } from
 import type { Habit, Preferences } from './types';
 
 /**
- * `ready`: the account's habits and settings have loaded. Until then the Android/iOS reminders are
- * left as scheduled, since rescheduling from the empty startup state would cancel them all.
+ * `habits`: this week's habits (the app passes its current ones); one whose week has ended is never
+ * reminded or snoozed either way. `ready`: the account's habits and settings have loaded. Until then
+ * the Android/iOS reminders are left as scheduled, since rescheduling from the empty startup state
+ * would cancel them all.
  */
 export function useHabitReminders({ habits, preferences, ringInterval, snoozeFrequency, ready }: {
   habits: Habit[];
@@ -119,8 +122,9 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
             if (!key.includes(`-${today}-`)) sentBrowserRemindersRef.current.delete(key);
           }
           for (const habit of reminders) {
-            // Done, or missed (past its last reminder time): it can no longer be checked in today.
-            if ((habit.startDate && habit.startDate > today) || !isHabitReminderDay(habit, now) || !canRemindAt(habit, now, now)) continue;
+            // Not active today (not started yet, or its week has ended), done, or missed (past its
+            // last reminder time): it cannot be checked in today.
+            if (!isHabitActiveOn(habit, today) || !isHabitReminderDay(habit, now) || !canRemindAt(habit, now, now)) continue;
             const smart = habit.smartReminderEnabled ? computeSmartReminderTimes(habit, now) : null;
             const times = smart ? smart.times : getHabitReminderTimes(habit);
             for (const time of times) {

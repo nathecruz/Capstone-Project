@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { NotificationRequest, NotificationResponse } from 'expo-notifications';
 import { Platform } from 'react-native';
 import { getCurrentSession } from '@/authentication/session';
+import { isHabitActiveOn } from '@/utils/habit-week';
 import { getLocalDateKey } from './habit-progress';
 import { canRemindAt, canSnoozeAt, getHabitReminderTimes, getSnoozeLimit, isHabitReminderDay, notificationShownAt, type NotificationsModule } from './reminders';
 import { APP_STATE_KEY_PREFIX } from './sync-storage';
@@ -18,19 +19,19 @@ export type SnoozeSettings = { habits: Habit[]; ringInterval: number; snoozeFreq
 
 /**
  * Whether the habit may be reminded at `at` and `at` is still today: it has reminders on (the same
- * habits the app schedules), is due that day, and is neither done nor missed (past its last reminder
- * time) by then.
+ * habits the app schedules), is active (started, and its week has not ended) and due that day, and
+ * is neither done nor missed (past its last reminder time) by then.
  */
 function remindsAt(habit: Habit, at: Date, now: Date) {
   if (!habit.reminderEnabled || !getHabitReminderTimes(habit).length) return false;
-  if ((habit.startDate && habit.startDate > getLocalDateKey(at)) || !isHabitReminderDay(habit, at)) return false;
+  if (!isHabitActiveOn(habit, getLocalDateKey(at)) || !isHabitReminderDay(habit, at)) return false;
   return canRemindAt(habit, at, now);
 }
 
 /**
  * Whether a scheduled notification is a snooze to keep when the reminders are scheduled again: its
- * habit still exists with reminders on, and it comes back while the habit can still be checked in.
- * Regular reminders are not kept; they are scheduled again from the habits.
+ * habit still exists with reminders on and its week has not ended, and it comes back while the habit
+ * can still be checked in. Regular reminders are not kept; they are scheduled again from the habits.
  */
 export function keepsSnooze(request: NotificationRequest, habits: Habit[], now = new Date()) {
   const data = request.content.data ?? {};
@@ -58,8 +59,8 @@ async function claimSnooze(key: string) {
 /**
  * Schedules the snooze a tapped Snooze asks for; false when there is none to set. None is set for a
  * reminder from an older day, past the snooze limit, with notifications off, for a habit that is gone
- * (deleted, or signed out) or no longer reminded, or when it would come back once the habit is done or
- * missed. A habit has one pending snooze at most: a newer one replaces it.
+ * (deleted, or signed out), ended (its week is over) or no longer reminded, or when it would come back
+ * once the habit is done or missed. A habit has one pending snooze at most: a newer one replaces it.
  */
 export async function snoozeReminder(Notifications: NotificationsModule, response: NotificationResponse, { habits, ringInterval, snoozeFrequency, notificationsEnabled = true }: SnoozeSettings, now = new Date()) {
   if (response.actionIdentifier !== 'SNOOZE') return false;

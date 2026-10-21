@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { getWebPushVapidPublicKey, saveWebPushSubscription, sendTestWebPush } from '@/authentication/authService';
 import { deadlineMinutes, isHabitLockedMissed } from '@/utils/engagement';
 import { getLocalDateKey } from '@/utils/habit-visibility';
+import { hasHabitEnded } from '@/utils/habit-week';
 import { parseReminderTime } from '@/utils/reminder-time';
 import type { Habit } from './types';
 
@@ -46,7 +47,12 @@ export function getHabitReminderSchedule(habit: Pick<Habit, 'frequency' | 'meta'
   return { type: 'daily' as const };
 }
 
-export function isHabitReminderDay(habit: Pick<Habit, 'frequency' | 'meta' | 'reminderDays' | 'startDate'>, date: Date) {
+/**
+ * Whether the habit is reminded on `date`'s day: one of its days, and not after its week ended
+ * (habits last one week, utils/habit-week.ts; an ended habit is only history).
+ */
+export function isHabitReminderDay(habit: Pick<Habit, 'frequency' | 'meta' | 'reminderDays' | 'startDate' | 'activeUntil'>, date: Date) {
+  if (hasHabitEnded(habit, getLocalDateKey(date))) return false;
   const schedule = getHabitReminderSchedule(habit);
   if (schedule.type === 'weekly') return schedule.days.includes(reminderDayLabels[date.getDay()]);
   // A monthly day past the month's length (29-31) falls on the last day of that month instead.

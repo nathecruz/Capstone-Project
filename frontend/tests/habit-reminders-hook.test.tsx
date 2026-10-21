@@ -331,3 +331,57 @@ describe('reminders shown by an open HabitAI tab', () => {
     expect(await shownAt(11, 31)).toEqual([]);
   });
 });
+
+describe('habits whose week has ended (habits last one week)', () => {
+  // This week runs from Monday the 19th to Sunday the 25th; last week's habit ended on the 18th.
+  const thisWeek = { ...gym, activeUntil: '2026-10-25' };
+  const lastWeek = { ...gym, id: 'old', label: 'Old', startDate: '2026-10-12', activeUntil: '2026-10-18' };
+  const nativeOS = Platform.OS;
+  beforeEach(async () => {
+    jest.useFakeTimers({ now, doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] });
+    mockListeners.length = 0;
+    mockPending = [];
+    jest.clearAllMocks();
+    await AsyncStorage.clear();
+  });
+  afterEach(() => {
+    Object.defineProperty(Platform, 'OS', { value: nativeOS, configurable: true });
+    delete (globalThis as { Notification?: unknown }).Notification;
+    jest.useRealTimers();
+  });
+
+  it('schedules no reminder after the end of the week, and none at all for an ended habit', async () => {
+    // A pending snooze of last week's habit (an older plan) is cancelled too.
+    mockPending = [{ identifier: 'habitai-snooze:old', content: { data: { habitId: 'old', snoozeCount: 1, snoozeAt: new Date(2026, 9, 19, 11, 25).getTime() } } }];
+    renderHook(() => useHabitReminders({ habits: [thisWeek, lastWeek], preferences, ringInterval: 20, snoozeFrequency: 'Once', ready: true }));
+    await settle();
+    const requests = scheduled();
+    // Today's 11:30, then both times on the 20th to the 25th.
+    expect(requests).toHaveLength(13);
+    expect(requests.every((request) => (request.content.data as { habitId?: string }).habitId === 'gym')).toBe(true);
+    expect(requests[12].trigger.date).toEqual(new Date(2026, 9, 25, 11, 30));
+    expect(mockNotifications.cancelScheduledNotificationAsync.mock.calls.map(([identifier]) => identifier)).toEqual(['habitai-snooze:old']);
+  });
+
+  it('sets no snooze for an ended habit, also from the settings saved on the device', async () => {
+    await AsyncStorage.setItem('habitai_session', JSON.stringify({ email: 'Student@Example.com', fullName: 'A Student' }));
+    await AsyncStorage.setItem('habitai_app_state:student@example.com', JSON.stringify({ habits: [lastWeek], ringInterval: 10, snoozeFrequency: 'Once' }));
+    renderHook(() => useHabitReminders({ habits: [], preferences, ringInterval: 30, snoozeFrequency: 'Once', ready: false }));
+    await settle();
+    const tap = snoozeResponse(new Date(2026, 9, 19, 11, 0));
+    tap.notification.request.content.data.habitId = 'old';
+    await act(async () => { mockListeners.forEach((listener) => listener(tap)); });
+    await settle();
+    expect(mockNotifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  it('is not shown by an open tab', async () => {
+    Object.defineProperty(Platform, 'OS', { value: 'web', configurable: true });
+    (globalThis as { Notification?: unknown }).Notification = { permission: 'granted' };
+    jest.useFakeTimers({ now: new Date(2026, 9, 19, 11, 30, 5), doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] });
+    const { unmount } = renderHook(() => useHabitReminders({ habits: [lastWeek, { ...thisWeek, label: 'This week' }], preferences, ringInterval: 20, snoozeFrequency: 'Once', ready: true }));
+    await settle();
+    unmount();
+    expect(mockRegistration.showNotification.mock.calls.map(([title]) => title)).toEqual(['This week reminder']);
+  });
+});

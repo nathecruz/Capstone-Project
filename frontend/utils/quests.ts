@@ -2,6 +2,7 @@
 // same rules (backend/services/quests.js), so the card and the tokens agree.
 import type { Habit } from '@/hooks/app-state/types';
 import { getLocalDateKey } from '@/utils/habit-visibility';
+import { isHabitActiveOn } from '@/utils/habit-week';
 import { isHabitScheduledOn } from '@/utils/streaks';
 
 export type Quest = { id: string; title: string; icon: string; target: number; progress: number; reward: number; weekStart: string; complete: boolean };
@@ -19,11 +20,26 @@ export function weekStartOf(dateKey: string) {
 
 const weekNumber = (weekStart: string) => Math.floor((Date.parse(`${weekStart}T00:00:00Z`) / 86_400_000 - 4) / 7);
 
-/** This week's quests and their progress up to today. */
-export function weeklyQuests(habits: Habit[], now = new Date()): Quest[] {
-  if (!habits.length) return [];
+/**
+ * Whether a habit counts for the week starting `weekStart`: it was active at some point in it
+ * (habits last one week, utils/habit-week.ts), so last week's habits do not count this week. The
+ * server's rule (backend/services/quests.js isHabitInWeek), exactly.
+ */
+export function isHabitInWeek(habit: Pick<Habit, 'startDate' | 'activeUntil'>, weekStart: string) {
+  const weekEnd = shift(weekStart, 6);
+  return (!habit.startDate || habit.startDate <= weekEnd) && (!habit.activeUntil || habit.activeUntil >= weekStart);
+}
+
+/**
+ * This week's quests and their progress up to today, for the habits that count this week (every
+ * habit can be passed: those of other weeks are left out). A habit is due on a day when it is active
+ * then and scheduled.
+ */
+export function weeklyQuests(allHabits: Habit[], now = new Date()): Quest[] {
   const today = getLocalDateKey(now);
   const weekStart = weekStartOf(today);
+  const habits = allHabits.filter((habit) => isHabitInWeek(habit, weekStart));
+  if (!habits.length) return [];
   let checkIns = 0;
   let perfectDays = 0;
   let challengeDays = 0;
@@ -36,7 +52,7 @@ export function weeklyQuests(habits: Habit[], now = new Date()): Quest[] {
     checkIns += doneHabits.length;
     if (doneHabits.length) activeDays += 1;
     for (const habit of doneHabits) habitsDone.add(habit.id);
-    const due = habits.filter((habit) => (!habit.startDate || habit.startDate <= day) && isHabitScheduledOn(habit, day));
+    const due = habits.filter((habit) => isHabitActiveOn(habit, day) && isHabitScheduledOn(habit, day));
     const dueDone = due.filter((habit) => habit.completionDates.includes(day)).length;
     if (due.length && dueDone === due.length) perfectDays += 1;
     if (due.length && dueDone >= Math.min(3, due.length)) challengeDays += 1;

@@ -5,8 +5,10 @@ import { ActivityIndicator, Modal, Pressable, Text, View } from 'react-native';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { createThemedStyles, useThemedStyles } from '@/hooks/use-themed-styles';
 
+// A freeze protects the account streak (days in a row with a check-in): it covers a day with no
+// check-in at all, and so every habit's own streak on that day too.
 const HOW_IT_WORKS = [
-  { icon: 'shield-checkmark', text: 'Miss a habit? A freeze is used the next day so your streaks keep going.' },
+  { icon: 'shield-checkmark', text: 'Missed a whole day? A freeze is used the next day so your streak keeps going.' },
   { icon: 'pause-circle', text: 'A frozen day keeps the streak alive; it does not add to it.' },
   { icon: 'time', text: 'Bought after a miss, it can still save yesterday.' },
 ];
@@ -38,7 +40,7 @@ export function StreakFreezeSheet({ visible, onClose }: { visible: boolean; onCl
             <View style={styles.icon}><Ionicons name="snow" size={26} color="#FFFFFF" /></View>
             <View style={styles.headerCopy}>
               <Text style={styles.title}>Streak Freeze</Text>
-              <Text style={styles.subtitle}>Protects all your streaks for one missed day.</Text>
+              <Text style={styles.subtitle}>Protects your streak for one day with no check-in.</Text>
             </View>
             <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
               <Ionicons name="close" size={22} color="#8A8492" />

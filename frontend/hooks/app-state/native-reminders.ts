@@ -1,6 +1,7 @@
 // The reminders the Android/iOS app has the phone schedule. The phone shows them while HabitAI is
 // closed, so the next two weeks are scheduled: they keep coming on days the app is not opened, and
 // are planned again (with the latest check-ins) whenever it opens.
+import { hasHabitEnded, isHabitActiveOn } from '@/utils/habit-week';
 import { getLocalDateKey } from './habit-progress';
 import { canSnoozeAt, getHabitReminderTimes, isHabitReminderDay } from './reminders';
 import { computeSmartReminderTimes, getSmartReminderMessage, type HabitPrediction } from './smart-reminders';
@@ -30,9 +31,10 @@ function modelRisk(prediction: HabitPrediction | null | undefined) {
 
 /**
  * The reminders to have scheduled at `now`, soonest first: each reminder time on the habit's days
- * of the next two weeks, from its start date, except today's once the habit is done or the time has
- * passed. At most `limit` of them (the soonest), plus the next one of every reminder time however
- * far ahead. A smart habit's times, risk and message are today's on every day.
+ * of the next two weeks, from its start date to the end of its week (habits last one week), except
+ * today's once the habit is done or the time has passed. At most `limit` of them (the soonest), plus
+ * the next one of every reminder time however far ahead. A smart habit's times, risk and message are
+ * today's on every day.
  */
 export function planReminders(habits: Habit[], now: Date, { ringInterval, limit, predictions = {} }: {
   ringInterval: number;
@@ -42,7 +44,8 @@ export function planReminders(habits: Habit[], now: Date, { ringInterval, limit,
   const today = getLocalDateKey(now);
   const candidates: (PlannedReminder & { next: boolean })[] = [];
   for (const habit of habits) {
-    if (!habit.reminderEnabled || !getHabitReminderTimes(habit).length) continue;
+    // A habit whose week has ended is only history: it has nothing left to remind.
+    if (!habit.reminderEnabled || !getHabitReminderTimes(habit).length || hasHabitEnded(habit, today)) continue;
     const prediction = predictions[habit.id];
     const smart = habit.smartReminderEnabled ? computeSmartReminderTimes(habit, now, modelRisk(prediction)) : null;
     const content = smart
@@ -63,7 +66,9 @@ export function planReminders(habits: Habit[], now: Date, { ringInterval, limit,
         if (!next && offset >= PLAN_DAYS) break;
         const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, time.hour, time.minute);
         const day = getLocalDateKey(date);
-        if (date <= now || (day === today && doneToday) || (habit.startDate && day < habit.startDate) || !isHabitReminderDay(habit, date)) continue;
+        // Never after the habit's last active day (the Sunday of its week).
+        if (hasHabitEnded(habit, day)) break;
+        if (date <= now || (day === today && doneToday) || !isHabitActiveOn(habit, day) || !isHabitReminderDay(habit, date)) continue;
         // A scheduled reminder with another time (e.g. after a time zone change), text or sound is replaced.
         const plan = JSON.stringify([date.getTime(), content, soundEnabled, snooze]);
         candidates.push({ identifier: `habitai-reminder:${habit.id}:${day}:${clock}`, date, ...content, soundEnabled, snooze, data: { ...content.data, plan }, next });

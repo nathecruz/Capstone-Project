@@ -1,6 +1,8 @@
 // Home, as a bento dashboard: a greeting, today's progress and next habit (the hero), tiles for
 // streak, level, tokens and Habi, today's habits, then the rewards (as tabs) and progress. On laptops the
 // hero, habits and progress sit on the left and the tiles and challenges on the right.
+// Habits last one week: today's cards get this week's habits (`currentHabits`); the progress cards
+// get every habit, as their history includes past weeks.
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React from 'react';
@@ -37,7 +39,7 @@ function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) 
 export default function HomeScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
-  const { avatarImage, habits, profile, toggleHabit, isFaculty, goals, tokenHistory, applyWallet, preferences } = useAppColorScheme();
+  const { avatarImage, habits, currentHabits, profile, toggleHabit, isFaculty, goals, tokenHistory, applyWallet, preferences } = useAppColorScheme();
   const [freezeSheetVisible, setFreezeSheetVisible] = React.useState(false);
   const insets = useSafeAreaInsets();
   const { isDesktop } = useResponsiveLayout();
@@ -102,16 +104,16 @@ export default function HomeScreen() {
         <View style={isDesktop ? styles.columns : styles.column}>
           <View style={[styles.column, isDesktop && styles.mainColumn]}>
             <InstallAppCard variant="home" />
-            <DeviceRemindersBanner habits={habits} notificationsEnabled={preferences.notificationsEnabled} />
-            <StreakRiskBanner habits={habits} now={now} onFreeze={openFreeze} />
-            <TodayAgenda habits={habits} now={now} onCheck={(habit) => toggleHabit(habit.id)} middle={isDesktop ? undefined : tiles} />
+            <DeviceRemindersBanner habits={currentHabits} notificationsEnabled={preferences.notificationsEnabled} />
+            <StreakRiskBanner habits={currentHabits} now={now} onFreeze={openFreeze} />
+            <TodayAgenda habits={currentHabits} now={now} onCheck={(habit) => toggleHabit(habit.id)} middle={isDesktop ? undefined : tiles} />
             {isDesktop && progress}
           </View>
 
           <View style={[styles.column, isDesktop && styles.sideColumn]}>
             {isDesktop && tiles}
-            <RewardsHub habits={habits} now={now} />
-            <MysteryBoxCard habits={habits} tokenHistory={tokenHistory} onWallet={applyWallet} />
+            <RewardsHub habits={currentHabits} now={now} />
+            <MysteryBoxCard habits={currentHabits} tokenHistory={tokenHistory} onWallet={applyWallet} />
             {!isDesktop && progress}
           </View>
         </View>

@@ -131,6 +131,20 @@ erDiagram
 - `habit_completions` is the authoritative record of check-ins: points, leaderboards,
   streaks, AI context and analytics all derive from it. A synced state can add offline
   check-ins but never delete them; only `PUT /api/habit-completions` can undo one.
+- **Habits last one week.** Each habit has `activeUntil` (`habits.active_until`): the Sunday of
+  the Monday-to-Sunday week it starts in (`backend/services/habit-week.js`,
+  `frontend/utils/habit-week.ts`).
+  - After that day the habit leaves Home and the habit lists, gets no reminders, and refuses
+    check-ins with 409 `HABIT_ENDED`.
+  - It is never deleted: it stays in the synced state with its check-ins, so stats, the AI
+    context, habit analysis and ML training keep its history, counted only up to its last day.
+  - The server stamps the field on habits without one: on every save (habits from older app
+    builds) and once for every account (the `habits-weekly-reset` migration).
+- **Streaks.** The main streak is the account streak (`account-streak.js`/`.ts`): days in a row
+  with at least one check-in, across habits and weeks.
+  - A day breaks it only when some habit was due and nothing was checked in.
+  - Streak freezes, the streak milestone bonuses (once per run) and the streak badges follow it.
+  - A habit's own streak stops at its last day.
 - `token_transactions` is the wallet ledger. The balance is its sum: +5 per check-in (id
   unique per habit and day, so it cannot be earned twice), −5 when a check-in is undone,
   −10 per AI Coach answer, and the reward cost on redemption.
@@ -289,6 +303,13 @@ sequenceDiagram
 - The **goal planner** uses Groq JSON mode and gives the model the JSON Schema; the server then
   normalises the plan (lengths, allowed values) and computes due dates from the chosen
   timeline, retrying once if the output is unusable.
+  - It also reads the student's last four weeks (`planner-history.js`). For each habit that is
+    current or ended recently it sends the results up to its last day, the usual check-in time
+    and an ML forecast; it also sends the account streak.
+  - It returns this week's habits (the "Habits to focus on" count), each with a category, days,
+    time and a reason from that history.
+  - Open requests such as "create my habits today" are planned from the history alone.
+  - The app adds the planned habits to the week after one confirmation.
 - Calls time out, retry once on transient errors (429/5xx), and are disabled cleanly when
   no real API key is configured (`/health` reports `aiConfigured` and the model in use).
 

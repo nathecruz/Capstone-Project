@@ -27,6 +27,8 @@ export type Goal = {
   actionPlan: string[];
   actionDueDates: string[];
   habitSuggestions?: string[];
+  /** The habits the AI planned for this week, from the student's history (added with one tap). */
+  habitPlan?: PlannedHabit[];
   weeklyRoadmap?: string[];
   nextMilestone: string;
   successMetric?: string;
@@ -41,9 +43,28 @@ export type Goal = {
   status: string;
 };
 
+/** A habit the AI goal planner recommends, ready to add (utils/planned-habits.ts). */
+export type PlannedHabit = {
+  name: string;
+  category: string;
+  frequency: 'Daily' | 'Weekly' | 'Custom';
+  /** The days for a Weekly or Custom habit (Mon..Sun); empty for Daily. */
+  days: string[];
+  /** The reminder time, e.g. "07:30 AM". */
+  time: string;
+  /** Why the AI picked it, from the student's history. */
+  reason: string;
+};
+
 export type Habit = {
   id: string;
   startDate: string;
+  /**
+   * The last day the habit is active (YYYY-MM-DD): the Sunday of the week it starts in
+   * (utils/habit-week.ts). After it, the habit leaves Home and the habit lists but keeps its history.
+   * Missing on habits from older app versions until the server sets it.
+   */
+  activeUntil?: string;
   label: string;
   meta: string;
   category: string;

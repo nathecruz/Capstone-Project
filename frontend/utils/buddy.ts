@@ -3,6 +3,7 @@
 import type { Habit } from '@/hooks/app-state/types';
 import { isHabitLate, isHabitLockedMissed, STREAK_MILESTONES, todayAgenda } from '@/utils/engagement';
 import { getLocalDateKey, isHabitMissedYesterday } from '@/utils/habit-visibility';
+import { hasHabitEnded, isHabitActiveOn } from '@/utils/habit-week';
 import { isHabitScheduledOn } from '@/utils/streaks';
 
 export type BuddySlot = 'head' | 'hand' | 'room' | 'accessory';
@@ -61,8 +62,15 @@ export type BuddyMood = 'ecstatic' | 'happy' | 'sleepy' | 'hungry' | 'sad';
 
 export const MOOD_FACE: Record<BuddyMood, string> = { ecstatic: '🤩', happy: '😊', sleepy: '😴', hungry: '🍪', sad: '🥺' };
 
+/**
+ * This week's habits (habits last one week): those of past weeks are only history, so the buddy's
+ * mood and tips never come from them, whether it gets every habit or this week's.
+ */
+const ofThisWeek = (habits: Habit[], now: Date) => habits.filter((habit) => !hasHabitEnded(habit, getLocalDateKey(now)));
+
 /** How the buddy feels about today, what it says, and its energy (share of today's habits done). */
-export function buddyMood(habits: Habit[], name: string, now = new Date(), frozenDays: string[] = []): { mood: BuddyMood; line: string; energy: number } {
+export function buddyMood(allHabits: Habit[], name: string, now = new Date(), frozenDays: string[] = []): { mood: BuddyMood; line: string; energy: number } {
+  const habits = ofThisWeek(allHabits, now);
   const agenda = todayAgenda(habits, now);
   const total = agenda.scheduled.length;
   const done = agenda.done.length;
@@ -89,7 +97,8 @@ export const PET_LINES = ['Hehe, that tickles!', 'You\'re doing great!', 'One sm
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const dayKey = (now: Date, back: number) => getLocalDateKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - back));
-const dueOn = (habit: Habit, key: string) => (!habit.startDate || key >= habit.startDate) && isHabitScheduledOn(habit, key);
+// Due on a day: active then (started, and its week not over) and scheduled.
+const dueOn = (habit: Habit, key: string) => isHabitActiveOn(habit, key) && isHabitScheduledOn(habit, key);
 
 /** Share of the habit's scheduled days done in the `days` days before today (null if none were due). */
 function recentRate(habit: Habit, now: Date, days = 7) {
@@ -107,11 +116,13 @@ function recentRate(habit: Habit, now: Date, days = 7) {
 /**
  * What the buddy suggests, from the student's own check-ins (most useful first, up to three):
  * growing up soon, a streak milestone one check-in away, a late habit, pairing a weak habit with a
- * strong one (habit stacking), and the student's best day of the week.
+ * strong one (habit stacking), and the student's best day of the week. Tips name only this week's
+ * habits; the best day comes from every check-in of the last four weeks.
  */
-export function buddyTips(habits: Habit[], buddy: { checkIns: number; stages?: BuddyStage[] }, now = new Date()): string[] {
+export function buddyTips(allHabits: Habit[], buddy: { checkIns: number; stages?: BuddyStage[] }, now = new Date()): string[] {
   const tips: string[] = [];
   const today = getLocalDateKey(now);
+  const habits = ofThisWeek(allHabits, now);
   // Past its last reminder time a habit is missed for today and cannot be done any more.
   const open = habits.filter((habit) => dueOn(habit, today) && !habit.completionDates.includes(today) && !isHabitLockedMissed(habit, now));
   const growth = buddyGrowth(buddy.checkIns, buddy.stages);
@@ -135,15 +146,19 @@ export function buddyTips(habits: Habit[], buddy: { checkIns: number; stages?: B
   for (let back = 1; back <= 28; back += 1) {
     const key = dayKey(now, back);
     const weekday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - back).getDay();
-    byWeekday[weekday] += habits.filter((habit) => habit.completionDates.includes(key)).length;
+    byWeekday[weekday] += allHabits.filter((habit) => habit.completionDates.includes(key)).length;
   }
   const total = byWeekday.reduce((sum, count) => sum + count, 0);
   const best = byWeekday.indexOf(Math.max(...byWeekday));
-  if (total >= 8) tips.push(`${WEEKDAYS[best]} is your best day.${best === now.getDay() ? " That's today, let's make it count!" : " Let's make today just as good!"}`);
+  // Only with habits this week to make that day count.
+  if (habits.length && total >= 8) tips.push(`${WEEKDAYS[best]} is your best day.${best === now.getDay() ? " That's today, let's make it count!" : " Let's make today just as good!"}`);
   return tips.slice(0, 3);
 }
 
-/** The buddy's mood on each of the last 7 days (today last), from how many of that day's habits were done. */
+/**
+ * The buddy's mood on each of the last 7 days (today last), from how many of that day's habits were
+ * done. History: pass every habit, also those of past weeks; each counts only on its week's days.
+ */
 export function buddyWeek(habits: Habit[], now = new Date(), frozenDays: string[] = []) {
   return Array.from({ length: 7 }, (_, index) => {
     const back = 6 - index;
