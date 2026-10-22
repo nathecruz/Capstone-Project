@@ -109,6 +109,10 @@ export type Preferences = {
   region: string;
   /** false hides the student from other students' leaderboards. */
   showOnLeaderboard?: boolean;
+  /** With the Buddy Showcase reward: false hides Habi from the leaderboard (shown when unset). */
+  showBuddy?: boolean;
+  /** false stops classmates from sending this student treats (allowed when unset). */
+  allowGifts?: boolean;
   /** App colour theme from the Premium Themes reward (classic, ocean, sunset, forest, midnight). */
   appTheme?: string;
   /** Notification types the student turned off on the Notifications screen. */

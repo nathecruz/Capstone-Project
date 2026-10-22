@@ -4,6 +4,7 @@ import type { Habit } from '@/hooks/app-state/types';
 import { isHabitLate, isHabitLockedMissed, STREAK_MILESTONES, todayAgenda } from '@/utils/engagement';
 import { getLocalDateKey, isHabitMissedYesterday } from '@/utils/habit-visibility';
 import { hasHabitEnded, isHabitActiveOn } from '@/utils/habit-week';
+import type { LeaderBuddy } from '@/utils/leaderboard-range';
 import { isHabitScheduledOn } from '@/utils/streaks';
 
 export type BuddySlot = 'head' | 'hand' | 'room' | 'accessory';
@@ -14,6 +15,8 @@ export type BuddyTreat = { id: string; name: string; emoji: string; cost: number
 export type BuddyFedTreat = { treatId: string; count: number };
 /** This week's drop: unlocked by finishing `questsNeeded` of the week's 3 quests (the server counts them). */
 export type BuddyDrop = { item: BuddyItem; weekStart: string; weekEnd: string; questsDone: number; questsNeeded: number; unlocked: boolean; owned: boolean };
+/** A treat a classmate sent today: `from` is their first name and last initial, `message` one of the fixed cheers. */
+export type BuddyGift = { treatId: string; emoji: string; from: string; message: string };
 export type Buddy = {
   name: string;
   head: string;
@@ -33,6 +36,12 @@ export type Buddy = {
   drops?: BuddyItem[];
   /** How many of them were collected. */
   dropsOwned?: number;
+  /** Treats classmates sent on the account's today (at most 10, newest first). */
+  giftsToday?: BuddyGift[];
+  giftsSent?: number;
+  giftsReceived?: number;
+  /** The 5 cheers a gift can carry (its messageId is the index); there is no free text. */
+  giftMessages?: string[];
 };
 
 /** How each room looks behind the buddy: its colour and two things in it. */
@@ -105,6 +114,42 @@ export function dropQuestsFooter(drop: BuddyDrop | null | undefined, questsDone:
 export function keepWeekDrop(next: Buddy, known: Buddy | null, today: string): Buddy {
   if (next.drop || !known || !isDropOfWeek(known.drop, today)) return next;
   return { ...next, drop: { ...known.drop, owned: next.owned.includes(known.drop.item.id) }, drops: next.drops?.length ? next.drops : known.drops };
+}
+
+/** An answer without today's gifts (from an older server or a change of look) keeps the ones already known. */
+export function keepTodayGifts(next: Buddy, known: Buddy | null): Buddy {
+  return next.giftsToday || !known?.giftsToday ? next : { ...next, giftsToday: known.giftsToday };
+}
+
+/** 'a cupcake', 'an apple'. */
+const withArticle = (noun: string) => `${/^[aeiou]/i.test(noun) ? 'an' : 'a'} ${noun}`;
+
+/** What Habi says about a classmate's treat: 'Maria R. sent me a cupcake! Keep going!'. */
+export function giftLine(gift: BuddyGift, treats: BuddyTreat[]) {
+  const treat = treats.find((entry) => entry.id === gift.treatId)?.name.toLowerCase() ?? 'treat';
+  return `${gift.from} sent me ${withArticle(treat)}! ${gift.message}`;
+}
+
+/**
+ * A classmate's Habi as the leaderboard shows it (Buddy Showcase): the stage and look from their
+ * row, drawn with this student's own catalog (shop items and drops) to find each item's emoji.
+ */
+export function classmateBuddy(look: LeaderBuddy, catalog: Pick<Buddy, 'items' | 'drops' | 'stages'> | null, name: string): Buddy {
+  return {
+    name,
+    head: look.head,
+    hand: look.hand,
+    accessory: look.accessory,
+    room: look.room,
+    owned: [],
+    checkIns: look.checkIns,
+    items: catalog?.items ?? [],
+    drops: catalog?.drops ?? [],
+    stages: catalog?.stages?.length ? catalog.stages : BUDDY_STAGES,
+    treats: [],
+    fedTreats: [],
+    treatsFed: 0,
+  };
 }
 
 export const BUDDY_STAGES: BuddyStage[] = [

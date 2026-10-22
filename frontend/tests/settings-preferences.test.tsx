@@ -83,6 +83,10 @@ jest.mock('@/components/ui/app-dialog', () => ({
   useAppDialog: () => mockShowAlert,
 }));
 
+// The reward sheets also hold the Buddy Showcase sheet, which this screen does not show.
+jest.mock('@/components/buddy', () => ({ BuddyAvatar: () => null }));
+jest.mock('@/hooks/use-buddy', () => ({ useBuddy: () => ({ buddy: null }) }));
+
 jest.mock('@/hooks/color-scheme-context', () => ({
   useAppColorScheme: () => ({
     isDarkMode: false,
@@ -167,6 +171,18 @@ describe('SettingsPreferencesScreen', () => {
     await fireEvent.press(screen.getByLabelText('Ocean theme'));
 
     expect(mockUpdatePreferences).toHaveBeenCalledWith({ appTheme: 'ocean' });
+  });
+
+  it('lets a student stop classmates from sending treats', async () => {
+    const screen = await render(<SettingsPreferencesScreen />);
+    expect(screen.getByText('They see only your first name and last initial')).toBeTruthy();
+    // Allowed while the preference is unset (the row and its switch share the label).
+    const toggle = screen.getAllByLabelText('Let classmates send me treats').find((node) => node.props.accessibilityRole === 'switch')!;
+    expect(toggle.props.accessibilityState).toEqual({ checked: true });
+
+    await fireEvent.press(toggle);
+
+    expect(mockUpdatePreferences).toHaveBeenCalledWith({ allowGifts: false });
   });
 
   it('shows the region from sign-up locked, while the language can still be changed', async () => {

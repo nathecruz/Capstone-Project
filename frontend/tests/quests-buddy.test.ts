@@ -1,5 +1,5 @@
 import type { Habit } from '@/hooks/app-state/types';
-import { BUDDY_STAGES, buddyCatalog, buddyGrowth, buddyMood, dropQuestsFooter, keepWeekDrop, ROOM_LOOK, weeklyDropCard, type Buddy, type BuddyDrop, type BuddyItem } from '@/utils/buddy';
+import { BUDDY_STAGES, buddyCatalog, buddyGrowth, buddyMood, classmateBuddy, dropQuestsFooter, giftLine, keepTodayGifts, keepWeekDrop, ROOM_LOOK, weeklyDropCard, type Buddy, type BuddyDrop, type BuddyItem } from '@/utils/buddy';
 import { daysLeftInWeek, weekStartOf, weeklyQuests } from '@/utils/quests';
 
 function habit(id: string, completionDates: string[] = [], overrides: Partial<Habit> = {}): Habit {
@@ -150,5 +150,43 @@ describe('weekly drop', () => {
 describe('legend room', () => {
   it('has a look for the Aurora', () => {
     expect(ROOM_LOOK.aurora).toEqual({ background: '#1B2346', decor: ['🌌', '✨'] });
+  });
+});
+
+describe('treats from classmates', () => {
+  const treats = [
+    { id: 'apple', name: 'Apple', emoji: '🍎', cost: 15, line: '' },
+    { id: 'icecream', name: 'Ice cream', emoji: '🍦', cost: 30, line: '' },
+    { id: 'cupcake', name: 'Cupcake', emoji: '🧁', cost: 25, line: '' },
+  ];
+
+  it("become Habi's line, with the right article", () => {
+    expect(giftLine({ treatId: 'cupcake', emoji: '🧁', from: 'Maria R.', message: 'Keep going!' }, treats)).toBe('Maria R. sent me a cupcake! Keep going!');
+    expect(giftLine({ treatId: 'icecream', emoji: '🍦', from: 'Jose P.', message: "Kaya mo 'yan!" }, treats)).toBe("Jose P. sent me an ice cream! Kaya mo 'yan!");
+    expect(giftLine({ treatId: 'mystery', emoji: '🎁', from: 'Ana L.', message: 'Laban!' }, treats)).toBe('Ana L. sent me a treat! Laban!');
+  });
+
+  it("stay known after an answer without them (a change of look)", () => {
+    const gifts = [{ treatId: 'apple', emoji: '🍎', from: 'Maria R.', message: 'Laban!' }];
+    const known = { ...buddyWith(null), giftsToday: gifts };
+    expect(keepTodayGifts(buddyWith(null), known).giftsToday).toEqual(gifts);
+    // An answer with today's gifts replaces them, also when there are none.
+    expect(keepTodayGifts({ ...buddyWith(null), giftsToday: [] }, known).giftsToday).toEqual([]);
+    expect(keepTodayGifts(buddyWith(null), null).giftsToday).toBeUndefined();
+  });
+});
+
+describe("a classmate's Habi on the leaderboard", () => {
+  it('takes its stage and look from the row and its items from the own catalog', () => {
+    const own = buddyWith(null);
+    const look = { stage: 'champ' as const, checkIns: 150, head: 'top-hat', hand: 'drop-umbrella', accessory: '', room: 'aurora' };
+    const shown = classmateBuddy(look, own, "Maria's Habi");
+    expect(shown).toMatchObject({ name: "Maria's Habi", head: 'top-hat', hand: 'drop-umbrella', accessory: '', room: 'aurora', checkIns: 150, owned: [] });
+    expect(buddyGrowth(shown.checkIns, shown.stages).stage.id).toBe('champ');
+    expect(buddyCatalog(shown).find((item) => item.id === 'drop-umbrella')?.emoji).toBe('☔');
+    // Before the own buddy loads: the stages still draw the stage, with no items to find.
+    const bare = classmateBuddy(look, null, "Maria's Habi");
+    expect(bare.stages).toBe(BUDDY_STAGES);
+    expect(buddyCatalog(bare)).toEqual([]);
   });
 });

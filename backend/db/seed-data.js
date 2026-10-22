@@ -16,6 +16,7 @@ export const rewardSeeds = [
   ['grace-day', 'Grace Day', 620, 'Skip logging for a day, streak stays safe'],
   ['custom-title', 'Custom Title', 250, 'Your own title under your name on your profile and the leaderboard'],
   ['profile-frames', 'Profile Frames', 180, 'Eight frames for your photo: Gold, Neon, Leaf, Fire, Aqua, Galaxy, Blossom and Royal'],
+  ['buddy-showcase', 'Buddy Showcase', 300, 'Show your Habi, with what it wears, next to your name on the leaderboard'],
 ];
 
 export async function seedCatalog(connection) {

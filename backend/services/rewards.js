@@ -1,6 +1,7 @@
-// Token rewards that do something: Premium Themes (four app colour themes) and a Custom Title shown
-// on the profile and the leaderboard. Rewards that only took tokens (or doubled other features)
-// were retired and what students paid for them was refunded.
+// Token rewards that do something: Premium Themes (app colour themes), a Custom Title shown on the
+// profile and the leaderboard, Profile Frames, and the Buddy Showcase (the student's Habi next to
+// their name on the leaderboard). Rewards that only took tokens (or doubled other features) were
+// retired and what students paid for them was refunded.
 
 export const RETIRED_REWARDS = ['plant-buddy', 'kindness-boost', 'habit-swap', 'mystery-box', 'xp-booster', 'grace-day'];
 
@@ -8,6 +9,7 @@ export const REAL_REWARDS = {
   'premium-theme': { name: 'Premium Themes', cost: 200, description: 'Seven app colour themes: Ocean, Sunset, Forest, Midnight, Rose, Amber and Berry' },
   'custom-title': { name: 'Custom Title', cost: 250, description: 'Your own title under your name on your profile and the leaderboard' },
   'profile-frames': { name: 'Profile Frames', cost: 180, description: 'Eight frames for your photo: Gold, Neon, Leaf, Fire, Aqua, Galaxy, Blossom and Royal' },
+  'buddy-showcase': { name: 'Buddy Showcase', cost: 300, description: 'Show your Habi, with what it wears, next to your name on the leaderboard' },
 };
 
 /** The frames the Profile Frames reward unlocks ('' is no frame). */

@@ -1,10 +1,12 @@
 import { query, withTransaction } from '../db/client.js';
+import { runAll } from '../db/run-all.js';
 import { walletLimiter } from '../http/rate-limits.js';
 import { parse } from '../lib/http.js';
-import { buddyItemSchema, buddySaveSchema, buddyTreatSchema, dayInputSchema, mysteryBoxSchema, streakFreezeSchema, webPushDoneSchema } from '../schemas.js';
+import { buddyGiftSchema, buddyItemSchema, buddySaveSchema, buddyTreatSchema, dayInputSchema, mysteryBoxSchema, streakFreezeSchema, webPushDoneSchema } from '../schemas.js';
 import { dayClosedBody, getAccountDay, resolveAccountDay } from '../services/account-day.js';
 import { requireAuth } from '../services/accounts.js';
 import { refreshSnapshot } from '../services/app-state-store.js';
+import { getBuddyGifts, GIFTS_PER_DAY, sendBuddyGift } from '../services/buddy-gifts.js';
 import { buyBuddyItem, feedTreat, getBuddy, isBuddyDrop, saveBuddy } from '../services/buddy.js';
 import { setCheckIn } from '../services/check-ins.js';
 import { getDailyChallenges } from '../services/daily-challenges.js';
@@ -27,19 +29,33 @@ async function queryDay(request, userId, options) {
   return resolveAccountDay({ query }, userId, input.data, options);
 }
 
+/**
+ * The buddy as the app gets it: with `day` (the account's today, { today, timeZone }) this week's
+ * drop, and the treats classmates sent on the account's today (`day`, else the stored zone's).
+ */
+async function buddyAnswer(db, userId, day) {
+  const giftDay = day ?? await getAccountDay(db, userId);
+  const [buddy, gifts] = await runAll(db, [
+    () => getBuddy(db, userId, { today: day?.today ?? null }),
+    () => getBuddyGifts(db, userId, giftDay),
+  ]);
+  return { ...buddy, ...gifts };
+}
+
 /** The buddy with this week's drop, for the account's own today (an answer to a change that sent no date). */
 async function buddyOnAccountDay(db, userId) {
-  return getBuddy(db, userId, { today: (await getAccountDay(db, userId)).today });
+  return buddyAnswer(db, userId, await getAccountDay(db, userId));
 }
 
 export default function registerEngagementRoutes(app) {
-  // Habit Buddy: what it wears, what was bought, the shop and how many check-ins it has grown on.
-  // With ?date&timeZone (the account's today) it also has this week's drop; a GET never stores a zone.
+  // Habit Buddy: what it wears, what was bought, the shop, how many check-ins it has grown on and
+  // the treats classmates sent today. With ?date&timeZone (the account's today) it also has this
+  // week's drop; a GET never stores a zone.
   app.get('/api/buddy', async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
     const day = await queryDay(request, session.userId, { write: false });
-    response.json({ ok: true, buddy: await getBuddy({ query }, session.userId, { today: day?.ok ? day.today : null }) });
+    response.json({ ok: true, buddy: await buddyAnswer({ query }, session.userId, day?.ok ? day : null) });
   });
 
   // Buys a shop item or this week's drop. A drop needs the app's today: it is only sold in its week.
@@ -59,7 +75,7 @@ export default function registerEngagementRoutes(app) {
       await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
       const refused = await buyBuddyItem(db, session.userId, itemId, { today: day?.ok ? day.today : null });
       if (refused) return { refused };
-      const buddy = day?.ok ? await getBuddy(db, session.userId, { today: day.today }) : await buddyOnAccountDay(db, session.userId);
+      const buddy = day?.ok ? await buddyAnswer(db, session.userId, day) : await buddyOnAccountDay(db, session.userId);
       return { buddy, wallet: await getWallet(db, session.userId) };
     });
     if (result.refused) {
@@ -93,6 +109,29 @@ export default function registerEngagementRoutes(app) {
     });
     if (result.refused) return response.status(result.refused.status).json({ ok: false, message: result.refused.message });
     response.json({ ok: true, line: result.line, buddy: result.buddy, ...result.wallet });
+  });
+
+  // Sends a treat to a classmate's Habi (services/buddy-gifts.js): the sender pays, the classmate
+  // gets the treat and a notification. Limited per account day, so it needs the app's today.
+  app.post('/api/buddy/gifts', walletLimiter, async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const input = parse(buddyGiftSchema, request, response);
+    if (!input) return;
+    const { to, treatId, messageId, ...dayInput } = input;
+    const day = await resolveAccountDay({ query }, session.userId, dayInput);
+    if (!day.ok) return response.status(409).json(dayClosedBody(day, 'That day is over. Send treats on your today.'));
+    // sendBuddyGift locks the sender's users row (and the classmate's) itself.
+    const result = await withTransaction(async (db) => {
+      const sent = await sendBuddyGift(db, session.userId, { to, treatId, messageId }, day.today);
+      return sent.refused ? sent : { ...sent, wallet: await getWallet(db, session.userId) };
+    });
+    if (result.refused) {
+      const { status, code, message } = result.refused;
+      return response.status(status).json({ ok: false, ...(code ? { code } : {}), message });
+    }
+    const { gift, sentToday, wallet } = result;
+    response.json({ ok: true, gift, sentToday, leftToday: Math.max(0, GIFTS_PER_DAY - sentToday), tokens: wallet.tokens, tokenHistory: wallet.tokenHistory, points: wallet.points });
   });
 
   // Live updates: a version for each kind of data, so an open tab fetches only what changed.

@@ -1,5 +1,6 @@
 // The buddy screen's weekly drop: locked until 2 quests are done, bought with the device's today
-// after a confirm, then collected and worn from the wardrobe with a Drop tag.
+// after a confirm, then collected and worn from the wardrobe with a Drop tag. Also the treats
+// classmates sent today and the Buddy Showcase switch (or where to get it).
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { router } from 'expo-router';
@@ -11,16 +12,22 @@ import { getLocalDateKey } from '@/utils/habit-visibility';
 import { weekStartOf } from '@/utils/quests';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
-jest.mock('expo-router', () => ({ router: { navigate: jest.fn(), back: jest.fn(), canGoBack: () => true, replace: jest.fn() } }));
+jest.mock('expo-router', () => ({ router: { navigate: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: () => true, replace: jest.fn() } }));
 jest.mock('@/authentication/authService', () => ({ buyBuddyItem: jest.fn(), feedBuddyTreat: jest.fn(), saveBuddy: jest.fn() }));
 jest.mock('@/components/buddy', () => ({ BuddyAvatar: () => null }));
 jest.mock('@/components/confetti', () => ({ Confetti: () => null }));
 const mockShowAlert = jest.fn();
 jest.mock('@/components/ui/app-dialog', () => ({ useAppDialog: () => mockShowAlert }));
-const mockContext = { habits: [], currentHabits: [], tokens: 500, applyWallet: jest.fn(), streakFreeze: null };
+const mockContext = { habits: [], currentHabits: [], tokens: 500, applyWallet: jest.fn(), streakFreeze: null, preferences: {}, updatePreferences: jest.fn() };
 jest.mock('@/hooks/color-scheme-context', () => ({ useAppColorScheme: () => mockContext }));
 const mockBuddy: { buddy: Buddy | null } = { buddy: null };
 jest.mock('@/hooks/use-buddy', () => ({ useBuddy: () => mockBuddy, publishBuddy: jest.fn(), reloadBuddy: jest.fn() }));
+const mockRewards: { rewards: { id: string; name: string; cost: number; description: string; permanent: boolean }[]; owned: string[] } = { rewards: [], owned: [] };
+jest.mock('@/hooks/use-rewards', () => ({
+  useRewards: () => ({ ...mockRewards, frame: '', owns: (id: string) => mockRewards.owned.includes(id) }),
+  saveFrame: jest.fn(),
+  saveTitle: jest.fn(),
+}));
 
 const umbrella: BuddyItem = { id: 'drop-umbrella', slot: 'hand', name: 'Umbrella', emoji: '☔', cost: 150, stage: 'kid', drop: true };
 const rice: BuddyItem = { ...umbrella, id: 'drop-rice', name: 'Rice stalk', emoji: '🌾' };
@@ -95,5 +102,54 @@ describe('weekly drop on the buddy screen', () => {
     expect(screen.getByText('Drop')).toBeTruthy();
     // Drops not collected stay out of the wardrobe.
     expect(screen.queryByLabelText(/Rice stalk/)).toBeNull();
+  });
+});
+
+describe('treats from classmates and Buddy Showcase on the buddy screen', () => {
+  const cupcake = { id: 'cupcake', name: 'Cupcake', emoji: '🧁', cost: 25, line: 'So sweet!' };
+  const apple = { id: 'apple', name: 'Apple', emoji: '🍎', cost: 15, line: 'Crunchy!' };
+  const showcase = { id: 'buddy-showcase', name: 'Buddy Showcase', cost: 300, description: 'Show your Habi', permanent: true };
+
+  beforeEach(() => {
+    mockRewards.rewards = [showcase];
+    mockRewards.owned = [];
+  });
+
+  it("puts today's gifts in Habi's room and says the newest one", () => {
+    mockBuddy.buddy = buddyWith({}, {
+      treats: [apple, cupcake],
+      giftsToday: [{ treatId: 'apple', emoji: '🍎', from: 'Maria R.', message: 'Laban!' }, { treatId: 'cupcake', emoji: '🧁', from: 'Jose P.', message: 'Keep going!' }],
+      giftsSent: 2,
+      giftsReceived: 5,
+    });
+    const screen = render(<BuddyScreen />);
+    expect(screen.getByLabelText('Treats from classmates today: 🍎 🧁')).toBeTruthy();
+    expect(screen.getByText('Maria R. sent me an apple! Laban!')).toBeTruthy();
+    expect(screen.getByText('Gifts sent 2 · received 5')).toBeTruthy();
+  });
+
+  it('says its own line on a day without gifts', () => {
+    mockBuddy.buddy = buddyWith({}, { treats: [cupcake], giftsToday: [], giftsSent: 0, giftsReceived: 0 });
+    const screen = render(<BuddyScreen />);
+    expect(screen.queryByLabelText(/Treats from classmates today/)).toBeNull();
+    expect(screen.queryByText(/sent me/)).toBeNull();
+    expect(screen.getByText('Gifts sent 0 · received 0')).toBeTruthy();
+  });
+
+  it('leads to Buddy Showcase on the leaderboard until it is bought', () => {
+    mockBuddy.buddy = buddyWith({});
+    const screen = render(<BuddyScreen />);
+    expect(screen.queryByLabelText('Show my Habi on the leaderboard')).toBeNull();
+    fireEvent.press(screen.getByText('Buddy Showcase · 300 tokens: let classmates see Habi'));
+    expect(router.push).toHaveBeenCalledWith('/leaderboards?reward=buddy-showcase');
+  });
+
+  it('has the showcase switch once bought', () => {
+    mockRewards.owned = ['buddy-showcase'];
+    mockBuddy.buddy = buddyWith({});
+    const screen = render(<BuddyScreen />);
+    expect(screen.queryByText(/let classmates see Habi/)).toBeNull();
+    fireEvent(screen.getByLabelText('Show my Habi on the leaderboard'), 'valueChange', false);
+    expect(mockContext.updatePreferences).toHaveBeenCalledWith({ showBuddy: false });
   });
 });

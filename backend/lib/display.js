@@ -1,4 +1,4 @@
-import { splitFullName } from './names.js';
+import { namesFromRow, splitFullName } from './names.js';
 
 /**
  * "Juan" + "Dela Cruz" -> "Juan D." — leaderboards never show other students' full names.
@@ -9,4 +9,10 @@ export function leaderboardName(firstName, lastName) {
   if (!names.firstName && !names.lastName) return 'Student';
   if (!names.lastName) return names.firstName;
   return `${names.firstName || names.lastName} ${names.lastName[0].toUpperCase()}.`;
+}
+
+/** The board name of a stored account row ({ firstName, lastName, fullName }); older rows split full_name. */
+export function leaderboardNameOf(row) {
+  const { firstName, lastName } = namesFromRow(row);
+  return leaderboardName(firstName, lastName);
 }

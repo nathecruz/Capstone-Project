@@ -1,7 +1,8 @@
 // Habit Buddy: the mascot that grows with every check-in. It gives tips from the student's own
 // check-ins, shows how its week went, and wears items and lives in rooms bought with tokens (the
 // server checks prices, stages and the balance). Each week one limited item, the weekly drop, is
-// for sale once 2 of the week's quests are done. Tap the buddy to hear its tips.
+// for sale once 2 of the week's quests are done. Treats classmates sent today sit in its room, and
+// with Buddy Showcase it can be shown on the leaderboard. Tap the buddy to hear its tips.
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
@@ -10,22 +11,26 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { buyBuddyItem, feedBuddyTreat, saveBuddy } from '@/authentication/authService';
 import { BuddyAvatar } from '@/components/buddy';
 import { Confetti } from '@/components/confetti';
+import { ShowBuddyToggle } from '@/components/reward-sheets';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { publishBuddy, reloadBuddy, useBuddy } from '@/hooks/use-buddy';
+import { useRewards } from '@/hooks/use-rewards';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
-import { buddyGrowth, buddyMood, buddyTips, buddyWeek, collectedDrops, MOOD_FACE, PET_LINES, weeklyDropCard, type BuddyItem, type BuddySlot, type BuddyTreat } from '@/utils/buddy';
+import { buddyGrowth, buddyMood, buddyTips, buddyWeek, collectedDrops, giftLine, MOOD_FACE, PET_LINES, weeklyDropCard, type BuddyItem, type BuddySlot, type BuddyTreat } from '@/utils/buddy';
 import { getLocalDateKey } from '@/utils/habit-visibility';
 
 type Slot = BuddySlot;
 const TABS: { slot: Slot; label: string }[] = [{ slot: 'head', label: 'Hats' }, { slot: 'hand', label: 'To hold' }, { slot: 'accessory', label: 'Gear' }, { slot: 'room', label: 'Rooms' }];
+const SHOWCASE_ID = 'buddy-showcase';
 
 export default function BuddyScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const showAlert = useAppDialog();
-  const { habits, currentHabits, tokens, applyWallet, streakFreeze } = useAppColorScheme();
+  const { habits, currentHabits, tokens, applyWallet, streakFreeze, isFaculty } = useAppColorScheme();
   const { buddy } = useBuddy();
+  const catalog = useRewards();
   const [slot, setSlot] = useState<Slot>('head');
   const [editingName, setEditingName] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -137,6 +142,13 @@ export default function BuddyScreen() {
   const dropCard = buddy ? weeklyDropCard(buddy, tokens, getLocalDateKey()) : null;
   const treats = buddy?.treats ?? [];
   const fedCount = new Map((buddy?.fedTreats ?? []).map((treat) => [treat.treatId, treat.count]));
+  // Treats classmates sent today (newest first): they sit in the room and the newest is what it says.
+  const gifts = buddy?.giftsToday ?? [];
+  const giftSays = gifts.length ? giftLine(gifts[0], treats) : null;
+  // Buddy Showcase: its switch once bought, otherwise where to get it (when the catalog sells it).
+  // The leaderboard and its treats are the students' own, so faculty see neither.
+  const showcase = isFaculty ? undefined : catalog.rewards.find((reward) => reward.id === SHOWCASE_ID);
+  const showcaseOwned = !isFaculty && catalog.owns(SHOWCASE_ID);
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -186,6 +198,11 @@ export default function BuddyScreen() {
         <View style={styles.hero}>
           <Pressable onPress={pet} accessibilityRole="button" accessibilityLabel={`Pet ${name}`} style={styles.avatarWrap}>
             <BuddyAvatar buddy={buddy} checkIns={checkIns} mood={mood} size={170} />
+            {gifts.length > 0 && (
+              <View style={styles.giftRow} pointerEvents="none" accessible accessibilityLabel={`Treats from classmates today: ${gifts.map((gift) => gift.emoji).join(' ')}`}>
+                {gifts.map((gift, index) => <Text key={`${gift.treatId}-${index}`} style={styles.giftEmoji}>{gift.emoji}</Text>)}
+              </View>
+            )}
             <Animated.Text
               pointerEvents="none"
               style={[styles.hearts, { opacity: hearts.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0, 1, 0] }), transform: [{ translateY: hearts.interpolate({ inputRange: [0, 1], outputRange: [0, -60] }) }] }]}
@@ -210,7 +227,7 @@ export default function BuddyScreen() {
               accessibilityLabel="Buddy name"
             />
           )}
-          <View style={styles.speech}><Text style={styles.speechText}>{petLine ?? line}</Text></View>
+          <View style={styles.speech}><Text style={styles.speechText}>{petLine ?? giftSays ?? line}</Text></View>
           <View style={styles.meters}>
             <View style={styles.meter}>
               <View style={styles.meterHead}><Ionicons name="flash" size={13} color="#F2A93B" /><Text style={styles.meterLabel}>Energy today</Text><Text style={styles.meterValue}>{Math.round(energy * 100)}%</Text></View>
@@ -263,6 +280,22 @@ export default function BuddyScreen() {
           </View>
         </View>
 
+        {showcaseOwned ? (
+          <View style={styles.card}>
+            <View style={styles.cardHead}>
+              <View style={[styles.cardIcon, styles.showcaseIcon]}><Ionicons name="paw" size={15} color="#FFFFFF" /></View>
+              <Text style={styles.cardTitle}>Buddy Showcase</Text>
+            </View>
+            <ShowBuddyToggle />
+          </View>
+        ) : showcase ? (
+          <Pressable style={({ pressed }) => [styles.card, styles.showcaseLink, pressed && styles.pressed]} onPress={() => router.push(`/leaderboards?reward=${SHOWCASE_ID}`)} accessibilityRole="button">
+            <View style={[styles.cardIcon, styles.showcaseIcon]}><Ionicons name="paw" size={15} color="#FFFFFF" /></View>
+            <Text style={styles.showcaseText}>Buddy Showcase · {showcase.cost} tokens: let classmates see {name}</Text>
+            <Ionicons name="chevron-forward" size={16} color={themeColor('#8A8492')} />
+          </Pressable>
+        ) : null}
+
         <View style={styles.tabs}>
           {TABS.map((tab) => (
             <Pressable key={tab.slot} style={[styles.tab, slot === tab.slot && styles.activeTab]} onPress={() => setSlot(tab.slot)} accessibilityRole="tab" accessibilityState={{ selected: slot === tab.slot }}>
@@ -309,8 +342,9 @@ export default function BuddyScreen() {
               <Text style={styles.cardTitle}>Treats</Text>
             </View>
             <Text style={styles.treatIntro}>
-              Feed {name} a snack to cheer them up.{buddy && buddy.treatsFed > 0 ? ` You have shared ${buddy.treatsFed} so far.` : ''}
+              Feed {name} a snack to cheer them up{isFaculty ? '' : ', or send one to a classmate from the leaderboard'}.{buddy && buddy.treatsFed > 0 ? ` You have shared ${buddy.treatsFed} so far.` : ''}
             </Text>
+            {!isFaculty && buddy?.giftsSent !== undefined && <Text style={styles.giftStats}>Gifts sent {buddy.giftsSent} · received {buddy.giftsReceived ?? 0}</Text>}
             <View style={styles.grid}>
               {treats.map((treat) => {
                 const count = fedCount.get(treat.id) ?? 0;
@@ -352,6 +386,9 @@ const themedStyles = createThemedStyles({
   hero: { alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 26, paddingVertical: 22, paddingHorizontal: 18, marginBottom: 16 },
   avatarWrap: { alignItems: 'center', justifyContent: 'center' },
   hearts: { position: 'absolute', top: 0, fontSize: 22 },
+  // Today's treats from classmates, on the floor of the room.
+  giftRow: { position: 'absolute', left: 18, right: 18, bottom: 10, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 2 },
+  giftEmoji: { fontSize: 15 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14 },
   name: { fontSize: 24, fontWeight: '900', color: '#24212D' },
   nameInput: { marginTop: 14, minWidth: 160, textAlign: 'center', fontSize: 22, fontWeight: '900', color: '#24212D', borderBottomWidth: 2, borderBottomColor: '#5B42D8', paddingVertical: 2 },
@@ -378,6 +415,10 @@ const themedStyles = createThemedStyles({
   cardIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F2A93B' },
   weekIcon: { backgroundColor: '#5B42D8' },
   treatIcon: { backgroundColor: '#E86F9E' },
+  showcaseIcon: { backgroundColor: '#3BAA74' },
+  showcaseLink: { flexDirection: 'row', alignItems: 'center' },
+  showcaseText: { flex: 1, fontSize: 13, fontWeight: '800', color: '#3B3647' },
+  giftStats: { fontSize: 12, fontWeight: '800', color: '#8A8492' },
   // This week's drop: a limited item, so its card stands out a little.
   dropCard: { borderWidth: 1.5, borderColor: '#F2C94C' },
   dropIcon: { backgroundColor: '#E7A72F' },

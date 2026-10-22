@@ -4,7 +4,7 @@
 import { runAll } from '../db/run-all.js';
 import { weekEndKey } from './habit-week.js';
 import { getWeeklyQuests, weekNumber, weekStartOf } from './quests.js';
-import { countedCheckIns, spendTokens } from './wallet.js';
+import { countedCheckIns, countedDaySql, spendTokens } from './wallet.js';
 
 export const BUDDY_STAGES = [
   { id: 'baby', name: 'Baby', min: 0 },
@@ -131,7 +131,7 @@ async function dropQuestsDone(db, userId, today) {
 /**
  * Name, what it wears, what was bought, the treats fed, and the catalogs. With the account day
  * `today`, also this week's drop: { item, weekStart, weekEnd, questsDone, questsNeeded, unlocked,
- * owned } (else null).
+ * owned } (else null). The routes add the treats classmates sent (services/buddy-gifts.js).
  */
 export async function getBuddy(db, userId, { today = null } = {}) {
   // One query at a time on a transaction client (buying, feeding), side by side on the pool.
@@ -173,6 +173,40 @@ export async function getBuddy(db, userId, { today = null } = {}) {
     drops: BUDDY_DROPS,
     dropsOwned: ownedIds.filter(isBuddyDrop).length,
   };
+}
+
+/**
+ * A Habi as classmates see it with the Buddy Showcase: its stage (with that stage's least check-ins,
+ * not the student's own count) and what it wears. An item is kept only if it is in the shop or the
+ * drops, fits its slot and was bought; anything else is ''.
+ */
+export function showcaseLook({ checkIns, head, hand, accessory, room, owned }) {
+  const stage = BUDDY_STAGES[buddyStageIndex(Number(checkIns) || 0)];
+  const kept = (itemId, slot) => (itemId && owned.includes(itemId) && WEARABLES.some((item) => item.id === itemId && item.slot === slot) ? itemId : '');
+  return { stage: stage.id, checkIns: stage.min, head: kept(head, 'head'), hand: kept(hand, 'hand'), accessory: kept(accessory, 'accessory'), room: kept(room, 'room') };
+}
+
+/**
+ * The showcased Habi (showcaseLook) of each student in `userIds`, by user id, in one grouped query:
+ * lifetime counted check-ins (as getBuddy counts them), what it wears and what was bought.
+ */
+export async function showcaseBuddies(db, userIds) {
+  if (!userIds.length) return new Map();
+  const result = await db.query(
+    `WITH days AS (
+       SELECT user_id, completed_date AS d, COUNT(*)::int AS n FROM habit_completions
+        WHERE user_id = ANY($1::text[]) GROUP BY user_id, completed_date
+     ), counted AS (
+       SELECT user_id, SUM(${countedDaySql('d', 'n')})::int AS checkins FROM days GROUP BY user_id
+     )
+     SELECT ids.id AS "userId", COALESCE(c.checkins, 0) AS "checkIns", b.head_item AS head, b.hand_item AS hand,
+            b.accessory_item AS accessory, b.room_item AS room, ARRAY(SELECT item_id FROM buddy_items i WHERE i.user_id = ids.id) AS owned
+       FROM unnest($1::text[]) AS ids(id)
+       LEFT JOIN counted c ON c.user_id = ids.id
+       LEFT JOIN user_buddy b ON b.user_id = ids.id`,
+    [userIds],
+  );
+  return new Map(result.rows.map((row) => [row.userId, showcaseLook(row)]));
 }
 
 async function saveRow(db, userId, { name, head, hand, room, accessory }, now) {

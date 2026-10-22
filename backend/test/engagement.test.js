@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BUDDY_DROPS, BUDDY_ITEMS, BUDDY_STAGES, BUDDY_TREATS, buddyStageIndex, buyBuddyItem, dropForWeek, isBuddyDrop, weeksUntilDrop } from '../services/buddy.js';
+import { buddyGiftSchema } from '../schemas.js';
+import { GIFT_MESSAGES, GIFTS_PER_DAY, GIFTS_RECEIVED_PER_DAY, giftLimitRefusal } from '../services/buddy-gifts.js';
+import { BUDDY_DROPS, BUDDY_ITEMS, BUDDY_STAGES, BUDDY_TREATS, buddyStageIndex, buyBuddyItem, dropForWeek, isBuddyDrop, showcaseLook, weeksUntilDrop } from '../services/buddy.js';
 import { MYSTERY_REWARDS, pickMysteryReward } from '../services/mystery-box.js';
 import { weekStartOf, weeklyQuests } from '../services/quests.js';
 import { daysToFreeze, STREAK_FREEZE_COST, STREAK_FREEZE_MAX } from '../services/streak-freeze.js';
@@ -96,6 +98,48 @@ test('the Legend stage has four items, and the shop totals 6,975 tokens', () => 
   assert.deepEqual(legend.map(({ id, slot, cost }) => [id, slot, cost]).sort(), [['aurora', 'room', 500], ['diamond', 'accessory', 450], ['dragon', 'hand', 420], ['rainbow', 'head', 360]]);
   assert.equal(legend.reduce((sum, item) => sum + item.cost, 0), 1730);
   assert.equal(BUDDY_ITEMS.reduce((sum, item) => sum + item.cost, 0), 6975);
+});
+
+test('the Buddy Showcase shows the stage and only bought items in their own slot', () => {
+  const owned = ['cap', 'cookie', 'garden', 'drop-ribbon', 'books'];
+  assert.deepEqual(showcaseLook({ checkIns: 57, head: 'cap', hand: 'cookie', accessory: 'drop-ribbon', room: 'garden', owned }), { stage: 'teen', checkIns: 50, head: 'cap', hand: 'cookie', accessory: 'drop-ribbon', room: 'garden' }, "the stage's least check-ins, not the student's own count");
+  // Not bought, not in the shop, or in another slot: ''.
+  assert.deepEqual(showcaseLook({ checkIns: 0, head: 'crown', hand: 'laser-sword', accessory: 'books', room: null, owned }), { stage: 'baby', checkIns: 0, head: '', hand: '', accessory: '', room: '' });
+  assert.deepEqual(showcaseLook({ checkIns: 400, head: null, hand: null, accessory: null, room: null, owned: [] }), { stage: 'legend', checkIns: 400, head: '', hand: '', accessory: '', room: '' }, 'a Habi that was never dressed');
+});
+
+test('treat gifts: 3 sent a day, 1 per classmate in 7 days, 10 received in 24 hours', () => {
+  const now = Date.parse('2026-10-28T04:00:00Z');
+  const hour = 60 * 60 * 1000;
+  const limit = (sent, received = []) => giftLimitRefusal({ sent, received, today: '2026-10-28', recipientId: 'bea', recipientName: 'Bea S.', now })?.code ?? null;
+  const gift = (recipientId, localDate, hoursAgo) => ({ recipientId, localDate, createdAt: now - hoursAgo * hour });
+  assert.equal(GIFTS_PER_DAY, 3);
+  assert.equal(limit([]), null);
+  assert.equal(limit([gift('ana', '2026-10-28', 1), gift('cal', '2026-10-28', 2)]), null, 'two sent today');
+  assert.equal(limit([gift('ana', '2026-10-28', 1), gift('cal', '2026-10-28', 2), gift('dan', '2026-10-28', 3)]), 'GIFT_DAILY_LIMIT', 'the 4th of the account day');
+  assert.equal(limit([gift('ana', '2026-10-27', 5), gift('cal', '2026-10-27', 6), gift('dan', '2026-10-27', 7)]), null, "yesterday's 3 do not count");
+  assert.deepEqual(giftLimitRefusal({ sent: [gift('ana', '2026-10-28', 1), gift('cal', '2026-10-28', 1), gift('dan', '2026-10-28', 1)], received: [], today: '2026-10-28', recipientId: 'bea', recipientName: 'Bea S.', now }), { status: 429, code: 'GIFT_DAILY_LIMIT', message: 'You can send 3 treats a day. Try again tomorrow.' });
+  // One treat to the same classmate in any 7 days.
+  assert.equal(limit([gift('bea', '2026-10-22', 7 * 24 - 1)]), 'GIFT_PAIR_LIMIT', '6 days 23 hours ago');
+  assert.equal(limit([gift('bea', '2026-10-21', 7 * 24 + 1)]), null, 'over 7 days ago');
+  assert.equal(giftLimitRefusal({ sent: [gift('bea', '2026-10-27', 20)], received: [], today: '2026-10-28', recipientId: 'bea', recipientName: 'Bea S.', now }).message, 'You already sent Bea S. a treat this week.');
+  // The classmate receives at most 10 in any 24 hours.
+  assert.equal(GIFTS_RECEIVED_PER_DAY, 10);
+  const received = (count, hoursAgo) => Array.from({ length: count }, () => now - hoursAgo * hour);
+  assert.equal(limit([], received(9, 1)), null);
+  assert.equal(limit([], received(10, 23)), 'RECIPIENT_FULL');
+  assert.equal(limit([], [...received(9, 1), ...received(1, 25)]), null, 'one was more than 24 hours ago');
+  assert.equal(giftLimitRefusal({ sent: [], received: received(10, 1), today: '2026-10-28', recipientId: 'bea', recipientName: 'Bea S.', now }).message, 'Bea S. has received lots of treats today. Try again tomorrow.');
+});
+
+test('a gift picks one of the 5 fixed cheers, never free text', () => {
+  assert.deepEqual(GIFT_MESSAGES, ['Keep going!', 'Proud of you!', 'Laban!', "Kaya mo 'yan!", 'Nice streak!']);
+  const body = { to: '0123456789ab', treatId: 'apple', messageId: 0, date: '2026-10-28', timeZone: 'Asia/Manila' };
+  assert.equal(buddyGiftSchema.safeParse(body).success, true);
+  assert.equal(buddyGiftSchema.safeParse({ ...body, messageId: GIFT_MESSAGES.length - 1 }).success, true);
+  for (const messageId of [-1, GIFT_MESSAGES.length, 1.5, '2']) assert.equal(buddyGiftSchema.safeParse({ ...body, messageId }).success, false, String(messageId));
+  assert.equal(buddyGiftSchema.safeParse({ ...body, message: 'Hi!' }).success, false, 'no free text');
+  for (const to of ['0123456789AB', '0123456789a', 'not-a-public-id']) assert.equal(buddyGiftSchema.safeParse({ ...body, to }).success, false, to);
 });
 
 test('streak milestone bonuses rise with the milestone and fire only on the ones just crossed', () => {

@@ -2,27 +2,22 @@ import crypto from 'node:crypto';
 import { config } from '../config/index.js';
 import { query, withTransaction } from '../db/client.js';
 import { walletLimiter } from '../http/rate-limits.js';
-import { leaderboardName } from '../lib/display.js';
-import { namesFromRow } from '../lib/names.js';
+import { leaderboardNameOf } from '../lib/display.js';
 import { getPeriodRange, parse, periodLabel, periodResetsAt } from '../lib/http.js';
 import { leaderboardSchema, rewardFrameSchema, rewardRedemptionSchema, rewardTitleSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
 import { refreshSnapshot, serverCompletionPoints } from '../services/app-state-store.js';
+import { showcaseBuddies } from '../services/buddy.js';
 import { cleanTitle, getRewards, PERMANENT_REWARDS, PROFILE_FRAMES } from '../services/rewards.js';
 import { countedDaySql, getWallet, POINTS_PER_CHECK_IN, spendTokens } from '../services/wallet.js';
-
-/** First name and last initial; accounts from before the name split fall back to splitting full_name. */
-function displayName(row) {
-  const { firstName, lastName } = namesFromRow(row);
-  return leaderboardName(firstName, lastName);
-}
 
 /**
  * The board for `range` ({ start, end } or null for all time): students only, staff accounts are
  * excluded, and students who turned off "Show me on leaderboards" are hidden from everyone but
  * themselves. Points are 20 for each counted check-in (at most 6 a day, services/wallet.js) dated
  * inside the range; one dated after its end never counts. Ties go by name, then by public id, so
- * two students with the same name and points keep their ranks between loads.
+ * two students with the same name and points keep their ranks between loads. showsBuddy: they own
+ * the Buddy Showcase and did not turn off "Show my Habi"; allowsGifts: they accept treats.
  */
 export async function leaderboardRows(db, userId, range) {
   const result = await db.query(
@@ -34,7 +29,10 @@ export async function leaderboardRows(db, userId, range) {
        SELECT user_id, SUM(${countedDaySql('d', 'n')})::int AS checkins FROM days GROUP BY user_id
      )
      SELECT u.id, u.public_id AS "publicId", u.full_name AS "fullName", u.first_name AS "firstName", u.last_name AS "lastName", u.custom_title AS "title", u.profile_frame AS "frame",
-            (COALESCE(k.checkins, 0) * $4)::int AS points, COALESCE(l.avatar, LEFT(u.full_name, 1)) AS avatar
+            (COALESCE(k.checkins, 0) * $4)::int AS points, COALESCE(l.avatar, LEFT(u.full_name, 1)) AS avatar,
+            (u.id IN (SELECT user_id FROM reward_redemptions WHERE reward_id = 'buddy-showcase')
+              AND (p.preferences_json->'showBuddy') IS DISTINCT FROM 'false'::jsonb) AS "showsBuddy",
+            (p.preferences_json->'allowGifts') IS DISTINCT FROM 'false'::jsonb AS "allowsGifts"
        FROM users u
        LEFT JOIN counted k ON k.user_id=u.id
        LEFT JOIN leaderboard_users l ON l.user_id=u.id
@@ -48,22 +46,24 @@ export async function leaderboardRows(db, userId, range) {
 }
 
 /**
- * One row of the board as the app gets it. `id` is the student's public id, never the internal
- * one. canGift and buddy are filled in by the treat gifts and the Buddy Showcase.
+ * One row of the board as the app gets it, for the signed-in `session`. `id` is the student's
+ * public id, never the internal one. canGift: a student can send this classmate a treat (not
+ * themselves, and the classmate accepts them; services/buddy-gifts.js). buddy: their showcased Habi
+ * from `buddies` (showcaseBuddies), else null; it shows nothing about habits, times or streaks.
  */
-function leaderRow(row, index, userId) {
-  const isYou = row.id === userId;
+function leaderRow(row, index, session, buddies) {
+  const isYou = row.id === session.userId;
   return {
     id: row.publicId,
     rank: index + 1,
-    name: `${displayName(row)}${isYou ? ' (You)' : ''}`,
+    name: `${leaderboardNameOf(row)}${isYou ? ' (You)' : ''}`,
     points: row.points,
     avatar: row.avatar,
     title: row.title || '',
     frame: row.frame || '',
     isYou,
-    canGift: false,
-    buddy: null,
+    canGift: !isYou && row.allowsGifts && session.role === 'user',
+    buddy: buddies.get(row.id) ?? null,
   };
 }
 
@@ -135,11 +135,12 @@ export default function registerGamificationRoutes(app) {
     if (!['This Week', 'This Month', 'All Time'].includes(period)) return response.status(400).json({ ok: false, message: 'Unsupported leaderboard period.' });
     const range = getPeriodRange(period);
     const rows = await leaderboardRows({ query }, session.userId, range);
+    const buddies = await showcaseBuddies({ query }, rows.filter((row) => row.showsBuddy).map((row) => row.id));
     response.json({
       period,
       date: range ? periodLabel(range) : 'Since joining',
       range: range ? { ...range, timeZone: config.appTimeZone, resetsAt: periodResetsAt(range) } : null,
-      leaders: rows.map((row, index) => leaderRow(row, index, session.userId)),
+      leaders: rows.map((row, index) => leaderRow(row, index, session, buddies)),
     });
   });
 

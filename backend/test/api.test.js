@@ -875,7 +875,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
 
     const catalog = await request('/api/rewards', { headers });
     assert.equal(catalog.response.status, 200, JSON.stringify(catalog.body));
-    assert.deepEqual(catalog.body.rewards.map((reward) => [reward.id, reward.cost, reward.permanent]), [['profile-frames', 180, true], ['premium-theme', 200, true], ['custom-title', 250, true]], 'only rewards that do something are on sale');
+    assert.deepEqual(catalog.body.rewards.map((reward) => [reward.id, reward.cost, reward.permanent]), [['profile-frames', 180, true], ['premium-theme', 200, true], ['custom-title', 250, true], ['buddy-showcase', 300, true]], 'only rewards that do something are on sale');
     assert.deepEqual({ owned: catalog.body.owned, title: catalog.body.title }, { owned: [], title: '' });
     assert.equal((await request('/api/rewards/redeem', { method: 'POST', headers, body: JSON.stringify({ rewardId: 'grace-day', rewardName: 'Grace Day', tokenCost: 620 }) })).response.status, 400, 'retired rewards cannot be bought');
 
@@ -1180,7 +1180,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(new Set(ids).size, ids.length, 'every row has its own id');
     const internal = (await db.query('SELECT id FROM users')).rows.map((row) => row.id);
     assert.ok(internal.every((id) => !JSON.stringify(all.body).includes(id)), 'no internal user ids');
-    assert.ok(all.body.leaders.every((leader) => leader.canGift === false && leader.buddy === null));
+    assert.ok(all.body.leaders.every((leader) => leader.canGift === !leader.isYou && leader.buddy === null), 'treats for classmates; no Buddy Showcase yet');
 
     // Sync keeps only the student's own row, and writes nothing when it is already current.
     const synced = await request('/api/leaderboard/sync', { method: 'POST', headers, body: JSON.stringify({ avatar: 'L' }) });
@@ -1451,6 +1451,117 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const bought = await request('/api/buddy/items', { method: 'POST', headers, body: JSON.stringify({ itemId: 'cap', date: dateIn(east), timeZone: east }) });
     assert.deepEqual([bought.response.status, bought.body.buddy?.head, bought.body.tokens], [200, 'cap', 60], JSON.stringify(bought.body));
     assert.equal((await db.query('SELECT time_zone FROM users WHERE id=$1', [userId])).rows[0].time_zone, 'Asia/Manila', 'only a drop is sold by the day');
+  });
+
+  const publicIdOf = async (userId) => (await db.query('SELECT public_id AS "publicId" FROM users WHERE id=$1', [userId])).rows[0].publicId;
+  const leadersFor = async (headers) => (await request('/api/leaderboard?period=All%20Time', { headers })).body.leaders;
+  /** Saves the preferences as the app does, on top of the latest state (a save without a base keeps changed keys). */
+  const savePreferences = async (headers, preferences) => {
+    const latest = (await request('/api/app-state', { headers })).body;
+    const state = latest.updatedAt ? { ...latest.state, baseUpdatedAt: latest.updatedAt, baseState: latest.state } : appState;
+    return request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...state, preferences }) });
+  };
+
+  await t.test('the Buddy Showcase shows Habi, as it is dressed, next to the name on the leaderboard', async () => {
+    const owner = await student('Sho', 'Case');
+    const classmate = await student('Nora', 'Plain');
+    const ownerId = await publicIdOf(owner.userId);
+    const classmateId = await publicIdOf(classmate.userId);
+    await grant(owner.userId, 700, 'showcase-grant');
+
+    // On sale for 300, bought once and kept.
+    const catalog = await request('/api/rewards', { headers: owner.headers });
+    assert.deepEqual(catalog.body.rewards.find((reward) => reward.id === 'buddy-showcase'), { id: 'buddy-showcase', name: 'Buddy Showcase', cost: 300, description: 'Show your Habi, with what it wears, next to your name on the leaderboard', permanent: true });
+    const redeem = () => request('/api/rewards/redeem', { method: 'POST', headers: owner.headers, body: JSON.stringify({ rewardId: 'buddy-showcase', rewardName: 'Buddy Showcase', tokenCost: 300 }) });
+    const bought = await redeem();
+    assert.deepEqual([bought.response.status, bought.body.tokens], [200, 400], JSON.stringify(bought.body));
+    assert.deepEqual([(await redeem()).response.status, (await request('/api/rewards', { headers: owner.headers })).body.owned], [409, ['buddy-showcase']], 'bought once');
+
+    // 12 check-ins (the Kid stage), a cap and a cookie; a forged row wears the cookie as a room, glasses
+    // never bought and an item that is not in the shop.
+    assert.equal((await savePreferences(owner.headers, {})).response.status, 200);
+    for (let day = 1; day <= 12; day += 1) await checkInOn(owner.userId, 'habit-1', `2026-01-${String(day).padStart(2, '0')}`);
+    for (const itemId of ['cap', 'cookie']) assert.equal((await request('/api/buddy/items', { method: 'POST', headers: owner.headers, body: JSON.stringify({ itemId }) })).response.status, 200, itemId);
+    await db.query("UPDATE user_buddy SET hand_item='laser-sword', room_item='cookie', accessory_item='glasses' WHERE user_id=$1", [owner.userId]);
+    const look = { stage: 'kid', checkIns: 10, head: 'cap', hand: '', accessory: '', room: '' };
+    const seen = await leadersFor(classmate.headers);
+    assert.deepEqual(seen.find((leader) => leader.id === ownerId).buddy, look, "the stage's least check-ins and only what was bought, in its slot");
+    assert.equal(seen.find((leader) => leader.id === classmateId).buddy, null, 'no showcase without the reward');
+    assert.deepEqual(Object.keys(look).sort(), Object.keys(seen.find((leader) => leader.id === ownerId).buddy).sort(), 'nothing about habits, times or streaks');
+    const own = (await leadersFor(owner.headers)).find((leader) => leader.isYou);
+    assert.deepEqual([own.id, own.buddy], [ownerId, look], 'shown on the own row too');
+
+    // "Show my Habi" off: no buddy. Hidden from the leaderboard: still hidden, Habi or not.
+    await savePreferences(owner.headers, { showBuddy: false });
+    assert.equal((await leadersFor(classmate.headers)).find((leader) => leader.id === ownerId).buddy, null);
+    await savePreferences(owner.headers, { showOnLeaderboard: false });
+    assert.ok(!(await leadersFor(classmate.headers)).some((leader) => leader.id === ownerId), 'a hidden student stays hidden');
+    assert.deepEqual((await leadersFor(owner.headers)).find((leader) => leader.isYou).buddy, look, 'but sees their own Habi');
+  });
+
+  await t.test('treats go to a classmate: only the sender pays, with the limits, a notification and a live update', async () => {
+    const zone = 'Asia/Manila';
+    const sender = await student('Gia', 'Giver');
+    const recipient = await student('Rio', 'Receiver');
+    const [third, fourth, fifth] = [await student('Tess', 'Third'), await student('Fern', 'Fourth'), await student('Fil', 'Fifth')];
+    const hidden = await student('Hal', 'Hidden');
+    const closed = await student('Olive', 'Off');
+    const faculty = await student('Prof', 'Gifts');
+    await db.query("UPDATE users SET role='faculty' WHERE id=$1", [faculty.userId]);
+    await savePreferences(hidden.headers, { showOnLeaderboard: false });
+    await savePreferences(closed.headers, { allowGifts: false });
+    await request('/api/buddy', { method: 'PUT', headers: recipient.headers, body: JSON.stringify({ name: 'Mochi' }) });
+    const ids = Object.fromEntries(await Promise.all(Object.entries({ sender, recipient, third, fourth, fifth, hidden, closed, faculty }).map(async ([key, account]) => [key, await publicIdOf(account.userId)])));
+    const send = (headers, to, treatId = 'apple', messageId = 0, dayInput = { date: dateIn(zone), timeZone: zone }) => request('/api/buddy/gifts', { method: 'POST', headers, body: JSON.stringify({ to, treatId, messageId, ...dayInput }) });
+    const refusal = (answer) => [answer.response.status, answer.body.code, answer.body.message];
+    const ledger = async (userId) => (await db.query('SELECT id, amount FROM token_transactions WHERE user_id=$1 ORDER BY created_at', [userId])).rows;
+    const live = async (headers) => (await request('/api/live', { headers })).body.versions;
+    const changed = (before, after) => Object.keys(after).filter((key) => after[key] !== before[key]).sort();
+
+    // canGift on the board: classmates who accept treats, not yourself, and never for faculty.
+    const board = await leadersFor(sender.headers);
+    const canGift = (id) => board.find((leader) => leader.id === id)?.canGift;
+    assert.deepEqual([canGift(ids.recipient), canGift(ids.closed), canGift(ids.sender), canGift(ids.hidden)], [true, false, false, undefined]);
+    assert.ok((await leadersFor(faculty.headers)).every((leader) => !leader.canGift));
+
+    assert.deepEqual(refusal(await send(sender.headers, ids.recipient)), [402, undefined, 'You need 15 more tokens for the Apple.'], 'not enough tokens');
+    await grant(sender.userId, 200, 'gift-grant');
+    assert.deepEqual(refusal(await send(sender.headers, ids.sender)), [400, 'SELF_GIFT', 'You cannot send a treat to yourself.']);
+    for (const to of [ids.hidden, ids.faculty, 'ffffffffffff']) assert.deepEqual(refusal(await send(sender.headers, to)), [404, 'RECIPIENT_NOT_FOUND', 'That classmate is not on the leaderboard.'], to);
+    assert.deepEqual(refusal(await send(sender.headers, ids.closed)), [403, 'GIFTS_OFF', 'This classmate is not accepting treats.']);
+    assert.deepEqual(refusal(await send(faculty.headers, ids.recipient)), [403, undefined, 'Only students can send treats to classmates.']);
+    assert.equal((await send(sender.headers, ids.recipient, 'apple', 0, { date: shiftDay(dateIn(zone), -1), timeZone: zone })).body.code, 'DAY_CLOSED');
+    assert.equal((await send(sender.headers, ids.recipient, 'apple', 5)).response.status, 400, 'one of the 5 cheers');
+    assert.equal((await send(sender.headers, ids.recipient, 'pizza')).response.status, 404, 'a treat from the shop');
+
+    // A cupcake for Rio's Habi: the sender pays 25, Rio pays and gets nothing, and is told.
+    const [senderLive, recipientLive] = [await live(sender.headers), await live(recipient.headers)];
+    const recipientLedger = await ledger(recipient.userId);
+    const cupcake = await send(sender.headers, ids.recipient, 'cupcake', 3);
+    assert.equal(cupcake.response.status, 200, JSON.stringify(cupcake.body));
+    assert.deepEqual({ ...cupcake.body.gift, id: typeof cupcake.body.gift.id }, { id: 'string', treatId: 'cupcake', to: ids.recipient, message: "Kaya mo 'yan!" });
+    assert.deepEqual([cupcake.body.sentToday, cupcake.body.leftToday, cupcake.body.tokens], [1, 2, 175]);
+    assert.deepEqual([cupcake.body.tokenHistory[0].label, cupcake.body.tokenHistory[0].amount], ['Gift: Cupcake to Rio R.', -25]);
+    assert.match((await ledger(sender.userId)).at(-1).id, new RegExp(`^${sender.userId}:token:spend:gift:[0-9a-f-]{36}$`));
+    assert.deepEqual(await ledger(recipient.userId), recipientLedger, 'tokens never move between accounts');
+    const notes = (await request('/api/notifications', { headers: recipient.headers })).body.notifications.filter((note) => note.type === 'gift');
+    assert.deepEqual(notes.map(({ id, title, message }) => ({ id, title, message })), [{ id: `${recipient.userId}:notification:gift:${cupcake.body.gift.id}`, title: '🧁 A treat for Mochi', message: "Gia G. sent Mochi a Cupcake: Kaya mo 'yan!" }], 'First L. and the fixed cheer, never the full name');
+    assert.deepEqual(changed(recipientLive, await live(recipient.headers)), ['buddy', 'notifications'], "the classmate's Habi updates live");
+    assert.deepEqual(changed(senderLive, await live(sender.headers)), ['buddy', 'wallet']);
+    const gifted = (await request(`/api/buddy?date=${dateIn(zone)}&timeZone=${encodeURIComponent(zone)}`, { headers: recipient.headers })).body.buddy;
+    assert.deepEqual([gifted.giftsToday, gifted.giftsReceived, gifted.giftsSent, gifted.giftMessages.length], [[{ treatId: 'cupcake', emoji: '🧁', from: 'Gia G.', message: "Kaya mo 'yan!" }], 1, 0, 5]);
+    assert.deepEqual((await request('/api/buddy', { headers: recipient.headers })).body.buddy.giftsToday.length, 1, 'also without a date, on the stored day');
+    assert.deepEqual([(await request('/api/buddy', { headers: sender.headers })).body.buddy.giftsSent, gifted.treatsFed], [1, 0], 'feeding your own Habi is separate');
+
+    // One treat per classmate a week, three a day, ten received in 24 hours.
+    assert.deepEqual(refusal(await send(sender.headers, ids.recipient)), [429, 'GIFT_PAIR_LIMIT', 'You already sent Rio R. a treat this week.']);
+    assert.deepEqual([(await send(sender.headers, ids.third)).body.leftToday, (await send(sender.headers, ids.fourth)).body.leftToday], [1, 0]);
+    assert.deepEqual(refusal(await send(sender.headers, ids.fifth)), [429, 'GIFT_DAILY_LIMIT', 'You can send 3 treats a day. Try again tomorrow.']);
+    assert.equal((await ledger(sender.userId)).reduce((sum, row) => sum + row.amount, 0), 145, 'refusals cost nothing');
+    for (let index = 0; index < 10; index += 1) {
+      await db.query("INSERT INTO buddy_gifts(id,sender_id,recipient_id,treat_id,message_id,local_date,created_at) VALUES($1,$2,$3,'apple',0,$4,$5)", [crypto.randomUUID(), recipient.userId, fifth.userId, dateIn(zone), Date.now() - 60_000]);
+    }
+    assert.deepEqual(refusal(await send(third.headers, ids.fifth)), [429, 'RECIPIENT_FULL', 'Fil F. has received lots of treats today. Try again tomorrow.']);
   });
 
   await t.test('issue reports store attachments in the database and validate content', async () => {

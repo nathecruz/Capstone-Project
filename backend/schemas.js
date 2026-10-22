@@ -36,6 +36,9 @@ export const buddyItemSchema = z.object({ itemId: z.string().trim().min(1).max(4
 export const buddyTreatSchema = z.object({ treatId: z.string().trim().min(1).max(40) }).strict();
 export const buddySaveSchema = z.object({ name: z.string().trim().min(1).max(20).optional(), head: z.string().max(40).optional(), hand: z.string().max(40).optional(), room: z.string().max(40).optional(), accessory: z.string().max(40).optional() }).strict();
 export const dayInputSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: timeZoneSchema.optional() }).strict();
+// A treat for a classmate (services/buddy-gifts.js): their leaderboard id, a treat, one of the 5
+// fixed cheers (GIFT_MESSAGES, no free text) and the app's today, for the daily limit.
+export const buddyGiftSchema = dayInputSchema.extend({ to: z.string().regex(/^[0-9a-f]{12}$/), treatId: z.string().trim().min(1).max(40), messageId: z.number().int().min(0).max(4) }).strict();
 export const rewardFrameSchema = z.object({ frame: z.string().max(20) }).strict();
 export const mysteryBoxSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: timeZoneSchema.optional() }).strict();
 export const streakFreezeSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: timeZoneSchema.optional() }).strict();

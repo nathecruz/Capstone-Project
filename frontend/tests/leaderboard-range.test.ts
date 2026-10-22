@@ -1,13 +1,16 @@
 // The leaderboard's weeks and months come from the server's range on the campus calendar
 // (Asia/Manila), not from the device clock: the dates under the period picker, the countdown to the
 // reset and the reload when it passes. Rows are keyed by their public id, as names are not unique.
+// A showcased Habi sits beside its student's name, a tap opens the classmate's card, and
+// /leaderboards?reward=<id> opens that reward.
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import React from 'react';
 import LeaderboardsScreen from '@/app/leaderboards';
 import { leaderboardDateLabel, leaderKey, periodRange, rangeLabel, resetCountdownText, type LeaderboardRange } from '@/utils/leaderboard-range';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
-jest.mock('expo-router', () => ({ router: { push: jest.fn(), back: jest.fn() } }));
+const mockParams: { reward?: string } = {};
+jest.mock('expo-router', () => ({ router: { push: jest.fn(), back: jest.fn() }, useLocalSearchParams: () => mockParams }));
 jest.mock('react-native-safe-area-context', () => {
   const ReactActual = jest.requireActual('react');
   return {
@@ -17,14 +20,31 @@ jest.mock('react-native-safe-area-context', () => {
 });
 jest.mock('@/components/ui/app-dialog', () => ({ useAppDialog: () => jest.fn() }));
 jest.mock('@/components/framed-avatar', () => ({ FramedAvatar: ({ children }: { children?: React.ReactNode }) => children }));
-jest.mock('@/components/reward-sheets', () => ({ FrameSheet: () => null, ThemeSheet: () => null, TitleSheet: () => null }));
+jest.mock('@/components/reward-sheets', () => {
+  const ReactActual = jest.requireActual('react');
+  const { Text } = jest.requireActual('react-native');
+  return { FrameSheet: () => null, ThemeSheet: () => null, TitleSheet: () => null, ShowcaseSheet: ({ visible }: { visible: boolean }) => (visible ? ReactActual.createElement(Text, null, 'Showcase settings open') : null) };
+});
+// The Habi beside a name and the classmate card, as what they were given.
+jest.mock('@/components/buddy', () => {
+  const ReactActual = jest.requireActual('react');
+  const { View } = jest.requireActual('react-native');
+  return { BuddyAvatar: ({ buddy, checkIns, size }: { buddy: { name: string; head: string }; checkIns: number; size: number }) => ReactActual.createElement(View, { accessibilityLabel: `${buddy.name}: ${checkIns} check-ins, ${buddy.head || 'no hat'}, ${size} px` }) };
+});
+jest.mock('@/components/classmate-sheet', () => {
+  const ReactActual = jest.requireActual('react');
+  const { Text } = jest.requireActual('react-native');
+  return { ClassmateSheet: ({ leader, period }: { leader: { name: string; rank: number }; period: string }) => ReactActual.createElement(Text, null, `Card of ${leader.name} (#${leader.rank}, ${period})`) };
+});
+jest.mock('@/hooks/use-buddy', () => ({ useBuddy: () => ({ buddy: null }), getCachedBuddy: () => null }));
 jest.mock('@/components/streak-freeze-sheet', () => ({ StreakFreezeSheet: () => null }));
 jest.mock('@/authentication', () => ({
   getApiBaseUrl: () => 'https://api.test',
   getAuthenticatedHeaders: async () => ({ Authorization: 'Bearer token' }),
   redeemReward: jest.fn(),
 }));
-jest.mock('@/hooks/use-rewards', () => ({ loadRewards: jest.fn(), markRewardOwned: jest.fn(), useRewards: () => ({ status: 'ready', rewards: [], owns: () => false, title: '' }) }));
+const mockCatalog: { rewards: { id: string; name: string; cost: number; description: string; permanent: boolean }[]; owned: string[] } = { rewards: [], owned: [] };
+jest.mock('@/hooks/use-rewards', () => ({ loadRewards: jest.fn(), markRewardOwned: jest.fn(), useRewards: () => ({ status: 'ready', ...mockCatalog, owns: (id: string) => mockCatalog.owned.includes(id), title: '' }) }));
 const mockContext = { tokens: 120, applyWallet: jest.fn(), points: 240, profile: { fullName: 'Maria Reyes', email: 'maria@psau.edu.ph' }, tokenHistory: [], isFaculty: false, streakFreeze: null };
 jest.mock('@/hooks/color-scheme-context', () => ({ useAppColorScheme: () => mockContext }));
 
@@ -67,11 +87,12 @@ describe('the leaderboard calendar', () => {
 });
 
 describe('the Leaderboards screen', () => {
-  const leaders = [
+  const baseLeaders: object[] = [
     { id: '3f9a1c0b7d2e', rank: 1, name: 'Maria R.', points: 120, avatar: 'M', title: '', frame: '', isYou: false, canGift: false, buddy: null },
     { id: 'a81c44e0f1b9', rank: 2, name: 'Maria R.', points: 100, avatar: 'M', title: '', frame: '', isYou: false, canGift: false, buddy: null },
     { id: '0c7e2b19d4f3', rank: 3, name: 'Maria R. (You)', points: 60, avatar: 'M', title: '', frame: '', isYou: true, canGift: false, buddy: null },
   ];
+  let leaders = baseLeaders;
   let mockRange: LeaderboardRange;
   const fetchMock = jest.fn(async (url: string) => {
     const period = decodeURIComponent(/period=([^&]+)/.exec(url)?.[1] ?? '');
@@ -89,6 +110,10 @@ describe('the Leaderboards screen', () => {
     // React's act waits on microtasks, so only the clock and the timers are fake.
     jest.useFakeTimers({ now: NOW, doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
     mockRange = week;
+    leaders = baseLeaders;
+    delete mockParams.reward;
+    mockCatalog.rewards = [];
+    mockCatalog.owned = [];
     fetchMock.mockClear();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
   });
@@ -148,5 +173,41 @@ describe('the Leaderboards screen', () => {
       jest.advanceTimersByTime(5 * 60_000);
     });
     expect(calls('/api/leaderboard?period=This%20Week')).toBe(2);
+  });
+
+  it("shows a classmate's Habi beside their name, and a tap opens their card", async () => {
+    const showcased = { id: '5d1e9a0c3b7f', rank: 2, name: 'Jose P.', points: 100, avatar: 'J', title: '', frame: '', isYou: false, canGift: true, buddy: { stage: 'teen', checkIns: 50, head: 'top-hat', hand: '', accessory: '', room: 'garden' } };
+    leaders = [baseLeaders[0], showcased, baseLeaders[2]];
+    const screen = render(React.createElement(LeaderboardsScreen));
+    await waitFor(() => expect(screen.getAllByText('Jose P.').length).toBeGreaterThan(0));
+    // On the podium and in the rankings, at 28 px, with the stage's check-ins and what it wears.
+    expect(screen.getAllByLabelText("Jose P.'s Habi: 50 check-ins, top-hat, 28 px")).toHaveLength(2);
+    // Students without a showcased Habi have none.
+    expect(screen.queryAllByLabelText(/Maria R\.'s Habi/)).toHaveLength(0);
+    const rows = screen.getAllByLabelText('Jose P., rank 2, 100 points. Open card');
+    expect(rows).toHaveLength(2);
+    fireEvent.press(rows[1]);
+    expect(screen.getByText('Card of Jose P. (#2, This Week)')).toBeTruthy();
+    // The podium spot opens it too, also for the student's own row.
+    fireEvent.press(screen.getAllByLabelText('Maria R. (You), rank 3, 60 points. Open card')[0]);
+    expect(screen.getByText('Card of Maria R. (You) (#3, This Week)')).toBeTruthy();
+  });
+
+  it('opens the reward of /leaderboards?reward=<id>: its settings once owned, or what is still missing', async () => {
+    const showcase = { id: 'buddy-showcase', name: 'Buddy Showcase', cost: 300, description: 'Show your Habi', permanent: true };
+    mockCatalog.rewards = [showcase];
+    mockParams.reward = 'buddy-showcase';
+    const notYet = render(React.createElement(LeaderboardsScreen));
+    // 120 tokens: not enough to redeem it yet.
+    expect(notYet.getByText('180 more tokens to Buddy Showcase.')).toBeTruthy();
+    expect(notYet.queryByText('Redeem Buddy Showcase?')).toBeNull();
+    expect(notYet.getByText('Your Habi next to your name on the leaderboard')).toBeTruthy();
+    notYet.unmount();
+
+    mockCatalog.owned = ['buddy-showcase'];
+    const owned = render(React.createElement(LeaderboardsScreen));
+    expect(owned.getByText('Showcase settings open')).toBeTruthy();
+    expect(owned.getByText('Showcase settings')).toBeTruthy();
+    owned.unmount();
   });
 });

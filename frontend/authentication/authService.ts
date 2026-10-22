@@ -722,6 +722,16 @@ export const buyBuddyItem = (itemId: string, date?: string, timeZone = deviceTim
 export const saveBuddy = (changes: { name?: string; head?: string; hand?: string; room?: string; accessory?: string }) => authedRequest<{ buddy: BuddyResponse }>('/api/buddy', { method: 'PUT', body: JSON.stringify(changes) });
 /** Feeds a treat to the buddy (the server charges the tokens); returns the line it says. */
 export const feedBuddyTreat = (treatId: string) => authedRequest<{ buddy: BuddyResponse; line: string } & WalletResponse>('/api/buddy/treats', { method: 'POST', body: JSON.stringify({ treatId }) });
+export type BuddyGiftSent = { gift: { id: string; treatId: string; to: string; message: string }; sentToday: number; leftToday: number } & WalletResponse;
+/**
+ * Sends a treat to a classmate's Habi: `to` is their leaderboard id, `messageId` one of the 5 fixed
+ * cheers. Only the sender pays; the server checks the daily and weekly limits for the device's
+ * today `date` and refuses with a code (SELF_GIFT, GIFTS_OFF, GIFT_DAILY_LIMIT, ...) and a message.
+ */
+export const sendBuddyGift = (gift: { to: string; treatId: string; messageId: number }, date: string, timeZone = deviceTimeZone()) => authedRequest<BuddyGiftSent>('/api/buddy/gifts', {
+  method: 'POST',
+  body: JSON.stringify({ ...gift, date, timeZone }),
+});
 /** Opens today's mystery box (after the day's first check-in); the server picks the tokens. */
 export const openMysteryBox = (date: string) => authedRequest<{ amount: number; alreadyOpened: boolean } & WalletResponse>('/api/mystery-box/open', {
   method: 'POST',

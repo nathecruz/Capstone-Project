@@ -1,14 +1,20 @@
-// What the Premium Themes and Custom Title rewards unlock: the theme picker and the title editor.
+// What the token rewards unlock: the theme picker, the title editor, the frame picker and the
+// Buddy Showcase settings.
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { ActivityIndicator, Image, Modal, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, Modal, Pressable, Switch, Text, TextInput, View } from 'react-native';
+import { BuddyAvatar } from '@/components/buddy';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { FramedAvatar, PROFILE_FRAMES } from '@/components/framed-avatar';
+import { useBuddy } from '@/hooks/use-buddy';
 import { saveFrame, saveTitle, useRewards } from '@/hooks/use-rewards';
 import { APP_THEMES, createThemedStyles, isAppTheme, themedColor, useThemeColor, useThemedStyles, type AppTheme } from '@/hooks/use-themed-styles';
 
 const TITLE_IDEAS = ['Early Riser', 'Night Owl', 'Bookworm', 'Hydration Hero', 'Streak Master', 'Gym Buddy', 'Focus Mode', 'Habit Builder'];
 const TITLE_PATTERN = /^[\p{L}\p{N} .,'!&-]+$/u;
+// React Native Web colours the thumb of an "on" switch with activeThumbColor (teal by default).
+const WEB_THUMB = { activeThumbColor: '#FFFFFF' } as object;
 
 /** The app colour themes as swatches; the chosen one is ticked. */
 export function ThemePicker({ value, onChange }: { value: AppTheme; onChange: (theme: AppTheme) => void }) {
@@ -131,6 +137,72 @@ export function ThemeSheet({ visible, onClose }: { visible: boolean; onClose: ()
   );
 }
 
+/**
+ * The Buddy Showcase switch (preferences.showBuddy, on when unset): whether classmates see Habi next
+ * to the student's name on the leaderboard. On the showcase sheet and the buddy screen.
+ */
+export function ShowBuddyToggle() {
+  const styles = useThemedStyles(themedStyles);
+  const themeColor = useThemeColor();
+  const { preferences, updatePreferences } = useAppColorScheme();
+  const shown = preferences.showBuddy !== false;
+  return (
+    <View style={styles.toggleRow}>
+      <View style={styles.headerCopy}>
+        <Text style={styles.toggleLabel}>Show my Habi on the leaderboard</Text>
+        <Text style={styles.toggleHint}>{shown ? 'Classmates see Habi and what it wears, never your habits.' : 'Hidden: classmates do not see Habi.'}</Text>
+      </View>
+      <Switch
+        value={shown}
+        onValueChange={(value) => updatePreferences({ showBuddy: value })}
+        trackColor={{ false: '#D8D8E2', true: themeColor('#5B42D8', 'backgroundColor') }}
+        thumbColor="#FFFFFF"
+        {...WEB_THUMB}
+        accessibilityLabel="Show my Habi on the leaderboard"
+      />
+    </View>
+  );
+}
+
+/** What the Buddy Showcase reward unlocks: Habi next to the student's name on the leaderboard. */
+export function ShowcaseSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const styles = useThemedStyles(themedStyles);
+  // The screen that opens the sheet loads the buddy.
+  const { buddy } = useBuddy(false);
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close Buddy Showcase">
+        <Pressable style={styles.sheet} onPress={() => undefined} accessibilityViewIsModal>
+          <View style={styles.header}>
+            <View style={[styles.icon, styles.showcaseIcon]}><Ionicons name="paw" size={24} color="#FFFFFF" /></View>
+            <View style={styles.headerCopy}>
+              <Text style={styles.title}>Buddy Showcase</Text>
+              <Text style={styles.subtitle}>Your Habi next to your name on the leaderboard.</Text>
+            </View>
+          </View>
+          <View style={styles.framePreview}>
+            <BuddyAvatar buddy={buddy} checkIns={buddy?.checkIns ?? 0} mood="happy" size={72} />
+          </View>
+          <ShowBuddyToggle />
+          <Pressable
+            style={({ pressed }) => [styles.primary, pressed && styles.pressed]}
+            onPress={() => {
+              onClose();
+              router.push('/buddy');
+            }}
+            accessibilityRole="button"
+          >
+            <Text style={styles.primaryText}>Dress up Habi</Text>
+          </Pressable>
+          <Pressable style={styles.secondary} onPress={onClose} accessibilityRole="button">
+            <Text style={styles.doneText}>Done</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 /** Sets the title under the student's name, with ideas to tap. Render it only while it is open. */
 export function TitleSheet({ current, onClose, onSaved }: { current: string; onClose: () => void; onSaved?: (title: string) => void }) {
   const styles = useThemedStyles(themedStyles);
@@ -239,6 +311,10 @@ const themedStyles = createThemedStyles({
   icon: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#5B42D8', alignItems: 'center', justifyContent: 'center' },
   titleIcon: { backgroundColor: '#C2549B' },
   frameIcon: { backgroundColor: '#E9A21B' },
+  showcaseIcon: { backgroundColor: '#3BAA74' },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 14, backgroundColor: '#F4F1FF' },
+  toggleLabel: { fontSize: 14, fontWeight: '800', color: '#24212D' },
+  toggleHint: { marginTop: 2, fontSize: 12, fontWeight: '600', color: '#6A6573' },
   framePreview: { alignItems: 'center', paddingVertical: 6 },
   frameFace: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden', backgroundColor: '#EEE9FF' },
   frameInitial: { fontWeight: '900', color: '#5B42D8' },
@@ -273,6 +349,7 @@ const themedStyles = createThemedStyles({
   primaryText: { fontSize: 15, fontWeight: '900', color: '#FFFFFF' },
   secondary: { marginTop: -6, minHeight: 40, alignItems: 'center', justifyContent: 'center' },
   secondaryText: { fontSize: 13, fontWeight: '800', color: '#C2543E' },
+  doneText: { fontSize: 13, fontWeight: '800', color: '#6A6573' },
   badge: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 4, maxWidth: '100%', borderRadius: 999, backgroundColor: '#F1EDFF', paddingHorizontal: 9, paddingVertical: 4 },
   badgeText: { flexShrink: 1, fontSize: 11, fontWeight: '800', color: '#4A3BA0' },
   pressed: { opacity: 0.85 },

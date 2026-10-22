@@ -2,7 +2,7 @@
 // loaded for the device's today, so it also has this week's drop.
 import { useCallback, useEffect, useState } from 'react';
 import { getBuddy } from '@/authentication/authService';
-import { keepWeekDrop, type Buddy } from '@/utils/buddy';
+import { keepTodayGifts, keepWeekDrop, type Buddy } from '@/utils/buddy';
 import { getLocalDateKey } from '@/utils/habit-visibility';
 
 let cached: Buddy | null = null;
@@ -10,10 +10,10 @@ const listeners = new Set<(buddy: Buddy) => void>();
 
 /**
  * Shares a buddy from the server (after a purchase or a change) with every screen showing it. An
- * answer without the week's drop (a change of look) keeps the drop already known for this week.
+ * answer without the week's drop or today's gifts (a change of look) keeps the ones already known.
  */
 export function publishBuddy(buddy: Buddy) {
-  cached = keepWeekDrop(buddy, cached, getLocalDateKey());
+  cached = keepTodayGifts(keepWeekDrop(buddy, cached, getLocalDateKey()), cached);
   for (const listener of listeners) listener(cached);
 }
 
