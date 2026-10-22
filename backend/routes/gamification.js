@@ -8,6 +8,7 @@ import { leaderboardSchema, rewardFrameSchema, rewardRedemptionSchema, rewardTit
 import { requireAuth } from '../services/accounts.js';
 import { refreshSnapshot, serverCompletionPoints } from '../services/app-state-store.js';
 import { showcaseBuddies } from '../services/buddy.js';
+import { recentGiftRecipients } from '../services/buddy-gifts.js';
 import { cleanTitle, getRewards, PERMANENT_REWARDS, PROFILE_FRAMES } from '../services/rewards.js';
 import { countedDaySql, getWallet, POINTS_PER_CHECK_IN, spendTokens } from '../services/wallet.js';
 
@@ -48,10 +49,11 @@ export async function leaderboardRows(db, userId, range) {
 /**
  * One row of the board as the app gets it, for the signed-in `session`. `id` is the student's
  * public id, never the internal one. canGift: a student can send this classmate a treat (not
- * themselves, and the classmate accepts them; services/buddy-gifts.js). buddy: their showcased Habi
+ * themselves, the classmate accepts them, and none was sent to them in the last 7 days, in
+ * `gifted`; services/buddy-gifts.js). buddy: their showcased Habi
  * from `buddies` (showcaseBuddies), else null; it shows nothing about habits, times or streaks.
  */
-function leaderRow(row, index, session, buddies) {
+function leaderRow(row, index, session, buddies, gifted) {
   const isYou = row.id === session.userId;
   return {
     id: row.publicId,
@@ -62,7 +64,7 @@ function leaderRow(row, index, session, buddies) {
     title: row.title || '',
     frame: row.frame || '',
     isYou,
-    canGift: !isYou && row.allowsGifts && session.role === 'user',
+    canGift: !isYou && row.allowsGifts && session.role === 'user' && !gifted.has(row.id),
     buddy: buddies.get(row.id) ?? null,
   };
 }
@@ -136,11 +138,12 @@ export default function registerGamificationRoutes(app) {
     const range = getPeriodRange(period);
     const rows = await leaderboardRows({ query }, session.userId, range);
     const buddies = await showcaseBuddies({ query }, rows.filter((row) => row.showsBuddy).map((row) => row.id));
+    const gifted = session.role === 'user' ? await recentGiftRecipients({ query }, session.userId) : new Set();
     response.json({
       period,
       date: range ? periodLabel(range) : 'Since joining',
       range: range ? { ...range, timeZone: config.appTimeZone, resetsAt: periodResetsAt(range) } : null,
-      leaders: rows.map((row, index) => leaderRow(row, index, session, buddies)),
+      leaders: rows.map((row, index) => leaderRow(row, index, session, buddies, gifted)),
     });
   });
 

@@ -1554,6 +1554,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.deepEqual([(await request('/api/buddy', { headers: sender.headers })).body.buddy.giftsSent, gifted.treatsFed], [1, 0], 'feeding your own Habi is separate');
 
     // One treat per classmate a week, three a day, ten received in 24 hours.
+    assert.equal((await leadersFor(sender.headers)).find((leader) => leader.id === ids.recipient)?.canGift, false, 'no Send a treat for a classmate treated this week');
     assert.deepEqual(refusal(await send(sender.headers, ids.recipient)), [429, 'GIFT_PAIR_LIMIT', 'You already sent Rio R. a treat this week.']);
     assert.deepEqual([(await send(sender.headers, ids.third)).body.leftToday, (await send(sender.headers, ids.fourth)).body.leftToday], [1, 0]);
     assert.deepEqual(refusal(await send(sender.headers, ids.fifth)), [429, 'GIFT_DAILY_LIMIT', 'You can send 3 treats a day. Try again tomorrow.']);
@@ -1562,6 +1563,82 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
       await db.query("INSERT INTO buddy_gifts(id,sender_id,recipient_id,treat_id,message_id,local_date,created_at) VALUES($1,$2,$3,'apple',0,$4,$5)", [crypto.randomUUID(), recipient.userId, fifth.userId, dateIn(zone), Date.now() - 60_000]);
     }
     assert.deepEqual(refusal(await send(third.headers, ids.fifth)), [429, 'RECIPIENT_FULL', 'Fil F. has received lots of treats today. Try again tomorrow.']);
+  });
+
+  await t.test('treat gifts hold under requests at the same moment: the limits, two-way gifts and a classmate who just opted out', async () => {
+    const zone = 'Asia/Manila';
+    const send = (from, to, timeZone = zone) => request('/api/buddy/gifts', { method: 'POST', headers: from.headers, body: JSON.stringify({ to, treatId: 'apple', messageId: 1, date: dateIn(timeZone), timeZone }) });
+    const refusal = (answer) => [answer.response.status, answer.body.code, answer.body.message];
+    const statuses = (answers) => answers.map((answer) => answer.response.status).sort();
+    const balance = async (userId) => (await db.query('SELECT COALESCE(SUM(amount), 0)::int AS sum FROM token_transactions WHERE user_id=$1', [userId])).rows[0].sum;
+    const funded = async (firstName, lastName) => {
+      const account = await student(firstName, lastName);
+      await grant(account.userId, 200, 'race-grant');
+      return { ...account, publicId: await publicIdOf(account.userId) };
+    };
+
+    // Five at once from one student: three go through, the other two are over the day's limit and cost nothing.
+    const racer = await funded('Rae', 'Racer');
+    const targets = await Promise.all(['One', 'Two', 'Three', 'Four', 'Five'].map((lastName) => funded('Kai', lastName)));
+    const burst = await Promise.all(targets.map((target) => send(racer, target.publicId)));
+    assert.deepEqual(statuses(burst), [200, 200, 200, 429, 429], JSON.stringify(burst.map((answer) => answer.body)));
+    assert.ok(burst.filter((answer) => answer.response.status === 429).every((answer) => answer.body.code === 'GIFT_DAILY_LIMIT'));
+    assert.equal(await balance(racer.userId), 200 - 3 * 15, 'only three are paid');
+    // A new time zone does not start a new day of treats: one on the same date keeps the count, and
+    // one still on yesterday (UTC-12, unless it is past 20:00 in Manila) is a closed day.
+    const sixth = await funded('Kai', 'Six');
+    assert.equal((await send(racer, sixth.publicId, 'Asia/Singapore')).body.code, 'GIFT_DAILY_LIMIT');
+    const west = 'Etc/GMT+12';
+    assert.equal((await send(racer, sixth.publicId, west)).body.code, dateIn(west) < dateIn(zone) ? 'DAY_CLOSED' : 'GIFT_DAILY_LIMIT');
+
+    // Two classmates sending each other a treat at the same moment both get through, with no deadlock.
+    const [ana, ben] = [await funded('Ana', 'Mutual'), await funded('Ben', 'Mutual')];
+    const mutual = await Promise.all([send(ana, ben.publicId), send(ben, ana.publicId)]);
+    assert.deepEqual(statuses(mutual), [200, 200], JSON.stringify(mutual.map((answer) => answer.body)));
+    // A treat from 30 hours ago was before today in every time zone: counted, but not on today's floor.
+    await db.query("INSERT INTO buddy_gifts(id,sender_id,recipient_id,treat_id,message_id,local_date,created_at) VALUES($1,$2,$3,'cake',4,$4,$5)", [crypto.randomUUID(), racer.userId, ana.userId, shiftDay(dateIn(zone), -1), Date.now() - 30 * 60 * 60 * 1000]);
+    const anaBuddy = (await request('/api/buddy', { headers: ana.headers })).body.buddy;
+    assert.deepEqual([anaBuddy.giftsToday, anaBuddy.giftsReceived, anaBuddy.giftsSent], [[{ treatId: 'apple', emoji: '🍎', from: 'Ben M.', message: 'Proud of you!' }], 2, 1]);
+
+    // Eleven classmates at once to one student: ten land, the eleventh finds them full.
+    const popular = await funded('Pia', 'Popular');
+    const fans = await Promise.all(Array.from({ length: 11 }, (_, index) => funded('Fan', `Number${index}`)));
+    const rush = await Promise.all(fans.map((fan) => send(fan, popular.publicId)));
+    assert.deepEqual(statuses(rush), [...Array(10).fill(200), 429], JSON.stringify(rush.map((answer) => answer.body)));
+    assert.equal(rush.find((answer) => answer.response.status === 429).body.code, 'RECIPIENT_FULL');
+    assert.equal((await db.query('SELECT COUNT(*)::int AS count FROM buddy_gifts WHERE recipient_id=$1', [popular.userId])).rows[0].count, 10);
+
+    // A deactivated classmate gets nothing.
+    const gone = await funded('Dee', 'Gone');
+    await db.query("UPDATE users SET status='deactivated' WHERE id=$1", [gone.userId]);
+    assert.deepEqual(refusal(await send(racer, gone.publicId)).slice(0, 2), [404, 'RECIPIENT_NOT_FOUND']);
+
+    // A classmate turns treats off (an app-state save holds their account) while a gift waits for
+    // it: the gift reads the setting that was saved, not the one from before it waited.
+    const giver = await funded('Gus', 'Waiting');
+    const shy = await funded('Ola', 'Optout');
+    assert.equal((await savePreferences(shy.headers, {})).response.status, 200);
+    const holder = await db.connect();
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [shy.userId]);
+      await holder.query(`UPDATE user_preferences SET preferences_json = preferences_json || '{"allowGifts": false}'::jsonb WHERE user_id=$1`, [shy.userId]);
+      const holderPid = (await holder.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      const pending = send(giver, shy.publicId);
+      const deadline = Date.now() + 10_000;
+      while (!(await db.query('SELECT 1 FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))', [holderPid])).rowCount) {
+        assert.ok(Date.now() < deadline, 'the gift waits for the classmate\'s account');
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      await holder.query('COMMIT');
+      assert.deepEqual(refusal(await pending), [403, 'GIFTS_OFF', 'This classmate is not accepting treats.']);
+    } catch (error) {
+      await holder.query('ROLLBACK');
+      throw error;
+    } finally {
+      holder.release();
+    }
+    assert.equal(await balance(giver.userId), 200, 'the refused gift cost nothing');
   });
 
   await t.test('issue reports store attachments in the database and validate content', async () => {

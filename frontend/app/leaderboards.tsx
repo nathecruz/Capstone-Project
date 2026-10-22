@@ -14,7 +14,7 @@ import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { getCachedBuddy, useBuddy } from '@/hooks/use-buddy';
 import { loadRewards, markRewardOwned, useRewards } from '@/hooks/use-rewards';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
-import { classmateBuddy } from '@/utils/buddy';
+import { classmateBuddy, showcaseLookOf } from '@/utils/buddy';
 import { leaderboardDateLabel, leaderKey, resetCountdownText, type Leader, type LeaderboardPeriod, type LeaderboardRange } from '@/utils/leaderboard-range';
 
 // Every reward here does something. 'permanent' ones (from the server's catalog) are bought once
@@ -40,6 +40,7 @@ type RewardSheet = 'theme' | 'title' | 'frame' | 'showcase';
 /** Which sheet a bought reward opens. */
 const REWARD_SHEET: Record<string, RewardSheet> = { 'premium-theme': 'theme', 'custom-title': 'title', 'profile-frames': 'frame', 'buddy-showcase': 'showcase' };
 const BUDDY_SHOP_FROM = 40;
+const SHOWCASE_ID = 'buddy-showcase';
 /** How far apart the reward cards are along their row (a card's width and the gap). */
 const REWARD_CARD_STEP = 160;
 
@@ -72,7 +73,7 @@ export default function LeaderboardsScreen() {
   const [boardTimeZone, setBoardTimeZone] = useState<string | null>(null);
   // The student's own row (name and avatar) is saved once per visit, not on every period switch.
   const syncRef = useRef<Promise<void> | null>(null);
-  const { tokens, applyWallet, points, profile, tokenHistory, isFaculty, streakFreeze } = useAppColorScheme();
+  const { tokens, applyWallet, points, profile, preferences, tokenHistory, isFaculty, streakFreeze } = useAppColorScheme();
   const catalog = useRewards();
   // The student's own buddy: its catalog draws classmates' Habis, and its treats are what they can send.
   const { buddy: ownBuddy } = useBuddy(!isFaculty && !getCachedBuddy());
@@ -152,7 +153,14 @@ export default function LeaderboardsScreen() {
     };
   }, [apiUrl, period, points, profile.fullName, refreshKey]);
 
-  const { leaders } = leaderboard;
+  // The student's own row shows their Habi as this device has it: the "Show my Habi" switch and
+  // what Habi wears apply right away, not only once the change is saved and the board loads again.
+  const ownsShowcase = catalog.owns(SHOWCASE_ID);
+  const leaders = leaderboard.leaders.map((leader) => {
+    if (!leader.isYou) return leader;
+    if (preferences.showBuddy === false) return { ...leader, buddy: null };
+    return ownsShowcase && ownBuddy ? { ...leader, buddy: showcaseLookOf(ownBuddy) } : leader;
+  });
   const podium: Spotlight[] = leaders.slice(0, 3).map((leader, index) => ({
     ...leader,
     tone: index === 0 ? 'gold' : index === 1 ? 'silver' : 'bronze',
@@ -447,7 +455,7 @@ export default function LeaderboardsScreen() {
       <ThemeSheet visible={openSheet === 'theme'} onClose={() => setOpenSheet(null)} />
       <FrameSheet visible={openSheet === 'frame'} onClose={() => { setOpenSheet(null); setRefreshKey((key) => key + 1); }} />
       <ShowcaseSheet visible={openSheet === 'showcase'} onClose={() => { setOpenSheet(null); setRefreshKey((key) => key + 1); }} />
-      {classmate && <ClassmateSheet leader={classmate} period={period} onClose={() => setClassmate(null)} onSent={setToast} />}
+      {classmate && <ClassmateSheet leader={classmate} period={leaderboard.period} onClose={() => setClassmate(null)} onSent={setToast} />}
       {openSheet === 'title' && <TitleSheet current={catalog.title} onClose={() => setOpenSheet(null)} onSaved={(title) => { setToast(title ? `Your title is now "${title}".` : 'Title removed.'); setRefreshKey((key) => key + 1); }} />}
 
       <Modal visible={showTokenHistory} transparent animationType="slide" onRequestClose={() => setShowTokenHistory(false)}>

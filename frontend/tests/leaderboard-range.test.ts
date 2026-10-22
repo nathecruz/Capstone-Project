@@ -36,7 +36,9 @@ jest.mock('@/components/classmate-sheet', () => {
   const { Text } = jest.requireActual('react-native');
   return { ClassmateSheet: ({ leader, period }: { leader: { name: string; rank: number }; period: string }) => ReactActual.createElement(Text, null, `Card of ${leader.name} (#${leader.rank}, ${period})`) };
 });
-jest.mock('@/hooks/use-buddy', () => ({ useBuddy: () => ({ buddy: null }), getCachedBuddy: () => null }));
+// The student's own buddy, as the session has it.
+const mockOwnBuddy: { buddy: object | null } = { buddy: null };
+jest.mock('@/hooks/use-buddy', () => ({ useBuddy: () => mockOwnBuddy, getCachedBuddy: () => mockOwnBuddy.buddy }));
 jest.mock('@/components/streak-freeze-sheet', () => ({ StreakFreezeSheet: () => null }));
 jest.mock('@/authentication', () => ({
   getApiBaseUrl: () => 'https://api.test',
@@ -45,7 +47,7 @@ jest.mock('@/authentication', () => ({
 }));
 const mockCatalog: { rewards: { id: string; name: string; cost: number; description: string; permanent: boolean }[]; owned: string[] } = { rewards: [], owned: [] };
 jest.mock('@/hooks/use-rewards', () => ({ loadRewards: jest.fn(), markRewardOwned: jest.fn(), useRewards: () => ({ status: 'ready', ...mockCatalog, owns: (id: string) => mockCatalog.owned.includes(id), title: '' }) }));
-const mockContext = { tokens: 120, applyWallet: jest.fn(), points: 240, profile: { fullName: 'Maria Reyes', email: 'maria@psau.edu.ph' }, tokenHistory: [], isFaculty: false, streakFreeze: null };
+const mockContext = { tokens: 120, applyWallet: jest.fn(), points: 240, profile: { fullName: 'Maria Reyes', email: 'maria@psau.edu.ph' }, preferences: {} as { showBuddy?: boolean }, tokenHistory: [], isFaculty: false, streakFreeze: null };
 jest.mock('@/hooks/color-scheme-context', () => ({ useAppColorScheme: () => mockContext }));
 
 // Monday 26 October 2026, 01:00 in Manila: still Sunday 25 October on a UTC device clock.
@@ -114,6 +116,8 @@ describe('the Leaderboards screen', () => {
     delete mockParams.reward;
     mockCatalog.rewards = [];
     mockCatalog.owned = [];
+    mockOwnBuddy.buddy = null;
+    mockContext.preferences = {};
     fetchMock.mockClear();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
   });
@@ -191,6 +195,27 @@ describe('the Leaderboards screen', () => {
     // The podium spot opens it too, also for the student's own row.
     fireEvent.press(screen.getAllByLabelText('Maria R. (You), rank 3, 60 points. Open card')[0]);
     expect(screen.getByText('Card of Maria R. (You) (#3, This Week)')).toBeTruthy();
+  });
+
+  it("shows the student's own Habi as this device has it, before the board loads again", async () => {
+    const showcase = { id: 'buddy-showcase', name: 'Buddy Showcase', cost: 300, description: 'Show your Habi', permanent: true };
+    mockCatalog.rewards = [showcase];
+    mockCatalog.owned = ['buddy-showcase'];
+    // The board was loaded before Habi put on a top hat (and before it was shown at all).
+    mockOwnBuddy.buddy = { name: 'Habi', head: 'top-hat', hand: '', accessory: '', room: '', owned: ['top-hat'], checkIns: 64, items: [], drops: [], stages: [], treats: [], fedTreats: [], treatsFed: 0 };
+    const shown = render(React.createElement(LeaderboardsScreen));
+    await waitFor(() => expect(shown.getAllByText('Maria R. (You)').length).toBeGreaterThan(0));
+    // Its stage with that stage's least check-ins (Teen, 50), as classmates get it, on the podium and in the rows.
+    expect(shown.getAllByLabelText('Your Habi: 50 check-ins, top-hat, 28 px')).toHaveLength(2);
+    shown.unmount();
+
+    // "Show my Habi" was just turned off: the row the server sent still has Habi.
+    leaders = [baseLeaders[0], baseLeaders[1], { ...(baseLeaders[2] as object), buddy: { stage: 'kid', checkIns: 10, head: 'cap', hand: '', accessory: '', room: '' } }];
+    mockContext.preferences = { showBuddy: false };
+    const hidden = render(React.createElement(LeaderboardsScreen));
+    await waitFor(() => expect(hidden.getAllByText('Maria R. (You)').length).toBeGreaterThan(0));
+    expect(hidden.queryAllByLabelText(/Your Habi/)).toHaveLength(0);
+    hidden.unmount();
   });
 
   it('opens the reward of /leaderboards?reward=<id>: its settings once owned, or what is still missing', async () => {

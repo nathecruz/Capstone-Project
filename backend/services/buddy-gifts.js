@@ -42,9 +42,13 @@ export function giftLimitRefusal({ sent, received, today, recipientId, recipient
  * Locks the sender's users row and the classmate's (found by leaderboard id), in id order, so two
  * classmates sending each other a treat at once wait instead of deadlocking, and the classmate's
  * daily cap cannot be raced. Returns both accounts ({ sender, recipient }; recipient null if none).
+ * They are read after the lock, in a query of their own: one that waited for the lock (an app-state
+ * save turning treats off) would otherwise still see the preferences from before it waited.
  */
 async function lockAccounts(db, senderId, publicId) {
   const found = (await db.query('SELECT id FROM users WHERE public_id=$1', [publicId])).rows[0];
+  const ids = [...new Set([senderId, found?.id].filter(Boolean))];
+  await db.query('SELECT id FROM users WHERE id = ANY($1::text[]) ORDER BY id FOR UPDATE', [ids]);
   const rows = (await db.query(
     `SELECT u.id, u.role, u.status, u.full_name AS "fullName", u.first_name AS "firstName", u.last_name AS "lastName", b.name AS "buddyName",
             (p.preferences_json->'showOnLeaderboard') IS DISTINCT FROM 'false'::jsonb AS listed,
@@ -52,9 +56,8 @@ async function lockAccounts(db, senderId, publicId) {
        FROM users u
        LEFT JOIN user_preferences p ON p.user_id=u.id
        LEFT JOIN user_buddy b ON b.user_id=u.id
-      WHERE u.id = ANY($1::text[])
-      ORDER BY u.id FOR UPDATE OF u`,
-    [[...new Set([senderId, found?.id].filter(Boolean))]],
+      WHERE u.id = ANY($1::text[])`,
+    [ids],
   )).rows;
   return { sender: rows.find((row) => row.id === senderId), recipient: found ? rows.find((row) => row.id === found.id) ?? null : null };
 }
@@ -99,6 +102,12 @@ export async function sendBuddyGift(db, senderId, { to, treatId, messageId }, to
     [`${recipient.id}:notification:gift:${id}`, recipient.id, `${treat.emoji} A treat for ${buddyName}`, `${leaderboardNameOf(sender)} sent ${buddyName} ${withArticle(treat.name)}: ${message}`, now],
   );
   return { gift: { id, treatId: treat.id, to, message }, sentToday: sentGifts.filter((gift) => gift.localDate === today).length + 1 };
+}
+
+/** The classmates this student sent a treat to in the last 7 days (internal ids): no new one yet. */
+export async function recentGiftRecipients(db, senderId, now = Date.now()) {
+  const result = await db.query('SELECT DISTINCT recipient_id AS "recipientId" FROM buddy_gifts WHERE sender_id=$1 AND created_at > $2', [senderId, now - PAIR_WINDOW_MS]);
+  return new Set(result.rows.map((row) => row.recipientId));
 }
 
 /**

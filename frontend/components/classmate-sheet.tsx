@@ -3,7 +3,7 @@
 // classmate's Habi gets the treat, never tokens. Render it only while it is open.
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { sendBuddyGift } from '@/authentication/authService';
 import { BuddyAvatar } from '@/components/buddy';
@@ -23,12 +23,15 @@ export function ClassmateSheet({ leader, period, onClose, onSent }: { leader: Le
   const themeColor = useThemeColor();
   const { tokens, applyWallet } = useAppColorScheme();
   // The student's own buddy has the catalog (to draw the classmate's items), the treats and the cheers.
-  const { buddy: own } = useBuddy(false);
+  const { buddy: own, refresh } = useBuddy(false);
   const [picking, setPicking] = useState(false);
+  const [treatsFailed, setTreatsFailed] = useState(false);
   const [treatId, setTreatId] = useState<string | null>(null);
   const [messageId, setMessageId] = useState(0);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  // A second tap before the button turns off must not send a second treat.
+  const sendingRef = useRef(false);
 
   const name = cardName(leader);
   const firstName = name.split(' ')[0] || name;
@@ -38,11 +41,22 @@ export function ClassmateSheet({ leader, period, onClose, onSent }: { leader: Le
   const look = leader.buddy ? classmateBuddy(leader.buddy, own, leader.isYou ? 'Your Habi' : `${firstName}'s Habi`) : null;
   const stage = look ? buddyGrowth(look.checkIns, look.stages).stage.name : '';
 
+  const openPicker = () => {
+    setPicking(true);
+    // The treats and cheers come with the student's own buddy: load it when the board could not.
+    if (!treats.length || !cheers.length) {
+      setTreatsFailed(false);
+      void refresh().then((result) => setTreatsFailed(!result.ok));
+    }
+  };
+
   const send = async () => {
-    if (!treat || !leader.id || sending) return;
+    if (!treat || !leader.id || sendingRef.current) return;
+    sendingRef.current = true;
     setSending(true);
     setError('');
     const result = await sendBuddyGift({ to: leader.id, treatId: treat.id, messageId }, getLocalDateKey());
+    sendingRef.current = false;
     setSending(false);
     if (!result.ok) {
       setError(result.message);
@@ -96,7 +110,7 @@ export function ClassmateSheet({ leader, period, onClose, onSent }: { leader: Le
           <Text style={styles.primaryText}>Open Habi</Text>
         </Pressable>
       ) : leader.canGift && leader.id ? (
-        <Pressable style={({ pressed }) => [styles.primary, pressed && styles.pressed]} onPress={() => setPicking(true)} accessibilityRole="button">
+        <Pressable style={({ pressed }) => [styles.primary, pressed && styles.pressed]} onPress={openPicker} accessibilityRole="button">
           <Ionicons name="gift-outline" size={17} color="#FFFFFF" />
           <Text style={styles.primaryText}>Send a treat</Text>
         </Pressable>
@@ -113,7 +127,7 @@ export function ClassmateSheet({ leader, period, onClose, onSent }: { leader: Le
         <Text style={styles.name}>Send {firstName} a treat</Text>
         <Text style={styles.pickerHint}>It goes to {firstName}&apos;s Habi. Only you spend tokens.</Text>
       </View>
-      {!treats.length ? <Text style={styles.pickerHint}>Loading the treats...</Text> : (
+      {!treats.length ? <Text style={styles.pickerHint}>{treatsFailed ? 'Could not load the treats. Go back and try again.' : 'Loading the treats...'}</Text> : (
         <View style={styles.grid} accessibilityRole="radiogroup" accessibilityLabel="Treats">
           {treats.map((entry) => {
             const short = Math.max(0, entry.cost - tokens);

@@ -152,6 +152,15 @@ export function classmateBuddy(look: LeaderBuddy, catalog: Pick<Buddy, 'items' |
   };
 }
 
+/**
+ * The student's own Habi as the Buddy Showcase shows it to classmates, built the way the server
+ * builds a row's buddy: its stage (with that stage's least check-ins) and what it wears now.
+ */
+export function showcaseLookOf(buddy: Buddy): LeaderBuddy {
+  const { stage } = buddyGrowth(buddy.checkIns, buddy.stages?.length ? buddy.stages : BUDDY_STAGES);
+  return { stage: stage.id as LeaderBuddy['stage'], checkIns: stage.min, head: buddy.head, hand: buddy.hand, accessory: buddy.accessory ?? '', room: buddy.room ?? '' };
+}
+
 export const BUDDY_STAGES: BuddyStage[] = [
   { id: 'baby', name: 'Baby', min: 0 },
   { id: 'kid', name: 'Kid', min: 10 },

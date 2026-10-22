@@ -17,7 +17,7 @@ jest.mock('@/authentication/authService', () => ({ sendBuddyGift: jest.fn() }));
 jest.mock('@/hooks/use-rewards', () => ({ useRewards: () => ({ frame: '' }), saveFrame: jest.fn(), saveTitle: jest.fn() }));
 const mockContext = { tokens: 30, applyWallet: jest.fn(), preferences: {} as { showBuddy?: boolean }, updatePreferences: jest.fn() };
 jest.mock('@/hooks/color-scheme-context', () => ({ useAppColorScheme: () => mockContext }));
-const mockOwn: { buddy: Buddy | null } = { buddy: null };
+const mockOwn: { buddy: Buddy | null; refresh: jest.Mock } = { buddy: null, refresh: jest.fn() };
 jest.mock('@/hooks/use-buddy', () => ({ useBuddy: () => mockOwn, reloadBuddy: jest.fn() }));
 
 const GIFT_MESSAGES = ['Keep going!', 'Proud of you!', 'Laban!', "Kaya mo 'yan!", 'Nice streak!'];
@@ -47,6 +47,7 @@ function open(leader: Leader, period: 'This Week' | 'This Month' | 'All Time' = 
 }
 
 beforeEach(() => {
+  jest.clearAllMocks();
   mockOwn.buddy = own;
   mockContext.tokens = 30;
   mockContext.preferences = {};
@@ -125,6 +126,48 @@ describe('sending a treat', () => {
     expect(screen.getByText('You already sent Maria R. a treat this week.')).toBeTruthy();
     expect(mockContext.applyWallet).not.toHaveBeenCalled();
     expect(onSent).not.toHaveBeenCalled();
+  });
+});
+
+describe('sending a treat, guarded', () => {
+  it('sends one treat however fast the button is tapped twice', async () => {
+    type Sent = Awaited<ReturnType<typeof sendBuddyGift>>;
+    let answer: (value: Sent) => void = () => undefined;
+    jest.mocked(sendBuddyGift).mockReturnValue(new Promise<Sent>((resolve) => {
+      answer = resolve;
+    }));
+    const { screen, onSent } = open(maria);
+    fireEvent.press(screen.getByText('Send a treat'));
+    fireEvent.press(screen.getByLabelText('Apple, 15 tokens'));
+    // Both taps land before the button re-renders as busy.
+    act(() => {
+      const confirm = screen.getByText('Send 🍎 Apple · 15 tokens');
+      fireEvent.press(confirm);
+      fireEvent.press(confirm);
+    });
+    expect(sendBuddyGift).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      answer({ ok: true, gift: { id: 'g1', treatId: 'apple', to: maria.id!, message: 'Keep going!' }, sentToday: 1, leftToday: 2, tokens: 15, tokenHistory: [], points: 100 });
+    });
+    expect(onSent).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads the treats when the board could not, and says so when that fails too', async () => {
+    mockOwn.buddy = null;
+    mockOwn.refresh.mockResolvedValue({ ok: false, message: 'Could not reach HabitAI. Check your connection.' });
+    const { screen } = open(maria);
+    await act(async () => {
+      fireEvent.press(screen.getByText('Send a treat'));
+    });
+    expect(mockOwn.refresh).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Could not load the treats. Go back and try again.')).toBeTruthy();
+    expect(screen.getByText('Pick a treat')).toBeTruthy();
+  });
+
+  it('does not load the buddy again when its treats are known', () => {
+    const { screen } = open(maria);
+    fireEvent.press(screen.getByText('Send a treat'));
+    expect(mockOwn.refresh).not.toHaveBeenCalled();
   });
 });
 

@@ -1,5 +1,5 @@
 import type { Habit } from '@/hooks/app-state/types';
-import { BUDDY_STAGES, buddyCatalog, buddyGrowth, buddyMood, classmateBuddy, dropQuestsFooter, giftLine, keepTodayGifts, keepWeekDrop, ROOM_LOOK, weeklyDropCard, type Buddy, type BuddyDrop, type BuddyItem } from '@/utils/buddy';
+import { BUDDY_STAGES, buddyCatalog, buddyGrowth, buddyMood, classmateBuddy, dropQuestsFooter, giftLine, keepTodayGifts, keepWeekDrop, ROOM_LOOK, showcaseLookOf, weeklyDropCard, type Buddy, type BuddyDrop, type BuddyItem } from '@/utils/buddy';
 import { daysLeftInWeek, weekStartOf, weeklyQuests } from '@/utils/quests';
 
 function habit(id: string, completionDates: string[] = [], overrides: Partial<Habit> = {}): Habit {
@@ -188,5 +188,13 @@ describe("a classmate's Habi on the leaderboard", () => {
     const bare = classmateBuddy(look, null, "Maria's Habi");
     expect(bare.stages).toBe(BUDDY_STAGES);
     expect(buddyCatalog(bare)).toEqual([]);
+  });
+});
+
+describe("the student's own Habi on their row", () => {
+  it('is built as the server builds it: the stage, its least check-ins, and what it wears', () => {
+    const own = { ...buddyWith(null), head: 'top-hat', hand: 'drop-umbrella', room: 'aurora', checkIns: 172 };
+    expect(showcaseLookOf(own)).toEqual({ stage: 'champ', checkIns: 150, head: 'top-hat', hand: 'drop-umbrella', accessory: '', room: 'aurora' });
+    expect(showcaseLookOf({ ...own, checkIns: 3, stages: [] })).toMatchObject({ stage: 'baby', checkIns: 0 });
   });
 });
