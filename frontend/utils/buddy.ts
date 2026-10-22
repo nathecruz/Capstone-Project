@@ -61,13 +61,19 @@ export function collectedDrops(buddy: Pick<Buddy, 'owned' | 'drops'>) {
   return (buddy.drops ?? []).filter((item) => buddy.owned.includes(item.id));
 }
 
+/** Whether `drop` is the one of `today`'s week (a buddy loaded before Monday still has last week's). */
+export function isDropOfWeek(drop: BuddyDrop | null | undefined, today: string): drop is BuddyDrop {
+  return Boolean(drop && today >= drop.weekStart && today <= drop.weekEnd);
+}
+
 /**
  * The buddy screen's "This week's drop" card: locked until enough quests are done, then for sale
- * (unless the stage or the balance is short), then collected. Null while the drop is unknown.
+ * (unless the stage or the balance is short), then collected. Null while the drop of `today`'s week
+ * is unknown.
  */
-export function weeklyDropCard(buddy: Buddy, tokens: number) {
+export function weeklyDropCard(buddy: Buddy, tokens: number, today: string) {
   const { drop, stages } = buddy;
-  if (!drop) return null;
+  if (!isDropOfWeek(drop, today)) return null;
   const { item } = drop;
   const stageIndex = stages.findIndex((stage) => stage.id === item.stage);
   const stage = stageIndex > buddyGrowth(buddy.checkIns, stages).index ? stages[stageIndex] : null;
@@ -86,9 +92,9 @@ export function weeklyDropCard(buddy: Buddy, tokens: number) {
   };
 }
 
-/** The weekly quests card's last line: the drop its quests unlock, with `questsDone` of the 2 needed. */
-export function dropQuestsFooter(drop: BuddyDrop | null | undefined, questsDone: number) {
-  if (!drop) return null;
+/** The weekly quests card's last line: the drop its quests unlock, with `questsDone` of the 2 needed (only in the drop's week). */
+export function dropQuestsFooter(drop: BuddyDrop | null | undefined, questsDone: number, today: string) {
+  if (!isDropOfWeek(drop, today)) return null;
   return `Unlocks this week's drop: ${drop.item.emoji} ${drop.item.name} (${Math.min(questsDone, drop.questsNeeded)}/${drop.questsNeeded})`;
 }
 
@@ -97,7 +103,7 @@ export function dropQuestsFooter(drop: BuddyDrop | null | undefined, questsDone:
  * keeps the drop already known for the week of `today`, with whether it is owned now.
  */
 export function keepWeekDrop(next: Buddy, known: Buddy | null, today: string): Buddy {
-  if (next.drop || !known?.drop || today < known.drop.weekStart || today > known.drop.weekEnd) return next;
+  if (next.drop || !known || !isDropOfWeek(known.drop, today)) return next;
   return { ...next, drop: { ...known.drop, owned: next.owned.includes(known.drop.item.id) }, drops: next.drops?.length ? next.drops : known.drops };
 }
 

@@ -193,6 +193,7 @@ export async function buyBuddyItem(db, userId, itemId, { today = null, now = Dat
   const item = WEARABLES.find((entry) => entry.id === itemId);
   if (!item) return { status: 404, message: 'That item is not in the shop.' };
   if (item.drop) {
+    if (!today) return { status: 400, message: 'Send your today and time zone.' };
     const weeks = weeksUntilDrop(item, weekStartOf(today));
     if (weeks) return { status: 410, code: 'DROP_GONE', message: `This drop is gone for now. It comes back in ${weeks} week${weeks === 1 ? '' : 's'}.` };
   }

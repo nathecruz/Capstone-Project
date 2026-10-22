@@ -83,9 +83,12 @@ function buddyWith(drop: Partial<BuddyDrop> | null, overrides: Partial<Buddy> = 
   };
 }
 
+// A day of that week.
+const WEDNESDAY = '2026-10-28';
+
 describe('weekly drop', () => {
   it('is locked until 2 of the 3 quests are done', () => {
-    expect(weeklyDropCard(buddyWith({ questsDone: 1 }), 500)).toEqual({
+    expect(weeklyDropCard(buddyWith({ questsDone: 1 }), 500, WEDNESDAY)).toEqual({
       item: DROPS[0],
       state: 'locked',
       action: 'See quests',
@@ -94,28 +97,37 @@ describe('weekly drop', () => {
       progress: 'Finish 2 of 3 weekly quests to unlock (1/2)',
       collected: 'Drops collected 0/12',
     });
-    expect(weeklyDropCard(buddyWith({ questsDone: 0 }), 500)?.progress).toBe('Finish 2 of 3 weekly quests to unlock (0/2)');
+    expect(weeklyDropCard(buddyWith({ questsDone: 0 }), 500, WEDNESDAY)?.progress).toBe('Finish 2 of 3 weekly quests to unlock (0/2)');
   });
 
   it('can be bought once unlocked, unless the stage or the balance is short', () => {
-    expect(weeklyDropCard(buddyWith({ questsDone: 2, unlocked: true }), 500)).toMatchObject({ state: 'unlocked', action: 'Get it', canBuy: true, progress: null });
-    expect(weeklyDropCard(buddyWith({ questsDone: 3, unlocked: true }), 100)).toMatchObject({ state: 'unlocked', action: '50 more', canBuy: false });
+    expect(weeklyDropCard(buddyWith({ questsDone: 2, unlocked: true }), 500, WEDNESDAY)).toMatchObject({ state: 'unlocked', action: 'Get it', canBuy: true, progress: null });
+    expect(weeklyDropCard(buddyWith({ questsDone: 3, unlocked: true }), 100, WEDNESDAY)).toMatchObject({ state: 'unlocked', action: '50 more', canBuy: false });
     // Below Kid (10 check-ins), as the server refuses it.
-    expect(weeklyDropCard(buddyWith({ questsDone: 2, unlocked: true }, { checkIns: 6 }), 500)).toMatchObject({ state: 'unlocked', action: 'Kid stage', canBuy: false });
+    expect(weeklyDropCard(buddyWith({ questsDone: 2, unlocked: true }, { checkIns: 6 }), 500, WEDNESDAY)).toMatchObject({ state: 'unlocked', action: 'Kid stage', canBuy: false });
   });
 
   it('is collected once bought, and counts the drops collected', () => {
     const owned = buddyWith({ questsDone: 3, unlocked: true, owned: true }, { owned: ['cap', 'drop-umbrella', 'drop-parol'], dropsOwned: 2 });
-    expect(weeklyDropCard(owned, 0)).toMatchObject({ state: 'owned', action: 'Collected', canBuy: false, progress: null, collected: 'Drops collected 2/12' });
+    expect(weeklyDropCard(owned, 0, WEDNESDAY)).toMatchObject({ state: 'owned', action: 'Collected', canBuy: false, progress: null, collected: 'Drops collected 2/12' });
     // Unknown without the account's today.
-    expect(weeklyDropCard(buddyWith(null), 500)).toBeNull();
+    expect(weeklyDropCard(buddyWith(null), 500, WEDNESDAY)).toBeNull();
   });
 
   it('is named at the bottom of the weekly quests card', () => {
     const { drop } = buddyWith({ questsDone: 1 });
-    expect(dropQuestsFooter(drop, 1)).toBe("Unlocks this week's drop: ☔ Umbrella (1/2)");
-    expect(dropQuestsFooter(drop, 3)).toBe("Unlocks this week's drop: ☔ Umbrella (2/2)");
-    expect(dropQuestsFooter(null, 2)).toBeNull();
+    expect(dropQuestsFooter(drop, 1, WEDNESDAY)).toBe("Unlocks this week's drop: ☔ Umbrella (1/2)");
+    expect(dropQuestsFooter(drop, 3, WEDNESDAY)).toBe("Unlocks this week's drop: ☔ Umbrella (2/2)");
+    expect(dropQuestsFooter(null, 2, WEDNESDAY)).toBeNull();
+  });
+
+  it("is not shown after its week, while the buddy loaded before Monday still has it", () => {
+    const unlocked = buddyWith({ questsDone: 2, unlocked: true });
+    expect(weeklyDropCard(unlocked, 500, '2026-11-01')).toMatchObject({ state: 'unlocked', action: 'Get it' });
+    expect(weeklyDropCard(unlocked, 500, '2026-11-02')).toBeNull();
+    expect(weeklyDropCard(unlocked, 500, '2026-10-25')).toBeNull();
+    expect(dropQuestsFooter(unlocked.drop, 2, '2026-11-01')).toBe("Unlocks this week's drop: ☔ Umbrella (2/2)");
+    expect(dropQuestsFooter(unlocked.drop, 0, '2026-11-02')).toBeNull();
   });
 
   it('is drawn and worn like a shop item', () => {

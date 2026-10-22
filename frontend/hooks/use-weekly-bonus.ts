@@ -8,9 +8,12 @@ import { subscribeToAuthChanges } from '@/authentication/session';
 type State = { date: string; bonus: WeeklyBonus | null; claiming: boolean; error: string };
 const EMPTY: State = { date: '', bonus: null, claiming: false, error: '' };
 let state = EMPTY;
-// The day being loaded (a second card asking for it sends no second request), and the account's
-// version, so an answer for a signed-out account is dropped.
+// The day being loaded (a second card asking for it sends no second request), whether a change came
+// in meanwhile (it is loaded again after that answer), the latest load (an answer for an older day
+// is dropped) and the account's version, so an answer for a signed-out account is dropped.
 let loadingDate = '';
+let loadAgain = false;
+let latestLoad = 0;
 let account = 0;
 const listeners = new Set<() => void>();
 
@@ -22,24 +25,52 @@ function update(changes: Partial<State>) {
 subscribeToAuthChanges(() => {
   account += 1;
   loadingDate = '';
+  loadAgain = false;
   update(EMPTY);
 });
 
-/** Loads the bonus for `date` (the device's today). */
-export async function loadWeeklyBonus(date: string) {
-  if (loadingDate === date) return;
-  loadingDate = date;
+/**
+ * A bonus this store saw claimed stays claimed: an answer the server counted before the claim
+ * (sent just before it, answered just after) must not bring the Claim button back.
+ */
+function keepClaimed(next: WeeklyBonus, known: WeeklyBonus | null): WeeklyBonus {
+  const last = known?.lastWeek;
+  if (!last?.claimed || next.lastWeek.claimed || next.lastWeek.weekStart !== last.weekStart) return next;
+  return { ...next, lastWeek: { ...next.lastWeek, claimed: true, claimable: false, claimedAmount: last.claimedAmount } };
+}
+
+async function fetchBonus(date: string) {
   const asked = account;
+  latestLoad += 1;
+  const load = latestLoad;
+  loadingDate = date;
+  loadAgain = false;
   const result = await getWeeklyBonus(date);
-  // Dropped when the account changed or a newer day was asked for meanwhile.
-  if (asked !== account || loadingDate !== date) return;
+  // Dropped when the account changed or another day was asked for meanwhile.
+  if (asked !== account || load !== latestLoad) return;
   loadingDate = '';
-  if (result.ok) update({ date, bonus: { lastWeek: result.lastWeek, thisWeek: result.thisWeek, tiers: result.tiers } });
+  if (result.ok) {
+    const bonus = keepClaimed({ lastWeek: result.lastWeek, thisWeek: result.thisWeek, tiers: result.tiers }, state.bonus);
+    // A refused claim of another day (e.g. sent just before midnight) says nothing about this one.
+    update(date === state.date ? { bonus } : { date, bonus, error: '' });
+  }
+  if (loadAgain) void fetchBonus(date);
+}
+
+/** Loads the bonus for `date` again, after the load already on its way if there is one. */
+function refresh(date: string) {
+  if (loadingDate === date) loadAgain = true;
+  else void fetchBonus(date);
+}
+
+/** Loads the bonus for `date` (the device's today), unless it is being loaded already. */
+export async function loadWeeklyBonus(date: string) {
+  if (loadingDate !== date) await fetchBonus(date);
 }
 
 /** After a check-in or a payment: loads the bonus again, if a screen loaded it. */
 export function reloadWeeklyBonus() {
-  if (state.date) void loadWeeklyBonus(state.date);
+  if (state.date) refresh(state.date);
 }
 
 /**
@@ -48,6 +79,9 @@ export function reloadWeeklyBonus() {
  */
 export async function claimLastWeekBonus(date: string) {
   if (state.claiming) return null;
+  // The week this claim is for: when the day changed before the answer, the new day's last week is
+  // another one, still to claim.
+  const weekStart = state.date === date ? state.bonus?.lastWeek.weekStart : undefined;
   update({ claiming: true, error: '' });
   const asked = account;
   const result = await claimWeeklyBonus(date);
@@ -55,13 +89,15 @@ export async function claimLastWeekBonus(date: string) {
   if (!result.ok) {
     update({ claiming: false, error: result.message });
     // Not earned, or another day: show the server's numbers as they are now.
-    void loadWeeklyBonus(date);
+    refresh(date);
     return result;
   }
   const bonus = state.bonus;
   update({
     claiming: false,
-    bonus: bonus && { ...bonus, lastWeek: { ...bonus.lastWeek, claimed: true, claimable: false, claimedAmount: result.amount } },
+    bonus: bonus && weekStart && bonus.lastWeek.weekStart === weekStart
+      ? { ...bonus, lastWeek: { ...bonus.lastWeek, claimed: true, claimable: false, claimedAmount: result.amount } }
+      : bonus,
   });
   return result;
 }

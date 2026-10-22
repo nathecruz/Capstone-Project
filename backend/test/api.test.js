@@ -1333,6 +1333,30 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.deepEqual([paid.claimed, paid.claimedAmount, paid.claimable], [true, 10, false]);
   });
 
+  await t.test('a missed habit deleted mid-week still counts the days it missed', async () => {
+    const { headers, userId } = await student('Mid', 'Week');
+    await db.query("UPDATE users SET time_zone='UTC' WHERE id=$1", [userId]);
+    const lastMonday = shiftDay(weekStartOf(today), -7);
+    const lastWeek = Array.from({ length: 7 }, (_, index) => shiftDay(lastMonday, index));
+    const habit = (id) => ({ ...appState.habits[0], id, label: id, startDate: lastMonday, activeUntil: lastWeek[6] });
+    // Walk and read every day of last week. A gym habit missed Monday and Tuesday was deleted on
+    // Wednesday: that save recorded its 6 due check-ins of Monday and Tuesday before deleting it.
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: ['walk', 'read'].map(habit) }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    for (const date of lastWeek) for (const habitId of ['walk', 'read']) await checkInOn(userId, habitId, date);
+    await db.query('INSERT INTO weekly_due_marks(user_id, week_start, due, last_day, updated_at) VALUES($1,$2,6,$3,$4)', [userId, lastMonday, lastWeek[1], Date.now()]);
+    const marked = (await request(`/api/weekly-bonus?date=${today}&timeZone=UTC`, { headers })).body.lastWeek;
+    assert.deepEqual([marked.scheduled, marked.done, marked.percent, marked.tier?.amount], [16, 14, 87, 20], 'Monday and Tuesday of the gym, then walk and read: not 14/14 (+30)');
+
+    // The next save joins the stored mark with the days after it, and keeps it.
+    const renamed = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...saved.body.state, habits: saved.body.state.habits.map((entry) => ({ ...entry, label: `${entry.label}!` })), baseUpdatedAt: saved.body.updatedAt, baseState: saved.body.state }) });
+    assert.equal(renamed.response.status, 200, JSON.stringify(renamed.body));
+    const rows = await db.query('SELECT due, last_day::text AS "lastDay" FROM weekly_due_marks WHERE user_id=$1 AND week_start=$2', [userId, lastMonday]);
+    assert.deepEqual(rows.rows, [{ due: 16, lastDay: lastWeek[6] }]);
+    const claim = await request('/api/weekly-bonus/claim', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+    assert.deepEqual([claim.response.status, claim.body.amount, claim.body.percent, claim.body.tier?.label], [200, 20, 87, 'Strong week'], JSON.stringify(claim.body));
+  });
+
   await t.test('the weekly bonus: only last week can be claimed, and only from 60%', async () => {
     const { headers, userId } = await student('Nia', 'Lowe');
     await db.query("UPDATE users SET time_zone='UTC' WHERE id=$1", [userId]);
@@ -1417,6 +1441,16 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal((await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ [other.slot]: other.id }) })).response.status, 400);
     const listed = (await request('/api/buddy', { headers })).body.buddy;
     assert.deepEqual([listed.drop, listed.dropsOwned, listed.owned], [null, 1, [drop.id]], 'without a date there is no drop card, but the collection counts');
+  });
+
+  await t.test('buying a shop item with a date never stores a new time zone', async () => {
+    const { headers, userId } = await student('Shop', 'Zone');
+    await db.query("UPDATE users SET time_zone='Asia/Manila' WHERE id=$1", [userId]);
+    await grant(userId, 100, 'shop-grant');
+    const east = 'Pacific/Kiritimati';
+    const bought = await request('/api/buddy/items', { method: 'POST', headers, body: JSON.stringify({ itemId: 'cap', date: dateIn(east), timeZone: east }) });
+    assert.deepEqual([bought.response.status, bought.body.buddy?.head, bought.body.tokens], [200, 'cap', 60], JSON.stringify(bought.body));
+    assert.equal((await db.query('SELECT time_zone FROM users WHERE id=$1', [userId])).rows[0].time_zone, 'Asia/Manila', 'only a drop is sold by the day');
   });
 
   await t.test('issue reports store attachments in the database and validate content', async () => {

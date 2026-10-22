@@ -134,7 +134,7 @@ export default function BuddyScreen() {
   const drops = buddy ? collectedDrops(buddy) : [];
   const dropIds = new Set(drops.map((item) => item.id));
   const items = [...(buddy?.items ?? []), ...drops].filter((item) => item.slot === slot);
-  const dropCard = buddy ? weeklyDropCard(buddy, tokens) : null;
+  const dropCard = buddy ? weeklyDropCard(buddy, tokens, getLocalDateKey()) : null;
   const treats = buddy?.treats ?? [];
   const fedCount = new Map((buddy?.fedTreats ?? []).map((treat) => [treat.treatId, treat.count]));
 

@@ -338,13 +338,16 @@ CREATE TABLE IF NOT EXISTS streak_freeze_days (
   PRIMARY KEY (user_id, freeze_date)
 );
 -- Weekly consistency bonus (services/weekly-bonus.js): the most check-ins that were ever due on a
--- week's days already over, recorded before each save that can drop or reschedule habits, so
--- deleting or reshaping a missed habit cannot raise that week's rate. The bonus itself is the
--- ledger row `<user id>:token:week:<week start>`.
+-- week's days already over, from its Monday to last_day, recorded before each save that can drop or
+-- reschedule habits, so deleting or reshaping a missed habit cannot raise that week's rate. The
+-- bonus itself is the ledger row `<user id>:token:week:<week start>`.
 CREATE TABLE IF NOT EXISTS weekly_due_marks (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   week_start DATE NOT NULL,
   due INTEGER NOT NULL,
+  last_day DATE,
   updated_at BIGINT NOT NULL,
   PRIMARY KEY (user_id, week_start)
 );
+-- Tables made before last_day existed get it here; a mark with no last_day covers its whole week.
+ALTER TABLE weekly_due_marks ADD COLUMN IF NOT EXISTS last_day DATE;

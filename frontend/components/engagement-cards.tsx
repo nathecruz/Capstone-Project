@@ -142,7 +142,7 @@ export function WeeklyQuestsCard({ habits, now, style }: { habits: Habit[]; now:
   const soFar = bonus && next?.reachable && next.checkInsNeeded > 0
     ? `This week so far: ${bonus.thisWeek.percentSoFar}% · ${next.checkInsNeeded} more check-in${next.checkInsNeeded === 1 ? ' reaches' : 's reach'} ${next.percent}% (+${next.amount})`
     : null;
-  const footer = quests.length ? dropQuestsFooter(buddy?.drop, done) : null;
+  const footer = quests.length ? dropQuestsFooter(buddy?.drop, done, getLocalDateKey(now)) : null;
   return (
     <View style={[styles.card, style]}>
       {waiting && (

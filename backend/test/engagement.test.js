@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BUDDY_DROPS, BUDDY_ITEMS, BUDDY_STAGES, BUDDY_TREATS, buddyStageIndex, dropForWeek, isBuddyDrop, weeksUntilDrop } from '../services/buddy.js';
+import { BUDDY_DROPS, BUDDY_ITEMS, BUDDY_STAGES, BUDDY_TREATS, buddyStageIndex, buyBuddyItem, dropForWeek, isBuddyDrop, weeksUntilDrop } from '../services/buddy.js';
 import { MYSTERY_REWARDS, pickMysteryReward } from '../services/mystery-box.js';
 import { weekStartOf, weeklyQuests } from '../services/quests.js';
 import { daysToFreeze, STREAK_FREEZE_COST, STREAK_FREEZE_MAX } from '../services/streak-freeze.js';
@@ -84,6 +84,11 @@ test('the weekly drop: 12 items in turn, one a week, back every 12 weeks', () =>
   const shopIds = new Set(BUDDY_ITEMS.map((item) => item.id));
   assert.ok(BUDDY_DROPS.every((drop) => !shopIds.has(drop.id)), 'drop ids do not collide with shop items');
   assert.ok(!isBuddyDrop('cap'));
+});
+
+test('a weekly drop is never sold without the account day', async () => {
+  // Refused before any query: a drop's week comes only from the account's today.
+  assert.deepEqual(await buyBuddyItem(null, 'user', BUDDY_DROPS[0].id), { status: 400, message: 'Send your today and time zone.' });
 });
 
 test('the Legend stage has four items, and the shop totals 6,975 tokens', () => {

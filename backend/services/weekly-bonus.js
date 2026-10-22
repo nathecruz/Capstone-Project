@@ -2,8 +2,9 @@
 // check-ins, claimed during the next week (it lapses at 00:00 the Monday after). The rate is worked
 // out on the server from the habits and check-ins, never from the app's numbers. Habits added after
 // Wednesday count from the next week, and the due check-ins of days that are over are recorded
-// before every save that can drop or reschedule habits (weekly_due_marks), so deleting a missed
-// habit cannot raise it. Past days cannot be checked in, so a paid bonus never needs taking back.
+// before every save that can drop or reschedule habits (weekly_due_marks: the count and the last
+// day it covers), so deleting a missed habit, even mid-week, cannot raise it. Past days cannot be
+// checked in, so a paid bonus never needs taking back.
 import { runAll } from '../db/run-all.js';
 import { periodResetsAt } from '../lib/http.js';
 import { isHabitActiveOn, weekEndKey } from './habit-week.js';
@@ -59,18 +60,29 @@ function dueDays(counted, doneByDate, from, to) {
 const sum = (days, key) => days.reduce((total, day) => total + day[key], 0);
 
 /**
+ * The due check-ins of `days`, never fewer than a due mark: `dueMark` for the days up to
+ * `markedThrough` plus the habits' own count for the days after it (a null `markedThrough`: the mark
+ * covers all of them).
+ */
+function dueWithMark(days, dueMark, markedThrough) {
+  const after = markedThrough ? sum(days.filter((day) => day.date > markedThrough), 'due') : 0;
+  return Math.max(sum(days, 'due'), dueMark + after);
+}
+
+/**
  * The week starting `weekStart`, from its Monday to `lastDay`: due and done check-ins of the habits
  * that count (every category; a streak-frozen day stays due), the days with a check-in, and whether
- * it earns the bonus. `dueMark` is the most that was ever due on the week's days that are over
- * (weekly_due_marks), so `scheduled` never shrinks when a habit is deleted or reshaped.
+ * it earns the bonus. `dueMark` is the most that was ever due on the week's days up to
+ * `markedThrough` (weekly_due_marks), so `scheduled` never shrinks when a habit is deleted or
+ * reshaped: the days after it count as the habits are now.
  * `habits`: [{ id, frequency, startDate, activeUntil, reminderDays, meta }]; `doneByDate`: Map(date -> Set(habit id)).
  */
-export function weeklyConsistency({ habits, doneByDate, weekStart, lastDay, dueMark = 0 }) {
+export function weeklyConsistency({ habits, doneByDate, weekStart, lastDay, dueMark = 0, markedThrough = null }) {
   const days = dueDays(countedHabits(habits, weekStart), doneByDate, weekStart, lastDay);
   const due = sum(days, 'due');
   const done = sum(days, 'done');
   const activeDays = days.filter((day) => day.done > 0).length;
-  const scheduled = Math.max(due, dueMark);
+  const scheduled = dueWithMark(days, dueMark, markedThrough);
   const percent = scheduled ? Math.floor((100 * done) / scheduled) : 0;
   let reason = null;
   if (scheduled < WEEKLY_BONUS_MIN_SCHEDULED) reason = 'few-scheduled';
@@ -84,12 +96,12 @@ export function weeklyConsistency({ habits, doneByDate, weekStart, lastDay, dueM
  * against the whole week's due check-ins. It is reachable when the check-ins it needs are still
  * open from today to Sunday (and the week can still have enough due check-ins and active days).
  */
-export function weekSoFar({ habits, doneByDate, today, dueMark = 0 }) {
+export function weekSoFar({ habits, doneByDate, today, dueMark = 0, markedThrough = null }) {
   const weekStart = weekStartOf(today);
   const weekEnd = weekEndKey(today);
-  const soFar = weeklyConsistency({ habits, doneByDate, weekStart, lastDay: today, dueMark });
+  const soFar = weeklyConsistency({ habits, doneByDate, weekStart, lastDay: today, dueMark, markedThrough });
   const days = dueDays(countedHabits(habits, weekStart), doneByDate, weekStart, weekEnd);
-  const dueWeek = Math.max(sum(days, 'due'), dueMark);
+  const dueWeek = dueWithMark(days, dueMark, markedThrough);
   const coming = days.filter((day) => day.date >= today);
   const open = sum(coming, 'due') - sum(coming, 'done');
   const possibleDays = days.filter((day) => day.done > 0 || (day.date >= today && day.due > day.done)).length;
@@ -112,45 +124,74 @@ export function weekSoFar({ habits, doneByDate, today, dueMark = 0 }) {
 }
 
 /**
- * The due check-ins of the days already over, before `today`: all of last week and this week up to
- * yesterday, as [{ weekStart, due }] (weeks with nothing due are left out). A habit added and
- * removed on the same day is never counted.
+ * The due check-ins of the days already over, before `today`, from `habits`: all of last week and
+ * this week up to yesterday, as [{ weekStart, lastDay, due }]. A habit added and removed on the same
+ * day is never counted.
  */
 export function closedDue(habits, today) {
   const thisWeek = weekStartOf(today);
   const yesterday = shiftDay(today, -1);
   return [[shiftDay(thisWeek, -7), shiftDay(thisWeek, -1)], [thisWeek, yesterday]]
     .filter(([weekStart, lastDay]) => lastDay >= weekStart)
-    .map(([weekStart, lastDay]) => ({ weekStart, due: weeklyConsistency({ habits, doneByDate: new Map(), weekStart, lastDay }).due }))
-    .filter((mark) => mark.due > 0);
+    .map(([weekStart, lastDay]) => ({ weekStart, lastDay, due: weeklyConsistency({ habits, doneByDate: new Map(), weekStart, lastDay }).due }));
 }
 
 /**
- * Records the due check-ins of the days already over (closedDue) from the habits as stored, keeping
- * the highest count per week. Call inside the save's transaction, after locking the user row and
- * before syncNormalizedState (the only path that drops or reschedules habits).
+ * The due mark a save keeps for a week: `closed` (from closedDue, with the habits as stored) joined
+ * with the mark stored before it (`previous` { due, lastDay }, or null). The days the previous mark
+ * covers keep the most that was ever due on them; the days after it count the stored habits, which
+ * are the ones that stood when those days ended (every change of habits is a save that records
+ * first). So a missed habit deleted on Wednesday still counts its Monday and Tuesday on top of the
+ * other habits' rest of the week. A mark with no last day covers its whole week.
+ */
+export function nextDueMark(habits, closed, previous) {
+  if (!previous) return closed;
+  const covered = previous.lastDay ?? shiftDay(closed.weekStart, 6);
+  if (covered >= closed.lastDay) return { weekStart: closed.weekStart, lastDay: covered, due: Math.max(previous.due, closed.due) };
+  const since = sum(dueDays(countedHabits(habits, closed.weekStart), new Map(), shiftDay(covered, 1), closed.lastDay), 'due');
+  return { weekStart: closed.weekStart, lastDay: closed.lastDay, due: Math.max(closed.due, previous.due + since) };
+}
+
+/** The stored due marks of the weeks from `from` on: Map(week start -> { due, lastDay }). */
+async function loadDueMarks(db, userId, from) {
+  const result = await db.query('SELECT week_start::text AS "weekStart", due, last_day::text AS "lastDay" FROM weekly_due_marks WHERE user_id=$1 AND week_start >= $2::date', [userId, from]);
+  return new Map(result.rows.map((row) => [row.weekStart, { due: Number(row.due), lastDay: row.lastDay ?? null }]));
+}
+
+/**
+ * Records the due check-ins of the days already over (closedDue) from the habits as stored, joined
+ * with the marks already kept (nextDueMark), so a week's count never shrinks. Call inside the save's
+ * transaction, after locking the user row and before syncNormalizedState (the only path that drops
+ * or reschedules habits).
  */
 export async function recordDueMarks(db, userId, today, now = Date.now()) {
-  for (const mark of closedDue(await loadHabits(db, userId), today)) {
+  const [habits, stored] = await runAll(db, [() => loadHabits(db, userId), () => loadDueMarks(db, userId, shiftDay(weekStartOf(today), -7))]);
+  for (const closed of closedDue(habits, today)) {
+    const previous = stored.get(closed.weekStart) ?? null;
+    const mark = nextDueMark(habits, closed, previous);
+    if (previous ? mark.due === previous.due && mark.lastDay === previous.lastDay : !mark.due) continue;
     await db.query(
-      `INSERT INTO weekly_due_marks(user_id, week_start, due, updated_at) VALUES($1,$2,$3,$4)
-       ON CONFLICT (user_id, week_start) DO UPDATE SET due=excluded.due, updated_at=excluded.updated_at
-       WHERE weekly_due_marks.due < excluded.due`,
-      [userId, mark.weekStart, mark.due, now],
+      `INSERT INTO weekly_due_marks(user_id, week_start, due, last_day, updated_at) VALUES($1,$2,$3,$4,$5)
+       ON CONFLICT (user_id, week_start) DO UPDATE SET due=GREATEST(weekly_due_marks.due, excluded.due),
+         last_day=GREATEST(weekly_due_marks.last_day, excluded.last_day), updated_at=excluded.updated_at`,
+      [userId, mark.weekStart, mark.due, mark.lastDay, now],
     );
   }
 }
 
+/** How a stored mark (or none) enters weeklyConsistency and weekSoFar. */
+const markInput = (mark) => ({ dueMark: mark?.due ?? 0, markedThrough: mark?.lastDay ?? null });
+
 /**
  * The bonus as the app shows it (the API's WeeklyBonus), from the loaded data: last week, which can
  * be claimed until 00:00 next Monday in the account's zone, and this week so far. `marks`:
- * Map(week start -> due mark); `claimedAmount`: last week's paid bonus, or null.
+ * Map(week start -> { due, lastDay }); `claimedAmount`: last week's paid bonus, or null.
  */
 export function weeklyBonus({ habits, doneByDate, today, timeZone, marks = new Map(), claimedAmount = null }) {
   const weekStart = shiftDay(weekStartOf(today), -7);
   const weekEnd = shiftDay(weekStart, 6);
-  const { done, scheduled, percent, activeDays, eligible, reason, tier } = weeklyConsistency({ habits, doneByDate, weekStart, lastDay: weekEnd, dueMark: marks.get(weekStart) ?? 0 });
-  const thisWeek = weekSoFar({ habits, doneByDate, today, dueMark: marks.get(weekStartOf(today)) ?? 0 });
+  const { done, scheduled, percent, activeDays, eligible, reason, tier } = weeklyConsistency({ habits, doneByDate, weekStart, lastDay: weekEnd, ...markInput(marks.get(weekStart)) });
+  const thisWeek = weekSoFar({ habits, doneByDate, today, ...markInput(marks.get(weekStartOf(today))) });
   return {
     lastWeek: {
       weekStart,
@@ -178,15 +219,10 @@ async function loadWeeks(db, userId, today) {
   const [habits, doneByDate, marks, claimed] = await runAll(db, [
     () => loadHabits(db, userId),
     () => loadDoneByDate(db, userId, lastWeek, today),
-    () => db.query('SELECT week_start::text AS "weekStart", due FROM weekly_due_marks WHERE user_id=$1 AND week_start >= $2::date', [userId, lastWeek]),
+    () => loadDueMarks(db, userId, lastWeek),
     () => db.query('SELECT amount FROM token_transactions WHERE id=$1', [bonusId(userId, lastWeek)]),
   ]);
-  return {
-    habits,
-    doneByDate,
-    marks: new Map(marks.rows.map((row) => [row.weekStart, Number(row.due)])),
-    claimedAmount: claimed.rowCount ? Number(claimed.rows[0].amount) : null,
-  };
+  return { habits, doneByDate, marks, claimedAmount: claimed.rowCount ? Number(claimed.rows[0].amount) : null };
 }
 
 /** The weekly bonus for the account day ({ today, timeZone }, services/account-day.js). */
@@ -203,7 +239,7 @@ export async function getWeeklyBonus(db, userId, { today, timeZone }) {
 export async function claimWeeklyBonus(db, userId, today, now = Date.now()) {
   const { habits, doneByDate, marks, claimedAmount } = await loadWeeks(db, userId, today);
   const weekStart = shiftDay(weekStartOf(today), -7);
-  const week = weeklyConsistency({ habits, doneByDate, weekStart, lastDay: shiftDay(weekStart, 6), dueMark: marks.get(weekStart) ?? 0 });
+  const week = weeklyConsistency({ habits, doneByDate, weekStart, lastDay: shiftDay(weekStart, 6), ...markInput(marks.get(weekStart)) });
   const paid = (amount) => ({ amount, alreadyClaimed: true, percent: week.percent, tier: WEEKLY_BONUS_TIERS.find((tier) => tier.amount === amount) ?? null });
   if (claimedAmount !== null) return paid(claimedAmount);
   if (!week.eligible) return { refused: NOT_EARNED[week.reason](week.percent) };

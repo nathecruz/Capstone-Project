@@ -49,7 +49,8 @@ export default function registerEngagementRoutes(app) {
     const input = parse(buddyItemSchema, request, response);
     if (!input) return;
     const { itemId, ...dayInput } = input;
-    const day = dayInput.date ? await resolveAccountDay({ query }, session.userId, dayInput) : null;
+    // Only a drop is sold by the day, so only a drop purchase can store a new time zone.
+    const day = dayInput.date ? await resolveAccountDay({ query }, session.userId, dayInput, { write: isBuddyDrop(itemId) }) : null;
     if (isBuddyDrop(itemId)) {
       if (!day) return response.status(400).json({ ok: false, message: 'Send your today and time zone.' });
       if (!day.ok) return response.status(409).json(dayClosedBody(day, 'That day is over. This week\'s drop follows your today.'));
