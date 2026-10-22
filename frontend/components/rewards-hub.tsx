@@ -1,13 +1,15 @@
 // Home's rewards as tabs: the daily reward, today's challenges and the weekly quests, one at a time
 // instead of three tall cards in a row. All three stay mounted (only the chosen one shows), so each
 // keeps its own data and live updates, and the tabs can say where something is waiting: the daily
-// reward, or last week's consistency bonus on the Quests tab.
+// reward, or last week's consistency bonus on the Quests tab. 'See all ways' opens the Tokens screen.
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { DailyChallengesCard, DailyClaimCard } from '@/components/daily-cards';
 import { WeeklyQuestsCard } from '@/components/engagement-cards';
 import type { Habit } from '@/hooks/app-state/types';
+import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useDailyChallenges } from '@/hooks/use-daily-challenges';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 import { useWeeklyBonus } from '@/hooks/use-weekly-bonus';
@@ -20,6 +22,8 @@ type Tab = 'daily' | 'challenges' | 'quests';
 export function RewardsHub({ habits, now }: { habits: Habit[]; now: Date }) {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
+  // Tokens are the students' own: faculty have no Tokens screen.
+  const { isFaculty } = useAppColorScheme();
   // Read only: the challenges card below loads them.
   const challenges = useDailyChallenges(habits.length, false);
   const quests = weeklyQuests(habits, now);
@@ -48,7 +52,15 @@ export function RewardsHub({ habits, now }: { habits: Habit[]; now: Date }) {
     <View style={styles.hub}>
       <View style={styles.header}>
         <Text style={styles.title}>Rewards</Text>
-        <Text style={styles.subtitle}>Earn tokens every day</Text>
+        <Text style={styles.subtitle}>
+          Earn tokens every day
+          {isFaculty ? null : (
+            <>
+              {' · '}
+              <Text style={styles.link} onPress={() => router.push('/wallet')} accessibilityRole="link">See all ways</Text>
+            </>
+          )}
+        </Text>
       </View>
       <View style={styles.tabs} accessibilityRole="tablist">
         {tabs.map((item) => {
@@ -84,6 +96,7 @@ const themedStyles = createThemedStyles({
   header: { marginTop: 8 },
   title: { fontSize: 20, fontWeight: '900', color: '#1F1C26' },
   subtitle: { marginTop: 2, fontSize: 13, fontWeight: '600', color: '#8A8492' },
+  link: { fontWeight: '800', color: '#5B42D8' },
   tabs: { flexDirection: 'row', gap: 8 },
   tab: { flex: 1, minWidth: 0, minHeight: 58, alignItems: 'center', justifyContent: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 8, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E7E2F3' },
   tabActive: { backgroundColor: '#5B42D8', borderColor: '#5B42D8' },

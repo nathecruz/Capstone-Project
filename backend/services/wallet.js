@@ -13,6 +13,8 @@ export const CHECK_IN_CAP_FROM = config.checkIns.cappedFrom;
 export const COACH_TOKEN_COST = 10;
 export const DAILY_CHALLENGE_BONUS = 10;
 const HISTORY_LIMIT = 100;
+/** What tokens are spent on: the <kind> of a spend row's id (spendTokens). */
+export const SPEND_KINDS = ['reward', 'buddy-item', 'buddy-treat', 'gift', 'freeze', 'coach'];
 
 // Bonus tokens for reaching an account streak milestone (days in a row with a check-in, across all
 // habits and weeks: services/account-streak.js). Awarded once per run of the streak and milestone,
@@ -26,6 +28,49 @@ const checkInId = (userId, habitId, date) => `${userId}:token:check-in:${habitId
 const streakBonusId = (userId, runStart, milestone) => `${userId}:token:streak:account:${runStart}:${milestone}`;
 // For LIKE patterns: an id's own % or _ must not act as a wildcard.
 const escapeLike = (value) => String(value).replace(/[\\%_]/g, '\\$&');
+// A ledger id as the app sees it: without the `${userId}:token:` prefix (older spends are plain UUIDs).
+const publicTokenId = (userId, id) => String(id).replace(`${userId}:token:`, '');
+
+// The kind of a ledger row by the part of its id after `:token:`, checked in this order (so
+// 'daily-claim' before 'daily'). The admin panel sorts rows with the same rules in SQL
+// (admin-panel/server/src/lib/token-kinds.js), so keep the two in step.
+const ID_KINDS = [
+  ['check-in', 'check-in'],
+  ['undo', 'undo'],
+  ['daily-claim', 'daily-claim'],
+  ['challenge', 'challenge'],
+  ['daily', 'challenge'],
+  ['quest', 'quest'],
+  ['mystery', 'mystery'],
+  ['streak', 'streak'],
+  ['week', 'weekly-bonus'],
+  ['refund', 'refund'],
+];
+const SPEND_MARK = ':token:spend:';
+// Spends from before their ids named the kind, by label ('Buddy treat:' before 'Buddy:').
+const LEGACY_SPEND_LABELS = [
+  [(label) => label.startsWith('Redeemed '), 'reward'],
+  [(label) => label.startsWith('Buddy treat:'), 'buddy-treat'],
+  [(label) => label.startsWith('Buddy:'), 'buddy-item'],
+  [(label) => label === 'Streak freeze', 'freeze'],
+  [(label) => label === 'AI Coach', 'coach'],
+];
+
+/**
+ * The kind of a ledger row: what paid it (check-in, daily-claim, challenge, quest, mystery, streak,
+ * weekly-bonus, refund), what it was spent on (a SPEND_KINDS entry), 'undo' (the -5 an undone
+ * check-in wrote before undoing deleted the +5 instead) or 'other'. It follows from the id, and for
+ * spends made before ids named their kind, from the label; the amount never changes it.
+ */
+export function tokenKind(id, label = '') {
+  const text = String(id ?? '');
+  const byId = ID_KINDS.find(([part]) => text.includes(`:token:${part}:`));
+  if (byId) return byId[1];
+  const spend = text.indexOf(SPEND_MARK);
+  if (spend >= 0) return text.slice(spend + SPEND_MARK.length).split(':')[0];
+  const name = String(label ?? '');
+  return LEGACY_SPEND_LABELS.find(([matches]) => matches(name))?.[1] ?? 'other';
+}
 
 /** The milestones a streak crossed going from `before` to `after` (before < m <= after). */
 export function crossedStreakMilestones(before, after) {
@@ -117,11 +162,12 @@ export async function tokenBalance(db, userId) {
 }
 
 /**
- * Spends tokens if the balance allows, as a row `${userId}:token:spend:<kind>:<uuid>` (kind: reward,
- * buddy-item, buddy-treat, gift, freeze or coach). Returns { ok, balance, id }. Call inside a
- * transaction that locked the user row.
+ * Spends tokens if the balance allows, as a row `${userId}:token:spend:<kind>:<uuid>` (kind: one of
+ * SPEND_KINDS, so every spend has a kind in the history and the admin panel). Returns { ok, balance,
+ * id }. Call inside a transaction that locked the user row.
  */
 export async function spendTokens(db, userId, amount, label, { kind, now = Date.now() } = {}) {
+  if (!SPEND_KINDS.includes(kind)) throw new Error(`Unknown token spend kind: ${kind}`);
   const balance = await tokenBalance(db, userId);
   if (balance < amount) return { ok: false, balance };
   const id = `${userId}:token:spend:${kind}:${crypto.randomUUID()}`;
@@ -156,11 +202,72 @@ export async function getWallet(db, userId) {
     tokens: Math.max(0, balance),
     points: points * POINTS_PER_CHECK_IN,
     tokenHistory: history.rows.map((row) => ({
-      id: String(row.id).replace(`${userId}:token:`, ''),
+      id: publicTokenId(userId, row.id),
       amount: Number(row.amount),
       label: row.label,
       date: row.date || new Date(Number(row.createdAt)).toISOString(),
     })),
+  };
+}
+
+// The history's filters (schemas.js walletHistorySchema): every row, the positive ones or the negative ones.
+const FILTER_SQL = { all: '', earned: ' AND amount > 0', spent: ' AND amount < 0' };
+
+/** The opaque cursor of a history page that ends at `row`: the next page starts after it. */
+export function historyCursor(row) {
+  return Buffer.from(JSON.stringify([Number(row.createdAt), String(row.id)])).toString('base64url');
+}
+
+/** The row a cursor points at ({ createdAt, id }), or null when it is not one historyCursor made. */
+export function readHistoryCursor(cursor) {
+  try {
+    const [createdAt, id] = JSON.parse(Buffer.from(String(cursor), 'base64url').toString('utf8'));
+    return Number.isSafeInteger(createdAt) && typeof id === 'string' && id ? { createdAt, id } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One page of the ledger, newest first (created_at, then id, both descending, so rows written in
+ * the same millisecond keep their order across pages): `filter` 'earned' keeps the positive rows,
+ * 'spent' the negative ones. `before` is the row (readHistoryCursor) the page starts after. Totals
+ * cover the whole ledger, whatever the filter: earned (the positive rows), spent (the negative
+ * ones, as a positive number) and the balance (their sum, below zero after an undo that followed a
+ * spend). Returns { items: [{ id, amount, kind, label, date, createdAt }], nextCursor, totals }.
+ */
+export async function getTokenHistory(db, userId, { filter = 'all', limit = 30, before = null } = {}) {
+  const values = [userId];
+  // The plain `created_at <=` bound keeps the page a range scan of token_transactions_user_date_idx.
+  const older = before ? ' AND created_at <= $2 AND (created_at < $2 OR id < $3)' : '';
+  if (before) values.push(before.createdAt, before.id);
+  values.push(limit + 1);
+  const [page, totals] = await runAll(db, [
+    () => db.query(
+      `SELECT id, amount, label, transaction_date AS date, created_at AS "createdAt" FROM token_transactions
+        WHERE user_id=$1${FILTER_SQL[filter] ?? ''}${older}
+        ORDER BY created_at DESC, id DESC LIMIT $${values.length}`,
+      values,
+    ),
+    () => db.query(
+      `SELECT COALESCE(SUM(amount) FILTER (WHERE amount > 0), 0)::int AS earned, COALESCE(-SUM(amount) FILTER (WHERE amount < 0), 0)::int AS spent,
+              COALESCE(SUM(amount), 0)::int AS balance
+         FROM token_transactions WHERE user_id=$1`,
+      [userId],
+    ),
+  ]);
+  const rows = page.rows.slice(0, limit);
+  return {
+    items: rows.map((row) => ({
+      id: publicTokenId(userId, row.id),
+      amount: Number(row.amount),
+      kind: tokenKind(row.id, row.label),
+      label: row.label,
+      date: row.date || new Date(Number(row.createdAt)).toISOString(),
+      createdAt: Number(row.createdAt),
+    })),
+    nextCursor: page.rows.length > limit ? historyCursor(rows.at(-1)) : null,
+    totals: totals.rows[0],
   };
 }
 

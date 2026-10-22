@@ -40,7 +40,10 @@ export const faqSections: FaqSection[] = [
     icon: 'trophy-outline',
     color: '#D9822B',
     items: [
-      { question: 'How do I earn points and badges?', answer: 'Every check-in gives 20 points and 5 tokens; undoing it takes them back. Achievements unlock as you build habits and streaks. Spend tokens on rewards in Leaderboards.' },
+      { question: 'How do I earn points and badges?', answer: 'Every check-in gives 20 points and 5 tokens (points and tokens count up to 6 check-ins a day); undoing it takes them back. Achievements unlock as you build habits and streaks.' },
+      // Prices stay on the Tokens screen, which has them from the server.
+      { question: 'How do I earn tokens?', answer: "Check-ins, the daily reward, daily challenges, the mystery box, weekly quests, the Monday consistency bonus and streak milestones. Tap Tokens on Home to see each one with today's progress." },
+      { question: 'What can I spend tokens on?', answer: "Token Rewards (themes, frames, a custom title, Buddy Showcase), Habi's shop and weekly drop, treats for classmates, Streak Freezes and AI Coach answers. Prices are on the Tokens screen." },
       { question: 'Can I set multiple goals?', answer: 'Yes. Use Set New Goal as often as needed.' },
       { question: 'How are levels calculated?', answer: 'Every 100 points is one level.' },
     ],
@@ -60,7 +63,7 @@ export const faqSections: FaqSection[] = [
 export const faqCount = faqSections.reduce((total, section) => total + section.items.length, 0);
 
 /** Shown first on Help & Support. */
-export const popularQuestions = ['How do streaks work?', 'What happens when I miss a day?', 'How do I earn points and badges?', 'Can I customize reminder times?'];
+export const popularQuestions = ['How do streaks work?', 'What happens when I miss a day?', 'How do I earn points and badges?', 'How do I earn tokens?', 'Can I customize reminder times?'];
 
 /** Suggested questions for the help assistant. */
 export const supportQuestions = ['How do I add a new habit?', "Why isn't my streak updating?", 'How do I earn more points?', 'How do I turn on reminders?'];

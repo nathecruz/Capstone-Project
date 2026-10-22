@@ -1,5 +1,7 @@
 // System instructions, prompt builders and output guards for every AI feature.
 // Keeping them in one module makes the AI behaviour reviewable and testable.
+import { economyGuide } from './token-guide.js';
+import { COACH_TOKEN_COST, PAID_CHECK_INS_PER_DAY, POINTS_PER_CHECK_IN } from './wallet.js';
 
 export const AI_MODES = ['assistant', 'coach', 'support'];
 
@@ -19,9 +21,9 @@ HabitAI app guide (the only features that exist):
 - Edit a habit: tap the pencil on a habit card in the Habits tab to rename it or change its category or schedule (check-ins are kept), or to delete it.
 - Habit analysis: Insights > Predictions shows each habit's chance of success from the machine-learning model and AI advice on the best way and time to do it.
 - Streaks: the main streak counts the days in a row with at least one check-in, across all habits and weeks. It stops on a day when habits were due and none was checked in; a Streak Freeze (bought with tokens from the streak tile on Home) covers a missed day. Each habit also shows its own streak; history is kept.
-- Points and levels: every check-in gives 20 points and 5 tokens. Each 100 points is one level. Leaderboards rank students by points this week, this month or all time.
-- Rewards: spend tokens on rewards from the Leaderboards screen (for example Plant Buddy 200 tokens, Premium Theme 320, Grace Day 620, Custom Title 750).
-- AI Coach: on the Profile tab; each answered question costs 10 tokens (nothing is charged if the AI is unavailable).
+- Points and levels: every check-in gives ${POINTS_PER_CHECK_IN} points (points count up to ${PAID_CHECK_INS_PER_DAY} check-ins a day). Each 100 points is one level. Leaderboards rank students by points this week, this month or all time.
+${economyGuide()}
+- AI Coach: on the Profile tab; each answered question costs ${COACH_TOKEN_COST} tokens (they are given back if the AI cannot answer).
 - Insights tab: completion stats, habit predictions and the progress assistant.
 - Goals tab: describe a goal, or just ask for this week's habits, and the AI planner reads your recent habit history and builds a step-by-step plan you can save under My Goals, plus this week's habits, which you can add to this week after one confirmation.
 - Notifications screen: Reminders, Achievements and System tabs. Reminders on the web need HTTPS and notification permission; on iPhone add HabitAI to the Home Screen first.

@@ -16,6 +16,9 @@ export function weekStartOf(dateKey) {
   return shiftDay(dateKey, -((weekday + 6) % 7));
 }
 
+/** Tokens for each of the week's 3 quests: check-ins, perfect days and the rotating third one. */
+export const QUEST_REWARDS = { 'check-ins': 15, 'perfect-days': 20, rotating: 15 };
+
 /** Weeks since the Monday of 1970-01-05, to rotate the third quest and the Habi weekly drop. */
 export function weekNumber(weekStart) {
   return Math.floor((Date.parse(`${weekStart}T00:00:00Z`) / 86_400_000 - 4) / 7);
@@ -63,9 +66,9 @@ export function weeklyQuests(allHabits, doneByDate, today) {
     { id: 'every-habit', title: 'Check in on every habit at least once', icon: 'grid', target: habits.length, progress: habitsDone.size },
   ][((weekNumber(weekStart) % 3) + 3) % 3];
   return [
-    { id: 'check-ins', title: `Check in ${checkInTarget} times`, icon: 'checkmark-done', target: checkInTarget, progress: checkIns, reward: 15 },
-    { id: 'perfect-days', title: 'Have 2 perfect days', icon: 'sparkles', target: 2, progress: perfectDays, reward: 20 },
-    { ...rotating, reward: 15 },
+    { id: 'check-ins', title: `Check in ${checkInTarget} times`, icon: 'checkmark-done', target: checkInTarget, progress: checkIns, reward: QUEST_REWARDS['check-ins'] },
+    { id: 'perfect-days', title: 'Have 2 perfect days', icon: 'sparkles', target: 2, progress: perfectDays, reward: QUEST_REWARDS['perfect-days'] },
+    { ...rotating, reward: QUEST_REWARDS.rotating },
   ].map((quest) => ({ ...quest, weekStart, progress: Math.min(quest.progress, quest.target), complete: quest.progress >= quest.target }));
 }
 

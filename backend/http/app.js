@@ -11,6 +11,7 @@ import registerHealthRoutes from '../routes/health.js';
 import registerNotificationRoutes from '../routes/notifications.js';
 import registerPasswordResetRoutes from '../routes/password-reset.js';
 import registerSupportRoutes from '../routes/support.js';
+import registerWalletRoutes from '../routes/wallet.js';
 import { apiLimiter } from './rate-limits.js';
 
 /**
@@ -60,6 +61,7 @@ export function createApp() {
   registerSupportRoutes(app);
   registerGamificationRoutes(app);
   registerEngagementRoutes(app);
+  registerWalletRoutes(app);
   registerAiRoutes(app);
 
   app.use('/api', (_request, response) => response.status(404).json({ ok: false, message: 'API route not found.' }));

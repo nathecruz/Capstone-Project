@@ -104,6 +104,12 @@ export async function sendBuddyGift(db, senderId, { to, treatId, messageId }, to
   return { gift: { id, treatId: treat.id, to, message }, sentToday: sentGifts.filter((gift) => gift.localDate === today).length + 1 };
 }
 
+/** The treats this student sent on the account day `today` (at most GIFTS_PER_DAY). */
+export async function giftsSentOn(db, senderId, today) {
+  const result = await db.query('SELECT COUNT(*)::int AS count FROM buddy_gifts WHERE sender_id=$1 AND local_date=$2::date', [senderId, today]);
+  return result.rows[0].count;
+}
+
 /** The classmates this student sent a treat to in the last 7 days (internal ids): no new one yet. */
 export async function recentGiftRecipients(db, senderId, now = Date.now()) {
   const result = await db.query('SELECT DISTINCT recipient_id AS "recipientId" FROM buddy_gifts WHERE sender_id=$1 AND created_at > $2', [senderId, now - PAIR_WINDOW_MS]);

@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, Text, View } from 'react-native';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { createThemedStyles, useThemedStyles } from '@/hooks/use-themed-styles';
+import { reloadWallet } from '@/hooks/use-wallet';
 
 // A freeze protects the account streak (days in a row with a check-in): it covers a day with no
 // check-in at all, and so every habit's own streak on that day too.
@@ -30,6 +31,8 @@ export function StreakFreezeSheet({ visible, onClose }: { visible: boolean; onCl
     const result = await buyStreakFreeze();
     setBusy(false);
     setNote({ ok: result.ok, text: result.ok ? `Streak freeze added! ${result.message}` : result.message });
+    // The Tokens screen shows the new balance and freezes held right away, not at the next live pulse.
+    if (result.ok) reloadWallet();
   };
 
   return (

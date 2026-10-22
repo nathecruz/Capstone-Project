@@ -684,8 +684,11 @@ export async function saveWebPushSubscription(
 
 type BuddyResponse = import('@/utils/buddy').Buddy;
 type WalletResponse = { tokens?: number; points?: number; tokenHistory?: object[] };
-/** A refusal keeps the server's code (DAY_CLOSED, BONUS_NOT_EARNED, DROP_LOCKED, ...) when it sent one. */
-type Result<T> = ({ ok: true } & T) | { ok: false; message: string; code?: string };
+/**
+ * A refusal keeps the server's code (DAY_CLOSED, BONUS_NOT_EARNED, DROP_LOCKED, ...) when it sent
+ * one; a DAY_CLOSED one also the day the account is on (its today and time zone).
+ */
+type Result<T> = ({ ok: true } & T) | { ok: false; message: string; code?: string; today?: string; timeZone?: string };
 
 const textField = (payload: Record<string, unknown>, key: string) => (typeof payload[key] === 'string' ? payload[key] as string : undefined);
 
@@ -696,8 +699,10 @@ async function authedRequest<T>(path: string, init: RequestInit = {}): Promise<R
     const body = await apiRequest<T>(path, { ...init, headers: { ...(init.headers ?? {}), Authorization: `Bearer ${token}` } });
     return { ok: true, ...body };
   } catch (error) {
-    if (error instanceof ApiRequestError) return { ok: false, message: error.message, code: textField(error.payload, 'code') };
-    return { ok: false, message: 'Could not reach HabitAI. Check your connection.' };
+    if (!(error instanceof ApiRequestError)) return { ok: false, message: 'Could not reach HabitAI. Check your connection.' };
+    const code = textField(error.payload, 'code');
+    const day = code === 'DAY_CLOSED' ? { today: textField(error.payload, 'today'), timeZone: textField(error.payload, 'timeZone') } : {};
+    return { ok: false, message: error.message, code, ...day };
   }
 }
 
@@ -821,6 +826,54 @@ export const getWeeklyBonus = (date: string, timeZone = deviceTimeZone()) => aut
  * alreadyClaimed with the amount paid), or refuses with BONUS_NOT_EARNED.
  */
 export const claimWeeklyBonus = (date: string, timeZone = deviceTimeZone()) => authedRequest<WeeklyBonusClaim>('/api/weekly-bonus/claim', { method: 'POST', body: JSON.stringify({ date, timeZone }) });
+
+/** One way to earn tokens; its numbers come from the server's own constants (amount: '+5', '+2 to +15', ...). */
+export type WalletEarnRow = { id: string; title: string; amount: string; detail: string };
+export type WalletSpendStatus = 'owned' | 'ready' | 'short' | 'locked' | 'full';
+/**
+ * One thing to buy. `from`: the cost is the cheapest of several. `short`: tokens missing; held and
+ * max: streak freezes. target: 'reward:<id>' | 'freeze' | 'buddy' | 'gift' | 'coach'.
+ */
+export type WalletSpendRow = { id: string; title: string; detail: string; cost: number; from: boolean; status: WalletSpendStatus; short?: number; held?: number; max?: number; target: string };
+type Progress = { done: number; total: number; earned: number; available: number };
+/**
+ * The Tokens screen as the server counts it, for the account's today: every way to earn with
+ * today's progress, everything to buy, this week's flow and the next goal. `balance` is the raw
+ * ledger sum (below 0 after an undone check-in whose tokens were spent); `tokens` never is.
+ */
+export type WalletSummary = {
+  balance: number;
+  tokens: number;
+  /** How many things to buy are 'ready'. */
+  affordable: number;
+  today: {
+    date: string;
+    checkIns: { paid: number; limit: number; perCheckIn: number; earned: number };
+    dailyClaim: { claimed: boolean; day: number; amount: number; tomorrowAmount: number };
+    challenges: Progress;
+    mysteryBox: { status: 'locked' | 'ready' | 'opened'; amount: number | null; min: number; max: number };
+    canStillEarn: number;
+  };
+  week: { start: string; end: string; resetsAt: number; earned: number; spent: number; bySource: Record<string, number>; bySink: Record<string, number>; quests: Progress; bonus: WeeklyBonus };
+  streak: { days: number; next: { days: number; bonus: number; daysLeft: number } | null };
+  earn: WalletEarnRow[];
+  spend: WalletSpendRow[];
+  pace: { perDay: number };
+  nextGoal: { id: string; title: string; cost: number; short: number; days: number | null } | null;
+};
+/** The wallet for `date` (the device's today); a refused day (DAY_CLOSED) says which day the account is on. */
+export const getWalletSummary = (date: string, timeZone = deviceTimeZone()) => authedRequest<WalletSummary>(`/api/wallet/summary?${todayQuery(date, timeZone)}`);
+
+export type WalletHistoryFilter = 'all' | 'earned' | 'spent';
+/** A ledger row, newest first; its id is shown without the account prefix. createdAt is in ms. */
+export type WalletHistoryItem = { id: string; amount: number; kind: import('@/hooks/app-state/types').TokenKind; label: string; date: string; createdAt: number };
+/** totals cover the whole ledger, not just this page. */
+export type WalletHistory = { items: WalletHistoryItem[]; nextCursor: string | null; totals: { earned: number; spent: number; balance: number } };
+/** One page of the token history (limit 1-50, 30 by default); `before` is the nextCursor of the page before. */
+export function getWalletHistory({ filter = 'all', before, limit }: { filter?: WalletHistoryFilter; before?: string | null; limit?: number } = {}) {
+  const query = [`filter=${filter}`, limit ? `limit=${limit}` : '', before ? `before=${encodeURIComponent(before)}` : ''].filter(Boolean).join('&');
+  return authedRequest<WalletHistory>(`/api/wallet/history?${query}`);
+}
 
 /** Asks the server to send a test reminder to this device (or all of the account's devices) now. */
 export async function sendTestWebPush(endpoint?: string): Promise<{ ok: boolean; message: string }> {

@@ -385,3 +385,51 @@ test('a leaderboard period resets at midnight after its last day, in the zone', 
   assert.equal(periodResetsAt({ start: '2027-03-01', end: '2027-03-13' }, 'America/New_York'), Date.parse('2027-03-14T00:00:00-05:00'));
   assert.equal(periodResetsAt({ start: '2027-03-01', end: '2027-03-14' }, 'America/New_York'), Date.parse('2027-03-15T00:00:00-04:00'));
 });
+
+test('every ledger row has a kind: by its id, and by its label for spends from before ids named the kind', async () => {
+  const { SPEND_KINDS, tokenKind } = await import('../services/wallet.js');
+  const user = '3f0c2a9e-0000-4000-8000-000000000001';
+  const byId = {
+    [`${user}:token:check-in:h1:2026-10-26`]: 'check-in',
+    [`${user}:token:undo:h1:2026-10-01:1790000000000`]: 'undo',
+    [`${user}:token:daily-claim:2026-10-26`]: 'daily-claim',
+    [`${user}:token:challenge:2026-10-26`]: 'challenge',
+    [`${user}:token:daily:2026-10-26:early-bird`]: 'challenge',
+    [`${user}:token:quest:2026-10-26:check-ins`]: 'quest',
+    [`${user}:token:mystery:2026-10-26`]: 'mystery',
+    [`${user}:token:streak:account:2026-10-20:7`]: 'streak',
+    [`${user}:token:streak:h1:14`]: 'streak',
+    [`${user}:token:week:2026-10-19`]: 'weekly-bonus',
+    [`${user}:token:refund:9a1b`]: 'refund',
+    [`${user}:token:refund:coach:9a1b`]: 'refund',
+  };
+  // The id wins over the label.
+  for (const [id, kind] of Object.entries(byId)) assert.equal(tokenKind(id, 'Redeemed Premium Themes'), kind, id);
+  assert.equal(tokenKind(`${user}:token:test-grant`, 'Test grant'), 'other');
+  for (const kind of SPEND_KINDS) assert.equal(tokenKind(`${user}:token:spend:${kind}:6e2d`, 'Something else'), kind);
+  assert.deepEqual(SPEND_KINDS, ['reward', 'buddy-item', 'buddy-treat', 'gift', 'freeze', 'coach']);
+  // Older spends are plain UUIDs: their label tells the kind ('Buddy treat:' before 'Buddy:').
+  const legacy = { 'Redeemed Custom Title': 'reward', 'Buddy treat: Apple': 'buddy-treat', 'Buddy: Cap': 'buddy-item', 'Streak freeze': 'freeze', 'AI Coach': 'coach', 'Free tokens': 'other', 'AI Coach answer': 'other', 'Buddy treats': 'other' };
+  for (const [label, kind] of Object.entries(legacy)) assert.equal(tokenKind('9b3c7a52-1111-4222-8333-444455556666', label), kind, label);
+  assert.equal(tokenKind(`${user}:token:daily-claim:2026-10-26`, 'Daily claim: day 1'), 'daily-claim', "'daily-claim' is not a daily challenge");
+});
+
+test('a spend is a spend:<kind>:<uuid> row, written only when the balance covers it', async () => {
+  const { spendTokens } = await import('../services/wallet.js');
+  const writes = [];
+  const db = (balance) => ({
+    query: async (text, values) => {
+      if (text.startsWith('SELECT')) return { rows: [{ balance }] };
+      writes.push(values);
+      return { rowCount: 1, rows: [] };
+    },
+  });
+  const spent = await spendTokens(db(40), 'user-1', 30, 'Streak freeze', { kind: 'freeze', now: 1_790_000_000_000 });
+  assert.equal(spent.ok, true);
+  assert.equal(spent.balance, 10);
+  assert.match(spent.id, /^user-1:token:spend:freeze:[0-9a-f-]{36}$/);
+  assert.deepEqual(writes, [[spent.id, 'user-1', -30, 'Streak freeze', new Date(1_790_000_000_000).toISOString(), 1_790_000_000_000]]);
+  assert.deepEqual(await spendTokens(db(20), 'user-1', 30, 'Streak freeze', { kind: 'freeze' }), { ok: false, balance: 20 });
+  assert.equal(writes.length, 1, 'nothing is written without the tokens');
+  await assert.rejects(spendTokens(db(40), 'user-1', 10, 'AI Coach answer'), /spend kind/, 'every spend names its kind');
+});

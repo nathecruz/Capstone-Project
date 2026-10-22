@@ -22,6 +22,7 @@ import { loadRewards } from './use-rewards';
 import { emitLive, setUnreadCount } from '@/utils/live-events';
 import { getKnownChallenges, loadDailyChallenges, publishDailyChallenges } from './use-daily-challenges';
 import { reloadWeeklyBonus } from './use-weekly-bonus';
+import { reloadWallet } from './use-wallet';
 import { isAppTheme } from './use-themed-styles';
 import { APP_STATE_KEY_PREFIX, clearSyncMeta, loadSyncMeta, persistSyncBase, persistUnsaved, TOKEN_CAP_SHOWN_KEY_PREFIX } from './app-state/sync-storage';
 import { useHabitReminders } from './app-state/use-habit-reminders';
@@ -570,6 +571,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         }
         if (changed('state') || changed('buddy')) void reloadBuddy();
         if (changed('rewards')) void loadRewards();
+        // The Tokens screen counts all of these (earning, owned rewards, Habi's shop and drop, the
+        // daily claim, freezes held).
+        if (['state', 'wallet', 'rewards', 'buddy', 'claims', 'freezes'].some(changed)) reloadWallet();
         if (changed('claims')) emitLive('claims');
         if (changed('notifications')) emitLive('notifications');
         if (changed('freezes')) {

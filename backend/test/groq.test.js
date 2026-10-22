@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test } from 'node:test';
+import { systemPromptFor } from '../services/ai-prompts.js';
+import { BUDDY_ITEMS, BUDDY_TREATS } from '../services/buddy.js';
 import { generateAiText, getAiModel, isAiConfigured, verifyAi } from '../services/groq.js';
+import { REAL_REWARDS, RETIRED_REWARDS } from '../services/rewards.js';
+import { STREAK_FREEZE_COST } from '../services/streak-freeze.js';
+import { COACH_TOKEN_COST } from '../services/wallet.js';
 
 const saved = {};
 let keyNumber = 0;
@@ -155,4 +160,22 @@ test('the start-up check reports the model in use, a fallback, a bad key and a k
     '[ai] GROQ_API_KEY is not set: the AI Coach, assistants and goal planner are disabled.',
   ]);
   assert.ok(lines.every((line) => keys.every((key) => !line.includes(key))), 'keys are never logged');
+});
+
+test('the help assistant names only the rewards on sale, at their real prices', () => {
+  const guide = systemPromptFor('support');
+  // The retired rewards (the daily mystery box is still a way to earn, so only its old capitalised name).
+  const retired = { 'plant-buddy': 'Plant Buddy', 'kindness-boost': 'Kindness Boost', 'habit-swap': 'Habit Swap', 'mystery-box': 'Mystery Box', 'xp-booster': 'XP Booster', 'grace-day': 'Grace Day' };
+  assert.deepEqual(Object.keys(retired), RETIRED_REWARDS);
+  for (const name of Object.values(retired)) assert.ok(!guide.includes(name), name);
+  for (const oldPrice of ['Premium Theme 320', 'Custom Title 750', '620']) assert.ok(!guide.includes(oldPrice), oldPrice);
+  for (const reward of Object.values(REAL_REWARDS)) {
+    const prices = [...guide.matchAll(new RegExp(`${reward.name} (\\d+)`, 'g'))].map((match) => Number(match[1]));
+    assert.deepEqual(prices, [reward.cost], reward.name);
+  }
+  const range = (items) => `${Math.min(...items.map((item) => item.cost))} to ${Math.max(...items.map((item) => item.cost))}`;
+  for (const text of [`Habi shop items ${range(BUDDY_ITEMS)}`, `treats for classmates ${range(BUDDY_TREATS)}`, `Streak Freeze ${STREAK_FREEZE_COST}`, `costs ${COACH_TOKEN_COST} tokens`, 'The Tokens screen (tap Tokens on Home)']) {
+    assert.ok(guide.includes(text), text);
+  }
+  assert.ok(!/every check-in gives 20 points and 5 tokens/.test(guide), 'tokens are paid for 6 check-ins a day');
 });

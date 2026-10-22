@@ -147,6 +147,14 @@ export type TokenTransaction = {
   date: string;
 };
 
+/**
+ * What a token ledger row was for, as the server derives it from the row's id (or, for spends made
+ * before spends had typed ids, from the label). The Tokens screen picks its history icon from it.
+ */
+export type TokenKind =
+  | 'check-in' | 'undo' | 'daily-claim' | 'challenge' | 'quest' | 'mystery' | 'streak' | 'weekly-bonus' | 'refund'
+  | 'reward' | 'buddy-item' | 'buddy-treat' | 'gift' | 'freeze' | 'coach' | 'other';
+
 export const initialPreferences: Preferences = {
   notificationsEnabled: true,
   showOnLeaderboard: true,

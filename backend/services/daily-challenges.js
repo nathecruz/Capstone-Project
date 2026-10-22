@@ -9,6 +9,10 @@ import { DAILY_CHALLENGE_BONUS } from './wallet.js';
 
 /** The pool the two daily extras come from, in rotation order. */
 export const ROTATING_CHALLENGES = ['early-bird', 'comeback', 'streak-keeper', 'two-by-noon', 'perfect-day'];
+/** Challenges a day: "Finish N habits" and two from the pool. */
+export const DAILY_CHALLENGE_COUNT = 3;
+/** Tokens for each challenge. */
+export const CHALLENGE_REWARDS = { finish: DAILY_CHALLENGE_BONUS, 'early-bird': 5, 'two-by-noon': 6, comeback: 8, 'streak-keeper': 8, 'perfect-day': 15 };
 
 function shiftDay(dateKey, days) {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -39,35 +43,35 @@ export function dailyChallenges({ habits, doneToday, doneYesterday, streaksBefor
   const keepers = due.filter((habit) => (streaksBefore.get(habit.id) ?? 0) >= 2);
 
   const pool = {
-    'early-bird': () => ({ title: 'Check in before 10 AM', icon: 'sunny', target: 1, progress: minutes.some((minute) => minute < 600) ? 1 : 0, reward: 5 }),
-    'two-by-noon': () => (due.length >= 2 ? { title: 'Check in twice before noon', icon: 'time', target: 2, progress: minutes.filter((minute) => minute < 720).length, reward: 6 } : null),
+    'early-bird': () => ({ title: 'Check in before 10 AM', icon: 'sunny', target: 1, progress: minutes.some((minute) => minute < 600) ? 1 : 0, reward: CHALLENGE_REWARDS['early-bird'] }),
+    'two-by-noon': () => (due.length >= 2 ? { title: 'Check in twice before noon', icon: 'time', target: 2, progress: minutes.filter((minute) => minute < 720).length, reward: CHALLENGE_REWARDS['two-by-noon'] } : null),
     comeback: () => (missed.length ? {
       title: missed.length === 1 ? `Bounce back: do ${missed[0].label} today` : 'Bounce back: do a habit you missed yesterday',
       icon: 'refresh',
       target: 1,
       progress: missed.some((habit) => doneToday.has(habit.id)) ? 1 : 0,
-      reward: 8,
+      reward: CHALLENGE_REWARDS.comeback,
     } : null),
     'streak-keeper': () => (keepers.length ? {
       title: keepers.length === 1 ? `Keep your ${streaksBefore.get(keepers[0].id)}-day ${keepers[0].label} streak` : `Keep all ${keepers.length} streaks alive`,
       icon: 'flame',
       target: keepers.length,
       progress: keepers.filter((habit) => doneToday.has(habit.id)).length,
-      reward: 8,
+      reward: CHALLENGE_REWARDS['streak-keeper'],
     } : null),
     // With 3 habits or fewer, finishing 3 already is a perfect day.
-    'perfect-day': () => (due.length > 3 ? { title: `Have a perfect day: all ${due.length} habits`, icon: 'sparkles', target: due.length, progress: dueDone, reward: 15 } : null),
+    'perfect-day': () => (due.length > 3 ? { title: `Have a perfect day: all ${due.length} habits`, icon: 'sparkles', target: due.length, progress: dueDone, reward: CHALLENGE_REWARDS['perfect-day'] } : null),
   };
 
   const start = dayNumber(today) % ROTATING_CHALLENGES.length;
   const extras = [];
-  for (let offset = 0; offset < ROTATING_CHALLENGES.length && extras.length < 2; offset += 1) {
+  for (let offset = 0; offset < ROTATING_CHALLENGES.length && extras.length < DAILY_CHALLENGE_COUNT - 1; offset += 1) {
     const id = ROTATING_CHALLENGES[(start + offset) % ROTATING_CHALLENGES.length];
     const challenge = pool[id]();
     if (challenge) extras.push({ id, ...challenge });
   }
   return [
-    { id: 'finish', title: `Finish ${plural(finishTarget, 'habit')} today`, icon: 'trophy', target: finishTarget, progress: dueDone, reward: DAILY_CHALLENGE_BONUS },
+    { id: 'finish', title: `Finish ${plural(finishTarget, 'habit')} today`, icon: 'trophy', target: finishTarget, progress: dueDone, reward: CHALLENGE_REWARDS.finish },
     ...extras,
   ].map((challenge) => ({ ...challenge, date: today, progress: Math.min(challenge.progress, challenge.target), complete: challenge.progress >= challenge.target }));
 }

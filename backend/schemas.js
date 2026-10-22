@@ -40,6 +40,9 @@ export const dayInputSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d
 // fixed cheers (GIFT_MESSAGES, no free text) and the app's today, for the daily limit.
 export const buddyGiftSchema = dayInputSchema.extend({ to: z.string().regex(/^[0-9a-f]{12}$/), treatId: z.string().trim().min(1).max(40), messageId: z.number().int().min(0).max(4) }).strict();
 export const rewardFrameSchema = z.object({ frame: z.string().max(20) }).strict();
+// A page of the token history (GET /api/wallet/history, from the query string): `before` is the
+// nextCursor of the page before (services/wallet.js historyCursor).
+export const walletHistorySchema = z.object({ filter: z.enum(['all', 'earned', 'spent']).default('all'), limit: z.coerce.number().int().min(1).max(50).default(30), before: z.string().min(1).max(500).optional() }).strict();
 export const mysteryBoxSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: timeZoneSchema.optional() }).strict();
 export const streakFreezeSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: timeZoneSchema.optional() }).strict();
 export const webPushDoneSchema = z.object({ token: z.string().min(20).max(1000) }).strict();
