@@ -68,7 +68,7 @@ function bonusStatus({ lastWeek, thisWeek }: WeeklyBonus) {
   if (lastWeek.claimable && lastWeek.tier) return `Last week ${lastWeek.percent}%: +${lastWeek.tier.amount} ready`;
   const next = thisWeek.next;
   if (!next?.reachable) return `This week ${thisWeek.percentSoFar}%`;
-  return `This week ${thisWeek.percentSoFar}% · ${plural(next.checkInsNeeded, 'more check-in', 'more check-ins')} reach ${next.percent}% (+${next.amount})`;
+  return `This week ${thisWeek.percentSoFar}% · ${next.checkInsNeeded} more check-in${next.checkInsNeeded === 1 ? ' reaches' : 's reach'} ${next.percent}% (+${next.amount})`;
 }
 
 /** Today's progress of one way to earn ('' for one this app does not know yet). */

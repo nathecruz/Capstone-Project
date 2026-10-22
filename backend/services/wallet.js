@@ -230,23 +230,24 @@ export function readHistoryCursor(cursor) {
 
 /**
  * One page of the ledger, newest first (created_at, then id, both descending, so rows written in
- * the same millisecond keep their order across pages): `filter` 'earned' keeps the positive rows,
- * 'spent' the negative ones. `before` is the row (readHistoryCursor) the page starts after. Totals
- * cover the whole ledger, whatever the filter: earned (the positive rows), spent (the negative
- * ones, as a positive number) and the balance (their sum, below zero after an undo that followed a
- * spend). Returns { items: [{ id, amount, kind, label, date, createdAt }], nextCursor, totals }.
+ * the same millisecond keep their order across pages; ids compare byte by byte, as the app compares
+ * them, whatever the database's collation): `filter` 'earned' keeps the positive rows, 'spent' the
+ * negative ones. `before` is the row (readHistoryCursor) the page starts after. Totals cover the
+ * whole ledger, whatever the filter: earned (the positive rows), spent (the negative ones, as a
+ * positive number) and the balance (their sum, below zero after an undo that followed a spend).
+ * Returns { items: [{ id, amount, kind, label, date, createdAt }], nextCursor, totals }.
  */
 export async function getTokenHistory(db, userId, { filter = 'all', limit = 30, before = null } = {}) {
   const values = [userId];
   // The plain `created_at <=` bound keeps the page a range scan of token_transactions_user_date_idx.
-  const older = before ? ' AND created_at <= $2 AND (created_at < $2 OR id < $3)' : '';
+  const older = before ? ' AND created_at <= $2 AND (created_at < $2 OR id COLLATE "C" < $3)' : '';
   if (before) values.push(before.createdAt, before.id);
   values.push(limit + 1);
   const [page, totals] = await runAll(db, [
     () => db.query(
       `SELECT id, amount, label, transaction_date AS date, created_at AS "createdAt" FROM token_transactions
         WHERE user_id=$1${FILTER_SQL[filter] ?? ''}${older}
-        ORDER BY created_at DESC, id DESC LIMIT $${values.length}`,
+        ORDER BY created_at DESC, id COLLATE "C" DESC LIMIT $${values.length}`,
       values,
     ),
     () => db.query(

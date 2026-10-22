@@ -5,10 +5,11 @@
 
 export const RETIRED_REWARDS = ['plant-buddy', 'kindness-boost', 'habit-swap', 'mystery-box', 'xp-booster', 'grace-day'];
 
+// In the order the AI help assistant names them (services/token-guide.js economyGuide).
 export const REAL_REWARDS = {
   'premium-theme': { name: 'Premium Themes', cost: 200, description: 'Seven app colour themes: Ocean, Sunset, Forest, Midnight, Rose, Amber and Berry' },
-  'custom-title': { name: 'Custom Title', cost: 250, description: 'Your own title under your name on your profile and the leaderboard' },
   'profile-frames': { name: 'Profile Frames', cost: 180, description: 'Eight frames for your photo: Gold, Neon, Leaf, Fire, Aqua, Galaxy, Blossom and Royal' },
+  'custom-title': { name: 'Custom Title', cost: 250, description: 'Your own title under your name on your profile and the leaderboard' },
   'buddy-showcase': { name: 'Buddy Showcase', cost: 300, description: 'Show your Habi, with what it wears, next to your name on the leaderboard' },
 };
 

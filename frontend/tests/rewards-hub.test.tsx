@@ -1,6 +1,7 @@
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fireEvent, render, waitFor, within } from '@testing-library/react-native';
+import { router } from 'expo-router';
 import { WeeklyRecapCard } from '@/components/engagement-cards';
 import { RewardsHub } from '@/components/rewards-hub';
 import { getWeeklyBonus } from '@/authentication/authService';
@@ -107,6 +108,12 @@ describe('RewardsHub', () => {
     expect(await screen.findByText('This week so far: 66% · 14 more check-ins reach 75% (+20)')).toBeTruthy();
     expect(screen.getByText("Unlocks this week's drop: ☔ Umbrella (0/2)")).toBeTruthy();
     expect(screen.queryByText(/bonus is waiting/)).toBeNull();
+  });
+
+  it('leads to every way to earn on the Tokens screen', async () => {
+    const screen = render(<RewardsHub habits={[]} now={monday} />);
+    fireEvent.press(await screen.findByText('See all ways'));
+    expect(router.push).toHaveBeenCalledWith('/wallet');
   });
 
   it('leaves out a tier this week can no longer reach', async () => {

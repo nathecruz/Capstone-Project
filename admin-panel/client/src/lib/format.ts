@@ -1,3 +1,5 @@
+import type { TokenKind } from './types';
+
 const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
 const whole = new Intl.NumberFormat('en-US');
 
@@ -70,4 +72,28 @@ export function change(current: number | null | undefined, previous: number | nu
 export function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase() || '?';
+}
+
+const TOKEN_KIND_LABELS: Record<TokenKind, string> = {
+  'check-in': 'Check-ins',
+  'daily-claim': 'Daily claim',
+  challenge: 'Daily challenges',
+  quest: 'Weekly quests',
+  mystery: 'Mystery box',
+  streak: 'Streak milestones',
+  'weekly-bonus': 'Weekly bonus',
+  refund: 'Refunds',
+  reward: 'Rewards',
+  'buddy-item': 'Habi items',
+  'buddy-treat': 'Habi treats',
+  gift: 'Treat gifts',
+  freeze: 'Streak freezes',
+  coach: 'AI Coach',
+  undo: 'Undone check-ins',
+  other: 'Other',
+};
+
+/** A token ledger kind for people ('weekly-bonus' is "Weekly bonus"); unknown kinds as they are. */
+export function formatTokenKind(kind: string) {
+  return TOKEN_KIND_LABELS[kind as TokenKind] ?? kind;
 }

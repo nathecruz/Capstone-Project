@@ -178,4 +178,6 @@ test('the AI help assistant gets the same token facts', () => {
   for (const text of [`gives ${TOKENS_PER_CHECK_IN} tokens (up to ${PAID_CHECK_INS_PER_DAY} paid`, `Streak Freeze ${STREAK_FREEZE_COST} (hold up to ${STREAK_FREEZE_MAX})`, `AI Coach answers ${COACH_TOKEN_COST} each`, `the weekly drop ${DROP_COST}`, 'Habi shop items 40 to 500', 'treats for classmates 15 to 50', 'the mystery box (3 to 20', 'the Monday consistency bonus (10, 20 or 30)', 'streak milestones (15 to 500)']) {
     assert.ok(guide.includes(text), text);
   }
+  // With today's constants, exactly the line of the plan.
+  assert.equal(guide, "- Tokens: each check-in gives 5 tokens (up to 6 paid check-ins a day); also the daily reward (2 to 15), daily challenges (5 to 15), the mystery box (3 to 20, after the first check-in), weekly quests (15 to 20), the Monday consistency bonus (10, 20 or 30) and streak milestones (15 to 500). Spend them on Premium Themes 200, Profile Frames 180, Custom Title 250, Buddy Showcase 300, Habi shop items 40 to 500 and the weekly drop 150, treats for classmates 15 to 50, Streak Freeze 30 (hold up to 2) and AI Coach answers 10 each. The Tokens screen (tap Tokens on Home) lists all of them.");
 });

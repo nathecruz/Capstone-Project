@@ -42,6 +42,17 @@ export function query(text, values = []) {
   return getPool().query(text, values);
 }
 
+/**
+ * Runs a query on a table that a newer app backend adds (backend/db/neon-schema.js owns the schema;
+ * this panel never migrates it). Until that table exists the query is not run and the result has
+ * the `fallback` rows instead (zeros for counts), so the panel works before the backend migration.
+ */
+export async function queryIfTable(table, text, values, fallback, runner = { query }) {
+  const found = await runner.query('SELECT to_regclass($1) IS NOT NULL AS present', [table]);
+  if (!found.rows[0]?.present) return { rows: fallback, rowCount: fallback.length };
+  return runner.query(text, values);
+}
+
 export async function withTransaction(callback) {
   const client = await getPool().connect();
   try {

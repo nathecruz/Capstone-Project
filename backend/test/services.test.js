@@ -433,3 +433,13 @@ test('a spend is a spend:<kind>:<uuid> row, written only when the balance covers
   assert.equal(writes.length, 1, 'nothing is written without the tokens');
   await assert.rejects(spendTokens(db(40), 'user-1', 10, 'AI Coach answer'), /spend kind/, 'every spend names its kind');
 });
+
+test('a history cursor names the row a page ended at, and anything else is refused', async () => {
+  const { historyCursor, readHistoryCursor } = await import('../services/wallet.js');
+  const row = { createdAt: '1790000000123', id: 'u1:token:spend:gift:7d3f' };
+  assert.deepEqual(readHistoryCursor(historyCursor(row)), { createdAt: 1_790_000_000_123, id: 'u1:token:spend:gift:7d3f' });
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  for (const cursor of ['not-a-cursor', '', encode([1.5, 'x']), encode(['1790000000123', 'x']), encode([1_790_000_000_123, '']), encode([1_790_000_000_123, 7]), encode({ createdAt: 1, id: 'x' })]) {
+    assert.equal(readHistoryCursor(cursor), null, cursor);
+  }
+});

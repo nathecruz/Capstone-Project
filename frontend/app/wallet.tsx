@@ -3,15 +3,15 @@
 // (GET /api/wallet/summary and /api/wallet/history), so this screen cannot drift from what pays.
 // /wallet?section=history opens on the history. Tokens are the students' own: faculty are sent back.
 import { Ionicons } from '@expo/vector-icons';
-import { router, useLocalSearchParams, type Href } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams, type Href } from 'expo-router';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { WalletHistoryFilter, WalletHistoryItem, WalletSpendRow, WalletSpendStatus } from '@/authentication/authService';
 import { StreakFreezeSheet } from '@/components/streak-freeze-sheet';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
-import { loadMoreWalletHistory, loadWallet, loadWalletHistory, useWallet, useWalletHistory } from '@/hooks/use-wallet';
+import { loadMoreWalletHistory, loadWallet, loadWalletHistory, reloadWallet, useWallet, useWalletHistory } from '@/hooks/use-wallet';
 import { getLocalDateKey } from '@/utils/habit-visibility';
 import { EARN_HREFS, EARN_ICONS, earnStatus, goalLine, historyGroups, historyTime, KIND_ICONS, SPEND_ICONS, spendStatus, spendTarget } from '@/utils/wallet';
 
@@ -44,12 +44,20 @@ export default function WalletScreen() {
   const [historyY, setHistoryY] = useState<number | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const scrolledRef = useRef(false);
+  const focusedRef = useRef(false);
 
   useEffect(() => {
     if (!isFaculty) return;
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)');
   }, [isFaculty]);
+
+  // Back from a screen or sheet where tokens were spent or earned: the numbers load again at once,
+  // not at the next live pulse (the first focus is the opening, which loads them already).
+  useFocusEffect(useCallback(() => {
+    if (focusedRef.current && !isFaculty) reloadWallet();
+    focusedRef.current = true;
+  }, [isFaculty]));
 
   useEffect(() => {
     if (!wantsHistory || scrolledRef.current || historyY === null) return;

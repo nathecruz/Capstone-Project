@@ -30,6 +30,9 @@ let loadAgain = false;
 let latestLoad = 0;
 let latestHistoryLoad = 0;
 let account = 0;
+// The screens showing the history: only these are kept current by the live pulse (the next one to
+// open loads its first page anyway).
+let historyViewers = 0;
 const listeners = new Set<() => void>();
 
 function update(changes: Partial<State>) {
@@ -119,13 +122,13 @@ export async function loadMoreWalletHistory() {
   updateHistory({ items: [...state.history.items, ...result.items.filter((item) => !known.has(item.id))], nextCursor: result.nextCursor, totals: result.totals, loadingMore: false });
 }
 
-/** After the live pulse saw a change: loads again what a screen loaded (the summary and the history on show). */
+/** After the live pulse saw a change: loads again what a screen loaded (the summary, and the history while one shows it). */
 export function reloadWallet() {
   if (state.date) {
     if (loadingDate === state.date) loadAgain = true;
     else void fetchSummary(state.date);
   }
-  if (state.history.status !== 'idle') void fetchFirstPage(state.history.filter, true);
+  if (historyViewers > 0 && state.history.status !== 'idle') void fetchFirstPage(state.history.filter, true);
 }
 
 function subscribe(listener: () => void) {
@@ -155,7 +158,12 @@ export function useWallet(date: string, load = true) {
 export function useWalletHistory(load = true) {
   const snapshot = useSyncExternalStore(subscribe, () => state, () => state);
   useEffect(() => {
-    if (load) void fetchFirstPage('all', true);
+    if (!load) return;
+    historyViewers += 1;
+    void fetchFirstPage('all', true);
+    return () => {
+      historyViewers -= 1;
+    };
   }, [load]);
   return snapshot.history;
 }

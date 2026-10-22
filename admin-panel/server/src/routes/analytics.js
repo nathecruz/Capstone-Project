@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { config } from '../config.js';
-import { query } from '../db.js';
+import { query, queryIfTable } from '../db.js';
 import { audit } from '../lib/audit.js';
 import { activeUntilOf, hasHabitEnded } from '../lib/habit-week.js';
 import { toCsv, validate } from '../lib/http.js';
@@ -15,6 +15,7 @@ import {
   expectedPerWeek,
   habitFirstDay,
   habitFrequency,
+  mondayOf,
   ratio,
   reminderPeriod,
   streakBucket,
@@ -23,6 +24,7 @@ import {
 } from '../lib/metrics.js';
 import { getSettings } from '../lib/settings.js';
 import { loadLiveStreaks } from '../lib/streaks.js';
+import { byKindOrder, flowTotals, SHOWCASE_REWARD_ID, tokenKindSql } from '../lib/token-kinds.js';
 import { requirePermission } from '../middleware/auth.js';
 import { buildCategoryRows, loadCategoryOrder } from './overview.js';
 
@@ -30,14 +32,14 @@ const router = Router();
 const RANGES = [30, 90, 180, 365];
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const COHORT_WEEKS = 8;
+const ECONOMY_DAYS = 28;
+const ECONOMY_WEEKS = 4;
+// The weekly bonus tiers' amounts (backend/services/weekly-bonus.js WEEKLY_BONUS_TIERS).
+const BONUS_AMOUNTS = { gold: 30, silver: 20, bronze: 10 };
 
 const dayNumber = (key) => Date.UTC(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, Number(key.slice(8, 10))) / 86_400_000;
-
-function mondayOf(key) {
-  const date = new Date(`${key}T00:00:00Z`);
-  const offset = (date.getUTCDay() + 6) % 7;
-  return addDays(key, -offset);
-}
+// SQL: the epoch milliseconds (created_at, bought_at) at which a day starts in a time zone.
+const dayStartMs = (dayParam, tzParam) => `extract(epoch FROM (${dayParam}::date::timestamp AT TIME ZONE ${tzParam})) * 1000`;
 
 /**
  * Pre-computes each habit's daily expectation and the days it can be due (from its first day to
@@ -80,6 +82,123 @@ function countBy(items, keyOf, order) {
   return [...counts.entries()].map(([label, count]) => ({ label, count }));
 }
 
+/**
+ * The token economy for faculty and administrators, students only and aggregates only: the last 28
+ * days' flow by kind (issued without refunds, spent without undone check-ins), the balances of the
+ * students active in those days (over 1,000 banked hints that spending options are too weak), the
+ * weekly bonus claims and Weekly Drops of the last 4 weeks, the other sinks, the student-days over
+ * the check-in cap, and the rewards on sale. Tables a newer app backend adds are only read once they
+ * exist (queryIfTable).
+ */
+export async function computeEconomy(tz, today) {
+  const start = addDays(today, -(ECONOMY_DAYS - 1));
+  const thisWeek = mondayOf(today);
+  // A bonus is claimed for the week before, so its weeks end last week; this week's drop is on sale now.
+  const bonusWeeks = Array.from({ length: ECONOMY_WEEKS }, (_, index) => addDays(thisWeek, -7 * (ECONOMY_WEEKS - index)));
+  const dropWeeks = Array.from({ length: ECONOMY_WEEKS }, (_, index) => addDays(thisWeek, -7 * (ECONOMY_WEEKS - 1 - index)));
+  const { paidPerDay, cappedFrom } = config.checkIns;
+  const capStart = cappedFrom > start ? cappedFrom : start;
+
+  const [flow, balances, bonuses, drops, facts, rewards, gifts] = await Promise.all([
+    query(
+      `SELECT ${tokenKindSql('t')} AS kind,
+              COALESCE(sum(t.amount) FILTER (WHERE t.amount > 0), 0)::int AS earned,
+              COALESCE(-sum(t.amount) FILTER (WHERE t.amount < 0), 0)::int AS spent,
+              count(*) FILTER (WHERE t.amount < 0)::int AS spends
+         FROM token_transactions t JOIN users u ON u.id = t.user_id AND u.role = 'user'
+        WHERE t.created_at >= ${dayStartMs('$1', '$2')}
+        GROUP BY 1`,
+      [start, tz],
+    ),
+    query(
+      `WITH events AS (${activityEventsSql('$1', '$2')}),
+            active AS (SELECT DISTINCT e.user_id FROM events e JOIN users u ON u.id = e.user_id AND u.role = 'user' AND u.status = 'active'),
+            balances AS (
+              SELECT GREATEST(COALESCE(sum(t.amount), 0), 0) AS balance
+                FROM active a LEFT JOIN token_transactions t ON t.user_id = a.user_id
+               GROUP BY a.user_id)
+       SELECT count(*)::int AS students,
+              COALESCE(round(percentile_cont(0.5) WITHIN GROUP (ORDER BY balance)), 0)::int AS median,
+              COALESCE(round(percentile_cont(0.9) WITHIN GROUP (ORDER BY balance)), 0)::int AS p90,
+              count(*) FILTER (WHERE balance > 1000)::int AS over1000
+         FROM balances`,
+      [start, tz],
+    ),
+    // The bonus row of a week is `<user id>:token:week:<week start>`.
+    query(
+      `SELECT substring(t.id from position(':token:week:' in t.id) + 12) AS "weekStart", count(*)::int AS claims,
+              count(*) FILTER (WHERE t.amount = $2)::int AS gold,
+              count(*) FILTER (WHERE t.amount = $3)::int AS silver,
+              count(*) FILTER (WHERE t.amount = $4)::int AS bronze
+         FROM token_transactions t JOIN users u ON u.id = t.user_id AND u.role = 'user'
+        WHERE t.id LIKE '%:token:week:%' AND substring(t.id from position(':token:week:' in t.id) + 12) = ANY($1::text[])
+        GROUP BY 1`,
+      [bonusWeeks, BONUS_AMOUNTS.gold, BONUS_AMOUNTS.silver, BONUS_AMOUNTS.bronze],
+    ),
+    query(
+      `SELECT date_trunc('week', to_timestamp(b.bought_at / 1000.0) AT TIME ZONE $2)::date AS "weekStart", count(*)::int AS bought
+         FROM buddy_items b JOIN users u ON u.id = b.user_id AND u.role = 'user'
+        WHERE b.item_id LIKE 'drop-%' AND b.bought_at >= ${dayStartMs('$1', '$2')}
+        GROUP BY 1`,
+      [dropWeeks[0], tz],
+    ),
+    query(
+      `SELECT
+         (SELECT count(DISTINCT rr.user_id)::int FROM reward_redemptions rr JOIN users u ON u.id = rr.user_id AND u.role = 'user'
+           WHERE rr.reward_id = $1) AS "showcaseOwners",
+         (SELECT count(*)::int FROM streak_freeze_days f JOIN users u ON u.id = f.user_id AND u.role = 'user'
+           WHERE f.freeze_date >= $2::date) AS "freezesUsed",
+         (SELECT count(*)::int FROM (
+            SELECT 1 FROM habit_completions hc JOIN users u ON u.id = hc.user_id AND u.role = 'user'
+             WHERE hc.completed_date >= $3::date
+             GROUP BY hc.user_id, hc.completed_date HAVING count(*) > $4) capped) AS "cappedDays",
+         (SELECT count(*)::int FROM rewards WHERE NOT active) AS "retiredRewards",
+         (SELECT COALESCE(sum(t.amount), 0)::int FROM token_transactions t JOIN users u ON u.id = t.user_id AND u.role = 'user'
+           WHERE t.id LIKE '%:token:refund:%' AND t.id NOT LIKE '%:token:refund:coach:%') AS "refundedTokens"`,
+      [SHOWCASE_REWARD_ID, start, capStart, paidPerDay],
+    ),
+    // Rewards on sale only: retired ones are no longer sold and were refunded.
+    query(
+      `SELECT r.name, count(rr.id)::int AS redemptions, r.token_cost AS "tokenCost"
+         FROM rewards r
+         LEFT JOIN reward_redemptions rr ON rr.reward_id = r.id AND EXISTS (SELECT 1 FROM users u WHERE u.id = rr.user_id AND u.role = 'user')
+        WHERE r.active
+        GROUP BY r.id, r.name, r.token_cost ORDER BY r.token_cost`,
+    ),
+    queryIfTable(
+      'buddy_gifts',
+      `SELECT count(*)::int AS n FROM buddy_gifts g JOIN users u ON u.id = g.sender_id AND u.role = 'user'
+        WHERE g.created_at >= ${dayStartMs('$1', '$2')}`,
+      [start, tz],
+      [{ n: 0 }],
+    ),
+  ]);
+
+  const byKind28 = byKindOrder(flow.rows.map(({ kind, earned, spent }) => ({ kind, earned, spent })));
+  const totals = flowTotals(byKind28);
+  const bonusByWeek = new Map(bonuses.rows.map((row) => [row.weekStart, row]));
+  const dropsByWeek = new Map(drops.rows.map((row) => [row.weekStart, row.bought]));
+  const fact = facts.rows[0];
+  return {
+    since: start,
+    checkInCap: { perDay: paidPerDay, from: cappedFrom },
+    issued28: totals.issued,
+    refunds28: totals.refunds,
+    spent28: totals.spent,
+    undone28: totals.undone,
+    byKind28,
+    balances: balances.rows[0],
+    weeklyBonus: bonusWeeks.map((weekStart) => ({ claims: 0, gold: 0, silver: 0, bronze: 0, ...bonusByWeek.get(weekStart), weekStart })),
+    drops: dropWeeks.map((weekStart) => ({ weekStart, bought: dropsByWeek.get(weekStart) ?? 0 })),
+    showcaseOwners: fact.showcaseOwners,
+    gifts28: gifts.rows[0].n,
+    freezes: { bought28: flow.rows.find((row) => row.kind === 'freeze')?.spends ?? 0, used28: fact.freezesUsed },
+    cappedDays28: fact.cappedDays,
+    rewards: rewards.rows,
+    retired: { count: fact.retiredRewards, refundedTokens: fact.refundedTokens },
+  };
+}
+
 export async function computeAnalytics(range) {
   const { anonymityThreshold: k } = await getSettings();
   const tz = config.timeZone;
@@ -89,7 +208,7 @@ export async function computeAnalytics(range) {
   const cohortStart = addDays(mondayOf(today), -7 * (COHORT_WEEKS - 1));
   const eventsSince = cohortStart < start ? cohortStart : start;
 
-  const [students, habitRows, perUser, perWeek, perDow, perCategory, weeklyActive, activeCount, goals, tokens, redemptions, achievements, categories] = await Promise.all([
+  const [students, habitRows, perUser, perWeek, perDow, perCategory, weeklyActive, activeCount, goals, economy, achievements, categories] = await Promise.all([
     query(`SELECT id, gender, region, date_of_birth AS "dateOfBirth", created_at AS "createdAt" FROM users WHERE role = 'user'`),
     query(
       `SELECT h.id, h.user_id AS "userId", h.meta, h.category, h.streak, h.start_date, h.active_until,
@@ -139,17 +258,7 @@ export async function computeAnalytics(range) {
               count(DISTINCT g.user_id)::int AS students
          FROM goals g JOIN users u ON u.id = g.user_id AND u.role = 'user' GROUP BY 1 ORDER BY 2 DESC`,
     ),
-    query(
-      `SELECT COALESCE(sum(amount) FILTER (WHERE amount > 0), 0)::int AS earned,
-              COALESCE(-sum(amount) FILTER (WHERE amount < 0), 0)::int AS spent
-         FROM token_transactions t JOIN users u ON u.id = t.user_id AND u.role = 'user'`,
-    ),
-    query(
-      `SELECT r.name, count(rr.id)::int AS redemptions, r.token_cost AS "tokenCost"
-         FROM rewards r
-         LEFT JOIN reward_redemptions rr ON rr.reward_id = r.id AND EXISTS (SELECT 1 FROM users u WHERE u.id = rr.user_id AND u.role = 'user')
-        GROUP BY r.id, r.name, r.token_cost ORDER BY r.token_cost`,
-    ),
+    computeEconomy(tz, today),
     query(
       `SELECT a.name, count(ua.user_id)::int AS students
          FROM achievements a
@@ -324,12 +433,8 @@ export async function computeAnalytics(range) {
     },
     cohorts,
     goals: goals.rows.filter((row) => row.students >= k).map(({ students: _students, ...row }) => row),
-    gamification: {
-      tokensEarned: tokens.rows[0].earned,
-      tokensSpent: tokens.rows[0].spent,
-      rewards: redemptions.rows,
-      achievements: achievements.rows.map((row) => ({ name: row.name, share: students.rowCount ? row.students / students.rowCount : 0 })),
-    },
+    economy,
+    achievements: achievements.rows.map((row) => ({ name: row.name, share: students.rowCount ? row.students / students.rowCount : 0 })),
   };
 }
 

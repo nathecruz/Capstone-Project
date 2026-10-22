@@ -1641,6 +1641,166 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(await balance(giver.userId), 200, 'the refused gift cost nothing');
   });
 
+  const ledgerOf = async (userId) => (await db.query('SELECT id, amount FROM token_transactions WHERE user_id=$1', [userId])).rows.map((row) => ({ id: row.id, amount: Number(row.amount) }));
+  const sumOf = (rows) => rows.reduce((sum, row) => sum + row.amount, 0);
+
+  await t.test('the Tokens screen is for students, on their today, from the ledger, and it never writes', async () => {
+    const { headers, userId } = await student('Tia', 'Tokens');
+    await db.query("UPDATE users SET time_zone='UTC' WHERE id=$1", [userId]);
+    const summaryFor = (query, asHeaders = headers) => request(`/api/wallet/summary?${query}`, { headers: asHeaders });
+    const day = `date=${today}&timeZone=UTC`;
+
+    // Faculty have no Tokens screen (system admins cannot use the app at all).
+    const faculty = await student('Fay', 'Culty');
+    await db.query("UPDATE users SET role='faculty' WHERE id=$1", [faculty.userId]);
+    for (const answer of [await summaryFor(day, faculty.headers), await request('/api/wallet/history', { headers: faculty.headers })]) {
+      assert.deepEqual([answer.response.status, answer.body], [403, { ok: false, message: 'Tokens are for students.' }]);
+    }
+    assert.equal((await request(`/api/wallet/summary?${day}`)).response.status, 401);
+    for (const query of ['', 'timeZone=UTC', `date=${today}&timeZone=Not%2FA_Zone`, `date=${today}&date=${today}&timeZone=UTC`]) {
+      const refused = await summaryFor(query);
+      assert.deepEqual([refused.response.status, refused.body.message], [400, 'Send your today and time zone.'], query);
+    }
+    const closed = await summaryFor(`date=${shiftDay(today, -1)}&timeZone=UTC`);
+    assert.deepEqual([closed.response.status, closed.body.ok, closed.body.code, closed.body.today, closed.body.timeZone], [409, false, 'DAY_CLOSED', today, 'UTC']);
+
+    // Two habits, one checked in; 100 granted tokens; a Streak Freeze bought.
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: ['h1', 'h2'].map((id) => ({ ...appState.habits[0], id, label: id })) }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    const done = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'h1', date: today, completed: true, timeZone: 'UTC' }) });
+    assert.equal(done.response.status, 200, JSON.stringify(done.body));
+    await grant(userId, 100, 'wallet-grant');
+    const freeze = await request('/api/streak-freezes/buy', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+    assert.equal(freeze.response.status, 200, JSON.stringify(freeze.body));
+
+    const before = await ledgerOf(userId);
+    const answer = await summaryFor(day);
+    assert.equal(answer.response.status, 200, JSON.stringify(answer.body));
+    const summary = answer.body;
+    const balance = sumOf(before);
+    const challengeTokens = sumOf(before.filter((row) => /:token:(challenge|daily):/.test(row.id)));
+    const earned = sumOf(before.filter((row) => row.amount > 0));
+    assert.deepEqual([summary.ok, summary.balance, summary.tokens], [true, balance, balance]);
+    assert.deepEqual(summary.today.checkIns, { paid: 1, limit: 6, perCheckIn: 5, earned: 5 });
+    assert.deepEqual(summary.today.dailyClaim, { claimed: false, day: 1, amount: 2, tomorrowAmount: 3 });
+    assert.deepEqual(summary.today.mysteryBox, { status: 'ready', amount: null, min: 3, max: 20 });
+    assert.equal(summary.today.challenges.earned, challengeTokens, 'the challenges paid so far');
+    // 2 (the daily reward) + 5 (h2, the one habit left) + the open challenges + 20 (the box).
+    assert.equal(summary.today.canStillEarn, 2 + 5 + summary.today.challenges.available + 20);
+
+    // This week: every row is from today, so earned minus spent is the balance.
+    const weekStart = weekStartOf(today);
+    const weekEnd = weekEndKey(today);
+    assert.deepEqual([summary.week.start, summary.week.end, summary.week.resetsAt], [weekStart, weekEnd, Date.parse(`${shiftDay(weekEnd, 1)}T00:00:00Z`)]);
+    assert.deepEqual([summary.week.earned, summary.week.spent, summary.week.bySink], [earned, 30, { freeze: 30 }]);
+    assert.deepEqual({ ...summary.week.bySource, challenge: summary.week.bySource.challenge ?? 0 }, { 'check-in': 5, other: 100, challenge: challengeTokens });
+    assert.deepEqual(summary.week.quests, { done: 0, total: 3, earned: 0, available: 50 });
+    assert.equal(summary.week.bonus.lastWeek.weekStart, shiftDay(weekStart, -7));
+    assert.deepEqual(summary.streak, { days: 1, next: { days: 7, bonus: 15, daysLeft: 6 } });
+    assert.deepEqual(summary.earn.map((row) => row.id), ['check-in', 'daily-claim', 'challenge', 'mystery', 'quest', 'weekly-bonus', 'streak']);
+
+    // What to spend on, against the balance.
+    const drop = dropForWeek(weekStart);
+    const spend = Object.fromEntries(summary.spend.map((row) => [row.id, row]));
+    assert.deepEqual(summary.spend.map((row) => row.target), ['freeze', 'buddy', 'buddy', 'reward:profile-frames', 'reward:premium-theme', 'reward:custom-title', 'reward:buddy-showcase', 'gift', 'coach']);
+    assert.deepEqual([spend['streak-freeze'].status, spend['streak-freeze'].held, spend['streak-freeze'].max, spend['streak-freeze'].cost], ['ready', 1, 2, 30]);
+    assert.deepEqual([spend['buddy-shop'].status, spend['buddy-shop'].cost, spend['buddy-shop'].from], ['ready', 40, true]);
+    assert.deepEqual([spend['weekly-drop'].status, spend['weekly-drop'].cost, spend['weekly-drop'].detail], ['locked', 150, `${drop.emoji} ${drop.name} · finish 2 of 3 quests (0/2)`]);
+    assert.deepEqual([spend['profile-frames'].status, spend['profile-frames'].short, spend['buddy-showcase'].cost], ['short', 180 - balance, 300]);
+    assert.deepEqual([spend['treat-gift'].status, spend['treat-gift'].detail], ['ready', '3 of 3 left today']);
+    assert.deepEqual([spend.coach.status, spend.coach.detail], ['ready', `Enough for ${Math.floor(balance / 10)} answers`]);
+    assert.equal(summary.affordable, 4, 'the freeze, a Habi item, a treat and the AI Coach');
+    const perDay = Math.round(earned / 7);
+    assert.deepEqual([summary.pace, summary.nextGoal], [{ perDay }, { id: 'profile-frames', title: 'Profile Frames', cost: 180, short: 180 - balance, days: Math.ceil((180 - balance) / perDay) }]);
+
+    // The daily reward and the box are counted once they are taken.
+    assert.equal((await request('/api/daily-claim', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) })).response.status, 200);
+    const box = await request('/api/mystery-box/open', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+    assert.equal(box.response.status, 200, JSON.stringify(box.body));
+    const later = (await summaryFor(day)).body;
+    assert.deepEqual(later.today.dailyClaim, { claimed: true, day: 1, amount: 2, tomorrowAmount: 3 });
+    assert.deepEqual(later.today.mysteryBox, { status: 'opened', amount: box.body.amount, min: 3, max: 20 });
+    assert.equal(later.today.canStillEarn, 5 + later.today.challenges.available);
+    assert.deepEqual([later.balance, later.week.bySource['daily-claim'], later.week.bySource.mystery], [balance + 2 + box.body.amount, 2, box.body.amount]);
+
+    // It only reads: a new time zone is not stored and nothing is written.
+    const east = 'Pacific/Kiritimati';
+    const rows = (await ledgerOf(userId)).length;
+    const eastern = await summaryFor(`date=${dateIn(east)}&timeZone=${encodeURIComponent(east)}`);
+    assert.deepEqual([eastern.response.status, eastern.body.today?.date], [200, dateIn(east)], JSON.stringify(eastern.body));
+    assert.deepEqual((await db.query('SELECT time_zone AS "timeZone", day_floor AS "floor" FROM users WHERE id=$1', [userId])).rows[0], { timeZone: 'UTC', floor: null });
+    assert.equal((await ledgerOf(userId)).length, rows);
+
+    // The freeze is a spend:freeze:<uuid> row in the history.
+    const history = (await request('/api/wallet/history', { headers })).body;
+    const bought = history.items.find((item) => item.kind === 'freeze');
+    assert.match(bought?.id ?? '', /^spend:freeze:[0-9a-f-]{36}$/);
+    assert.deepEqual([bought.amount, bought.label], [-30, 'Streak freeze']);
+  });
+
+  await t.test('the token history: the whole ledger a page at a time, with totals over all of it', async () => {
+    const { headers, userId } = await student('Hal', 'History');
+    // A new student: nothing earned yet, so no pace and no days to the first goal.
+    const fresh = (await request(`/api/wallet/summary?date=${today}&timeZone=UTC`, { headers })).body;
+    assert.deepEqual([fresh.balance, fresh.affordable, fresh.today.canStillEarn, fresh.streak.days, fresh.pace.perDay], [0, 0, 2 + 20, 0, 0], JSON.stringify(fresh));
+    assert.deepEqual(fresh.nextGoal, { id: 'profile-frames', title: 'Profile Frames', cost: 180, short: 180, days: null });
+    assert.deepEqual((await request('/api/wallet/history', { headers })).body, { ok: true, items: [], nextCursor: null, totals: { earned: 0, spent: 0, balance: 0 } });
+
+    // 130 rows, two to a millisecond (so a page can end between two rows of the same time), every
+    // tenth an AI Coach answer, and a spend from before ids named their kind (a plain UUID).
+    const at = Date.now() - 60_000;
+    const rows = Array.from({ length: 130 }, (_, index) => (index % 10 === 0
+      ? { id: `${userId}:token:spend:coach:${crypto.randomUUID()}`, amount: -10, label: 'AI Coach answer', createdAt: at + Math.floor(index / 2) }
+      : { id: `${userId}:token:quest:2026-10-19:q${index}`, amount: 4, label: `Quest ${index}`, createdAt: at + Math.floor(index / 2) }));
+    rows.push({ id: crypto.randomUUID(), amount: -30, label: 'Streak freeze', createdAt: at - 1 });
+    await db.query(
+      `INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at)
+       SELECT r.id, $1, r.amount, r.label, $2, r.created_at FROM unnest($3::text[], $4::int[], $5::text[], $6::bigint[]) AS r(id, amount, label, created_at)`,
+      [userId, new Date(at).toISOString(), rows.map((row) => row.id), rows.map((row) => row.amount), rows.map((row) => row.label), rows.map((row) => row.createdAt)],
+    );
+    const publicId = (id) => id.replace(`${userId}:token:`, '');
+    // Newest first, then by id (byte order) within a millisecond.
+    const newestFirst = [...rows].sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)).map((row) => publicId(row.id));
+    const totals = { earned: 117 * 4, spent: 13 * 10 + 30, balance: 117 * 4 - 13 * 10 - 30 };
+    const history = (query) => request(`/api/wallet/history?${query}`, { headers });
+
+    /** Every page of `filter`, `limit` rows at a time, following nextCursor. */
+    const allPages = async (filter, limit) => {
+      const pages = [];
+      let before = null;
+      do {
+        const page = await history(`filter=${filter}&limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ''}`);
+        assert.equal(page.response.status, 200, JSON.stringify(page.body));
+        assert.deepEqual(page.body.totals, totals, 'the totals are over the whole ledger');
+        pages.push(page.body);
+        before = page.body.nextCursor;
+      } while (before && pages.length < 10);
+      return pages;
+    };
+    const pages = await allPages('all', 45);
+    assert.deepEqual(pages.map((page) => page.items.length), [45, 45, 41], 'the pages end between two rows of the same millisecond');
+    assert.equal(pages.at(-1).nextCursor, null);
+    const items = pages.flatMap((page) => page.items);
+    assert.deepEqual(items.map((item) => item.id), newestFirst, 'every row once, in order');
+    assert.ok(items.every((item) => !item.id.includes(userId)), 'ids are shown without the account prefix');
+    const legacy = items.at(-1);
+    assert.deepEqual([legacy.kind, legacy.amount, legacy.label, legacy.createdAt], ['freeze', -30, 'Streak freeze', at - 1]);
+    assert.deepEqual([...new Set(items.map((item) => item.kind))].sort(), ['coach', 'freeze', 'quest']);
+    assert.ok(rows.length > 100 && sumOf(rows) === totals.balance, 'more rows than the 100 the app state carries');
+
+    const spent = (await allPages('spent', 50)).flatMap((page) => page.items);
+    assert.deepEqual([spent.length, spent.every((item) => item.amount < 0)], [14, true]);
+    const earnedRows = (await allPages('earned', 50)).flatMap((page) => page.items);
+    assert.deepEqual([earnedRows.length, earnedRows.every((item) => item.amount > 0)], [117, true]);
+    const first = (await history('')).body;
+    assert.deepEqual([first.items.length, Boolean(first.nextCursor)], [30, true], '30 rows by default');
+
+    const forged = Buffer.from(JSON.stringify(['soon', 'x'])).toString('base64url');
+    for (const query of ['limit=51', 'limit=0', 'limit=ten', 'filter=refunds', 'before=not-a-cursor', `before=${forged}`, 'userId=someone-else']) {
+      assert.equal((await history(query)).response.status, 400, query);
+    }
+  });
+
   await t.test('issue reports store attachments in the database and validate content', async () => {
     const report = await request('/api/support/reports', { method: 'POST', headers: authHeaders, body: JSON.stringify({ topic: 'Other', timing: 'Today', description: 'The report flow works.' }) });
     assert.equal(report.response.status, 201, JSON.stringify(report.body));
