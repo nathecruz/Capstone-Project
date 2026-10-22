@@ -72,10 +72,14 @@ async function fetchSummary(date: string) {
 /** Older first: the server orders the history by createdAt, then id, newest first. */
 const isOlder = (item: WalletHistoryItem, than: WalletHistoryItem) => Number(item.createdAt) < Number(than.createdAt) || (Number(item.createdAt) === Number(than.createdAt) && item.id < than.id);
 
-/** A new first page; the older rows Load more already brought stay after it, with their cursor. */
+/**
+ * A new first page; the older rows Load more already brought stay after it, with their cursor. Only
+ * when the page reaches them: after more new rows than a page (the screen was closed meanwhile) the
+ * rows between the two would be missing, so the page starts the list again.
+ */
 export function withFirstPage(page: Pick<WalletHistory, 'items' | 'nextCursor'>, known: Pick<History, 'items' | 'nextCursor'>) {
   const last = page.items.at(-1);
-  if (!last || !page.nextCursor || known.items.length <= page.items.length) return { items: page.items, nextCursor: page.nextCursor };
+  if (!last || !page.nextCursor || known.items.length <= page.items.length || isOlder(known.items[0], last)) return { items: page.items, nextCursor: page.nextCursor };
   const older = known.items.filter((item) => isOlder(item, last));
   return older.length ? { items: [...page.items, ...older], nextCursor: known.nextCursor } : { items: page.items, nextCursor: page.nextCursor };
 }

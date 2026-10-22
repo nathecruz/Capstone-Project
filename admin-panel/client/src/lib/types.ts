@@ -168,6 +168,8 @@ export type TokenFlagType = 'big-day' | 'capped-day' | 'many-habits' | 'many-gif
 export interface TokenFlags {
   from: string;
   to: string;
+  /** Flagged above these: tokens or check-ins in a day, habits starting in a week; and gifts sent from `giftsSent`. */
+  limits: { dayTokens: number; dayCheckIns: number; weekHabits: number; giftsSent: number };
   items: { userId: string; name: string; flags: { type: TokenFlagType; detail: string }[] }[];
 }
 

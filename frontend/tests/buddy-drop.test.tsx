@@ -12,7 +12,7 @@ import { getLocalDateKey } from '@/utils/habit-visibility';
 import { weekStartOf } from '@/utils/quests';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
-jest.mock('expo-router', () => ({ router: { navigate: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: () => true, replace: jest.fn() } }));
+jest.mock('expo-router', () => ({ router: { dismissTo: jest.fn(), push: jest.fn(), back: jest.fn(), canGoBack: () => true, replace: jest.fn() } }));
 jest.mock('@/authentication/authService', () => ({ buyBuddyItem: jest.fn(), feedBuddyTreat: jest.fn(), saveBuddy: jest.fn() }));
 jest.mock('@/components/buddy', () => ({ BuddyAvatar: () => null }));
 jest.mock('@/components/confetti', () => ({ Confetti: () => null }));
@@ -59,7 +59,8 @@ describe('weekly drop on the buddy screen', () => {
     expect(screen.getByText('Finish 2 of 3 weekly quests to unlock (1/2)')).toBeTruthy();
     expect(screen.getByText('Drops collected 0/12')).toBeTruthy();
     fireEvent.press(screen.getByLabelText("See this week's quests"));
-    expect(router.navigate).toHaveBeenCalledWith('/(tabs)');
+    // Back to Home below this screen, not a second copy of the tabs on top.
+    expect(router.dismissTo).toHaveBeenCalledWith('/(tabs)');
   });
 
   it('is bought after a confirm, with the device today', async () => {

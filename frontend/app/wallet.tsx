@@ -24,8 +24,11 @@ const EMPTY_HISTORY: Record<WalletHistoryFilter, string> = {
   spent: 'Nothing spent yet.',
 };
 
-/** The tabs are one screen already open below this one: go back to them instead of stacking another. */
-const open = (href: Href) => (String(href).startsWith('/(tabs)') ? router.navigate(href) : router.push(href));
+/**
+ * The tabs are one screen already open below this one: go back to them instead of stacking another
+ * (router.navigate would push a second copy of the tabs above this screen).
+ */
+const open = (href: Href) => (String(href).startsWith('/(tabs)') ? router.dismissTo(href) : router.push(href));
 const signed = (amount: number) => (amount > 0 ? `+${amount}` : String(amount));
 
 export default function WalletScreen() {

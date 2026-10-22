@@ -22,6 +22,7 @@ import { recipientVariables, renderTemplate, unknownPlaceholders } from '../src/
 import { FLAG_LIMITS, flowTotals, TOKEN_KINDS, tokenFlags, tokenKind, tokenKindSql } from '../src/lib/token-kinds.js';
 import { availableUsername, usernameBase } from '../src/lib/usernames.js';
 import { buildCategoryRows } from '../src/routes/overview.js';
+import { buddyItemName, historyCursor, readHistoryCursor } from '../src/routes/users.js';
 
 test('date helpers work in local calendar days', () => {
   assert.equal(addDays('2026-02-27', 2), '2026-03-01');
@@ -231,4 +232,20 @@ test('a table the app backend has not added yet reads as zeros', async () => {
 
   const present = { query: async (text) => ({ rows: text.includes('to_regclass') ? [{ present: true }] : [{ n: 4 }] }) };
   assert.deepEqual((await queryIfTable('buddy_gifts', 'SELECT count(*)::int AS n FROM buddy_gifts', [], [{ n: 0 }], present)).rows, [{ n: 4 }]);
+});
+
+test('a ledger page cursor names its last row, and nothing else reads as one', () => {
+  const row = { createdAt: 1792566000000, id: 'user-1:token:check-in:habit-1790708001257-1:2026-10-20' };
+  assert.deepEqual(readHistoryCursor(historyCursor(row)), row);
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  for (const cursor of ['', 'junk', encode([1.5, 'x']), encode(['1', 'x']), encode([1, '']), encode({ createdAt: 1, id: 'x' })]) {
+    assert.equal(readHistoryCursor(cursor), null, cursor);
+  }
+});
+
+test('Habi items are named by the spend that bought them, else by their id', () => {
+  assert.equal(buddyItemName('bedroom', 'Buddy: Cozy room'), 'Cozy room');
+  assert.equal(buddyItemName('drop-umbrella', 'Buddy: Umbrella (weekly drop)'), 'Umbrella');
+  assert.equal(buddyItemName('sun-hat', null), 'Sun hat');
+  assert.equal(buddyItemName('drop-mini-tree', 'Buddy treat: Cookie'), 'Mini tree');
 });

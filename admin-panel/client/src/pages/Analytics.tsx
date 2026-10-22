@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { Download, ShieldCheck } from 'lucide-react';
 import { BarList, ChartCard, CohortTable, ColumnChart, seriesColor, StatTile, TrendChart } from '../components/charts';
-import { Alert, Button, Card, cx, EmptyState, PageHeader, Segmented, Select, Spinner, Table, Tabs, Td, Th, useToast } from '../components/ui';
+import { Alert, Badge, Button, Card, cx, EmptyState, PageHeader, Segmented, Select, Spinner, Table, Tabs, Td, Th, useToast } from '../components/ui';
 import { download } from '../lib/api';
-import { formatDate, formatNumber, formatPercent, formatShortDay } from '../lib/format';
+import { useAuth } from '../lib/auth';
+import { formatDate, formatNumber, formatPercent, formatShortDay, formatTokenKind } from '../lib/format';
+import type { TokenEconomy, TokenFlags, TokenFlagType } from '../lib/types';
 import { useApi } from '../lib/useApi';
 
 interface GroupRow { label: string; students: number; combined: number; habitsPerStudent: number; weeklyCheckInsPerStudent: number; completionRate: number | null }
@@ -31,7 +34,8 @@ interface AnalyticsData {
   demographics: { gender: Breakdown; age: Breakdown; region: Breakdown };
   cohorts: { week: string; size: number | null; suppressed: boolean; retention: (number | null)[] }[];
   goals: { category: string; goals: number; avgProgress: number }[];
-  gamification: { tokensEarned: number; tokensSpent: number; rewards: { name: string; redemptions: number; tokenCost: number }[]; achievements: { name: string; share: number }[] };
+  economy: TokenEconomy;
+  achievements: { name: string; share: number }[];
 }
 
 const TREND_METRICS = [
@@ -50,9 +54,159 @@ const DATASETS = [
 ];
 
 const weekLabel = (week: string) => `Week of ${formatShortDay(week)}`;
+const signed = (value: number) => `${value > 0 ? '+' : ''}${formatNumber(value)}`;
+
+const FLAG_LABELS: Record<TokenFlagType, string> = {
+  'big-day': 'Big day',
+  'capped-day': 'Over the cap',
+  'many-habits': 'Many habits',
+  'many-gifts': 'Many gifts',
+};
+
+function EconomyTile({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode }) {
+  return (
+    <div className="rounded-lg bg-surface-2 p-3">
+      <p className="text-xs text-muted">{label}</p>
+      <p className="text-xl font-semibold text-ink tabular">{value}</p>
+      {hint && <p className="mt-0.5 text-xs text-muted">{hint}</p>}
+    </div>
+  );
+}
+
+/** A small titled table inside the token economy card. */
+function EconomyTable({ title, note, head, children }: { title: string; note?: ReactNode; head: ReactNode; children: ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-lg border border-line [&_tbody_tr:last-child_td]:border-b-0">
+      <p className="px-5 pt-3 text-[13px] font-medium text-ink">{title}</p>
+      {note && <p className="px-5 text-xs text-muted">{note}</p>}
+      <Table className="mt-1">
+        <thead><tr>{head}</tr></thead>
+        <tbody>{children}</tbody>
+      </Table>
+    </div>
+  );
+}
+
+/** Where tokens came from and went in the last 28 days, students only and aggregates only. */
+function TokenEconomyCard({ economy }: { economy: TokenEconomy }) {
+  const earned = economy.byKind28.filter((row) => row.earned > 0).sort((a, b) => b.earned - a.earned);
+  const spent = economy.byKind28.filter((row) => row.spent > 0).sort((a, b) => b.spent - a.spent);
+  const thisWeek = economy.drops.at(-1)?.weekStart;
+  const { perDay, from: capFrom } = economy.checkInCap;
+  const { balances, freezes, retired } = economy;
+  return (
+    <Card title="Token economy" subtitle={`Students only. The last 28 days (since ${formatDate(economy.since)}) unless noted, whatever the date range above.`}>
+      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+        <EconomyTile label="Issued, 28 days" value={formatNumber(economy.issued28)} hint={`Plus ${formatNumber(economy.refunds28)} refunded`} />
+        <EconomyTile label="Spent, 28 days" value={formatNumber(economy.spent28)} hint={`Plus ${formatNumber(economy.undone28)} taken back by undos`} />
+        <EconomyTile label="Net, 28 days" value={signed(economy.issued28 - economy.spent28)} hint="Issued minus spent" />
+        <EconomyTile label="Median balance" value={formatNumber(balances.median)} hint={`90th percentile ${formatNumber(balances.p90)}, ${formatNumber(balances.students)} active students`} />
+        <EconomyTile label="Students over 1,000" value={formatNumber(balances.over1000)} hint="Many here means too few ways to spend" />
+      </div>
+
+      <div className="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <div>
+          <p className="mb-3 text-[13px] font-medium text-ink">Earned by source</p>
+          {earned.length ? <BarList rows={earned} label={(row) => formatTokenKind(row.kind)} value={(row) => row.earned} /> : <p className="text-[13px] text-muted">No tokens earned in these days.</p>}
+        </div>
+        <div>
+          <p className="mb-3 text-[13px] font-medium text-ink">Spent by</p>
+          {spent.length ? <BarList rows={spent} label={(row) => formatTokenKind(row.kind)} value={(row) => row.spent} color={() => 'var(--series-2)'} /> : <p className="text-[13px] text-muted">No tokens spent in these days.</p>}
+          <p className="mt-3 text-xs text-muted">{formatNumber(economy.gifts28)} treat gifts sent · {formatNumber(economy.showcaseOwners)} Buddy Showcase owners (all time)</p>
+        </div>
+      </div>
+
+      <div className="mb-5 grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-4">
+        <EconomyTable title="Weekly bonus claims" note="By the week the bonus is for" head={<><Th>Week of</Th><Th align="right">Claims</Th><Th align="right">+30</Th><Th align="right">+20</Th><Th align="right">+10</Th></>}>
+          {economy.weeklyBonus.map((week) => (
+            <tr key={week.weekStart}>
+              <Td className="whitespace-nowrap">{formatShortDay(week.weekStart)}</Td>
+              <Td align="right">{formatNumber(week.claims)}</Td>
+              <Td align="right">{formatNumber(week.gold)}</Td>
+              <Td align="right">{formatNumber(week.silver)}</Td>
+              <Td align="right">{formatNumber(week.bronze)}</Td>
+            </tr>
+          ))}
+        </EconomyTable>
+        <EconomyTable title="Weekly drops bought" note="By the week they were bought" head={<><Th>Week of</Th><Th align="right">Bought</Th></>}>
+          {economy.drops.map((week) => (
+            <tr key={week.weekStart}>
+              <Td className="whitespace-nowrap">{formatShortDay(week.weekStart)}{week.weekStart === thisWeek && <span className="ml-1 text-muted">(this week)</span>}</Td>
+              <Td align="right">{formatNumber(week.bought)}</Td>
+            </tr>
+          ))}
+        </EconomyTable>
+        <EconomyTable title="Freezes bought vs used" note="Streak freezes, 28 days" head={<><Th>Freezes</Th><Th align="right">Count</Th></>}>
+          <tr><Td>Bought</Td><Td align="right">{formatNumber(freezes.bought28)}</Td></tr>
+          <tr><Td>Used</Td><Td align="right">{formatNumber(freezes.used28)}</Td></tr>
+        </EconomyTable>
+        <EconomyTable
+          title="Capped check-in days"
+          note={capFrom > economy.since ? `The cap counts from ${formatDate(capFrom)}` : '28 days'}
+          head={<><Th>Student-days</Th><Th align="right">Count</Th></>}
+        >
+          <tr><Td>Over {perDay} check-ins</Td><Td align="right">{formatNumber(economy.cappedDays28)}</Td></tr>
+        </EconomyTable>
+      </div>
+
+      <p className="mb-3 text-[13px] font-medium text-ink">Rewards on sale</p>
+      {economy.rewards.length ? (
+        <BarList rows={economy.rewards} label={(row) => row.name} value={(row) => row.redemptions} detail={(row) => `${formatNumber(row.tokenCost)} tokens`} />
+      ) : <p className="text-[13px] text-muted">No rewards are on sale.</p>}
+      <p className="mt-3 text-xs text-muted">Retired rewards: {formatNumber(retired.count)}, refunded {formatNumber(retired.refundedTokens)} tokens</p>
+    </Card>
+  );
+}
+
+/** Students whose last 14 days look like token farming. It names them, so administrators only. */
+function TokenFlagsCard() {
+  const navigate = useNavigate();
+  const { data, error, loading } = useApi<TokenFlags>('/users/token-flags');
+  const limits = data?.limits;
+  return (
+    <Card
+      title="Token flags"
+      subtitle={data && limits
+        ? `${formatDate(data.from)} – ${formatDate(data.to)}: a day over ${limits.dayTokens} tokens (without streak, refund and weekly bonus payouts), a day over ${limits.dayCheckIns} check-ins, over ${limits.weekHabits} habits starting in one week, or ${limits.giftsSent} or more treat gifts sent. Administrators only.`
+        : 'The last 14 days. Administrators only.'}
+      bodyClassName="!px-0 !pb-0"
+    >
+      {error && <div className="px-5 pb-5"><Alert tone="critical" title="Could not load token flags">{error}</Alert></div>}
+      {!data ? (loading && <Spinner />) : data.items.length ? (
+        <Table>
+          <thead>
+            <tr><Th>Student</Th><Th>Flags</Th></tr>
+          </thead>
+          <tbody>
+            {data.items.map((item) => (
+              <tr key={item.userId} className="cursor-pointer hover:bg-surface-hover" onClick={() => navigate(`/users/${item.userId}`)}>
+                <Td className="whitespace-nowrap font-medium">
+                  <Link to={`/users/${item.userId}`} className="hover:underline" onClick={(event) => event.stopPropagation()}>{item.name}</Link>
+                </Td>
+                <Td>
+                  <ul className="flex flex-col gap-1">
+                    {item.flags.map((flag) => (
+                      <li key={flag.type} className="flex flex-wrap items-center gap-2">
+                        <Badge tone="warning">{FLAG_LABELS[flag.type] ?? flag.type}</Badge>
+                        <span className="text-ink-2">{flag.detail}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      ) : <EmptyState title="No students flagged">No student passed a threshold in these days.</EmptyState>}
+    </Card>
+  );
+}
 
 export function AnalyticsPage() {
   const toast = useToast();
+  const { can } = useAuth();
+  // Token flags name students: only for those who may open their accounts (administrators).
+  const showFlags = can('users:view');
   const [range, setRange] = useState(90);
   const [metric, setMetric] = useState<TrendMetric>('completionRate');
   const [dimension, setDimension] = useState<'gender' | 'age' | 'region'>('gender');
@@ -101,6 +255,7 @@ export function AnalyticsPage() {
             <p>
               Privacy by design: these views contain no names, emails or individual records. Demographic groups with fewer than <strong className="text-ink">{k} students</strong> are
               combined or withheld (k-anonymity). Staff accounts are excluded. Period: {formatDate(data.meta.start)} – {formatDate(data.meta.end)}.
+              {showFlags && ' Only the Token flags card names students, and only administrators see it.'}
             </p>
           </div>
 
@@ -243,17 +398,12 @@ export function AnalyticsPage() {
             <CohortTable cohorts={data.cohorts} threshold={k} formatWeek={(week) => formatShortDay(week)} />
           </Card>
 
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-            <Card title="Gamification" subtitle="Tokens and rewards across all students">
-              <div className="mb-5 grid grid-cols-2 gap-3">
-                <div className="rounded-lg bg-surface-2 p-3"><p className="text-xs text-muted">Tokens earned</p><p className="text-xl font-semibold text-ink">{formatNumber(data.gamification.tokensEarned)}</p></div>
-                <div className="rounded-lg bg-surface-2 p-3"><p className="text-xs text-muted">Tokens spent</p><p className="text-xl font-semibold text-ink">{formatNumber(data.gamification.tokensSpent)}</p></div>
-              </div>
-              <p className="mb-3 text-[13px] font-medium text-ink">Reward redemptions</p>
-              <BarList rows={data.gamification.rewards} label={(row) => row.name} value={(row) => row.redemptions} detail={(row) => `${row.tokenCost} tokens`} />
-            </Card>
+          <TokenEconomyCard economy={data.economy} />
+
+          <div className={cx('grid grid-cols-1 gap-5', showFlags && 'lg:grid-cols-2')}>
+            {showFlags && <TokenFlagsCard />}
             <Card title="Achievements unlocked" subtitle="Share of students who earned each achievement">
-              <BarList rows={data.gamification.achievements} max={1} label={(row) => row.name} value={(row) => row.share} format={(value) => formatPercent(value)} />
+              <BarList rows={data.achievements} max={1} label={(row) => row.name} value={(row) => row.share} format={(value) => formatPercent(value)} />
               {data.goals.length > 0 && (
                 <>
                   <p className="mb-2 mt-6 text-[13px] font-medium text-ink">Goals by category</p>

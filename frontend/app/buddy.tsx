@@ -191,7 +191,7 @@ export default function BuddyScreen() {
                 <Pressable
                   style={({ pressed }) => [styles.dropButton, !dropCard.canBuy && styles.dropButtonQuiet, pressed && styles.pressed]}
                   disabled={busy || (dropCard.state === 'unlocked' && !dropCard.canBuy)}
-                  onPress={() => (dropCard.state === 'locked' ? router.navigate('/(tabs)') : buyDrop(dropCard.item))}
+                  onPress={() => (dropCard.state === 'locked' ? router.dismissTo('/(tabs)') : buyDrop(dropCard.item))}
                   accessibilityRole="button"
                   accessibilityLabel={dropCard.state === 'locked' ? 'See this week\'s quests' : `${dropCard.item.name}: ${dropCard.action}`}
                 >

@@ -190,7 +190,7 @@ router.get('/token-flags', canView, async (_request, response) => {
   const items = names.rows
     .map((user) => ({ userId: user.id, name: namesFromRow(user).fullName || user.email, flags: flagged.get(user.id) }))
     .sort((a, b) => b.flags.length - a.flags.length || a.name.localeCompare(b.name));
-  response.json({ ok: true, from, to: today, items });
+  response.json({ ok: true, from, to: today, limits: FLAG_LIMITS, items });
 });
 
 async function loadUser(id, runner = { query }) {
@@ -316,7 +316,8 @@ export function buddyItemName(id, label) {
   return words ? words[0].toUpperCase() + words.slice(1) : String(id);
 }
 
-const tokensSchema = z.object({ before: z.string().trim().max(400).optional() });
+// A cursor carries a whole ledger id, and check-in ids hold the habit id the app chose.
+const tokensSchema = z.object({ before: z.string().trim().max(2000).optional() });
 
 /**
  * A student's tokens for the detail page: earned, spent, the balance and sums by kind; what they

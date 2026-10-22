@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Bell, Pencil, Trophy } from 'lucide-react';
-import { ChartCard, ColumnChart, StatTile } from '../components/charts';
+import { BarList, ChartCard, ColumnChart, StatTile } from '../components/charts';
 import { ComposeModal } from '../components/Compose';
 import { UserActionMenu, useUserActions } from '../components/UserActions';
-import { Alert, Avatar, Badge, Button, Card, cx, EmptyState, Spinner, Table, Td, Th } from '../components/ui';
+import { Alert, Avatar, Badge, Button, Card, cx, EmptyState, Spinner, Table, Td, Th, useToast } from '../components/ui';
+import { get } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { formatDate, formatDateTime, formatNumber, formatRelative, formatShortDay } from '../lib/format';
-import type { UserRow } from '../lib/types';
+import { formatDate, formatDateTime, formatNumber, formatRelative, formatShortDay, formatTokenKind } from '../lib/format';
+import type { TokenEntry, UserRow, UserTokens } from '../lib/types';
 import { useApi } from '../lib/useApi';
 import { RoleBadge, StatusBadge } from './Users';
 
@@ -22,7 +23,6 @@ interface UserDetail {
     bestStreak: number;
     goalCount: number;
     goalAvgProgress: number;
-    tokenBalance: number;
     appSessions: number;
     pushDevices: number;
     issueReports: number;
@@ -42,6 +42,105 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
       <dt className="text-muted">{label}</dt>
       <dd className="text-right text-ink">{children === '' || children === null || children === undefined ? '—' : children}</dd>
     </div>
+  );
+}
+
+const signedTokens = (amount: number) => (amount > 0 ? `+${formatNumber(amount)}` : amount < 0 ? `−${formatNumber(-amount)}` : '0');
+const names = (items: { name: string }[]) => items.map((item) => item.name).join(', ');
+
+function TokenTile({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg bg-surface-2 p-3">
+      <p className="text-xs text-muted">{label}</p>
+      <p className="text-xl font-semibold text-ink tabular">{formatNumber(value)}</p>
+    </div>
+  );
+}
+
+/**
+ * A student's tokens, read-only: earned, spent and the balance, the sums by kind, what they own,
+ * their treat gifts, and the ledger newest first, 30 rows at a time.
+ */
+function TokensCard({ userId }: { userId: string }) {
+  const toast = useToast();
+  const { data, error } = useApi<UserTokens>(`/users/${userId}/tokens`);
+  const [older, setOlder] = useState<{ items: TokenEntry[]; nextCursor: string | null } | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  if (!data) {
+    return <Card title="Tokens">{error ? <Alert tone="critical" title="Could not load tokens">{error}</Alert> : <Spinner />}</Card>;
+  }
+  const entries = [...data.history.items, ...(older?.items ?? [])];
+  const nextCursor = older ? older.nextCursor : data.history.nextCursor;
+  const earned = data.byKind.filter((row) => row.earned > 0).sort((a, b) => b.earned - a.earned);
+  const spent = data.byKind.filter((row) => row.spent > 0).sort((a, b) => b.spent - a.spent);
+
+  async function loadMore() {
+    if (!nextCursor) return;
+    setLoadingMore(true);
+    try {
+      const page = await get<UserTokens>(`/users/${userId}/tokens?before=${encodeURIComponent(nextCursor)}`);
+      setOlder({ items: [...(older?.items ?? []), ...page.history.items], nextCursor: page.history.nextCursor });
+    } catch (reason) {
+      toast(reason instanceof Error ? reason.message : 'Could not load more of the token history.', 'critical');
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  return (
+    <Card title="Tokens" subtitle="From the server's token ledger. Read-only." bodyClassName="!px-0 !pb-0">
+      <div className="px-5">
+        <div className="mb-5 grid grid-cols-3 gap-3">
+          <TokenTile label="Balance" value={data.balance} />
+          <TokenTile label="Earned" value={data.earned} />
+          <TokenTile label="Spent" value={data.spent} />
+        </div>
+        {(earned.length > 0 || spent.length > 0) && (
+          <div className="mb-5 grid grid-cols-1 gap-5 md:grid-cols-2">
+            <div>
+              <p className="mb-3 text-[13px] font-medium text-ink">Earned by source</p>
+              {earned.length ? <BarList rows={earned} label={(row) => formatTokenKind(row.kind)} value={(row) => row.earned} /> : <p className="text-[13px] text-muted">Nothing earned yet.</p>}
+            </div>
+            <div>
+              <p className="mb-3 text-[13px] font-medium text-ink">Spent on</p>
+              {spent.length ? <BarList rows={spent} label={(row) => formatTokenKind(row.kind)} value={(row) => row.spent} color={() => 'var(--series-2)'} /> : <p className="text-[13px] text-muted">Nothing spent yet.</p>}
+            </div>
+          </div>
+        )}
+        <dl className="mb-4">
+          <Detail label="Rewards">{data.rewards.join(', ')}</Detail>
+          <Detail label="Habi items">{names(data.buddyItems)}</Detail>
+          <Detail label="Weekly drops">{names(data.dropsOwned)}</Detail>
+          <Detail label="Streak freezes">{`${formatNumber(data.freezesHeld)} held · ${formatNumber(data.freezesUsed)} used`}</Detail>
+          <Detail label="Treat gifts">{`${formatNumber(data.giftsSent)} sent · ${formatNumber(data.giftsReceived)} received`}</Detail>
+        </dl>
+      </div>
+      {entries.length ? (
+        <>
+          <Table>
+            <thead>
+              <tr><Th>When</Th><Th>Kind</Th><Th>Entry</Th><Th align="right">Tokens</Th></tr>
+            </thead>
+            <tbody>
+              {entries.map((entry) => (
+                <tr key={entry.id}>
+                  <Td className="whitespace-nowrap text-ink-2">{formatDateTime(entry.createdAt)}</Td>
+                  <Td><Badge tone={entry.amount > 0 ? 'good' : 'neutral'}>{formatTokenKind(entry.kind)}</Badge></Td>
+                  <Td>{entry.label}</Td>
+                  <Td align="right" className={cx('font-medium', entry.amount > 0 && 'text-good-ink')}>{signedTokens(entry.amount)}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          {nextCursor && (
+            <div className="flex justify-center px-5 py-3">
+              <Button size="sm" loading={loadingMore} onClick={loadMore}>Load more</Button>
+            </div>
+          )}
+        </>
+      ) : <EmptyState title="No token activity yet" />}
+    </Card>
   );
 }
 
@@ -96,10 +195,9 @@ export function UserDetailPage() {
         </div>
       )}
 
-      <div className="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-5">
         <StatTile label="Habits this week" value={formatNumber(stats.habitCount)} hint={`Best streak ${stats.bestStreak} day${stats.bestStreak === 1 ? '' : 's'} · ${stats.totalHabitCount} all time`} />
         <StatTile label="Check-ins (30 days)" value={formatNumber(stats.completions30d)} hint={`${stats.completionCount} all time`} />
-        <StatTile label="Token balance" value={formatNumber(stats.tokenBalance)} />
         <StatTile label="Goals" value={formatNumber(stats.goalCount)} hint={stats.goalCount ? `${stats.goalAvgProgress}% average progress` : undefined} />
         <StatTile label="Signed-in devices" value={formatNumber(stats.appSessions)} hint={`${stats.pushDevices} with push reminders`} />
         <StatTile label="Last active" value={<span className="text-lg">{formatRelative(stats.lastActiveAt)}</span>} hint={`${stats.unreadNotifications} unread notifications`} />
@@ -143,6 +241,8 @@ export function UserDetailPage() {
           >
             <ColumnChart data={data.dailyCompletions} xKey="day" yKey="completions" seriesLabel="check-ins" formatX={formatShortDay} labels={false} height={200} />
           </ChartCard>
+
+          <TokensCard key={user.id} userId={user.id} />
         </div>
 
         <div className="flex flex-col gap-5">

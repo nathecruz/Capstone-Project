@@ -1801,6 +1801,24 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     }
   });
 
+  await t.test('what can still be earned today leaves out a habit past its reminder time, which a check-in no longer pays', async () => {
+    const { headers, userId } = await student('Dee', 'Dline');
+    await db.query('UPDATE users SET time_zone=$2 WHERE id=$1', [userId, middayZone]);
+    const pills = { ...appState.habits[0], id: 'pills', label: 'Pills', reminderEnabled: true, reminderTime: '12:00 AM', reminderTimes: ['12:00 AM'] };
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], id: 'read', label: 'Read' }, pills] }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    const day = { date: dateIn(middayZone), timeZone: middayZone };
+    const summary = (await request(`/api/wallet/summary?date=${day.date}&timeZone=${encodeURIComponent(middayZone)}`, { headers })).body;
+    // 2 (the daily reward) + 5 (Read: Pills is missed for today) + the open challenges + 20 (the box).
+    assert.equal(summary.today.canStillEarn, 2 + 5 + summary.today.challenges.available + 20, JSON.stringify(summary.today));
+    const late = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'pills', completed: true, ...day }) });
+    assert.deepEqual([late.response.status, late.body.code], [409, 'PAST_DEADLINE']);
+    const done = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'read', completed: true, ...day }) });
+    assert.equal(done.response.status, 200, JSON.stringify(done.body));
+    const after = (await request(`/api/wallet/summary?date=${day.date}&timeZone=${encodeURIComponent(middayZone)}`, { headers })).body;
+    assert.deepEqual([after.today.checkIns.paid, after.today.canStillEarn], [1, 2 + after.today.challenges.available + 20], 'no habit is left that pays');
+  });
+
   await t.test('issue reports store attachments in the database and validate content', async () => {
     const report = await request('/api/support/reports', { method: 'POST', headers: authHeaders, body: JSON.stringify({ topic: 'Other', timing: 'Today', description: 'The report flow works.' }) });
     assert.equal(report.response.status, 201, JSON.stringify(report.body));

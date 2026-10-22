@@ -8,6 +8,7 @@ import { periodResetsAt } from '../lib/http.js';
 import { accountStreakRun } from './account-streak.js';
 import { BUDDY_ITEMS, BUDDY_STAGES, BUDDY_TREATS, buddyStageIndex, DROP_COST, getBuddy } from './buddy.js';
 import { GIFTS_PER_DAY, giftsSentOn } from './buddy-gifts.js';
+import { isPastHabitDeadline } from './completion-date.js';
 import { CHALLENGE_REWARDS, DAILY_CHALLENGE_COUNT, getDailyChallenges } from './daily-challenges.js';
 import { DAILY_CLAIM_REWARDS, getDailyClaim } from './daily-claims.js';
 import { isHabitActiveOn, weekEndKey } from './habit-week.js';
@@ -151,8 +152,8 @@ export function spendRows({ balance, rewards, owned, freezes, buddy, giftsSentTo
 
 /**
  * The most that can still be earned today: the daily reward if it is not claimed, +5 for each habit
- * due today and not done (`openHabits`, up to the paid check-ins left), the challenges not finished
- * and, while the mystery box is not opened, its top prize.
+ * due today, not done and not past its last reminder time (`openHabits`, up to the paid check-ins
+ * left), the challenges not finished and, while the mystery box is not opened, its top prize.
  */
 export function canStillEarnToday({ dailyClaim, paidToday, openHabits, challenges, mysteryBox }) {
   const checkIns = TOKENS_PER_CHECK_IN * Math.min(Math.max(0, PAID_CHECK_INS_PER_DAY - paidToday), openHabits);
@@ -226,7 +227,7 @@ export async function getWalletSummary(db, userId, { today, timeZone }, now = Da
   const weekStart = weekStartOf(today);
   const weekEnd = weekEndKey(today);
   const weekStartsAt = periodResetsAt({ end: shiftDay(weekStart, -1) }, timeZone);
-  const [balance, ledger, paidToday, dailyClaim, challenges, quests, mysteryBox, habits, completions, rewards, buddy, freezes, bonus, giftsSentToday] = await runAll(db, [
+  const [balance, ledger, paidToday, dailyClaim, challenges, quests, mysteryBox, habits, completions, saved, rewards, buddy, freezes, bonus, giftsSentToday] = await runAll(db, [
     () => tokenBalance(db, userId),
     // The week's rows and the last 7 days' (for the pace).
     () => db.query('SELECT id, amount, label, created_at AS "createdAt" FROM token_transactions WHERE user_id=$1 AND created_at >= $2', [userId, Math.min(weekStartsAt, now - PACE_DAYS * DAY_MS)]),
@@ -237,6 +238,8 @@ export async function getWalletSummary(db, userId, { today, timeZone }, now = Da
     () => getMysteryBox(db, userId, today),
     () => loadHabits(db, userId),
     () => db.query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1', [userId]),
+    // The habits as a check-in reads them (services/check-ins.js), for their reminder times.
+    () => db.query(`SELECT state_json->'habits' AS habits FROM user_app_state WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 1`, [userId]),
     () => getRewards(db, userId),
     () => getBuddy(db, userId, { today }),
     () => getStreakFreezeStatus(db, userId),
@@ -251,7 +254,10 @@ export async function getWalletSummary(db, userId, { today, timeZone }, now = Da
     datesByHabit.get(habitId).push(row.date);
   }
   const doneToday = (habit) => (datesByHabit.get(habit.id) ?? []).includes(today);
-  const openHabits = habits.filter((habit) => isHabitActiveOn(habit, today) && isScheduledDay(habitSchedule(habit), today) && !doneToday(habit)).length;
+  // Past its last reminder time a habit is missed for today: its check-in is refused and pays nothing.
+  const reminders = new Map((Array.isArray(saved.rows[0]?.habits) ? saved.rows[0].habits : []).map((habit) => [String(habit?.id), habit]));
+  const missed = (habit) => isPastHabitDeadline(reminders.get(habit.id), today, timeZone, new Date(now));
+  const openHabits = habits.filter((habit) => isHabitActiveOn(habit, today) && isScheduledDay(habitSchedule(habit), today) && !doneToday(habit) && !missed(habit)).length;
   const streak = accountStreakRun(habits.map((habit) => ({ ...habit, completionDates: datesByHabit.get(habit.id) ?? [] })), today, freezes.frozenDays).streak;
   const spend = spendRows({ balance, rewards: rewards.rewards, owned: rewards.owned, freezes, buddy, giftsSentToday });
   const perDay = pacePerDay(rows, now);

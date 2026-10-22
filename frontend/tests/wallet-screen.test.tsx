@@ -6,7 +6,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { router } from 'expo-router';
 import WalletScreen from '@/app/wallet';
 import { getWalletHistory, getWalletSummary, type WalletHistoryItem, type WalletSummary } from '@/authentication/authService';
-import { reloadWallet } from '@/hooks/use-wallet';
+import { reloadWallet, withFirstPage } from '@/hooks/use-wallet';
 import { getLocalDateKey } from '@/utils/habit-visibility';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
@@ -16,7 +16,7 @@ const mockFocus: { effect: (() => void) | null } = { effect: null };
 jest.mock('expo-router', () => {
   const ReactActual = jest.requireActual('react');
   return {
-    router: { navigate: jest.fn(), push: jest.fn(), back: jest.fn(), replace: jest.fn(), canGoBack: () => true },
+    router: { dismissTo: jest.fn(), push: jest.fn(), back: jest.fn(), replace: jest.fn(), canGoBack: () => true },
     useLocalSearchParams: () => mockParams,
     useFocusEffect: (effect: () => void) => {
       mockFocus.effect = effect;
@@ -177,12 +177,15 @@ describe('Tokens screen', () => {
 
   it('leads each way to earn to where it is done, and each thing to buy to its sheet', async () => {
     const screen = await renderWallet();
+    // Back to the tabs below this screen, not a second copy of them on top.
     fireEvent.press(screen.getByLabelText('Check in a habit: Go'));
-    expect(router.navigate).toHaveBeenLastCalledWith('/(tabs)/habits');
+    expect(router.dismissTo).toHaveBeenLastCalledWith('/(tabs)/habits');
     fireEvent.press(screen.getByLabelText('Daily reward: Go'));
-    expect(router.navigate).toHaveBeenLastCalledWith('/(tabs)');
+    expect(router.dismissTo).toHaveBeenLastCalledWith('/(tabs)');
     fireEvent.press(screen.getByLabelText('Mystery box: Go'));
-    expect(router.navigate).toHaveBeenLastCalledWith('/(tabs)');
+    expect(router.dismissTo).toHaveBeenLastCalledWith('/(tabs)');
+    fireEvent.press(screen.getByLabelText('Streak milestones: Go'));
+    expect(router.dismissTo).toHaveBeenLastCalledWith('/(tabs)/habits');
 
     fireEvent.press(screen.getByLabelText('Premium Theme, 200 tokens: 80 more'));
     expect(router.push).toHaveBeenLastCalledWith('/leaderboards?reward=premium-theme');
@@ -193,7 +196,7 @@ describe('Tokens screen', () => {
     fireEvent.press(screen.getByLabelText('Treats for classmates, from 15 tokens: Full'));
     expect(router.push).toHaveBeenLastCalledWith('/leaderboards');
     fireEvent.press(screen.getByLabelText('AI Coach, 10 tokens: Ready'));
-    expect(router.navigate).toHaveBeenLastCalledWith('/(tabs)/profile');
+    expect(router.dismissTo).toHaveBeenLastCalledWith('/(tabs)/profile');
 
     expect(screen.queryByText('Streak Freeze sheet')).toBeNull();
     fireEvent.press(screen.getByLabelText('Streak Freeze, 30 tokens: Ready'));
@@ -301,6 +304,29 @@ describe('Tokens screen', () => {
     expect(historyMock).toHaveBeenCalledTimes(2);
   });
 
+  it('starts the history over when it opens again after more new rows than a page', async () => {
+    const screen = await renderWallet();
+    fireEvent.press(screen.getByText('See all'));
+    fireEvent.press(screen.getByText('Load more'));
+    expect(await screen.findByText('Redeemed Premium Theme')).toBeTruthy();
+    screen.unmount();
+
+    // Days later: a whole page of new rows, and more of them after it (cursor 'c2').
+    const fresh = Array.from({ length: 7 }, (_, index) => row(`check-in:new:${index}`, 5, `New check-in ${index}`, 'check-in', at(0, 12) + index * 60_000)).reverse();
+    historyMock.mockImplementation(async ({ before }: { before?: string | null }) => (before === 'c2'
+      ? { ok: true, items: [row('check-in:new:older', 5, 'Older new check-in', 'check-in', at(0, 11) + 30 * 60_000)], nextCursor: 'c1', totals }
+      : { ok: true, items: fresh, nextCursor: 'c2', totals }));
+    const again = render(<WalletScreen />);
+    await again.findByText('New check-in 6');
+    fireEvent.press(again.getByText('See all'));
+    // The rows loaded before are not shown after the new page as if nothing came between them.
+    expect(again.queryByText('Checked in: Read')).toBeNull();
+    expect(again.queryByText('Redeemed Premium Theme')).toBeNull();
+    fireEvent.press(again.getByText('Load more'));
+    expect(await again.findByText('Older new check-in')).toBeTruthy();
+    expect(historyMock).toHaveBeenLastCalledWith({ filter: 'all', before: 'c2', limit: 30 });
+  });
+
   it('opens on the whole history from /wallet?section=history', async () => {
     mockParams.section = 'history';
     const screen = await renderWallet();
@@ -317,5 +343,21 @@ describe('Tokens screen', () => {
     expect(screen.queryByText('Tokens')).toBeNull();
     expect(summaryMock).not.toHaveBeenCalled();
     expect(historyMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('withFirstPage', () => {
+  const known = { items: [...firstPage, ...olderPage], nextCursor: null };
+
+  it('keeps the rows Load more brought after a reload that reaches them', () => {
+    const page = { items: [row('check-in:h3:c', 5, 'Checked in: Stretch', 'check-in', at(0, 12)), ...firstPage.slice(0, 5)], nextCursor: 'c0' };
+    const merged = withFirstPage(page, known);
+    expect(merged.items.map((item) => item.id)).toEqual(['check-in:h3:c', ...firstPage.map((item) => item.id), 'legacy-uuid']);
+    expect(merged.nextCursor).toBeNull();
+  });
+
+  it('drops them when the new page ends before them (the rows in between were never loaded)', () => {
+    const page = { items: [row('check-in:h4:d', 5, 'Checked in: Swim', 'check-in', at(0, 12) + 60_000), row('check-in:h3:c', 5, 'Checked in: Stretch', 'check-in', at(0, 12))], nextCursor: 'c9' };
+    expect(withFirstPage(page, known)).toEqual(page);
   });
 });
