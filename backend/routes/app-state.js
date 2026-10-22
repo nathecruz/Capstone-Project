@@ -19,6 +19,7 @@ import {
 import { setCheckIn } from '../services/check-ins.js';
 import { applyWallet, getWallet, PAID_CHECK_INS_PER_DAY } from '../services/wallet.js';
 import { notifyReminderChange } from '../services/web-push-clock.js';
+import { recordDueMarks } from '../services/weekly-bonus.js';
 import { stampActiveUntil } from '../services/weekly-reset.js';
 
 /** The app's blank startup state: sent before an account's state loaded, it has no email and no habits. */
@@ -81,6 +82,10 @@ export default function registerAppStateRoutes(app) {
 
       const updatedAt = Math.max(clientUpdatedAt || 0, Date.now());
       const savedUpdatedAt = Math.max(updatedAt, existingUpdatedAt || 0) + (existingUpdatedAt === updatedAt ? 1 : 0);
+      // The check-ins due on the days already over, from the habits as stored before this save (the
+      // only one that can drop or reschedule them), so deleting a missed habit cannot raise the
+      // weekly bonus (services/weekly-bonus.js).
+      await recordDueMarks(connection, session.userId, today);
       await syncNormalizedState(session.userId, state, savedUpdatedAt, connection);
       const serverState = await buildServerState(session.userId, state, connection);
       await saveUserAppState(session.userId, serverState, savedUpdatedAt, connection);

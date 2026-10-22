@@ -15,7 +15,8 @@ import { goalPlanSchema } from '../schemas.js';
 import { normalizeAppState } from '../services/app-state-sync.js';
 import { isValidCompletionDate } from '../services/completion-date.js';
 import { weekEndKey } from '../services/habit-week.js';
-import { weeklyQuests } from '../services/quests.js';
+import { BUDDY_DROPS, dropForWeek, weeksUntilDrop } from '../services/buddy.js';
+import { weekStartOf, weeklyQuests } from '../services/quests.js';
 import { retireRewards } from '../services/rewards.js';
 import { doneActionSecret, makeDoneToken } from '../services/web-push-actions.js';
 import { getSupportEmailConfig } from '../services/support-email.js';
@@ -1279,6 +1280,143 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
       await aiExit;
       await new Promise((resolve) => groq.close(resolve));
     }
+  });
+
+  const shiftDay = (date, days) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+  const checkInOn = (userId, habitId, date) => db.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4)', [userId, habitId, date, Date.now()]);
+
+  await t.test('the weekly bonus is worked out on the server, paid once, and deleting a missed habit cannot raise it', async () => {
+    const { headers, userId } = await student('Wes', 'Bonus');
+    // The account day is in UTC, so it is the test's today.
+    await db.query("UPDATE users SET time_zone='UTC' WHERE id=$1", [userId]);
+    const lastMonday = shiftDay(weekStartOf(today), -7);
+    const lastWeek = Array.from({ length: 7 }, (_, index) => shiftDay(lastMonday, index));
+    const habit = (id) => ({ ...appState.habits[0], id, label: id, startDate: lastMonday, activeUntil: lastWeek[6] });
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: ['walk', 'read', 'gym'].map(habit) }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    // Walk and read every day of last week, the gym never: 14 of 21 (66%).
+    for (const date of lastWeek) for (const habitId of ['walk', 'read']) await checkInOn(userId, habitId, date);
+
+    const day = `date=${today}&timeZone=UTC`;
+    assert.equal((await request('/api/weekly-bonus', { headers })).response.status, 400);
+    const closed = await request(`/api/weekly-bonus?date=${lastMonday}&timeZone=UTC`, { headers });
+    assert.deepEqual([closed.response.status, closed.body.code, closed.body.today, closed.body.timeZone], [409, 'DAY_CLOSED', today, 'UTC']);
+    const steady = { percent: 60, amount: 10, label: 'Steady week' };
+    const bonus = await request(`/api/weekly-bonus?${day}`, { headers });
+    assert.equal(bonus.response.status, 200, JSON.stringify(bonus.body));
+    const { weekStart, scheduled, done, percent, activeDays, eligible, tier, claimed, claimable } = bonus.body.lastWeek;
+    assert.deepEqual({ weekStart, scheduled, done, percent, activeDays, eligible, tier, claimed, claimable }, { weekStart: lastMonday, scheduled: 21, done: 14, percent: 66, activeDays: 7, eligible: true, tier: steady, claimed: false, claimable: true });
+    assert.equal(bonus.body.thisWeek.weekStart, weekStartOf(today));
+    assert.equal(bonus.body.tiers.length, 3);
+
+    // The gym habit is deleted after its days passed: the 7 check-ins it missed still count.
+    const deleted = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...saved.body.state, habits: saved.body.state.habits.filter((entry) => entry.id !== 'gym'), baseUpdatedAt: saved.body.updatedAt, baseState: saved.body.state }) });
+    assert.deepEqual([deleted.response.status, deleted.body.state.habits.length], [200, 2], JSON.stringify(deleted.body));
+    assert.deepEqual((await db.query('SELECT due FROM weekly_due_marks WHERE user_id=$1 AND week_start=$2', [userId, lastMonday])).rows, [{ due: 21 }]);
+    const after = (await request(`/api/weekly-bonus?${day}`, { headers })).body.lastWeek;
+    assert.deepEqual([after.scheduled, after.done, after.percent, after.tier], [21, 14, 66, steady], 'not 100% (+30)');
+
+    // Two devices claim at once: paid once, and both get the same amount.
+    const claim = () => request('/api/weekly-bonus/claim', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+    const claims = await Promise.all([claim(), claim()]);
+    assert.ok(claims.every((answer) => answer.response.status === 200), JSON.stringify(claims.map((answer) => answer.body)));
+    assert.deepEqual(claims.map((answer) => answer.body.alreadyClaimed).sort(), [false, true]);
+    for (const answer of claims) assert.deepEqual([answer.body.amount, answer.body.percent, answer.body.tier, answer.body.tokens], [10, 66, steady, 10]);
+    const first = claims.find((answer) => !answer.body.alreadyClaimed).body;
+    assert.ok(first.updatedAt > saved.body.updatedAt && first.points === 280, JSON.stringify(first));
+    const row = first.tokenHistory.find((item) => item.id === `week:${lastMonday}`);
+    assert.deepEqual([row?.amount, row?.label], [10, 'Weekly bonus: 66% (Steady week)']);
+    const again = await claim();
+    assert.deepEqual([again.response.status, again.body.amount, again.body.alreadyClaimed, again.body.tokens], [200, 10, true, 10], 'a second claim returns the same amount');
+    assert.deepEqual((await db.query("SELECT amount FROM token_transactions WHERE user_id=$1 AND id LIKE '%:token:week:%'", [userId])).rows, [{ amount: 10 }]);
+    const paid = (await request(`/api/weekly-bonus?${day}`, { headers })).body.lastWeek;
+    assert.deepEqual([paid.claimed, paid.claimedAmount, paid.claimable], [true, 10, false]);
+  });
+
+  await t.test('the weekly bonus: only last week can be claimed, and only from 60%', async () => {
+    const { headers, userId } = await student('Nia', 'Lowe');
+    await db.query("UPDATE users SET time_zone='UTC' WHERE id=$1", [userId]);
+    const claim = (date = today) => request('/api/weekly-bonus/claim', { method: 'POST', headers, body: JSON.stringify({ date, timeZone: 'UTC' }) });
+    const empty = await claim();
+    assert.deepEqual([empty.response.status, empty.body], [409, { ok: false, code: 'BONUS_NOT_EARNED', message: 'Last week had fewer than 7 scheduled check-ins.' }]);
+
+    // The week before last was perfect; last week reached 10 of 21 (47%).
+    const lastMonday = shiftDay(weekStartOf(today), -7);
+    const mondayBefore = shiftDay(lastMonday, -7);
+    const habit = (id, monday) => ({ ...appState.habits[0], id, label: id, startDate: monday, activeUntil: shiftDay(monday, 6) });
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [...['a', 'b', 'c'].map((id) => habit(id, mondayBefore)), ...['x', 'y', 'z'].map((id) => habit(id, lastMonday))] }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    for (let index = 0; index < 7; index += 1) {
+      for (const habitId of ['a', 'b', 'c']) await checkInOn(userId, habitId, shiftDay(mondayBefore, index));
+      await checkInOn(userId, 'x', shiftDay(lastMonday, index));
+      if (index < 3) await checkInOn(userId, 'y', shiftDay(lastMonday, index));
+    }
+    const low = await claim();
+    assert.deepEqual([low.response.status, low.body], [409, { ok: false, code: 'BONUS_NOT_EARNED', message: 'Last week reached 47%. Reach 60% this week for +10 tokens.' }]);
+    const status = (await request(`/api/weekly-bonus?date=${today}&timeZone=UTC`, { headers })).body.lastWeek;
+    assert.deepEqual([status.weekStart, status.percent, status.eligible, status.reason, status.tier, status.claimable], [lastMonday, 47, false, 'low-rate', null, false]);
+    // The week before last cannot be claimed: not from today, and not with one of its own days.
+    const old = await claim(shiftDay(mondayBefore, 6));
+    assert.deepEqual([old.response.status, old.body.code, old.body.today], [409, 'DAY_CLOSED', today]);
+    assert.equal((await db.query("SELECT 1 FROM token_transactions WHERE user_id=$1 AND id LIKE '%:token:week:%'", [userId])).rowCount, 0, 'no bonus was paid');
+  });
+
+  await t.test('the weekly drop is sold in its week, after 2 of 3 quests, from the Kid stage, once', async () => {
+    // A time zone where today is not a Monday, so yesterday is in the same week.
+    const zone = ['Etc/GMT+12', 'Etc/GMT-14'].find((candidate) => new Date(`${dateIn(candidate)}T00:00:00Z`).getUTCDay() !== 1);
+    const day = dateIn(zone);
+    const yesterday = shiftDay(day, -1);
+    const drop = dropForWeek(weekStartOf(day));
+    const other = BUDDY_DROPS.find((entry) => entry.id !== drop.id);
+    const buy = (headers, itemId, dayInput = { date: day, timeZone: zone }) => request('/api/buddy/items', { method: 'POST', headers, body: JSON.stringify({ itemId, ...dayInput }) });
+    const { headers, userId } = await student('Dina', 'Drop');
+    await db.query('UPDATE users SET time_zone=$2 WHERE id=$1', [userId, zone]);
+    await grant(userId, 400, 'drop-grant');
+
+    // A drop needs the account's today, and only this week's is on sale.
+    assert.deepEqual([(await buy(headers, drop.id, {})).response.status, (await buy(headers, drop.id, {})).body.message], [400, 'Send your today and time zone.']);
+    const closed = await buy(headers, drop.id, { date: yesterday, timeZone: zone });
+    assert.deepEqual([closed.response.status, closed.body.code, closed.body.today], [409, 'DAY_CLOSED', day]);
+    const gone = await buy(headers, other.id);
+    const weeks = weeksUntilDrop(other, weekStartOf(day));
+    assert.deepEqual([gone.response.status, gone.body], [410, { ok: false, code: 'DROP_GONE', message: `This drop is gone for now. It comes back in ${weeks} week${weeks === 1 ? '' : 's'}.` }]);
+    const baby = await buy(headers, drop.id);
+    assert.deepEqual([baby.response.status, baby.body.code, baby.body.message], [403, undefined, 'Habi needs to reach the Kid stage (10 check-ins) first.']);
+
+    // Seven habits, six of them checked in yesterday and today: 12 check-ins (one quest), no perfect day.
+    const ids = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7'];
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: ids.map((id) => ({ ...appState.habits[0], id, label: id })) }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    for (const date of [yesterday, day]) for (const habitId of ids.slice(0, 6)) await checkInOn(userId, habitId, date);
+    const questHabits = ids.map((id) => ({ id, frequency: 'Daily', startDate: '2026-01-01', reminderDays: [], meta: '' }));
+    const doneBy = (habitIds) => new Map([[yesterday, new Set(habitIds)], [day, new Set(habitIds)]]);
+    assert.equal(weeklyQuests(questHabits, doneBy(ids.slice(0, 6)), day).filter((quest) => quest.complete).length, 1);
+    const locked = await buy(headers, drop.id);
+    assert.deepEqual([locked.response.status, locked.body], [403, { ok: false, code: 'DROP_LOCKED', message: `Finish 2 of this week's 3 quests to unlock the ${drop.name}.` }]);
+    const lockedCard = (await request(`/api/buddy?date=${day}&timeZone=${encodeURIComponent(zone)}`, { headers })).body.buddy;
+    assert.deepEqual(lockedCard.drop, { item: drop, weekStart: weekStartOf(day), weekEnd: shiftDay(weekStartOf(day), 6), questsDone: 1, questsNeeded: 2, unlocked: false, owned: false });
+    assert.deepEqual([lockedCard.drops.length, lockedCard.dropsOwned, lockedCard.items.some((item) => item.id === 'aurora')], [12, 0, true]);
+
+    // The seventh habit too: two perfect days complete a second quest.
+    for (const date of [yesterday, day]) await checkInOn(userId, 'h7', date);
+    assert.ok(weeklyQuests(questHabits, doneBy(ids), day).filter((quest) => quest.complete).length >= 2);
+    const bought = await buy(headers, drop.id);
+    assert.equal(bought.response.status, 200, JSON.stringify(bought.body));
+    assert.deepEqual([bought.body.buddy[drop.slot], bought.body.buddy.owned, bought.body.tokens], [drop.id, [drop.id], 250], 'worn right away, for 150 tokens');
+    assert.deepEqual([bought.body.buddy.drop.owned, bought.body.buddy.drop.unlocked, bought.body.buddy.dropsOwned], [true, true, 1]);
+    assert.deepEqual(bought.body.tokenHistory.find((item) => item.amount === -150).label, `Buddy: ${drop.name} (weekly drop)`);
+    const twice = await buy(headers, drop.id);
+    assert.deepEqual([twice.response.status, twice.body.message], [409, 'You already have this item.']);
+
+    // Worn like any item, in its own slot only; another drop must be bought first.
+    assert.equal((await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ [drop.slot]: '' }) })).body.buddy[drop.slot], '');
+    const worn = await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ [drop.slot]: drop.id }) });
+    assert.deepEqual([worn.response.status, worn.body.buddy[drop.slot], worn.body.buddy.drop.item.id], [200, drop.id, drop.id]);
+    const wrongSlot = ['head', 'hand', 'accessory'].find((slot) => slot !== drop.slot);
+    assert.equal((await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ [wrongSlot]: drop.id }) })).response.status, 400);
+    assert.equal((await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ [other.slot]: other.id }) })).response.status, 400);
+    const listed = (await request('/api/buddy', { headers })).body.buddy;
+    assert.deepEqual([listed.drop, listed.dropsOwned, listed.owned], [null, 1, [drop.id]], 'without a date there is no drop card, but the collection counts');
   });
 
   await t.test('issue reports store attachments in the database and validate content', async () => {

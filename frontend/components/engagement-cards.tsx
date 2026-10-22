@@ -1,5 +1,6 @@
 // Small Home cards that give a reason to come back every day: the level bar, the evening
-// streak alert, the daily challenge and the Monday recap of last week.
+// streak alert, the daily challenge, the weekly quests and the Monday recap of last week with its
+// consistency bonus.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -10,9 +11,12 @@ import { Confetti } from '@/components/confetti';
 import { openFocus } from '@/components/today-agenda';
 import type { Goal, Habit, TokenTransaction } from '@/hooks/app-state/types';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
+import { useBuddy } from '@/hooks/use-buddy';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
+import { claimLastWeekBonus, useWeeklyBonus } from '@/hooks/use-weekly-bonus';
 import { badgeProgress, badgeRemaining, nextBadge } from '@/utils/achievements';
 import { askAi } from '@/utils/ai-client';
+import { dropQuestsFooter } from '@/utils/buddy';
 import { computeStreak } from '@/utils/streaks';
 import { dailyChallenge, habitsAtRisk, levelProgress, POINTS_PER_LEVEL, weeklyRecap } from '@/utils/engagement';
 import { getLocalDateKey } from '@/utils/habit-visibility';
@@ -99,38 +103,86 @@ export function NextBadgeCard({ habits, goals, style }: { habits: Habit[]; goals
   );
 }
 
-/** This week's three quests, their progress and the tokens they pay (the server pays them). */
+/** Claims last week's bonus (from the recap or the Quests tab): pays it into the wallet and celebrates it once. */
+function useBonusClaim(now: Date) {
+  const { applyWallet, celebrate } = useAppColorScheme();
+  const today = getLocalDateKey(now);
+  const weekly = useWeeklyBonus(today);
+  const claim = async () => {
+    const lastWeek = weekly.bonus?.lastWeek;
+    const result = await claimLastWeekBonus(today);
+    if (!result?.ok) return;
+    applyWallet(result);
+    // Already paid (another device or a double tap): shown as claimed, without a second celebration.
+    if (result.alreadyClaimed) return;
+    const label = result.tier?.label ?? lastWeek?.tier?.label ?? 'Weekly bonus';
+    celebrate({ id: `weekly-bonus:${lastWeek?.weekStart ?? today}`, kind: 'bonus', icon: 'trophy', title: 'Weekly bonus!', message: `${label}: +${result.amount} tokens.` });
+  };
+  return { ...weekly, claim };
+}
+
+/**
+ * This week's three quests, their progress and the tokens they pay (the server pays them). It starts
+ * with last week's bonus while it waits to be claimed (also when the recap was closed), says how
+ * close this week is to the next bonus tier, and ends with the weekly drop the quests unlock.
+ */
 export function WeeklyQuestsCard({ habits, now, style }: { habits: Habit[]; now: Date; style?: object | false }) {
   const styles = useThemedStyles(themedStyles);
   const quests = weeklyQuests(habits, now);
-  if (!quests.length) return null;
+  const { bonus, claiming, error, claim } = useBonusClaim(now);
+  // Read only: Home's Habi tile loads the buddy, with this week's drop.
+  const { buddy } = useBuddy(false);
+  const waiting = bonus?.lastWeek.claimable ? bonus.lastWeek : null;
+  if (!quests.length && !waiting) return null;
   const left = daysLeftInWeek(now);
+  const done = quests.filter((quest) => quest.complete).length;
   const earned = quests.filter((quest) => quest.complete).reduce((sum, quest) => sum + quest.reward, 0);
   const total = quests.reduce((sum, quest) => sum + quest.reward, 0);
+  const next = bonus?.thisWeek.next;
+  const soFar = bonus && next?.reachable && next.checkInsNeeded > 0
+    ? `This week so far: ${bonus.thisWeek.percentSoFar}% · ${next.checkInsNeeded} more check-in${next.checkInsNeeded === 1 ? ' reaches' : 's reach'} ${next.percent}% (+${next.amount})`
+    : null;
+  const footer = quests.length ? dropQuestsFooter(buddy?.drop, done) : null;
   return (
     <View style={[styles.card, style]}>
-      <View style={styles.cardHeader}>
-        <View style={[styles.cardIcon, styles.questIcon]}><Ionicons name="flag" size={16} color="#FFFFFF" /></View>
-        <View style={styles.cardCopy}>
-          <Text style={styles.cardTitle}>Weekly quests</Text>
-          <Text style={styles.cardText}>{left} day{left === 1 ? '' : 's'} left · {earned}/{total} tokens earned</Text>
+      {waiting && (
+        <View style={[styles.bonusWaiting, quests.length > 0 && styles.bonusWaitingAbove]}>
+          <Ionicons name="gift" size={16} color="#9A6A12" />
+          <Text style={styles.bonusWaitingText}>Last week&apos;s bonus is waiting: +{waiting.tier?.amount ?? 0}</Text>
+          <Pressable style={({ pressed }) => [styles.bonusClaim, pressed && styles.pressed]} onPress={claim} disabled={claiming} accessibilityRole="button" accessibilityLabel={`Claim last week's bonus of ${waiting.tier?.amount ?? 0} tokens`}>
+            <Text style={styles.bonusClaimText}>{claiming ? 'Claiming…' : 'Claim'}</Text>
+          </Pressable>
         </View>
-      </View>
-      <View style={styles.questList}>
-        {quests.map((quest) => (
-          <View key={quest.id} style={styles.questRow} accessible accessibilityLabel={`${quest.title}: ${quest.progress} of ${quest.target}${quest.complete ? ', done' : ''}, ${quest.reward} tokens`}>
-            <View style={[styles.questBadge, quest.complete && styles.questBadgeDone]}>
-              <Ionicons name={(quest.complete ? 'checkmark' : quest.icon) as keyof typeof Ionicons.glyphMap} size={14} color={quest.complete ? '#FFFFFF' : '#4BA3FF'} />
+      )}
+      {waiting && error ? <Text style={styles.tipError}>{error}</Text> : null}
+      {quests.length > 0 && (
+        <>
+          <View style={styles.cardHeader}>
+            <View style={[styles.cardIcon, styles.questIcon]}><Ionicons name="flag" size={16} color="#FFFFFF" /></View>
+            <View style={styles.cardCopy}>
+              <Text style={styles.cardTitle}>Weekly quests</Text>
+              <Text style={styles.cardText}>{left} day{left === 1 ? '' : 's'} left · {earned}/{total} tokens earned</Text>
             </View>
-            <View style={styles.questCopy}>
-              <Text style={[styles.questTitle, quest.complete && styles.questTitleDone]} numberOfLines={1}>{quest.title}</Text>
-              <View style={styles.questTrack}><View style={[styles.questFill, quest.complete && styles.questFillDone, { width: `${Math.round((quest.progress / quest.target) * 100)}%` }]} /></View>
-            </View>
-            <Text style={styles.questCount}>{quest.progress}/{quest.target}</Text>
-            <View style={[styles.rewardChip, quest.complete && styles.rewardChipDone]}><Text style={[styles.rewardText, quest.complete && styles.rewardTextDone]}>+{quest.reward}</Text></View>
           </View>
-        ))}
-      </View>
+          <View style={styles.questList}>
+            {quests.map((quest) => (
+              <View key={quest.id} style={styles.questRow} accessible accessibilityLabel={`${quest.title}: ${quest.progress} of ${quest.target}${quest.complete ? ', done' : ''}, ${quest.reward} tokens`}>
+                <View style={[styles.questBadge, quest.complete && styles.questBadgeDone]}>
+                  <Ionicons name={(quest.complete ? 'checkmark' : quest.icon) as keyof typeof Ionicons.glyphMap} size={14} color={quest.complete ? '#FFFFFF' : '#4BA3FF'} />
+                </View>
+                <View style={styles.questCopy}>
+                  <Text style={[styles.questTitle, quest.complete && styles.questTitleDone]} numberOfLines={1}>{quest.title}</Text>
+                  <View style={styles.questTrack}><View style={[styles.questFill, quest.complete && styles.questFillDone, { width: `${Math.round((quest.progress / quest.target) * 100)}%` }]} /></View>
+                </View>
+                <Text style={styles.questCount}>{quest.progress}/{quest.target}</Text>
+                <View style={[styles.rewardChip, quest.complete && styles.rewardChipDone]}><Text style={[styles.rewardText, quest.complete && styles.rewardTextDone]}>+{quest.reward}</Text></View>
+              </View>
+            ))}
+          </View>
+        </>
+      )}
+      {soFar ? <Text style={styles.questNote}>{soFar}</Text> : null}
+      {footer ? <Text style={styles.questNote}>{footer}</Text> : null}
     </View>
   );
 }
@@ -270,11 +322,17 @@ export function DailyChallengeCard({ habits, now, style }: { habits: Habit[]; no
 const RECAP_KEY = 'habitai:recap-dismissed';
 const dayName = (dateKey: string) => new Date(`${dateKey}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long' });
 
-/** Last week in numbers, with one AI tip on request; hidden for the rest of the week once closed. */
+/**
+ * Last week in numbers, as the server counts them for the weekly bonus (the change and the best day
+ * are the app's own), the bonus ladder and its claim, then the AI planner for the new week and one
+ * AI tip on request. Hidden for the rest of the week once closed: an unclaimed bonus still waits on
+ * the Quests tab.
+ */
 export function WeeklyRecapCard({ habits, now, style }: { habits: Habit[]; now: Date; style?: object | false }) {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const recap = weeklyRecap(habits, now);
+  const { bonus, claiming, error, claim } = useBonusClaim(now);
   const [dismissedWeek, setDismissedWeek] = useState<string | null | undefined>(undefined);
   const [tip, setTip] = useState<{ loading: boolean; text?: string; error?: string }>({ loading: false });
 
@@ -287,17 +345,23 @@ export function WeeklyRecapCard({ habits, now, style }: { habits: Habit[]; now: 
   }, []);
 
   const { lastWeek, change } = recap;
-  if (dismissedWeek === undefined || dismissedWeek === recap.weekKey || !lastWeek.scheduled) return null;
+  // The server's count once it answered (habits started after Wednesday wait for next week), else the app's.
+  const counted = bonus?.lastWeek ?? null;
+  const scheduled = counted ? counted.scheduled : lastWeek.scheduled;
+  const done = counted ? counted.done : lastWeek.done;
+  const percent = counted ? counted.percent : Math.round((lastWeek.rate ?? 0) * 100);
+  if (dismissedWeek === undefined || dismissedWeek === recap.weekKey || !scheduled) return null;
 
-  const percent = Math.round((lastWeek.rate ?? 0) * 100);
   const changePoints = change === null ? null : Math.round(change * 100);
+  const reached = counted?.eligible ? counted.tier : null;
+  const lowest = bonus?.tiers[0];
   const dismiss = () => {
     setDismissedWeek(recap.weekKey);
     AsyncStorage.setItem(RECAP_KEY, recap.weekKey).catch(() => undefined);
   };
   const getTip = async () => {
     setTip({ loading: true });
-    const result = await askAi('assistant', `Weekly recap: last week I completed ${lastWeek.done} of ${lastWeek.scheduled} scheduled habit check-ins (${percent}%)${lastWeek.bestDay ? `, best day ${dayName(lastWeek.bestDay)}` : ''}. Give me one short, specific tip to do better this week.`);
+    const result = await askAi('assistant', `Weekly recap: last week I completed ${done} of ${scheduled} scheduled habit check-ins (${percent}%)${lastWeek.bestDay ? `, best day ${dayName(lastWeek.bestDay)}` : ''}. Give me one short, specific tip to do better this week.`);
     setTip(result.ok ? { loading: false, text: result.answer } : { loading: false, error: result.message });
   };
 
@@ -316,7 +380,7 @@ export function WeeklyRecapCard({ habits, now, style }: { habits: Habit[]; now: 
       <View style={styles.recapStats}>
         <View style={styles.recapStat}>
           <Text style={styles.recapValue}>{percent}%</Text>
-          <Text style={styles.recapLabel}>{lastWeek.done}/{lastWeek.scheduled} done</Text>
+          <Text style={styles.recapLabel}>{done}/{scheduled} done</Text>
         </View>
         <View style={styles.recapStat}>
           <Text style={[styles.recapValue, changePoints !== null && changePoints > 0 && styles.up, changePoints !== null && changePoints < 0 && styles.down]}>
@@ -329,6 +393,41 @@ export function WeeklyRecapCard({ habits, now, style }: { habits: Habit[]; now: 
           <Text style={styles.recapLabel}>best day</Text>
         </View>
       </View>
+      {bonus && (
+        <View style={styles.ladder} accessible accessibilityLabel={`Weekly bonus: ${bonus.tiers.map((tier) => `${tier.percent}% pays ${tier.amount} tokens`).join(', ')}${reached ? `. Last week reached ${reached.percent}%` : ''}`}>
+          {bonus.tiers.map((tier, index) => (
+            <React.Fragment key={tier.percent}>
+              {index > 0 ? <Text style={styles.ladderDot}>·</Text> : null}
+              <View style={[styles.ladderStep, reached?.percent === tier.percent && styles.ladderStepReached]}>
+                <Text style={[styles.ladderText, reached?.percent === tier.percent && styles.ladderTextReached]}>{tier.percent}% +{tier.amount}</Text>
+              </View>
+            </React.Fragment>
+          ))}
+        </View>
+      )}
+      {counted?.claimable && counted.tier ? (
+        <Pressable style={({ pressed }) => [styles.claimButton, pressed && styles.pressed]} onPress={claim} disabled={claiming} accessibilityRole="button">
+          {claiming ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="gift" size={15} color="#FFFFFF" />}
+          <Text style={styles.claimButtonText}>Claim +{counted.tier.amount} tokens</Text>
+        </Pressable>
+      ) : counted?.claimed ? (
+        <View style={styles.claimed}>
+          <View style={styles.claimedRow}>
+            <Ionicons name="checkmark-circle" size={16} color="#2E8F5E" />
+            <Text style={styles.claimedText}>Claimed +{counted.claimedAmount ?? counted.tier?.amount ?? 0} tokens</Text>
+          </View>
+          <Pressable style={({ pressed }) => [styles.planButton, pressed && styles.pressed]} onPress={() => router.push('/(tabs)/goals')} accessibilityRole="button">
+            <Ionicons name="sparkles" size={15} color="#FFFFFF" />
+            <Text style={styles.planButtonText}>Plan this week with AI</Text>
+          </Pressable>
+        </View>
+      ) : counted && !counted.eligible && lowest ? (
+        <View style={styles.notEarned}>
+          <Text style={styles.notEarnedText}>Reach {lowest.percent}% this week for +{lowest.amount} tokens.</Text>
+          <Text style={styles.smallPrint}>Habits added after Wednesday count from next week.</Text>
+        </View>
+      ) : null}
+      {error && counted?.claimable ? <Text style={styles.tipError}>{error}</Text> : null}
       {tip.text ? (
         <View style={styles.tip}><Ionicons name="sparkles" size={14} color={themeColor('#5B42D8')} /><Text style={styles.tipText}>{tip.text}</Text></View>
       ) : (
@@ -419,4 +518,27 @@ const themedStyles = createThemedStyles({
   tip: { flexDirection: 'row', gap: 8, marginTop: 10, padding: 10, borderRadius: 12, backgroundColor: '#F4F0FF' },
   tipText: { flex: 1, fontSize: 12, lineHeight: 18, fontWeight: '600', color: '#3A3546' },
   tipError: { marginTop: 6, fontSize: 11, fontWeight: '700', color: '#C2543E' },
+  // The weekly bonus: its ladder (the tier last week reached stands out), the claim, then the planner.
+  ladder: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 6, marginTop: 10 },
+  ladderDot: { fontSize: 12, fontWeight: '900', color: '#B5AFC0' },
+  ladderStep: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999, backgroundColor: '#F4F1FA' },
+  ladderStepReached: { backgroundColor: '#E7A72F' },
+  ladderText: { fontSize: 11, fontWeight: '800', color: '#6A6573' },
+  ladderTextReached: { color: '#FFFFFF' },
+  claimButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 10, height: 40, borderRadius: 12, backgroundColor: '#E7A72F' },
+  claimButtonText: { fontSize: 13, fontWeight: '900', color: '#FFFFFF' },
+  claimed: { gap: 8, marginTop: 10 },
+  claimedRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  claimedText: { fontSize: 13, fontWeight: '800', color: '#2E8F5E' },
+  planButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 40, borderRadius: 12, backgroundColor: '#5B42D8' },
+  planButtonText: { fontSize: 13, fontWeight: '900', color: '#FFFFFF' },
+  notEarned: { gap: 2, marginTop: 10, alignItems: 'center' },
+  notEarnedText: { fontSize: 12, fontWeight: '800', color: '#4A4556', textAlign: 'center' },
+  smallPrint: { fontSize: 10, fontWeight: '600', color: '#8A8492', textAlign: 'center' },
+  bonusWaiting: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: 14, backgroundColor: '#FFF4D9' },
+  bonusWaitingAbove: { marginBottom: 12 },
+  bonusWaitingText: { flex: 1, fontSize: 12, fontWeight: '800', color: '#7A5512' },
+  bonusClaim: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: '#E7A72F' },
+  bonusClaimText: { fontSize: 12, fontWeight: '900', color: '#FFFFFF' },
+  questNote: { marginTop: 10, fontSize: 11, fontWeight: '700', color: '#6A6573' },
 });

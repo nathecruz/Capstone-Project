@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BUDDY_ITEMS, BUDDY_STAGES, BUDDY_TREATS, buddyStageIndex } from '../services/buddy.js';
+import { BUDDY_DROPS, BUDDY_ITEMS, BUDDY_STAGES, BUDDY_TREATS, buddyStageIndex, dropForWeek, isBuddyDrop, weeksUntilDrop } from '../services/buddy.js';
 import { MYSTERY_REWARDS, pickMysteryReward } from '../services/mystery-box.js';
 import { weekStartOf, weeklyQuests } from '../services/quests.js';
 import { daysToFreeze, STREAK_FREEZE_COST, STREAK_FREEZE_MAX } from '../services/streak-freeze.js';
@@ -66,6 +66,31 @@ test('the buddy grows with check-ins and the shop has a price and stage for ever
   for (const treat of BUDDY_TREATS) {
     assert.ok(treat.cost > 0 && Boolean(treat.emoji) && Boolean(treat.line), treat.id);
   }
+});
+
+test('the weekly drop: 12 items in turn, one a week, back every 12 weeks', () => {
+  const mondays = Array.from({ length: 13 }, (_, week) => new Date(Date.parse('2026-10-19T00:00:00Z') + week * 7 * 86_400_000).toISOString().slice(0, 10));
+  const drops = mondays.map(dropForWeek);
+  assert.equal(new Set(drops.slice(0, 12).map((drop) => drop.id)).size, 12, '12 consecutive weeks show all 12 drops');
+  assert.equal(drops[12], drops[0], 'week 13 repeats week 1');
+  assert.equal(dropForWeek('2026-10-25'), dropForWeek('2026-10-19'), 'the same drop all week, Monday to Sunday');
+  assert.notEqual(dropForWeek('2026-10-26'), dropForWeek('2026-10-19'));
+  assert.deepEqual(mondays.slice(0, 12).map((monday) => weeksUntilDrop(drops[0], monday)), [0, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
+  assert.deepEqual(BUDDY_DROPS.map((drop) => drop.id), ['drop-umbrella', 'drop-rice', 'drop-carabao', 'drop-mango', 'drop-salabat', 'drop-lantern', 'drop-sunflower', 'drop-parol', 'drop-fireworks', 'drop-mini-tree', 'drop-sports-medal', 'drop-ribbon']);
+  for (const drop of BUDDY_DROPS) {
+    assert.deepEqual([drop.cost, drop.stage, drop.drop, isBuddyDrop(drop.id)], [150, 'kid', true, true], drop.id);
+    assert.ok(['head', 'hand', 'accessory'].includes(drop.slot) && Boolean(drop.emoji) && Boolean(drop.name), drop.id);
+  }
+  const shopIds = new Set(BUDDY_ITEMS.map((item) => item.id));
+  assert.ok(BUDDY_DROPS.every((drop) => !shopIds.has(drop.id)), 'drop ids do not collide with shop items');
+  assert.ok(!isBuddyDrop('cap'));
+});
+
+test('the Legend stage has four items, and the shop totals 6,975 tokens', () => {
+  const legend = BUDDY_ITEMS.filter((item) => item.stage === 'legend');
+  assert.deepEqual(legend.map(({ id, slot, cost }) => [id, slot, cost]).sort(), [['aurora', 'room', 500], ['diamond', 'accessory', 450], ['dragon', 'hand', 420], ['rainbow', 'head', 360]]);
+  assert.equal(legend.reduce((sum, item) => sum + item.cost, 0), 1730);
+  assert.equal(BUDDY_ITEMS.reduce((sum, item) => sum + item.cost, 0), 6975);
 });
 
 test('streak milestone bonuses rise with the milestone and fire only on the ones just crossed', () => {

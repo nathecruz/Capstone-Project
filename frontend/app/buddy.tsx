@@ -1,6 +1,7 @@
 // Habit Buddy: the mascot that grows with every check-in. It gives tips from the student's own
 // check-ins, shows how its week went, and wears items and lives in rooms bought with tokens (the
-// server checks prices, stages and the balance). Tap it to hear its tips.
+// server checks prices, stages and the balance). Each week one limited item, the weekly drop, is
+// for sale once 2 of the week's quests are done. Tap the buddy to hear its tips.
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
@@ -11,9 +12,10 @@ import { BuddyAvatar } from '@/components/buddy';
 import { Confetti } from '@/components/confetti';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
-import { publishBuddy, useBuddy } from '@/hooks/use-buddy';
+import { publishBuddy, reloadBuddy, useBuddy } from '@/hooks/use-buddy';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
-import { buddyGrowth, buddyMood, buddyTips, buddyWeek, MOOD_FACE, PET_LINES, type BuddyItem, type BuddySlot, type BuddyTreat } from '@/utils/buddy';
+import { buddyGrowth, buddyMood, buddyTips, buddyWeek, collectedDrops, MOOD_FACE, PET_LINES, weeklyDropCard, type BuddyItem, type BuddySlot, type BuddyTreat } from '@/utils/buddy';
+import { getLocalDateKey } from '@/utils/habit-visibility';
 
 type Slot = BuddySlot;
 const TABS: { slot: Slot; label: string }[] = [{ slot: 'head', label: 'Hats' }, { slot: 'hand', label: 'To hold' }, { slot: 'accessory', label: 'Gear' }, { slot: 'room', label: 'Rooms' }];
@@ -70,25 +72,33 @@ export default function BuddyScreen() {
     else showAlert('Could not change the look', result.message);
   };
 
+  const purchase = async (item: BuddyItem, drop: boolean) => {
+    setBusy(true);
+    const result = await buyBuddyItem(item.id, getLocalDateKey());
+    setBusy(false);
+    if (!result.ok) {
+      showAlert('Not yet', result.message);
+      // The week, its quests or the account's day may have changed since the drop was loaded.
+      if (drop) void reloadBuddy();
+      return;
+    }
+    publishBuddy(result.buddy);
+    applyWallet(result);
+    setBurst((count) => count + 1);
+    setPetLine(`I love my new ${item.name.toLowerCase()}!`);
+  };
+
   const buy = (item: BuddyItem) => {
     showAlert(`Buy the ${item.name}?`, `${item.emoji}  ${item.cost} tokens. ${name} will wear it right away.`, [
       { text: 'Not now', style: 'cancel' },
-      {
-        text: `Buy for ${item.cost}`,
-        onPress: async () => {
-          setBusy(true);
-          const result = await buyBuddyItem(item.id);
-          setBusy(false);
-          if (!result.ok) {
-            showAlert('Not yet', result.message);
-            return;
-          }
-          publishBuddy(result.buddy);
-          applyWallet(result);
-          setBurst((count) => count + 1);
-          setPetLine(item.slot === 'room' ? `I love my new ${item.name.toLowerCase()}!` : `I love my new ${item.name.toLowerCase()}!`);
-        },
-      },
+      { text: `Buy for ${item.cost}`, onPress: () => purchase(item, false) },
+    ]);
+  };
+
+  const buyDrop = (item: BuddyItem) => {
+    showAlert(`Buy ${item.name} for ${item.cost} tokens?`, `${item.emoji}  This week only. ${name} will wear it right away.`, [
+      { text: 'Not now', style: 'cancel' },
+      { text: 'Get it', onPress: () => purchase(item, true) },
     ]);
   };
 
@@ -120,7 +130,11 @@ export default function BuddyScreen() {
     ]);
   };
 
-  const items = (buddy?.items ?? []).filter((item) => item.slot === slot);
+  // Collected weekly drops are worn like shop items, in their slot.
+  const drops = buddy ? collectedDrops(buddy) : [];
+  const dropIds = new Set(drops.map((item) => item.id));
+  const items = [...(buddy?.items ?? []), ...drops].filter((item) => item.slot === slot);
+  const dropCard = buddy ? weeklyDropCard(buddy, tokens) : null;
   const treats = buddy?.treats ?? [];
   const fedCount = new Map((buddy?.fedTreats ?? []).map((treat) => [treat.treatId, treat.count]));
 
@@ -138,6 +152,36 @@ export default function BuddyScreen() {
             <Text style={styles.tokenText}>{tokens}</Text>
           </View>
         </View>
+
+        {dropCard && (
+          <View style={[styles.card, styles.dropCard]}>
+            <View style={styles.cardHead}>
+              <View style={[styles.cardIcon, styles.dropIcon]}><Ionicons name="gift" size={15} color="#FFFFFF" /></View>
+              <Text style={styles.cardTitle}>This week&apos;s drop</Text>
+            </View>
+            <Text style={styles.dropLine}>{dropCard.line}</Text>
+            {dropCard.progress ? <Text style={styles.dropProgress}>{dropCard.progress}</Text> : null}
+            <View style={styles.dropFoot}>
+              <Text style={styles.dropCollected}>{dropCard.collected}</Text>
+              {dropCard.state === 'owned' ? (
+                <View style={[styles.dropButton, styles.dropButtonOwned]}>
+                  <Ionicons name="checkmark" size={13} color="#2C6B4C" />
+                  <Text style={[styles.dropButtonText, styles.dropButtonTextOwned]}>{dropCard.action}</Text>
+                </View>
+              ) : (
+                <Pressable
+                  style={({ pressed }) => [styles.dropButton, !dropCard.canBuy && styles.dropButtonQuiet, pressed && styles.pressed]}
+                  disabled={busy || (dropCard.state === 'unlocked' && !dropCard.canBuy)}
+                  onPress={() => (dropCard.state === 'locked' ? router.navigate('/(tabs)') : buyDrop(dropCard.item))}
+                  accessibilityRole="button"
+                  accessibilityLabel={dropCard.state === 'locked' ? 'See this week\'s quests' : `${dropCard.item.name}: ${dropCard.action}`}
+                >
+                  <Text style={[styles.dropButtonText, !dropCard.canBuy && styles.dropButtonTextQuiet]}>{dropCard.action}</Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        )}
 
         <View style={styles.hero}>
           <Pressable onPress={pet} accessibilityRole="button" accessibilityLabel={`Pet ${name}`} style={styles.avatarWrap}>
@@ -243,8 +287,9 @@ export default function BuddyScreen() {
                   disabled={busy || Boolean(!owned && (lockedStage || short))}
                   onPress={() => (owned ? wear(item) : buy(item))}
                   accessibilityRole="button"
-                  accessibilityLabel={`${item.name}: ${action}`}
+                  accessibilityLabel={`${item.name}${dropIds.has(item.id) ? ' (weekly drop)' : ''}: ${action}`}
                 >
+                  {dropIds.has(item.id) ? <View style={styles.dropTag}><Text style={styles.dropTagText}>Drop</Text></View> : null}
                   <Text style={styles.itemEmoji}>{item.emoji}</Text>
                   <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
                   <View style={[styles.itemAction, owned && styles.itemActionOwned, wearing && styles.itemActionWearing]}>
@@ -333,6 +378,23 @@ const themedStyles = createThemedStyles({
   cardIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F2A93B' },
   weekIcon: { backgroundColor: '#5B42D8' },
   treatIcon: { backgroundColor: '#E86F9E' },
+  // This week's drop: a limited item, so its card stands out a little.
+  dropCard: { borderWidth: 1.5, borderColor: '#F2C94C' },
+  dropIcon: { backgroundColor: '#E7A72F' },
+  dropLine: { fontSize: 15, fontWeight: '800', color: '#24212D' },
+  dropProgress: { fontSize: 12, fontWeight: '700', color: '#6A6573' },
+  dropFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  dropCollected: { flexShrink: 1, fontSize: 12, fontWeight: '700', color: '#8A8492' },
+  dropButton: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: '#5B42D8' },
+  dropButtonQuiet: { backgroundColor: '#F0E9FF' },
+  dropButtonOwned: { backgroundColor: '#ECF8F1' },
+  dropButtonText: { fontSize: 13, fontWeight: '900', color: '#FFFFFF' },
+  dropButtonTextQuiet: { color: '#5B42D8' },
+  dropButtonTextOwned: { color: '#2C6B4C' },
+  // A small tag on a collected weekly drop in the wardrobe.
+  dropTag: { position: 'absolute', top: 6, left: 6, paddingHorizontal: 5, height: 16, borderRadius: 8, backgroundColor: '#E7A72F', alignItems: 'center', justifyContent: 'center' },
+  dropTagText: { fontSize: 9, fontWeight: '900', color: '#FFFFFF' },
+  pressed: { opacity: 0.85 },
   treatIntro: { fontSize: 13, lineHeight: 19, fontWeight: '600', color: '#6A6573' },
   // A small tally on a discovered treat (how many times it has been fed).
   treatCount: { position: 'absolute', top: 6, right: 6, minWidth: 20, height: 18, paddingHorizontal: 5, borderRadius: 9, backgroundColor: '#5B42D8', alignItems: 'center', justifyContent: 'center' },

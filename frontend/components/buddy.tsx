@@ -7,7 +7,7 @@ import type { Habit } from '@/hooks/app-state/types';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useBuddy } from '@/hooks/use-buddy';
 import { createThemedStyles, useThemedStyles } from '@/hooks/use-themed-styles';
-import { buddyGrowth, buddyMood, MOOD_FACE, ROOM_LOOK, type Buddy, type BuddyMood } from '@/utils/buddy';
+import { buddyCatalog, buddyGrowth, buddyMood, MOOD_FACE, ROOM_LOOK, type Buddy, type BuddyMood } from '@/utils/buddy';
 
 /** Background and ring per stage: the buddy looks a little grander as it grows. */
 const STAGE_LOOK = [
@@ -18,7 +18,8 @@ const STAGE_LOOK = [
   { background: '#FFE3EF', ring: '#F28DB8' },
 ];
 
-const itemEmoji = (buddy: Buddy | null, id: string) => buddy?.items.find((item) => item.id === id)?.emoji ?? '';
+// Shop items and weekly drops are drawn the same way.
+const itemEmoji = (buddy: Buddy | null, id: string) => (id ? buddyCatalog(buddy).find((item) => item.id === id)?.emoji ?? '' : '');
 
 /**
  * The hamster with its stage, outfit, room and mood; it bobs gently, more when happy, slowly when

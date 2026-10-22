@@ -21,6 +21,7 @@ import { adjustBuddyCheckIns, getCachedBuddy, reloadBuddy } from './use-buddy';
 import { loadRewards } from './use-rewards';
 import { emitLive, setUnreadCount } from '@/utils/live-events';
 import { getKnownChallenges, loadDailyChallenges, publishDailyChallenges } from './use-daily-challenges';
+import { reloadWeeklyBonus } from './use-weekly-bonus';
 import { isAppTheme } from './use-themed-styles';
 import { APP_STATE_KEY_PREFIX, clearSyncMeta, loadSyncMeta, persistSyncBase, persistUnsaved, TOKEN_CAP_SHOWN_KEY_PREFIX } from './app-state/sync-storage';
 import { useHabitReminders } from './app-state/use-habit-reminders';
@@ -102,6 +103,8 @@ type ColorSchemeContextValue = {
   canUndoCheckIn: (id: string) => boolean;
   /** A moment worth celebrating after a check-in (streak milestone, level up, challenge, all done). */
   celebration: Celebration | null;
+  /** Shows a celebration (each id once per session), e.g. after claiming the weekly bonus. */
+  celebrate: (celebration: Celebration) => void;
   /** Streak freezes held and the days they covered (null until the server answered). */
   streakFreeze: StreakFreeze | null;
   buyStreakFreeze: () => Promise<{ ok: boolean; message: string }>;
@@ -130,7 +133,7 @@ type ColorSchemeContextValue = {
 export type StreakFreeze = { available: number; max: number; cost: number; frozenDays: string[] };
 
 /** 'info' is a notice about a check-in (the daily token limit, a closed day), shown without confetti. */
-export type Celebration = { id: string; kind: 'buddy' | 'streak' | 'freeze' | 'badge' | 'quest' | 'level' | 'challenge' | 'allDone' | 'info'; icon: string; title: string; message: string; color?: string };
+export type Celebration = { id: string; kind: 'buddy' | 'streak' | 'freeze' | 'badge' | 'quest' | 'level' | 'challenge' | 'allDone' | 'bonus' | 'info'; icon: string; title: string; message: string; color?: string };
 
 const ColorSchemeContext = createContext<ColorSchemeContextValue | undefined>(undefined);
 
@@ -561,7 +564,10 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         const changed = (key: string) => before[key] !== live.versions[key];
         if (changed('state')) void refreshRemoteState();
         else if (changed('wallet')) void refreshWallet();
-        if (changed('state') || changed('wallet')) void loadDailyChallenges();
+        if (changed('state') || changed('wallet')) {
+          void loadDailyChallenges();
+          reloadWeeklyBonus();
+        }
         if (changed('state') || changed('buddy')) void reloadBuddy();
         if (changed('rewards')) void loadRewards();
         if (changed('claims')) emitLive('claims');
@@ -969,6 +975,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       toggleHabitForDate,
       canUndoCheckIn,
       celebration,
+      celebrate,
       streakFreeze,
       buyStreakFreeze: async () => {
         const result = await requestStreakFreeze(getLocalDateKey());

@@ -2,9 +2,10 @@ import { query, withTransaction } from '../db/client.js';
 import { walletLimiter } from '../http/rate-limits.js';
 import { parse } from '../lib/http.js';
 import { buddyItemSchema, buddySaveSchema, buddyTreatSchema, dayInputSchema, mysteryBoxSchema, streakFreezeSchema, webPushDoneSchema } from '../schemas.js';
-import { dayClosedBody, resolveAccountDay } from '../services/account-day.js';
+import { dayClosedBody, getAccountDay, resolveAccountDay } from '../services/account-day.js';
 import { requireAuth } from '../services/accounts.js';
-import { buyBuddyItem, feedTreat, getBuddy, saveBuddy } from '../services/buddy.js';
+import { refreshSnapshot } from '../services/app-state-store.js';
+import { buyBuddyItem, feedTreat, getBuddy, isBuddyDrop, saveBuddy } from '../services/buddy.js';
 import { setCheckIn } from '../services/check-ins.js';
 import { getDailyChallenges } from '../services/daily-challenges.js';
 import { claimDaily, getDailyClaim } from '../services/daily-claims.js';
@@ -14,35 +15,56 @@ import { applyStreakFreezes, buyStreakFreeze, getStreakFreezeStatus } from '../s
 import { wakeMlService } from '../services/ml-wake.js';
 import { getWallet } from '../services/wallet.js';
 import { doneActionSecret, readDoneToken } from '../services/web-push-actions.js';
+import { claimWeeklyBonus, getWeeklyBonus } from '../services/weekly-bonus.js';
 
-/** The account day of a GET with ?date&timeZone (services/account-day.js), or null when the query is not the account's today. */
-async function queryDay(request, userId) {
+/**
+ * The account day of a GET with ?date&timeZone (services/account-day.js): { ok, today, timeZone },
+ * where ok is false for another day, or null when the query has no valid date.
+ */
+async function queryDay(request, userId, options) {
   const input = dayInputSchema.safeParse({ date: request.query.date, ...(request.query.timeZone ? { timeZone: request.query.timeZone } : {}) });
   if (!input.success) return null;
-  const day = await resolveAccountDay({ query }, userId, input.data);
-  return day.ok ? day : null;
+  return resolveAccountDay({ query }, userId, input.data, options);
+}
+
+/** The buddy with this week's drop, for the account's own today (an answer to a change that sent no date). */
+async function buddyOnAccountDay(db, userId) {
+  return getBuddy(db, userId, { today: (await getAccountDay(db, userId)).today });
 }
 
 export default function registerEngagementRoutes(app) {
   // Habit Buddy: what it wears, what was bought, the shop and how many check-ins it has grown on.
+  // With ?date&timeZone (the account's today) it also has this week's drop; a GET never stores a zone.
   app.get('/api/buddy', async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
-    response.json({ ok: true, buddy: await getBuddy({ query }, session.userId) });
+    const day = await queryDay(request, session.userId, { write: false });
+    response.json({ ok: true, buddy: await getBuddy({ query }, session.userId, { today: day?.ok ? day.today : null }) });
   });
 
+  // Buys a shop item or this week's drop. A drop needs the app's today: it is only sold in its week.
   app.post('/api/buddy/items', walletLimiter, async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
     const input = parse(buddyItemSchema, request, response);
     if (!input) return;
+    const { itemId, ...dayInput } = input;
+    const day = dayInput.date ? await resolveAccountDay({ query }, session.userId, dayInput) : null;
+    if (isBuddyDrop(itemId)) {
+      if (!day) return response.status(400).json({ ok: false, message: 'Send your today and time zone.' });
+      if (!day.ok) return response.status(409).json(dayClosedBody(day, 'That day is over. This week\'s drop follows your today.'));
+    }
     const result = await withTransaction(async (db) => {
       await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
-      const refused = await buyBuddyItem(db, session.userId, input.itemId);
+      const refused = await buyBuddyItem(db, session.userId, itemId, { today: day?.ok ? day.today : null });
       if (refused) return { refused };
-      return { buddy: await getBuddy(db, session.userId), wallet: await getWallet(db, session.userId) };
+      const buddy = day?.ok ? await getBuddy(db, session.userId, { today: day.today }) : await buddyOnAccountDay(db, session.userId);
+      return { buddy, wallet: await getWallet(db, session.userId) };
     });
-    if (result.refused) return response.status(result.refused.status).json({ ok: false, message: result.refused.message });
+    if (result.refused) {
+      const { status, code, message } = result.refused;
+      return response.status(status).json({ ok: false, ...(code ? { code } : {}), message });
+    }
     response.json({ ok: true, buddy: result.buddy, ...result.wallet });
   });
 
@@ -53,7 +75,7 @@ export default function registerEngagementRoutes(app) {
     if (!input) return;
     const refused = await saveBuddy({ query }, session.userId, input);
     if (refused) return response.status(refused.status).json({ ok: false, message: refused.message });
-    response.json({ ok: true, buddy: await getBuddy({ query }, session.userId) });
+    response.json({ ok: true, buddy: await buddyOnAccountDay({ query }, session.userId) });
   });
 
   // Feeds a treat to the buddy: spends its tokens and returns the line it says.
@@ -66,7 +88,7 @@ export default function registerEngagementRoutes(app) {
       await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
       const fed = await feedTreat(db, session.userId, input.treatId);
       if (fed.status) return { refused: fed };
-      return { line: fed.line, buddy: await getBuddy(db, session.userId), wallet: await getWallet(db, session.userId) };
+      return { line: fed.line, buddy: await buddyOnAccountDay(db, session.userId), wallet: await getWallet(db, session.userId) };
     });
     if (result.refused) return response.status(result.refused.status).json({ ok: false, message: result.refused.message });
     response.json({ ok: true, line: result.line, buddy: result.buddy, ...result.wallet });
@@ -88,7 +110,7 @@ export default function registerEngagementRoutes(app) {
     const session = await requireAuth(request, response);
     if (!session) return;
     const day = await queryDay(request, session.userId);
-    if (!day) return response.status(400).json({ ok: false, message: 'Send your today and time zone.' });
+    if (!day?.ok) return response.status(400).json({ ok: false, message: 'Send your today and time zone.' });
     response.json({ ok: true, challenges: await getDailyChallenges({ query }, session.userId, day.today, day.timeZone) });
   });
 
@@ -97,7 +119,7 @@ export default function registerEngagementRoutes(app) {
     const session = await requireAuth(request, response);
     if (!session) return;
     const day = await queryDay(request, session.userId);
-    if (!day) return response.status(400).json({ ok: false, message: 'Send your today and time zone.' });
+    if (!day?.ok) return response.status(400).json({ ok: false, message: 'Send your today and time zone.' });
     response.json({ ok: true, ...await getDailyClaim({ query }, session.userId, day.today) });
   });
 
@@ -115,6 +137,36 @@ export default function registerEngagementRoutes(app) {
     });
     const { wallet, ...claim } = result;
     response.json({ ok: true, ...claim, ...wallet });
+  });
+
+  // The weekly consistency bonus: last week's rate (claimable from Monday) and this week so far.
+  app.get('/api/weekly-bonus', async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const day = await queryDay(request, session.userId, { write: false });
+    if (!day) return response.status(400).json({ ok: false, message: 'Send your today and time zone.' });
+    if (!day.ok) return response.status(409).json(dayClosedBody(day, 'That day is over. Your weekly bonus follows your today.'));
+    response.json({ ok: true, ...await getWeeklyBonus({ query }, session.userId, day) });
+  });
+
+  // Claims last week's bonus, worked out again here from the habits and check-ins; paid once a week.
+  app.post('/api/weekly-bonus/claim', walletLimiter, async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const input = parse(dayInputSchema, request, response);
+    if (!input) return;
+    const day = await resolveAccountDay({ query }, session.userId, input);
+    if (!day.ok) return response.status(409).json(dayClosedBody(day, 'That day is over. Claim last week\'s bonus on your today.'));
+    const result = await withTransaction(async (db) => {
+      await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
+      const claim = await claimWeeklyBonus(db, session.userId, day.today);
+      if (claim.refused) return claim;
+      const refreshed = await refreshSnapshot(session.userId, db);
+      return { ...claim, updatedAt: refreshed?.updatedAt ?? null, wallet: await getWallet(db, session.userId) };
+    });
+    if (result.refused) return response.status(409).json({ ok: false, code: 'BONUS_NOT_EARNED', message: result.refused });
+    const { wallet, ...claim } = result;
+    response.json({ ok: true, ...claim, tokens: wallet.tokens, tokenHistory: wallet.tokenHistory, points: wallet.points });
   });
 
   // The daily mystery box, opened once after the day's first check-in.

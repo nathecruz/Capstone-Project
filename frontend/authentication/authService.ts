@@ -684,7 +684,10 @@ export async function saveWebPushSubscription(
 
 type BuddyResponse = import('@/utils/buddy').Buddy;
 type WalletResponse = { tokens?: number; points?: number; tokenHistory?: object[] };
-type Result<T> = ({ ok: true } & T) | { ok: false; message: string };
+/** A refusal keeps the server's code (DAY_CLOSED, BONUS_NOT_EARNED, DROP_LOCKED, ...) when it sent one. */
+type Result<T> = ({ ok: true } & T) | { ok: false; message: string; code?: string };
+
+const textField = (payload: Record<string, unknown>, key: string) => (typeof payload[key] === 'string' ? payload[key] as string : undefined);
 
 async function authedRequest<T>(path: string, init: RequestInit = {}): Promise<Result<T>> {
   const token = await getSessionToken();
@@ -693,14 +696,28 @@ async function authedRequest<T>(path: string, init: RequestInit = {}): Promise<R
     const body = await apiRequest<T>(path, { ...init, headers: { ...(init.headers ?? {}), Authorization: `Bearer ${token}` } });
     return { ok: true, ...body };
   } catch (error) {
-    return { ok: false, message: error instanceof ApiRequestError ? error.message : 'Could not reach HabitAI. Check your connection.' };
+    if (error instanceof ApiRequestError) return { ok: false, message: error.message, code: textField(error.payload, 'code') };
+    return { ok: false, message: 'Could not reach HabitAI. Check your connection.' };
   }
 }
 
-/** Habit Buddy: name, what it wears, what was bought, and the shop. */
-export const getBuddy = () => authedRequest<{ buddy: BuddyResponse }>('/api/buddy');
-/** Buys an item with tokens (the server checks the price, stage and balance) and puts it on. */
-export const buyBuddyItem = (itemId: string) => authedRequest<{ buddy: BuddyResponse } & WalletResponse>('/api/buddy/items', { method: 'POST', body: JSON.stringify({ itemId }) });
+const deviceTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+/** The device's today and time zone, which the server checks against the account's day. */
+const todayQuery = (date: string, timeZone = deviceTimeZone()) => `date=${date}&timeZone=${encodeURIComponent(timeZone)}`;
+
+/**
+ * Habit Buddy: name, what it wears, what was bought, and the shop. With the device's today `date`
+ * it also has this week's drop (null without a date, or for a day that is not the account's).
+ */
+export const getBuddy = (date?: string, timeZone = deviceTimeZone()) => authedRequest<{ buddy: BuddyResponse }>(`/api/buddy${date ? `?${todayQuery(date, timeZone)}` : ''}`);
+/**
+ * Buys an item with tokens (the server checks the price, stage and balance) and puts it on. A
+ * weekly drop needs the device's today `date`: it is sold only in its week, once 2 quests are done.
+ */
+export const buyBuddyItem = (itemId: string, date?: string, timeZone = deviceTimeZone()) => authedRequest<{ buddy: BuddyResponse } & WalletResponse>('/api/buddy/items', {
+  method: 'POST',
+  body: JSON.stringify(date ? { itemId, date, timeZone } : { itemId }),
+});
 /** Renames the buddy or changes what it wears ('' takes an item off). */
 export const saveBuddy = (changes: { name?: string; head?: string; hand?: string; room?: string; accessory?: string }) => authedRequest<{ buddy: BuddyResponse }>('/api/buddy', { method: 'PUT', body: JSON.stringify(changes) });
 /** Feeds a treat to the buddy (the server charges the tokens); returns the line it says. */
@@ -720,7 +737,6 @@ export const saveRewardFrame = (frame: string) => authedRequest<{ frame: string 
 export const saveRewardTitle = (title: string) => authedRequest<{ title: string }>('/api/rewards/title', { method: 'PUT', body: JSON.stringify({ title }) });
 
 export type StreakFreezeStatus = { available: number; max: number; cost: number; frozenDays: string[]; used: string[] };
-const deviceTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 /** Uses held streak freezes for days missed before `date` (the device's today) and returns the status. */
 export const syncStreakFreezes = (date: string) => authedRequest<StreakFreezeStatus>('/api/streak-freezes/sync', { method: 'POST', body: JSON.stringify({ date, timeZone: deviceTimeZone() }) });
 /** A version of each kind of the student's data (changes whenever that data does), and unread notifications. */
@@ -744,7 +760,6 @@ export async function getLiveVersions(): Promise<Result<{ versions: Record<strin
 
 export type DailyChallenge = { id: string; title: string; icon: string; target: number; progress: number; reward: number; date: string; complete: boolean };
 export type DailyClaim = { date: string; day: number; claimedToday: boolean; amount: number; rewards: number[]; alreadyClaimed?: boolean };
-const todayQuery = (date: string) => `date=${date}&timeZone=${encodeURIComponent(deviceTimeZone())}`;
 /** Today's three challenges and their progress, as the server counts (and pays) them. */
 export const getDailyChallenges = (date: string) => authedRequest<{ challenges: DailyChallenge[] }>(`/api/daily-challenges?${todayQuery(date)}`);
 /** The 7-day daily claim calendar for `date` (the device's today). */
@@ -754,6 +769,48 @@ export const claimDailyReward = (date: string) => authedRequest<DailyClaim & Wal
 
 /** Buys a streak freeze with tokens; it is used right away if yesterday's streak needs it. */
 export const buyStreakFreeze = (date: string) => authedRequest<StreakFreezeStatus & WalletResponse>('/api/streak-freezes/buy', { method: 'POST', body: JSON.stringify({ date, timeZone: deviceTimeZone() }) });
+
+export type WeeklyBonusTier = { percent: number; amount: number; label: string };
+/**
+ * The weekly consistency bonus as the server counts it: last week (claimable this week, from the
+ * habits started by Wednesday) and this week so far, with the next tier still in reach.
+ */
+export type WeeklyBonus = {
+  lastWeek: {
+    weekStart: string;
+    weekEnd: string;
+    scheduled: number;
+    done: number;
+    percent: number;
+    activeDays: number;
+    eligible: boolean;
+    reason: null | 'few-scheduled' | 'few-days' | 'low-rate';
+    tier: WeeklyBonusTier | null;
+    claimed: boolean;
+    claimedAmount: number | null;
+    claimable: boolean;
+    /** When it can no longer be claimed (00:00 next Monday). */
+    lapsesAt: number;
+  };
+  thisWeek: {
+    weekStart: string;
+    weekEnd: string;
+    dueSoFar: number;
+    doneSoFar: number;
+    dueWeek: number;
+    percentSoFar: number;
+    next: null | { percent: number; amount: number; checkInsNeeded: number; reachable: boolean };
+  };
+  tiers: WeeklyBonusTier[];
+};
+export type WeeklyBonusClaim = { amount: number; alreadyClaimed: boolean; percent: number; tier: WeeklyBonusTier | null; updatedAt?: number } & WalletResponse;
+/** Last week's bonus and this week so far, for `date` (the device's today). */
+export const getWeeklyBonus = (date: string, timeZone = deviceTimeZone()) => authedRequest<WeeklyBonus>(`/api/weekly-bonus?${todayQuery(date, timeZone)}`);
+/**
+ * Claims last week's bonus: the server recounts the week and pays it once (a second claim answers
+ * alreadyClaimed with the amount paid), or refuses with BONUS_NOT_EARNED.
+ */
+export const claimWeeklyBonus = (date: string, timeZone = deviceTimeZone()) => authedRequest<WeeklyBonusClaim>('/api/weekly-bonus/claim', { method: 'POST', body: JSON.stringify({ date, timeZone }) });
 
 /** Asks the server to send a test reminder to this device (or all of the account's devices) now. */
 export async function sendTestWebPush(endpoint?: string): Promise<{ ok: boolean; message: string }> {
@@ -860,8 +917,6 @@ export async function getRemoteHabitCompletions() {
  * HABIT_ENDED; none for a rate limit) and, for DAY_CLOSED, the account's own today and time zone.
  */
 export type CheckInRejection = { rejected: true; code?: string; message: string; today?: string; timeZone?: string };
-
-const textField = (payload: Record<string, unknown>, key: string) => (typeof payload[key] === 'string' ? payload[key] as string : undefined);
 
 export async function saveRemoteHabitCompletion(completion: HabitCompletion & { completed: boolean }) {
   const token = await getSessionToken();

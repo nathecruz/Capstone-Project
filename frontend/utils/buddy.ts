@@ -7,10 +7,13 @@ import { hasHabitEnded, isHabitActiveOn } from '@/utils/habit-week';
 import { isHabitScheduledOn } from '@/utils/streaks';
 
 export type BuddySlot = 'head' | 'hand' | 'room' | 'accessory';
-export type BuddyItem = { id: string; slot: BuddySlot; name: string; emoji: string; cost: number; stage: string };
+/** `drop`: one of the 12 weekly drops, sold only in its own week (backend/services/buddy.js BUDDY_DROPS). */
+export type BuddyItem = { id: string; slot: BuddySlot; name: string; emoji: string; cost: number; stage: string; drop?: boolean };
 export type BuddyStage = { id: string; name: string; min: number };
 export type BuddyTreat = { id: string; name: string; emoji: string; cost: number; line: string };
 export type BuddyFedTreat = { treatId: string; count: number };
+/** This week's drop: unlocked by finishing `questsNeeded` of the week's 3 quests (the server counts them). */
+export type BuddyDrop = { item: BuddyItem; weekStart: string; weekEnd: string; questsDone: number; questsNeeded: number; unlocked: boolean; owned: boolean };
 export type Buddy = {
   name: string;
   head: string;
@@ -24,6 +27,12 @@ export type Buddy = {
   treats: BuddyTreat[];
   fedTreats: BuddyFedTreat[];
   treatsFed: number;
+  /** Only with the account's today (GET /api/buddy?date): null without it. */
+  drop?: BuddyDrop | null;
+  /** All 12 drops, so owned ones can be worn and drawn. */
+  drops?: BuddyItem[];
+  /** How many of them were collected. */
+  dropsOwned?: number;
 };
 
 /** How each room looks behind the buddy: its colour and two things in it. */
@@ -39,7 +48,58 @@ export const ROOM_LOOK: Record<string, { background: string; decor: [string, str
   city: { background: '#2E2A52', decor: ['🏙️', '🌃'] },
   underwater: { background: '#C8EEF3', decor: ['🐠', '🪸'] },
   castle: { background: '#ECE4FF', decor: ['🏰', '🚩'] },
+  aurora: { background: '#1B2346', decor: ['🌌', '✨'] },
 };
+
+/** Everything the buddy can wear: the shop and the weekly drops (to find an item's emoji and slot). */
+export function buddyCatalog(buddy: Pick<Buddy, 'items' | 'drops'> | null | undefined): BuddyItem[] {
+  return buddy ? [...buddy.items, ...(buddy.drops ?? [])] : [];
+}
+
+/** The weekly drops this student collected (they are bought once and kept). */
+export function collectedDrops(buddy: Pick<Buddy, 'owned' | 'drops'>) {
+  return (buddy.drops ?? []).filter((item) => buddy.owned.includes(item.id));
+}
+
+/**
+ * The buddy screen's "This week's drop" card: locked until enough quests are done, then for sale
+ * (unless the stage or the balance is short), then collected. Null while the drop is unknown.
+ */
+export function weeklyDropCard(buddy: Buddy, tokens: number) {
+  const { drop, stages } = buddy;
+  if (!drop) return null;
+  const { item } = drop;
+  const stageIndex = stages.findIndex((stage) => stage.id === item.stage);
+  const stage = stageIndex > buddyGrowth(buddy.checkIns, stages).index ? stages[stageIndex] : null;
+  const short = Math.max(0, item.cost - tokens);
+  const state: 'locked' | 'unlocked' | 'owned' = drop.owned ? 'owned' : drop.unlocked ? 'unlocked' : 'locked';
+  // What the button says: buy it now, or what is still missing (as in the shop).
+  const action = state === 'owned' ? 'Collected' : state === 'locked' ? 'See quests' : stage ? `${stage.name} stage` : short ? `${short} more` : 'Get it';
+  return {
+    item,
+    state,
+    action,
+    canBuy: state === 'unlocked' && !stage && !short,
+    line: `${item.emoji} ${item.name} · ${item.cost} tokens · this week only`,
+    progress: state === 'locked' ? `Finish ${drop.questsNeeded} of 3 weekly quests to unlock (${Math.min(drop.questsDone, drop.questsNeeded)}/${drop.questsNeeded})` : null,
+    collected: `Drops collected ${buddy.dropsOwned ?? collectedDrops(buddy).length}/${buddy.drops?.length || 12}`,
+  };
+}
+
+/** The weekly quests card's last line: the drop its quests unlock, with `questsDone` of the 2 needed. */
+export function dropQuestsFooter(drop: BuddyDrop | null | undefined, questsDone: number) {
+  if (!drop) return null;
+  return `Unlocks this week's drop: ${drop.item.emoji} ${drop.item.name} (${Math.min(questsDone, drop.questsNeeded)}/${drop.questsNeeded})`;
+}
+
+/**
+ * The drop comes only with the account's today: an answer without it (a change of look or a treat)
+ * keeps the drop already known for the week of `today`, with whether it is owned now.
+ */
+export function keepWeekDrop(next: Buddy, known: Buddy | null, today: string): Buddy {
+  if (next.drop || !known?.drop || today < known.drop.weekStart || today > known.drop.weekEnd) return next;
+  return { ...next, drop: { ...known.drop, owned: next.owned.includes(known.drop.item.id) }, drops: next.drops?.length ? next.drops : known.drops };
+}
 
 export const BUDDY_STAGES: BuddyStage[] = [
   { id: 'baby', name: 'Baby', min: 0 },

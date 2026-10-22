@@ -31,7 +31,8 @@ const timeZoneSchema = z.string().trim().min(1).max(80).refine((value) => {
   }
 }, 'Unknown time zone.');
 // `summary` is accepted for older app builds; the server now builds AI context from the database.
-export const buddyItemSchema = z.object({ itemId: z.string().trim().min(1).max(40) }).strict();
+// A weekly drop is sold only in its week, so buying one also sends the app's today (services/account-day.js).
+export const buddyItemSchema = z.object({ itemId: z.string().trim().min(1).max(40), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), timeZone: timeZoneSchema.optional() }).strict();
 export const buddyTreatSchema = z.object({ treatId: z.string().trim().min(1).max(40) }).strict();
 export const buddySaveSchema = z.object({ name: z.string().trim().min(1).max(20).optional(), head: z.string().max(40).optional(), hand: z.string().max(40).optional(), room: z.string().max(40).optional(), accessory: z.string().max(40).optional() }).strict();
 export const dayInputSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: timeZoneSchema.optional() }).strict();

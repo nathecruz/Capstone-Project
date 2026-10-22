@@ -1,6 +1,7 @@
 // Weekly quests: three missions each Monday-to-Sunday week, paid in tokens by the server when
 // they are complete and taken back if an undo drops them below the target. The app shows the
 // same rules (frontend/utils/quests.ts), so the card and the tokens agree.
+import { runAll } from '../db/run-all.js';
 import { isHabitActiveOn } from './habit-week.js';
 import { habitFromRow, habitSchedule, isScheduledDay } from './streaks.js';
 
@@ -15,8 +16,8 @@ export function weekStartOf(dateKey) {
   return shiftDay(dateKey, -((weekday + 6) % 7));
 }
 
-/** Weeks since the Monday of 1970-01-05, to rotate the third quest. */
-function weekNumber(weekStart) {
+/** Weeks since the Monday of 1970-01-05, to rotate the third quest and the Habi weekly drop. */
+export function weekNumber(weekStart) {
   return Math.floor((Date.parse(`${weekStart}T00:00:00Z`) / 86_400_000 - 4) / 7);
 }
 
@@ -70,21 +71,36 @@ export function weeklyQuests(allHabits, doneByDate, today) {
 
 const questTokenId = (userId, weekStart, questId) => `${userId}:token:quest:${weekStart}:${questId}`;
 
-/** Pays (or takes back) the week's quest bonuses after a check-in on `date`. Call inside the check-in transaction. */
-export async function syncWeeklyQuests(db, userId, date, now = Date.now()) {
+/** Every habit of the account (also those of past weeks) in the shape weeklyQuests uses. */
+export async function loadHabits(db, userId) {
   const rows = (await db.query('SELECT id, meta, frequency, start_date, active_until, reminder_days FROM habits WHERE user_id=$1', [userId])).rows;
-  const habits = rows.map((row) => ({ ...habitFromRow(row), id: String(row.id).replace(`${userId}:habit:`, '') }));
-  const weekStart = weekStartOf(date);
+  return rows.map((row) => ({ ...habitFromRow(row), id: String(row.id).replace(`${userId}:habit:`, '') }));
+}
+
+/** The check-ins from `from` to `to` (both included): Map(date -> Set(habit id)). */
+export async function loadDoneByDate(db, userId, from, to) {
   const completions = await db.query(
     'SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1 AND completed_date >= $2::date AND completed_date <= $3::date',
-    [userId, weekStart, date],
+    [userId, from, to],
   );
   const doneByDate = new Map();
   for (const row of completions.rows) {
     if (!doneByDate.has(row.date)) doneByDate.set(row.date, new Set());
     doneByDate.get(row.date).add(String(row.habitId));
   }
-  const quests = weeklyQuests(habits, doneByDate, date);
+  return doneByDate;
+}
+
+/** The quests of `date`'s week and their progress up to `date`, from the database. Writes nothing. */
+export async function getWeeklyQuests(db, userId, date) {
+  const [habits, doneByDate] = await runAll(db, [() => loadHabits(db, userId), () => loadDoneByDate(db, userId, weekStartOf(date), date)]);
+  return weeklyQuests(habits, doneByDate, date);
+}
+
+/** Pays (or takes back) the week's quest bonuses after a check-in on `date`. Call inside the check-in transaction. */
+export async function syncWeeklyQuests(db, userId, date, now = Date.now()) {
+  const weekStart = weekStartOf(date);
+  const quests = await getWeeklyQuests(db, userId, date);
   for (const quest of quests) {
     const id = questTokenId(userId, weekStart, quest.id);
     if (quest.complete) {

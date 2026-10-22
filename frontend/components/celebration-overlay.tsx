@@ -9,7 +9,7 @@ import { Confetti } from '@/components/confetti';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { createThemedStyles, useThemedStyles } from '@/hooks/use-themed-styles';
 
-const ACCENT: Record<string, string> = { buddy: '#D2588F', streak: '#F2A93B', freeze: '#4BA3FF', badge: '#E7A72F', quest: '#4BA3FF', level: '#5B42D8', challenge: '#3BAA74', allDone: '#5B42D8', info: '#4BA3FF' };
+const ACCENT: Record<string, string> = { buddy: '#D2588F', streak: '#F2A93B', freeze: '#4BA3FF', badge: '#E7A72F', quest: '#4BA3FF', level: '#5B42D8', challenge: '#3BAA74', allDone: '#5B42D8', bonus: '#E7A72F', info: '#4BA3FF' };
 
 export function CelebrationOverlay() {
   const styles = useThemedStyles(themedStyles);
