@@ -221,6 +221,7 @@ test('token flags start above 150 tokens, 6 check-ins and 12 habits, and at 15 g
   assert.equal(flags[1].detail, '7 check-ins on Oct 21');
   assert.equal(flags[2].detail, '13 habits started in the week of Oct 12');
   assert.equal(flags[3].detail, '15 treat gifts sent');
+  assert.equal(tokenFlags({ tokenDays: [{ day: '2026-10-20', count: 5000 }] })[0].detail, 'Earned 5,000 tokens on Oct 20');
 });
 
 test('a table the app backend has not added yet reads as zeros', async () => {

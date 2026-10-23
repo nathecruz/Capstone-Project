@@ -127,7 +127,7 @@ const andMore = (times, unit) => (times > 1 ? ` (${times} ${unit})` : '');
 export function tokenFlags({ tokenDays = [], checkInDays = [], habitWeeks = [], giftsSent = 0 } = {}) {
   const flags = [];
   const bigDay = worstOver(tokenDays, FLAG_LIMITS.dayTokens);
-  if (bigDay) flags.push({ type: 'big-day', detail: `Earned ${bigDay.worst.count} tokens on ${shortDay(bigDay.worst.day)}${andMore(bigDay.times, `days over ${FLAG_LIMITS.dayTokens}`)}` });
+  if (bigDay) flags.push({ type: 'big-day', detail: `Earned ${bigDay.worst.count.toLocaleString('en-US')} tokens on ${shortDay(bigDay.worst.day)}${andMore(bigDay.times, `days over ${FLAG_LIMITS.dayTokens}`)}` });
   const busyDay = worstOver(checkInDays, FLAG_LIMITS.dayCheckIns);
   if (busyDay) flags.push({ type: 'capped-day', detail: `${busyDay.worst.count} check-ins on ${shortDay(busyDay.worst.day)}${andMore(busyDay.times, `days over ${FLAG_LIMITS.dayCheckIns}`)}` });
   const habitWeek = worstOver(habitWeeks, FLAG_LIMITS.weekHabits);
