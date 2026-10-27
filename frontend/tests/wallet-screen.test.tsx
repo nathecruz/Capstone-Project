@@ -5,6 +5,7 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { router } from 'expo-router';
 import WalletScreen from '@/app/wallet';
+import { BentoTiles } from '@/components/bento-tiles';
 import { getWalletHistory, getWalletSummary, type WalletHistoryItem, type WalletSummary } from '@/authentication/authService';
 import { reloadWallet, withFirstPage } from '@/hooks/use-wallet';
 import { getLocalDateKey } from '@/utils/habit-visibility';
@@ -36,8 +37,10 @@ jest.mock('@/authentication/session', () => {
   const listeners: (() => void)[] = [];
   return { subscribeToAuthChanges: (listener: () => void) => { listeners.push(listener); return () => undefined; }, mockSignOut: () => listeners.forEach((listener) => listener()) };
 });
-const mockContext = { tokens: 120, isFaculty: false, isDarkMode: false };
+// The rest is what Home's tiles read.
+const mockContext = { tokens: 120, isFaculty: false, isDarkMode: false, points: 0, streakFreeze: null, currentHabits: [], streak: 0, bestStreak: 0 };
 jest.mock('@/hooks/color-scheme-context', () => ({ useAppColorScheme: () => mockContext }));
+jest.mock('@/hooks/use-buddy', () => ({ useBuddy: () => ({ buddy: null }) }));
 jest.mock('@/components/streak-freeze-sheet', () => {
   const { Text } = jest.requireActual('react-native');
   return { StreakFreezeSheet: ({ visible }: { visible: boolean }) => (visible ? <Text>Streak Freeze sheet</Text> : null) };
@@ -343,6 +346,24 @@ describe('Tokens screen', () => {
     expect(screen.queryByText('Tokens')).toBeNull();
     expect(summaryMock).not.toHaveBeenCalled();
     expect(historyMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("Home's Tokens tile", () => {
+  it('opens the Tokens screen and says how many things are affordable now', async () => {
+    const screen = render(<BentoTiles habits={[]} onFreeze={jest.fn()} />);
+    // Until the server answered.
+    expect(screen.getByText('See how to earn and spend')).toBeTruthy();
+    expect(await screen.findByText('You can afford 3 things')).toBeTruthy();
+    expect(summaryMock).toHaveBeenCalledWith(today);
+    fireEvent.press(screen.getByLabelText('120 tokens. Open Tokens'));
+    expect(router.push).toHaveBeenLastCalledWith('/wallet');
+  });
+
+  it('counts one thing as one', async () => {
+    summaryMock.mockImplementation(async () => summaryWith({ affordable: 1 }));
+    const screen = render(<BentoTiles habits={[]} onFreeze={jest.fn()} />);
+    expect(await screen.findByText('You can afford 1 thing')).toBeTruthy();
   });
 });
 
