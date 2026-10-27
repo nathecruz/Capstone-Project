@@ -52,7 +52,7 @@ ${APP_GUIDE}`,
  * their own habits: the advice must fit a teacher's day, not a student's.
  */
 export const FACULTY_CONTEXT = `This user is a PSAU faculty member (a teacher who may also do research, advising and administrative work), not a student.
-Tailor everything to a faculty member's day: lesson preparation, grading and feedback, consultations with students, research and writing, meetings, and their own rest, health and family time. Do not talk about studying for exams, attending classes as a student, or student leaderboards.`;
+Tailor everything to a faculty member's day: lesson preparation, grading and feedback, consultations with students, research and writing, meetings, and their own rest, health and family time. Do not talk about studying for exams, attending classes as a student, or student leaderboards. Faculty accounts have no tokens, rewards or Tokens screen, so do not suggest them.`;
 
 /** The instruction for an AI feature, adjusted for faculty accounts. */
 export function forAudience(system, role) {
