@@ -6,7 +6,8 @@
 //     can add offline check-ins but can never delete them,
 //   - streaks are recomputed from check-ins and each habit's schedule,
 //   - points and tokens come from the server ledger (services/wallet.js),
-//   - every habit gets the last day it is active (habits last one week, services/habit-week.js).
+//   - every habit gets the last day it is active (habits last one week, services/habit-week.js),
+//   - "today" is the account day (services/account-day.js), never a habit's own time zone.
 // The latest `user_app_state` snapshot, with those server values applied, is what the
 // app reads; relational tables (habits, goals, achievements) mirror it for the
 // leaderboard, reminders, AI context and the Admin Panel.
@@ -14,13 +15,14 @@ import crypto from 'node:crypto';
 import { config } from '../config/index.js';
 import { query, withTransaction } from '../db/client.js';
 import { runAll } from '../db/run-all.js';
+import { getAccountDay } from './account-day.js';
 import { longestAccountStreak } from './account-streak.js';
 import { sameState } from './app-state-sync.js';
 import { getDateKeyInTimeZone, isPastHabitDeadline } from './completion-date.js';
 import { hasHabitEnded, isDateKey } from './habit-week.js';
 import { computeStreak } from './streaks.js';
 import { getFrozenDays } from './streak-freeze.js';
-import { applyWallet, awardCheckIn, getWallet, POINTS_PER_CHECK_IN } from './wallet.js';
+import { applyWallet, awardCheckIn, countedCheckIns, getWallet, POINTS_PER_CHECK_IN } from './wallet.js';
 import { weeklyResetSnapshot } from './weekly-reset.js';
 
 export { sameState, stableStringify } from './app-state-sync.js';
@@ -35,9 +37,9 @@ function todayFor(timeZone) {
   }
 }
 
+/** Lifetime points: 20 for each check-in that counts (services/wallet.js countedCheckIns). */
 export async function serverCompletionPoints(userId, runner = { query }) {
-  const result = await runner.query('SELECT COUNT(*)::integer AS checkins FROM habit_completions WHERE user_id=$1', [userId]);
-  return (result.rows[0]?.checkins || 0) * POINTS_PER_CHECK_IN;
+  return (await countedCheckIns(runner, userId)) * POINTS_PER_CHECK_IN;
 }
 
 export async function getServerCompletions(userId, runner = { query }) {
@@ -215,15 +217,14 @@ export function earnedAchievements(habits, { today = todayFor(habits.find((habit
   return [...earned];
 }
 
-/** Valid, not-in-the-future check-in dates from a synced habit (offline check-ins). */
 /**
- * New check-ins a synced state may add: today's only (in the habit's time zone), and only within
- * the habit's week, the same rules as PUT /api/habit-completions. A missed day cannot be filled in
- * later, even offline.
+ * New check-ins a synced state may add (offline check-ins): the account's today only, never a day
+ * from the habit's own (client-editable) time zone, not before the account's day floor, and only
+ * within the habit's week, the same rules as PUT /api/habit-completions. A missed day cannot be
+ * filled in later, even offline.
  */
-function syncedCompletionDates(habit) {
-  const today = todayFor(habit.completionTimeZone);
-  if (hasHabitEnded(habit, today)) return [];
+function syncedCompletionDates(habit, { today, floor }) {
+  if (hasHabitEnded(habit, today) || (floor && today < floor)) return [];
   return (Array.isArray(habit.completionDates) ? habit.completionDates : []).map(String).includes(today) ? [today] : [];
 }
 
@@ -240,12 +241,21 @@ export async function syncNormalizedState(userId, state, updatedAt, connection) 
 
   // Check-ins of deleted habits go with them; check-ins of existing habits are never
   // removed by a sync, only added (offline check-ins), so a stale device cannot erase them.
+  // A deleted habit's tokens for today go too, so deleting and re-creating a habit to check it in
+  // again pays nothing; earlier days keep theirs, so cleaning up history never makes a balance negative.
+  const day = await getAccountDay(connection, userId);
   const habitIds = habits.map((habit) => String(habit.id).trim());
+  await connection.query(
+    `DELETE FROM token_transactions WHERE user_id=$1 AND id IN (
+       SELECT $1 || ':token:check-in:' || habit_id || ':' || completed_date::text FROM habit_completions
+        WHERE user_id=$1 AND completed_date=$3::date AND NOT (habit_id = ANY($2::text[])))`,
+    [userId, habitIds, day.today],
+  );
   if (habitIds.length === 0) await connection.query('DELETE FROM habit_completions WHERE user_id=$1', [userId]);
   else await connection.query('DELETE FROM habit_completions WHERE user_id=$1 AND NOT (habit_id = ANY($2::text[]))', [userId, habitIds]);
   for (const habit of habits) {
     const habitId = String(habit.id).trim();
-    for (const date of syncedCompletionDates(habit)) {
+    for (const date of syncedCompletionDates(habit, day)) {
       const inserted = await connection.query(
         'INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING habit_id',
         [userId, habitId, date, updatedAt],

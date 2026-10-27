@@ -1,6 +1,8 @@
 // Habit Buddy: the mascot that grows with every check-in. It gives tips from the student's own
 // check-ins, shows how its week went, and wears items and lives in rooms bought with tokens (the
-// server checks prices, stages and the balance). Tap it to hear its tips.
+// server checks prices, stages and the balance). Each week one limited item, the weekly drop, is
+// for sale once 2 of the week's quests are done. Treats classmates sent today sit in its room, and
+// with Buddy Showcase it can be shown on the leaderboard. Tap the buddy to hear its tips.
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
@@ -9,21 +11,26 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { buyBuddyItem, feedBuddyTreat, saveBuddy } from '@/authentication/authService';
 import { BuddyAvatar } from '@/components/buddy';
 import { Confetti } from '@/components/confetti';
+import { ShowBuddyToggle } from '@/components/reward-sheets';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
-import { publishBuddy, useBuddy } from '@/hooks/use-buddy';
+import { publishBuddy, reloadBuddy, useBuddy } from '@/hooks/use-buddy';
+import { useRewards } from '@/hooks/use-rewards';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
-import { buddyGrowth, buddyMood, buddyTips, buddyWeek, MOOD_FACE, PET_LINES, type BuddyItem, type BuddySlot, type BuddyTreat } from '@/utils/buddy';
+import { buddyGrowth, buddyMood, buddyTips, buddyWeek, collectedDrops, giftLine, MOOD_FACE, PET_LINES, weeklyDropCard, type BuddyItem, type BuddySlot, type BuddyTreat } from '@/utils/buddy';
+import { getLocalDateKey } from '@/utils/habit-visibility';
 
 type Slot = BuddySlot;
 const TABS: { slot: Slot; label: string }[] = [{ slot: 'head', label: 'Hats' }, { slot: 'hand', label: 'To hold' }, { slot: 'accessory', label: 'Gear' }, { slot: 'room', label: 'Rooms' }];
+const SHOWCASE_ID = 'buddy-showcase';
 
 export default function BuddyScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const showAlert = useAppDialog();
-  const { habits, currentHabits, tokens, applyWallet, streakFreeze } = useAppColorScheme();
+  const { habits, currentHabits, tokens, applyWallet, streakFreeze, isFaculty } = useAppColorScheme();
   const { buddy } = useBuddy();
+  const catalog = useRewards();
   const [slot, setSlot] = useState<Slot>('head');
   const [editingName, setEditingName] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -70,25 +77,33 @@ export default function BuddyScreen() {
     else showAlert('Could not change the look', result.message);
   };
 
+  const purchase = async (item: BuddyItem, drop: boolean) => {
+    setBusy(true);
+    const result = await buyBuddyItem(item.id, getLocalDateKey());
+    setBusy(false);
+    if (!result.ok) {
+      showAlert('Not yet', result.message);
+      // The week, its quests or the account's day may have changed since the drop was loaded.
+      if (drop) void reloadBuddy();
+      return;
+    }
+    publishBuddy(result.buddy);
+    applyWallet(result);
+    setBurst((count) => count + 1);
+    setPetLine(`I love my new ${item.name.toLowerCase()}!`);
+  };
+
   const buy = (item: BuddyItem) => {
     showAlert(`Buy the ${item.name}?`, `${item.emoji}  ${item.cost} tokens. ${name} will wear it right away.`, [
       { text: 'Not now', style: 'cancel' },
-      {
-        text: `Buy for ${item.cost}`,
-        onPress: async () => {
-          setBusy(true);
-          const result = await buyBuddyItem(item.id);
-          setBusy(false);
-          if (!result.ok) {
-            showAlert('Not yet', result.message);
-            return;
-          }
-          publishBuddy(result.buddy);
-          applyWallet(result);
-          setBurst((count) => count + 1);
-          setPetLine(item.slot === 'room' ? `I love my new ${item.name.toLowerCase()}!` : `I love my new ${item.name.toLowerCase()}!`);
-        },
-      },
+      { text: `Buy for ${item.cost}`, onPress: () => purchase(item, false) },
+    ]);
+  };
+
+  const buyDrop = (item: BuddyItem) => {
+    showAlert(`Buy ${item.name} for ${item.cost} tokens?`, `${item.emoji}  This week only. ${name} will wear it right away.`, [
+      { text: 'Not now', style: 'cancel' },
+      { text: 'Get it', onPress: () => purchase(item, true) },
     ]);
   };
 
@@ -120,9 +135,20 @@ export default function BuddyScreen() {
     ]);
   };
 
-  const items = (buddy?.items ?? []).filter((item) => item.slot === slot);
+  // Collected weekly drops are worn like shop items, in their slot.
+  const drops = buddy ? collectedDrops(buddy) : [];
+  const dropIds = new Set(drops.map((item) => item.id));
+  const items = [...(buddy?.items ?? []), ...drops].filter((item) => item.slot === slot);
+  const dropCard = buddy ? weeklyDropCard(buddy, tokens, getLocalDateKey()) : null;
   const treats = buddy?.treats ?? [];
   const fedCount = new Map((buddy?.fedTreats ?? []).map((treat) => [treat.treatId, treat.count]));
+  // Treats classmates sent today (newest first): they sit in the room and the newest is what it says.
+  const gifts = buddy?.giftsToday ?? [];
+  const giftSays = gifts.length ? giftLine(gifts[0], treats) : null;
+  // Buddy Showcase: its switch once bought, otherwise where to get it (when the catalog sells it).
+  // The leaderboard and its treats are the students' own, so faculty see neither.
+  const showcase = isFaculty ? undefined : catalog.rewards.find((reward) => reward.id === SHOWCASE_ID);
+  const showcaseOwned = !isFaculty && catalog.owns(SHOWCASE_ID);
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -133,15 +159,57 @@ export default function BuddyScreen() {
             <Ionicons name="chevron-back" size={21} color={themeColor('#292633')} />
           </Pressable>
           <Text style={styles.headerTitle}>Habit Buddy</Text>
-          <View style={styles.tokenPill} accessible accessibilityLabel={`${tokens} tokens`}>
+          {/* How to earn more and what else to spend on: the Tokens screen (students only). */}
+          <Pressable
+            style={({ pressed }) => [styles.tokenPill, pressed && styles.pressed]}
+            disabled={isFaculty}
+            onPress={() => router.push('/wallet')}
+            accessibilityRole={isFaculty ? 'text' : 'button'}
+            accessibilityLabel={isFaculty ? `${tokens} tokens` : `${tokens} tokens. Open Tokens`}
+          >
             <Ionicons name="logo-bitcoin" size={14} color="#E7A72F" />
             <Text style={styles.tokenText}>{tokens}</Text>
-          </View>
+          </Pressable>
         </View>
+
+        {dropCard && (
+          <View style={[styles.card, styles.dropCard]}>
+            <View style={styles.cardHead}>
+              <View style={[styles.cardIcon, styles.dropIcon]}><Ionicons name="gift" size={15} color="#FFFFFF" /></View>
+              <Text style={styles.cardTitle}>This week&apos;s drop</Text>
+            </View>
+            <Text style={styles.dropLine}>{dropCard.line}</Text>
+            {dropCard.progress ? <Text style={styles.dropProgress}>{dropCard.progress}</Text> : null}
+            <View style={styles.dropFoot}>
+              <Text style={styles.dropCollected}>{dropCard.collected}</Text>
+              {dropCard.state === 'owned' ? (
+                <View style={[styles.dropButton, styles.dropButtonOwned]}>
+                  <Ionicons name="checkmark" size={13} color="#2C6B4C" />
+                  <Text style={[styles.dropButtonText, styles.dropButtonTextOwned]}>{dropCard.action}</Text>
+                </View>
+              ) : (
+                <Pressable
+                  style={({ pressed }) => [styles.dropButton, !dropCard.canBuy && styles.dropButtonQuiet, pressed && styles.pressed]}
+                  disabled={busy || (dropCard.state === 'unlocked' && !dropCard.canBuy)}
+                  onPress={() => (dropCard.state === 'locked' ? router.dismissTo('/(tabs)') : buyDrop(dropCard.item))}
+                  accessibilityRole="button"
+                  accessibilityLabel={dropCard.state === 'locked' ? 'See this week\'s quests' : `${dropCard.item.name}: ${dropCard.action}`}
+                >
+                  <Text style={[styles.dropButtonText, !dropCard.canBuy && styles.dropButtonTextQuiet]}>{dropCard.action}</Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        )}
 
         <View style={styles.hero}>
           <Pressable onPress={pet} accessibilityRole="button" accessibilityLabel={`Pet ${name}`} style={styles.avatarWrap}>
             <BuddyAvatar buddy={buddy} checkIns={checkIns} mood={mood} size={170} />
+            {gifts.length > 0 && (
+              <View style={styles.giftRow} pointerEvents="none" accessible accessibilityLabel={`Treats from classmates today: ${gifts.map((gift) => gift.emoji).join(' ')}`}>
+                {gifts.map((gift, index) => <Text key={`${gift.treatId}-${index}`} style={styles.giftEmoji}>{gift.emoji}</Text>)}
+              </View>
+            )}
             <Animated.Text
               pointerEvents="none"
               style={[styles.hearts, { opacity: hearts.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0, 1, 0] }), transform: [{ translateY: hearts.interpolate({ inputRange: [0, 1], outputRange: [0, -60] }) }] }]}
@@ -166,7 +234,7 @@ export default function BuddyScreen() {
               accessibilityLabel="Buddy name"
             />
           )}
-          <View style={styles.speech}><Text style={styles.speechText}>{petLine ?? line}</Text></View>
+          <View style={styles.speech}><Text style={styles.speechText}>{petLine ?? giftSays ?? line}</Text></View>
           <View style={styles.meters}>
             <View style={styles.meter}>
               <View style={styles.meterHead}><Ionicons name="flash" size={13} color="#F2A93B" /><Text style={styles.meterLabel}>Energy today</Text><Text style={styles.meterValue}>{Math.round(energy * 100)}%</Text></View>
@@ -219,6 +287,22 @@ export default function BuddyScreen() {
           </View>
         </View>
 
+        {showcaseOwned ? (
+          <View style={styles.card}>
+            <View style={styles.cardHead}>
+              <View style={[styles.cardIcon, styles.showcaseIcon]}><Ionicons name="paw" size={15} color="#FFFFFF" /></View>
+              <Text style={styles.cardTitle}>Buddy Showcase</Text>
+            </View>
+            <ShowBuddyToggle />
+          </View>
+        ) : showcase ? (
+          <Pressable style={({ pressed }) => [styles.card, styles.showcaseLink, pressed && styles.pressed]} onPress={() => router.push(`/leaderboards?reward=${SHOWCASE_ID}`)} accessibilityRole="button">
+            <View style={[styles.cardIcon, styles.showcaseIcon]}><Ionicons name="paw" size={15} color="#FFFFFF" /></View>
+            <Text style={styles.showcaseText}>Buddy Showcase · {showcase.cost} tokens: let classmates see {name}</Text>
+            <Ionicons name="chevron-forward" size={16} color={themeColor('#8A8492')} />
+          </Pressable>
+        ) : null}
+
         <View style={styles.tabs}>
           {TABS.map((tab) => (
             <Pressable key={tab.slot} style={[styles.tab, slot === tab.slot && styles.activeTab]} onPress={() => setSlot(tab.slot)} accessibilityRole="tab" accessibilityState={{ selected: slot === tab.slot }}>
@@ -243,8 +327,9 @@ export default function BuddyScreen() {
                   disabled={busy || Boolean(!owned && (lockedStage || short))}
                   onPress={() => (owned ? wear(item) : buy(item))}
                   accessibilityRole="button"
-                  accessibilityLabel={`${item.name}: ${action}`}
+                  accessibilityLabel={`${item.name}${dropIds.has(item.id) ? ' (weekly drop)' : ''}: ${action}`}
                 >
+                  {dropIds.has(item.id) ? <View style={styles.dropTag}><Text style={styles.dropTagText}>Drop</Text></View> : null}
                   <Text style={styles.itemEmoji}>{item.emoji}</Text>
                   <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
                   <View style={[styles.itemAction, owned && styles.itemActionOwned, wearing && styles.itemActionWearing]}>
@@ -264,8 +349,9 @@ export default function BuddyScreen() {
               <Text style={styles.cardTitle}>Treats</Text>
             </View>
             <Text style={styles.treatIntro}>
-              Feed {name} a snack to cheer them up.{buddy && buddy.treatsFed > 0 ? ` You have shared ${buddy.treatsFed} so far.` : ''}
+              Feed {name} a snack to cheer them up{isFaculty ? '' : ', or send one to a classmate from the leaderboard'}.{buddy && buddy.treatsFed > 0 ? ` You have shared ${buddy.treatsFed} so far.` : ''}
             </Text>
+            {!isFaculty && buddy?.giftsSent !== undefined && <Text style={styles.giftStats}>Gifts sent {buddy.giftsSent} · received {buddy.giftsReceived ?? 0}</Text>}
             <View style={styles.grid}>
               {treats.map((treat) => {
                 const count = fedCount.get(treat.id) ?? 0;
@@ -307,6 +393,9 @@ const themedStyles = createThemedStyles({
   hero: { alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 26, paddingVertical: 22, paddingHorizontal: 18, marginBottom: 16 },
   avatarWrap: { alignItems: 'center', justifyContent: 'center' },
   hearts: { position: 'absolute', top: 0, fontSize: 22 },
+  // Today's treats from classmates, on the floor of the room.
+  giftRow: { position: 'absolute', left: 18, right: 18, bottom: 10, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 2 },
+  giftEmoji: { fontSize: 15 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14 },
   name: { fontSize: 24, fontWeight: '900', color: '#24212D' },
   nameInput: { marginTop: 14, minWidth: 160, textAlign: 'center', fontSize: 22, fontWeight: '900', color: '#24212D', borderBottomWidth: 2, borderBottomColor: '#5B42D8', paddingVertical: 2 },
@@ -333,6 +422,27 @@ const themedStyles = createThemedStyles({
   cardIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F2A93B' },
   weekIcon: { backgroundColor: '#5B42D8' },
   treatIcon: { backgroundColor: '#E86F9E' },
+  showcaseIcon: { backgroundColor: '#3BAA74' },
+  showcaseLink: { flexDirection: 'row', alignItems: 'center' },
+  showcaseText: { flex: 1, fontSize: 13, fontWeight: '800', color: '#3B3647' },
+  giftStats: { fontSize: 12, fontWeight: '800', color: '#8A8492' },
+  // This week's drop: a limited item, so its card stands out a little.
+  dropCard: { borderWidth: 1.5, borderColor: '#F2C94C' },
+  dropIcon: { backgroundColor: '#E7A72F' },
+  dropLine: { fontSize: 15, fontWeight: '800', color: '#24212D' },
+  dropProgress: { fontSize: 12, fontWeight: '700', color: '#6A6573' },
+  dropFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  dropCollected: { flexShrink: 1, fontSize: 12, fontWeight: '700', color: '#8A8492' },
+  dropButton: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: '#5B42D8' },
+  dropButtonQuiet: { backgroundColor: '#F0E9FF' },
+  dropButtonOwned: { backgroundColor: '#ECF8F1' },
+  dropButtonText: { fontSize: 13, fontWeight: '900', color: '#FFFFFF' },
+  dropButtonTextQuiet: { color: '#5B42D8' },
+  dropButtonTextOwned: { color: '#2C6B4C' },
+  // A small tag on a collected weekly drop in the wardrobe.
+  dropTag: { position: 'absolute', top: 6, left: 6, paddingHorizontal: 5, height: 16, borderRadius: 8, backgroundColor: '#E7A72F', alignItems: 'center', justifyContent: 'center' },
+  dropTagText: { fontSize: 9, fontWeight: '900', color: '#FFFFFF' },
+  pressed: { opacity: 0.85 },
   treatIntro: { fontSize: 13, lineHeight: 19, fontWeight: '600', color: '#6A6573' },
   // A small tally on a discovered treat (how many times it has been fed).
   treatCount: { position: 'absolute', top: 6, right: 6, minWidth: 20, height: 18, paddingHorizontal: 5, borderRadius: 9, backgroundColor: '#5B42D8', alignItems: 'center', justifyContent: 'center' },

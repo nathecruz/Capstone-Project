@@ -109,6 +109,10 @@ export type Preferences = {
   region: string;
   /** false hides the student from other students' leaderboards. */
   showOnLeaderboard?: boolean;
+  /** With the Buddy Showcase reward: false hides Habi from the leaderboard (shown when unset). */
+  showBuddy?: boolean;
+  /** false stops classmates from sending this student treats (allowed when unset). */
+  allowGifts?: boolean;
   /** App colour theme from the Premium Themes reward (classic, ocean, sunset, forest, midnight). */
   appTheme?: string;
   /** Notification types the student turned off on the Notifications screen. */
@@ -142,6 +146,14 @@ export type TokenTransaction = {
   label: string;
   date: string;
 };
+
+/**
+ * What a token ledger row was for, as the server derives it from the row's id (or, for spends made
+ * before spends had typed ids, from the label). The Tokens screen picks its history icon from it.
+ */
+export type TokenKind =
+  | 'check-in' | 'undo' | 'daily-claim' | 'challenge' | 'quest' | 'mystery' | 'streak' | 'weekly-bonus' | 'refund'
+  | 'reward' | 'buddy-item' | 'buddy-treat' | 'gift' | 'freeze' | 'coach' | 'other';
 
 export const initialPreferences: Preferences = {
   notificationsEnabled: true,

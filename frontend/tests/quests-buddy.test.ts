@@ -1,5 +1,5 @@
 import type { Habit } from '@/hooks/app-state/types';
-import { buddyGrowth, buddyMood } from '@/utils/buddy';
+import { BUDDY_STAGES, buddyCatalog, buddyGrowth, buddyMood, classmateBuddy, dropQuestsFooter, giftLine, keepTodayGifts, keepWeekDrop, ROOM_LOOK, showcaseLookOf, weeklyDropCard, type Buddy, type BuddyDrop, type BuddyItem } from '@/utils/buddy';
 import { daysLeftInWeek, weekStartOf, weeklyQuests } from '@/utils/quests';
 
 function habit(id: string, completionDates: string[] = [], overrides: Partial<Habit> = {}): Habit {
@@ -63,5 +63,138 @@ describe('habit buddy', () => {
     expect(buddyMood([missed, habit('read', ['2026-10-02', '2026-10-03']), habit('walk', ['2026-10-02'])], 'Habi', afternoon).line).toBe("Yum, thanks! 1 more and I'm full of energy.");
     expect(buddyMood([missed, habit('read', ['2026-10-02', '2026-10-03'])], 'Habi', afternoon).line).toBe("Yum, thanks! That's all for today.");
     expect(buddyMood([missed], 'Habi', afternoon)).toMatchObject({ mood: 'sad', line: "We missed today's habits... let's get them next time." });
+  });
+});
+
+// The 12 weekly drops as GET /api/buddy lists them (backend/services/buddy.js BUDDY_DROPS).
+const DROPS: BuddyItem[] = [
+  ['umbrella', 'hand', '☔', 'Umbrella'], ['rice', 'hand', '🌾', 'Rice stalk'], ['carabao', 'hand', '🐃', 'Carabao'], ['mango', 'hand', '🥭', 'Mango'],
+  ['salabat', 'hand', '🍵', 'Salabat tea'], ['lantern', 'hand', '🏮', 'Lantern'], ['sunflower', 'head', '🌻', 'Sunflower'], ['parol', 'head', '🌟', 'Parol star'],
+  ['fireworks', 'head', '🎆', 'Fireworks'], ['mini-tree', 'hand', '🎄', 'Mini tree'], ['sports-medal', 'accessory', '🏅', 'Sports medal'], ['ribbon', 'accessory', '🎗️', 'Ribbon'],
+].map(([id, slot, emoji, name]) => ({ id: `drop-${id}`, slot: slot as BuddyItem['slot'], emoji, name, cost: 150, stage: 'kid', drop: true }));
+
+/** A Kid-stage buddy (30 check-ins) in the week of October 26, 2026, whose drop is the Umbrella. */
+function buddyWith(drop: Partial<BuddyDrop> | null, overrides: Partial<Buddy> = {}): Buddy {
+  return {
+    name: 'Habi', head: '', hand: '', room: '', accessory: '', owned: [], checkIns: 30, items: [{ id: 'cap', slot: 'head', name: 'Cap', emoji: '🧢', cost: 40, stage: 'baby' }],
+    stages: BUDDY_STAGES, treats: [], fedTreats: [], treatsFed: 0, drops: DROPS,
+    drop: drop && { item: DROPS[0], weekStart: '2026-10-26', weekEnd: '2026-11-01', questsDone: 1, questsNeeded: 2, unlocked: false, owned: false, ...drop },
+    ...overrides,
+  };
+}
+
+// A day of that week.
+const WEDNESDAY = '2026-10-28';
+
+describe('weekly drop', () => {
+  it('is locked until 2 of the 3 quests are done', () => {
+    expect(weeklyDropCard(buddyWith({ questsDone: 1 }), 500, WEDNESDAY)).toEqual({
+      item: DROPS[0],
+      state: 'locked',
+      action: 'See quests',
+      canBuy: false,
+      line: '☔ Umbrella · 150 tokens · this week only',
+      progress: 'Finish 2 of 3 weekly quests to unlock (1/2)',
+      collected: 'Drops collected 0/12',
+    });
+    expect(weeklyDropCard(buddyWith({ questsDone: 0 }), 500, WEDNESDAY)?.progress).toBe('Finish 2 of 3 weekly quests to unlock (0/2)');
+  });
+
+  it('can be bought once unlocked, unless the stage or the balance is short', () => {
+    expect(weeklyDropCard(buddyWith({ questsDone: 2, unlocked: true }), 500, WEDNESDAY)).toMatchObject({ state: 'unlocked', action: 'Get it', canBuy: true, progress: null });
+    expect(weeklyDropCard(buddyWith({ questsDone: 3, unlocked: true }), 100, WEDNESDAY)).toMatchObject({ state: 'unlocked', action: '50 more', canBuy: false });
+    // Below Kid (10 check-ins), as the server refuses it.
+    expect(weeklyDropCard(buddyWith({ questsDone: 2, unlocked: true }, { checkIns: 6 }), 500, WEDNESDAY)).toMatchObject({ state: 'unlocked', action: 'Kid stage', canBuy: false });
+  });
+
+  it('is collected once bought, and counts the drops collected', () => {
+    const owned = buddyWith({ questsDone: 3, unlocked: true, owned: true }, { owned: ['cap', 'drop-umbrella', 'drop-parol'], dropsOwned: 2 });
+    expect(weeklyDropCard(owned, 0, WEDNESDAY)).toMatchObject({ state: 'owned', action: 'Collected', canBuy: false, progress: null, collected: 'Drops collected 2/12' });
+    // Unknown without the account's today.
+    expect(weeklyDropCard(buddyWith(null), 500, WEDNESDAY)).toBeNull();
+  });
+
+  it('is named at the bottom of the weekly quests card', () => {
+    const { drop } = buddyWith({ questsDone: 1 });
+    expect(dropQuestsFooter(drop, 1, WEDNESDAY)).toBe("Unlocks this week's drop: ☔ Umbrella (1/2)");
+    expect(dropQuestsFooter(drop, 3, WEDNESDAY)).toBe("Unlocks this week's drop: ☔ Umbrella (2/2)");
+    expect(dropQuestsFooter(null, 2, WEDNESDAY)).toBeNull();
+  });
+
+  it("is not shown after its week, while the buddy loaded before Monday still has it", () => {
+    const unlocked = buddyWith({ questsDone: 2, unlocked: true });
+    expect(weeklyDropCard(unlocked, 500, '2026-11-01')).toMatchObject({ state: 'unlocked', action: 'Get it' });
+    expect(weeklyDropCard(unlocked, 500, '2026-11-02')).toBeNull();
+    expect(weeklyDropCard(unlocked, 500, '2026-10-25')).toBeNull();
+    expect(dropQuestsFooter(unlocked.drop, 2, '2026-11-01')).toBe("Unlocks this week's drop: ☔ Umbrella (2/2)");
+    expect(dropQuestsFooter(unlocked.drop, 0, '2026-11-02')).toBeNull();
+  });
+
+  it('is drawn and worn like a shop item', () => {
+    expect(buddyCatalog(buddyWith(null)).find((item) => item.id === 'drop-parol')).toMatchObject({ slot: 'head', emoji: '🌟' });
+    expect(buddyCatalog(null)).toEqual([]);
+  });
+
+  it('stays known for its week after an answer without it (a change of look)', () => {
+    const known = buddyWith({ questsDone: 2, unlocked: true });
+    const bought = buddyWith(null, { owned: ['drop-umbrella'], hand: 'drop-umbrella' });
+    expect(keepWeekDrop(bought, known, '2026-10-28').drop).toMatchObject({ item: DROPS[0], unlocked: true, owned: true });
+    // A new week has a new drop: the old one is not kept.
+    expect(keepWeekDrop(bought, known, '2026-11-02').drop).toBeNull();
+    // An answer with the drop replaces it.
+    const fresh = buddyWith({ item: DROPS[1], weekStart: '2026-11-02', weekEnd: '2026-11-08' });
+    expect(keepWeekDrop(fresh, known, '2026-11-02').drop?.item.id).toBe('drop-rice');
+  });
+});
+
+describe('legend room', () => {
+  it('has a look for the Aurora', () => {
+    expect(ROOM_LOOK.aurora).toEqual({ background: '#1B2346', decor: ['🌌', '✨'] });
+  });
+});
+
+describe('treats from classmates', () => {
+  const treats = [
+    { id: 'apple', name: 'Apple', emoji: '🍎', cost: 15, line: '' },
+    { id: 'icecream', name: 'Ice cream', emoji: '🍦', cost: 30, line: '' },
+    { id: 'cupcake', name: 'Cupcake', emoji: '🧁', cost: 25, line: '' },
+  ];
+
+  it("become Habi's line, with the right article", () => {
+    expect(giftLine({ treatId: 'cupcake', emoji: '🧁', from: 'Maria R.', message: 'Keep going!' }, treats)).toBe('Maria R. sent me a cupcake! Keep going!');
+    expect(giftLine({ treatId: 'icecream', emoji: '🍦', from: 'Jose P.', message: "Kaya mo 'yan!" }, treats)).toBe("Jose P. sent me an ice cream! Kaya mo 'yan!");
+    expect(giftLine({ treatId: 'mystery', emoji: '🎁', from: 'Ana L.', message: 'Laban!' }, treats)).toBe('Ana L. sent me a treat! Laban!');
+  });
+
+  it("stay known after an answer without them (a change of look)", () => {
+    const gifts = [{ treatId: 'apple', emoji: '🍎', from: 'Maria R.', message: 'Laban!' }];
+    const known = { ...buddyWith(null), giftsToday: gifts };
+    expect(keepTodayGifts(buddyWith(null), known).giftsToday).toEqual(gifts);
+    // An answer with today's gifts replaces them, also when there are none.
+    expect(keepTodayGifts({ ...buddyWith(null), giftsToday: [] }, known).giftsToday).toEqual([]);
+    expect(keepTodayGifts(buddyWith(null), null).giftsToday).toBeUndefined();
+  });
+});
+
+describe("a classmate's Habi on the leaderboard", () => {
+  it('takes its stage and look from the row and its items from the own catalog', () => {
+    const own = buddyWith(null);
+    const look = { stage: 'champ' as const, checkIns: 150, head: 'top-hat', hand: 'drop-umbrella', accessory: '', room: 'aurora' };
+    const shown = classmateBuddy(look, own, "Maria's Habi");
+    expect(shown).toMatchObject({ name: "Maria's Habi", head: 'top-hat', hand: 'drop-umbrella', accessory: '', room: 'aurora', checkIns: 150, owned: [] });
+    expect(buddyGrowth(shown.checkIns, shown.stages).stage.id).toBe('champ');
+    expect(buddyCatalog(shown).find((item) => item.id === 'drop-umbrella')?.emoji).toBe('☔');
+    // Before the own buddy loads: the stages still draw the stage, with no items to find.
+    const bare = classmateBuddy(look, null, "Maria's Habi");
+    expect(bare.stages).toBe(BUDDY_STAGES);
+    expect(buddyCatalog(bare)).toEqual([]);
+  });
+});
+
+describe("the student's own Habi on their row", () => {
+  it('is built as the server builds it: the stage, its least check-ins, and what it wears', () => {
+    const own = { ...buddyWith(null), head: 'top-hat', hand: 'drop-umbrella', room: 'aurora', checkIns: 172 };
+    expect(showcaseLookOf(own)).toEqual({ stage: 'champ', checkIns: 150, head: 'top-hat', hand: 'drop-umbrella', accessory: '', room: 'aurora' });
+    expect(showcaseLookOf({ ...own, checkIns: 3, stages: [] })).toMatchObject({ stage: 'baby', checkIns: 0 });
   });
 });

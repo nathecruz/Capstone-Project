@@ -2,15 +2,16 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import { config } from '../config.js';
-import { query, withTransaction } from '../db.js';
+import { query, queryIfTable, withTransaction } from '../db.js';
 import { audit } from '../lib/audit.js';
 import { activeUntilOf, currentHabitSql, hasHabitEnded } from '../lib/habit-week.js';
 import { HttpError, validate } from '../lib/http.js';
-import { addDays, dateRange, habitFrequency, todayInZone } from '../lib/metrics.js';
+import { addDays, dateRange, habitFirstDay, habitFrequency, mondayOf, todayInZone } from '../lib/metrics.js';
 import { generatePassword, hashPassword, passwordProblem } from '../lib/passwords.js';
 import { ROLES, ROLE_LABELS, STAFF_ROLES } from '../lib/permissions.js';
 import { loadLiveStreaks } from '../lib/streaks.js';
 import { joinName, namesFromRow } from '../lib/names.js';
+import { byKindOrder, FLAG_LIMITS, FLAG_WINDOW_DAYS, KINDS_OUTSIDE_BIG_DAY, tokenFlags, tokenKind, tokenKindSql } from '../lib/token-kinds.js';
 import { requirePermission } from '../middleware/auth.js';
 
 const router = Router();
@@ -116,6 +117,82 @@ router.get('/', canView, async (request, response) => {
   });
 });
 
+// Tokens -------------------------------------------------------------------------------------
+// Read-only views of the ledger the app backend writes: no price editing or token adjustments here.
+
+const HISTORY_PAGE = 30;
+// SQL: the epoch milliseconds at which a day starts in a time zone.
+const dayStartMs = (dayParam, tzParam) => `extract(epoch FROM (${dayParam}::date::timestamp AT TIME ZONE ${tzParam})) * 1000`;
+
+/**
+ * Students whose last 14 Manila days look like farming (lib/token-kinds.js tokenFlags): a day over
+ * 150 tokens without streak, refund and weekly-bonus payouts, a day over the paid check-ins, a week
+ * with more than 12 habits starting, or 15 or more gifts sent. Names are shown, so administrators only.
+ */
+router.get('/token-flags', canView, async (_request, response) => {
+  const tz = config.timeZone;
+  const today = todayInZone(tz);
+  const from = addDays(today, -(FLAG_WINDOW_DAYS - 1));
+
+  const [tokenDays, checkInDays, habits, gifts] = await Promise.all([
+    query(
+      `SELECT t.user_id AS "userId", (to_timestamp(t.created_at / 1000.0) AT TIME ZONE $2)::date AS day, sum(t.amount)::int AS count
+         FROM token_transactions t JOIN users u ON u.id = t.user_id AND u.role = 'user'
+        WHERE t.created_at >= ${dayStartMs('$1', '$2')} AND t.amount > 0 AND ${tokenKindSql('t')} <> ALL($3::text[])
+        GROUP BY 1, 2 HAVING sum(t.amount) > $4`,
+      [from, tz, KINDS_OUTSIDE_BIG_DAY, FLAG_LIMITS.dayTokens],
+    ),
+    query(
+      `SELECT hc.user_id AS "userId", hc.completed_date AS day, count(*)::int AS count
+         FROM habit_completions hc JOIN users u ON u.id = hc.user_id AND u.role = 'user'
+        WHERE hc.completed_date >= $1::date
+        GROUP BY 1, 2 HAVING count(*) > $2`,
+      [from, FLAG_LIMITS.dayCheckIns],
+    ),
+    query(`SELECT h.id, h.user_id AS "userId", h.start_date FROM habits h JOIN users u ON u.id = h.user_id AND u.role = 'user'`),
+    queryIfTable(
+      'buddy_gifts',
+      `SELECT g.sender_id AS "userId", count(*)::int AS count
+         FROM buddy_gifts g JOIN users u ON u.id = g.sender_id AND u.role = 'user'
+        WHERE g.created_at >= ${dayStartMs('$1', '$2')}
+        GROUP BY 1 HAVING count(*) >= $3`,
+      [from, tz, FLAG_LIMITS.giftsSent],
+      [],
+    ),
+  ]);
+
+  const facts = new Map();
+  const factsOf = (userId) => {
+    if (!facts.has(userId)) facts.set(userId, { tokenDays: [], checkInDays: [], habitWeeks: [], giftsSent: 0 });
+    return facts.get(userId);
+  };
+  for (const row of tokenDays.rows) factsOf(row.userId).tokenDays.push({ day: row.day, count: row.count });
+  for (const row of checkInDays.rows) factsOf(row.userId).checkInDays.push({ day: row.day, count: row.count });
+  for (const row of gifts.rows) factsOf(row.userId).giftsSent = row.count;
+  // A habit starts on its first day (the later of its start date and the day it was made).
+  const weeksByUser = new Map();
+  for (const habit of habits.rows) {
+    const firstDay = habitFirstDay(habit, tz);
+    if (!firstDay || firstDay < from || firstDay > today) continue;
+    if (!weeksByUser.has(habit.userId)) weeksByUser.set(habit.userId, new Map());
+    const weeks = weeksByUser.get(habit.userId);
+    const week = mondayOf(firstDay);
+    weeks.set(week, (weeks.get(week) ?? 0) + 1);
+  }
+  for (const [userId, weeks] of weeksByUser) {
+    for (const [weekStart, count] of weeks) if (count > FLAG_LIMITS.weekHabits) factsOf(userId).habitWeeks.push({ weekStart, count });
+  }
+
+  const flagged = new Map([...facts].map(([userId, fact]) => [userId, tokenFlags(fact)]).filter(([, flags]) => flags.length));
+  const names = flagged.size
+    ? await query('SELECT id, full_name AS "fullName", first_name AS "firstName", last_name AS "lastName", email FROM users WHERE id = ANY($1::text[])', [[...flagged.keys()]])
+    : { rows: [] };
+  const items = names.rows
+    .map((user) => ({ userId: user.id, name: namesFromRow(user).fullName || user.email, flags: flagged.get(user.id) }))
+    .sort((a, b) => b.flags.length - a.flags.length || a.name.localeCompare(b.name));
+  response.json({ ok: true, from, to: today, limits: FLAG_LIMITS, items });
+});
+
 async function loadUser(id, runner = { query }) {
   const { rows } = await runner.query(
     `SELECT id, full_name AS "fullName", first_name AS "firstName", last_name AS "lastName", username, email, role, status, status_reason AS "statusReason",
@@ -174,7 +251,6 @@ router.get('/:id', canView, async (request, response) => {
          (SELECT COALESCE(max(streak), 0)::int FROM habits WHERE user_id = $1) AS "bestStreak",
          (SELECT count(*)::int FROM goals WHERE user_id = $1) AS "goalCount",
          (SELECT COALESCE(round(avg(progress)), 0)::int FROM goals WHERE user_id = $1) AS "goalAvgProgress",
-         (SELECT COALESCE(sum(amount), 0)::int FROM token_transactions WHERE user_id = $1) AS "tokenBalance",
          (SELECT count(*)::int FROM sessions WHERE user_id = $1 AND expires_at > $3) AS "appSessions",
          (SELECT count(*)::int FROM web_push_subscriptions WHERE user_id = $1) AS "pushDevices",
          (SELECT count(*)::int FROM issue_reports WHERE user_id = $1) AS "issueReports",
@@ -211,6 +287,124 @@ router.get('/:id', canView, async (request, response) => {
     loginHistory: logins.rows,
     dailyCompletions: dateRange(start, today).map((day) => ({ day, completions: byDay.get(day) ?? 0 })),
     achievements: achievements.rows,
+  });
+});
+
+/** The opaque cursor of a ledger page that ends at `row`: the next page starts after it. */
+export function historyCursor(row) {
+  return Buffer.from(JSON.stringify([Number(row.createdAt), String(row.id)])).toString('base64url');
+}
+
+/** The row ({ createdAt, id }) a cursor points at, or null when historyCursor did not make it. */
+export function readHistoryCursor(cursor) {
+  try {
+    const [createdAt, id] = JSON.parse(Buffer.from(String(cursor), 'base64url').toString('utf8'));
+    return Number.isSafeInteger(createdAt) && typeof id === 'string' && id ? { createdAt, id } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A Habi item's name: from the label of the spend that bought it ("Buddy: Cozy room", "Buddy:
+ * Umbrella (weekly drop)"), else from its id ('sun-hat' is "Sun hat", the drop 'drop-mango' "Mango").
+ */
+export function buddyItemName(id, label) {
+  const bought = /^Buddy:\s*(.+?)(?:\s+\(weekly drop\))?$/.exec(String(label ?? ''));
+  if (bought) return bought[1];
+  const words = String(id).replace(/^drop-/, '').split('-').filter(Boolean).join(' ');
+  return words ? words[0].toUpperCase() + words.slice(1) : String(id);
+}
+
+// A cursor carries a whole ledger id, and check-in ids hold the habit id the app chose.
+const tokensSchema = z.object({ before: z.string().trim().max(2000).optional() });
+
+/**
+ * A student's tokens for the detail page: earned, spent, the balance and sums by kind; what they
+ * own (rewards on sale, Habi items and Weekly Drops, streak freezes held and used); their treat
+ * gifts; and one page of the ledger, newest first (`before` is the nextCursor of the page before).
+ */
+router.get('/:id/tokens', canView, async (request, response) => {
+  const { before } = validate(tokensSchema, request.query);
+  const after = before ? readHistoryCursor(before) : null;
+  if (before && !after) throw new HttpError(400, 'This page of the token history is not available.');
+  const user = await loadUser(request.params.id);
+  const values = [user.id];
+  // Newest first, by time and then id (byte order), so rows of the same millisecond keep their place across pages.
+  const older = after ? ' AND created_at <= $2 AND (created_at < $2 OR id COLLATE "C" < $3)' : '';
+  if (after) values.push(after.createdAt, after.id);
+  values.push(HISTORY_PAGE + 1);
+
+  const [kinds, rewards, items, freezes, gifts, page] = await Promise.all([
+    query(
+      `SELECT ${tokenKindSql('t')} AS kind,
+              COALESCE(sum(t.amount) FILTER (WHERE t.amount > 0), 0)::int AS earned,
+              COALESCE(-sum(t.amount) FILTER (WHERE t.amount < 0), 0)::int AS spent
+         FROM token_transactions t WHERE t.user_id = $1 GROUP BY 1`,
+      [user.id],
+    ),
+    // Retired rewards were refunded, so only the rewards on sale are owned.
+    query(
+      `SELECT r.name FROM reward_redemptions rr JOIN rewards r ON r.id = rr.reward_id
+        WHERE rr.user_id = $1 AND r.active GROUP BY r.id, r.name ORDER BY min(rr.redeemed_at)`,
+      [user.id],
+    ),
+    // An item and the spend that bought it share their time.
+    query(
+      `SELECT b.item_id AS id, b.bought_at AS "boughtAt",
+              (SELECT t.label FROM token_transactions t
+                WHERE t.user_id = b.user_id AND t.created_at = b.bought_at AND t.amount < 0 AND t.label LIKE 'Buddy:%' LIMIT 1) AS label
+         FROM buddy_items b WHERE b.user_id = $1 ORDER BY b.bought_at, b.item_id`,
+      [user.id],
+    ),
+    query(
+      `SELECT COALESCE((SELECT available FROM user_streak_freezes WHERE user_id = $1), 0)::int AS held,
+              (SELECT count(*)::int FROM streak_freeze_days WHERE user_id = $1) AS used`,
+      [user.id],
+    ),
+    queryIfTable(
+      'buddy_gifts',
+      `SELECT count(*) FILTER (WHERE sender_id = $1)::int AS sent, count(*) FILTER (WHERE recipient_id = $1)::int AS received
+         FROM buddy_gifts WHERE sender_id = $1 OR recipient_id = $1`,
+      [user.id],
+      [{ sent: 0, received: 0 }],
+    ),
+    query(
+      `SELECT id, amount, label, created_at AS "createdAt" FROM token_transactions
+        WHERE user_id = $1${older}
+        ORDER BY created_at DESC, id COLLATE "C" DESC LIMIT $${values.length}`,
+      values,
+    ),
+  ]);
+
+  const byKind = byKindOrder(kinds.rows);
+  const earned = byKind.reduce((sum, row) => sum + row.earned, 0);
+  const spent = byKind.reduce((sum, row) => sum + row.spent, 0);
+  const owned = items.rows.map((item) => ({ id: item.id, name: buddyItemName(item.id, item.label), boughtAt: item.boughtAt }));
+  const rows = page.rows.slice(0, HISTORY_PAGE);
+  response.json({
+    ok: true,
+    balance: earned - spent,
+    earned,
+    spent,
+    byKind,
+    rewards: rewards.rows.map((row) => row.name),
+    buddyItems: owned.filter((item) => !item.id.startsWith('drop-')),
+    dropsOwned: owned.filter((item) => item.id.startsWith('drop-')),
+    freezesHeld: freezes.rows[0].held,
+    freezesUsed: freezes.rows[0].used,
+    giftsSent: gifts.rows[0].sent,
+    giftsReceived: gifts.rows[0].received,
+    history: {
+      items: rows.map((row) => ({
+        id: String(row.id).replace(`${user.id}:token:`, ''),
+        amount: Number(row.amount),
+        kind: tokenKind(row.id, row.label),
+        label: row.label,
+        createdAt: Number(row.createdAt),
+      })),
+      nextCursor: page.rows.length > HISTORY_PAGE ? historyCursor(rows.at(-1)) : null,
+    },
   });
 });
 

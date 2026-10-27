@@ -1,5 +1,7 @@
 // System instructions, prompt builders and output guards for every AI feature.
 // Keeping them in one module makes the AI behaviour reviewable and testable.
+import { economyGuide } from './token-guide.js';
+import { COACH_TOKEN_COST, PAID_CHECK_INS_PER_DAY, POINTS_PER_CHECK_IN } from './wallet.js';
 
 export const AI_MODES = ['assistant', 'coach', 'support'];
 
@@ -19,9 +21,9 @@ HabitAI app guide (the only features that exist):
 - Edit a habit: tap the pencil on a habit card in the Habits tab to rename it or change its category or schedule (check-ins are kept), or to delete it.
 - Habit analysis: Insights > Predictions shows each habit's chance of success from the machine-learning model and AI advice on the best way and time to do it.
 - Streaks: the main streak counts the days in a row with at least one check-in, across all habits and weeks. It stops on a day when habits were due and none was checked in; a Streak Freeze (bought with tokens from the streak tile on Home) covers a missed day. Each habit also shows its own streak; history is kept.
-- Points and levels: every check-in gives 20 points and 5 tokens. Each 100 points is one level. Leaderboards rank students by points this week, this month or all time.
-- Rewards: spend tokens on rewards from the Leaderboards screen (for example Plant Buddy 200 tokens, Premium Theme 320, Grace Day 620, Custom Title 750).
-- AI Coach: on the Profile tab; each answered question costs 10 tokens (nothing is charged if the AI is unavailable).
+- Points and levels: every check-in gives ${POINTS_PER_CHECK_IN} points (points count up to ${PAID_CHECK_INS_PER_DAY} check-ins a day). Each 100 points is one level. Leaderboards rank students by points this week, this month or all time.
+${economyGuide()}
+- AI Coach: on the Profile tab; each answered question costs ${COACH_TOKEN_COST} tokens (they are given back if the AI cannot answer).
 - Insights tab: completion stats, habit predictions and the progress assistant.
 - Goals tab: describe a goal, or just ask for this week's habits, and the AI planner reads your recent habit history and builds a step-by-step plan you can save under My Goals, plus this week's habits, which you can add to this week after one confirmation.
 - Notifications screen: Reminders, Achievements and System tabs. Reminders on the web need HTTPS and notification permission; on iPhone add HabitAI to the Home Screen first.
@@ -35,6 +37,7 @@ HabitAI app guide (the only features that exist):
 const SYSTEM_PROMPTS = {
   coach: `You are HabitAI Coach, the personal habit coach inside HabitAI, a habit tracker used by PSAU students.
 Give a short, motivating coaching reply grounded in the student's data. Cover, in a natural flow: the one habit, streak or goal that needs attention right now and why; one specific main action they can do today or tomorrow; one or two smaller supporting steps or a backup plan for a busy day; and a brief, genuine encouragement to close. Keep it practical and realistic for a university student. Use 4 to 7 sentences.
+The USER DATA also has plannerHistory: each habit of the last 4 weeks (one week each) with its completionRate, its usualCheckInTime and its mlForecast (completionProbability and dropoutRisk), plus the student's strongestWeekday and weakestWeekday. Use them to make the main action one specific next step: name the habit, the time (their usual check-in time when they have one) and the day, protect the weakest weekday, and make a habit with a high dropoutRisk smaller rather than adding more. Mention a number from them only when it helps.
 ${SHARED_RULES}`,
   assistant: `You are the HabitAI progress assistant inside HabitAI, a habit tracker used by PSAU students.
 Answer the student's question directly and accurately from their data. Then point out one useful pattern or trend you notice (a strong day, a slipping habit, a streak worth protecting, or progress on a goal), explain briefly what it means, and suggest one concrete next step. Use 4 to 7 sentences.
@@ -49,7 +52,7 @@ ${APP_GUIDE}`,
  * their own habits: the advice must fit a teacher's day, not a student's.
  */
 export const FACULTY_CONTEXT = `This user is a PSAU faculty member (a teacher who may also do research, advising and administrative work), not a student.
-Tailor everything to a faculty member's day: lesson preparation, grading and feedback, consultations with students, research and writing, meetings, and their own rest, health and family time. Do not talk about studying for exams, attending classes as a student, or student leaderboards.`;
+Tailor everything to a faculty member's day: lesson preparation, grading and feedback, consultations with students, research and writing, meetings, and their own rest, health and family time. Do not talk about studying for exams, attending classes as a student, or student leaderboards. Faculty accounts have no tokens, rewards or Tokens screen, so do not suggest them.`;
 
 /** The instruction for an AI feature, adjusted for faculty accounts. */
 export function forAudience(system, role) {
@@ -58,6 +61,15 @@ export function forAudience(system, role) {
 
 export function systemPromptFor(mode, role = 'user') {
   return forAudience(SYSTEM_PROMPTS[mode] ?? SYSTEM_PROMPTS.assistant, role);
+}
+
+/**
+ * The USER DATA for an assistant mode. The coach (a paid answer) also gets the planner's history of
+ * the last 4 weeks (services/planner-history.js): completion rates per week, usual check-in times,
+ * strongest and weakest weekday and forecasts. The free assistant keeps the plain context.
+ */
+export function assistantContext(mode, context, plannerHistory = null) {
+  return mode === 'coach' && plannerHistory ? { ...context, plannerHistory } : context;
 }
 
 export function buildUserPrompt({ question, context }) {

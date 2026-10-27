@@ -49,3 +49,7 @@ export const habitAdviceLimiter = rateLimit({
   },
 });
 export const predictionLimiter = limiter({ limit: 120, message: 'Too many prediction requests. Please try again shortly.' });
+// Check-ins and token actions (buying, claiming, opening): far above what a student taps, but a
+// script cannot hammer the ledger. One budget is shared by all the token actions of a session.
+export const checkInLimiter = limiter({ limit: 120, message: 'Too many check-ins. Please wait a few minutes and try again.' });
+export const walletLimiter = limiter({ limit: 60, message: 'Too many token actions. Please wait a few minutes and try again.' });

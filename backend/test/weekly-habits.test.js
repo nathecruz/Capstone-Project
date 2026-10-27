@@ -7,14 +7,14 @@ import { buildHabitContext } from '../services/ai-context.js';
 import { canStillCheckIn, secondsUntilCheckInCloses } from '../services/completion-date.js';
 import { dailyChallenges } from '../services/daily-challenges.js';
 import { habitStats } from '../services/habit-analysis.js';
-import { habitActiveUntil, hasHabitEnded, isHabitActiveOn, weekEndKey, withActiveUntil } from '../services/habit-week.js';
+import { allowedActiveUntil, habitActiveUntil, hasHabitEnded, isHabitActiveOn, weekEndKey, withActiveUntil } from '../services/habit-week.js';
 import { buildTrainingRows, trainingSeries } from '../services/ml-training-rows.js';
 import { isHabitInWeek, weeklyQuests } from '../services/quests.js';
 import { daysToFreeze } from '../services/streak-freeze.js';
 import { computeStreak } from '../services/streaks.js';
 import { awardAccountStreakMilestones } from '../services/wallet.js';
 import { getDueHabitReminders, getWebPushSnoozeSettings } from '../services/web-push-reminders.js';
-import { keepActiveUntil, stampActiveUntil, weeklyResetSnapshot } from '../services/weekly-reset.js';
+import { stampActiveUntil, weeklyResetSnapshot } from '../services/weekly-reset.js';
 
 const daily = (id, startDate, activeUntil, extra = {}) => ({ id, label: id, frequency: 'Daily', startDate, activeUntil, reminderDays: [], meta: 'Daily • Anytime', ...extra });
 const lastWeek = (id, extra) => daily(id, '2026-10-12', '2026-10-18', extra);
@@ -51,13 +51,48 @@ test('habits without a last active day get the end of their week, in their time 
 
 test('a saved habit keeps the last active day the server gave it', () => {
   const now = new Date('2026-10-20T04:00:00Z');
-  const current = { habits: [{ id: 'old', activeUntil: '2026-10-11' }, { id: 'kept', activeUntil: '2026-10-25' }] };
+  const current = { habits: [{ id: 'old', activeUntil: '2026-10-11' }, { id: 'kept', activeUntil: '2026-10-25' }, { id: 'early', activeUntil: '2026-10-22' }] };
   // An older app version sends the habits without the field, and a new habit.
-  const incoming = { habits: [{ id: 'old' }, { id: 'kept', activeUntil: '2026-11-01' }, { id: 'new' }] };
-  assert.deepEqual(keepActiveUntil(incoming, current).habits.map((habit) => habit.activeUntil), ['2026-10-11', '2026-11-01', undefined]);
-  assert.equal(keepActiveUntil(incoming, { habits: [] }), incoming, 'nothing stored: the same state');
-  assert.deepEqual(stampActiveUntil(incoming, current, now).habits.map((habit) => habit.activeUntil), ['2026-10-11', '2026-11-01', '2026-10-25'], 'an ended habit is not moved into this week');
-  assert.deepEqual(stampActiveUntil(incoming, null, now).habits.map((habit) => habit.activeUntil), ['2026-10-25', '2026-11-01', '2026-10-25']);
+  const incoming = { habits: [{ id: 'old' }, { id: 'kept' }, { id: 'early' }, { id: 'new' }] };
+  assert.deepEqual(stampActiveUntil(incoming, current, now, '2026-10-20').habits.map((habit) => habit.activeUntil), ['2026-10-11', '2026-10-25', '2026-10-22', '2026-10-25'], 'an ended habit is not moved into this week');
+  assert.deepEqual(stampActiveUntil(incoming, null, now, '2026-10-20').habits.map((habit) => habit.activeUntil), ['2026-10-25', '2026-10-25', '2026-10-25', '2026-10-25']);
+  const stamped = stampActiveUntil(incoming, current, now, '2026-10-20');
+  assert.equal(stampActiveUntil(stamped, current, now, '2026-10-20'), stamped, 'nothing to change: the same state');
+  // Without the account's day, the campus day (Manila) is used.
+  assert.deepEqual(stampActiveUntil(incoming, current, now).habits.map((habit) => habit.activeUntil), ['2026-10-11', '2026-10-25', '2026-10-22', '2026-10-25']);
+});
+
+test('habits stay inside their week, whatever the app sends', () => {
+  const today = '2026-10-21';
+  // A forged far-away last day is cut back to the end of the habit's week.
+  assert.equal(allowedActiveUntil(thisWeek('a', { activeUntil: '2030-01-01' }), null, today), '2026-10-25');
+  // A habit that starts next week gets that week's Sunday, not this one.
+  assert.equal(allowedActiveUntil(daily('b', '2026-10-27', '2026-11-01'), null, today), '2026-11-01');
+  assert.equal(allowedActiveUntil(daily('b', '2026-10-27', '2026-12-31'), null, today), '2026-11-01');
+  // Ending early is allowed: an earlier valid day is kept.
+  assert.equal(allowedActiveUntil(thisWeek('c', { activeUntil: '2026-10-22' }), thisWeek('c'), today), '2026-10-22');
+  // An older build drops the field: the stored day is kept, and still capped by the week.
+  assert.equal(allowedActiveUntil({ id: 'd', startDate: '2026-10-19' }, thisWeek('d', { activeUntil: '2026-10-23' }), today), '2026-10-23');
+  // An ended habit stays ended, whatever it is sent with.
+  assert.equal(allowedActiveUntil(thisWeek('e', { activeUntil: '2026-10-25' }), lastWeek('e'), today), '2026-10-18');
+
+  // On save, an ended habit also keeps its stored start date, so it cannot be restarted this week.
+  const current = { habits: [lastWeek('old'), thisWeek('now')] };
+  const incoming = { habits: [{ ...lastWeek('old'), startDate: '2026-10-21', activeUntil: '2026-10-25', completionDates: ['2026-10-21'] }, { ...thisWeek('now'), activeUntil: '2030-01-01' }] };
+  const saved = stampActiveUntil(incoming, current, new Date('2026-10-21T04:00:00Z'), today);
+  assert.deepEqual(saved.habits.map((habit) => [habit.id, habit.startDate, habit.activeUntil]), [['old', '2026-10-12', '2026-10-18'], ['now', '2026-10-19', '2026-10-25']]);
+  assert.deepEqual(saved.habits[0].completionDates, ['2026-10-21'], 'nothing else about it changes here');
+  assert.ok(hasHabitEnded(saved.habits[0], today));
+});
+
+test('legacy habits without a last active day follow withActiveUntil on the account day', () => {
+  // Sunday October 18, 8 PM UTC: already Monday in Manila, still Sunday in Los Angeles.
+  const now = new Date('2026-10-18T20:00:00Z');
+  const legacy = { habits: [{ id: 'a' }, { id: 'c', startDate: '2026-10-28' }, { id: 'd', completionTimeZone: 'America/Los_Angeles' }] };
+  const losAngeles = { habits: legacy.habits.map((habit) => ({ ...habit, completionTimeZone: 'America/Los_Angeles' })) };
+  assert.deepEqual(stampActiveUntil(losAngeles, null, now, '2026-10-18').habits.map((habit) => habit.activeUntil), withActiveUntil(losAngeles, now).habits.map((habit) => habit.activeUntil));
+  // The account's day decides, not a habit's own (client-editable) time zone.
+  assert.deepEqual(stampActiveUntil(legacy, null, now, '2026-10-19').habits.map((habit) => habit.activeUntil), ['2026-10-25', '2026-11-01', '2026-10-25']);
 });
 
 test('the one-time migration stamps a snapshot as a newer one, or leaves it', () => {

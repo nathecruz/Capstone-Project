@@ -13,6 +13,19 @@ function list(value, fallback) {
   return (value || fallback).split(',').map((item) => item.trim()).filter(Boolean);
 }
 
+function intBetween(value, min, max, fallback) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= min && number <= max ? number : fallback;
+}
+
+/** A real calendar day (YYYY-MM-DD), else `fallback`. */
+function dateKeyOr(value, fallback) {
+  const text = value?.trim() ?? '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return fallback;
+  const parsed = new Date(`${text}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === text ? text : fallback;
+}
+
 export const config = {
   serverRoot,
   isProduction,
@@ -21,6 +34,13 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL?.trim() || '',
   databasePoolMax: Number(process.env.DATABASE_POOL_MAX || 5),
   timeZone: process.env.APP_TIME_ZONE?.trim() || 'Asia/Manila',
+  // The app backend's daily check-in cap (backend/config/index.js, same variables and defaults):
+  // tokens are paid for this many check-ins a day, and from `cappedFrom` a day counts at most this
+  // many toward points.
+  checkIns: {
+    paidPerDay: intBetween(process.env.PAID_CHECK_INS_PER_DAY, 1, 50, 6),
+    cappedFrom: dateKeyOr(process.env.CHECK_IN_CAP_FROM, '2026-10-26'),
+  },
   appName: process.env.APP_NAME?.trim() || 'HabitAI',
   sessionCookie: 'habitai_admin_session',
   sessionTtlMs: Number(process.env.ADMIN_SESSION_HOURS || 12) * 60 * 60 * 1000,

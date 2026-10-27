@@ -1,4 +1,5 @@
-// Notifications from the server (badges earned, reminders, system news), by type and by day.
+// Notifications from the server (badges earned, reminders, treats from classmates, system news),
+// by type and by day.
 // It opens on a tab with something new; the settings choose which types show (saved with the
 // student's preferences).
 import { Ionicons } from '@expo/vector-icons';
@@ -12,7 +13,7 @@ import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-
 import { onLive } from '@/utils/live-events';
 import { sectionFor, timeLabel, type Section } from '@/utils/notification-time';
 
-type NotificationCategory = 'Reminders' | 'Achievements' | 'System';
+type NotificationCategory = 'Reminders' | 'Achievements' | 'Treats' | 'System';
 
 type NotificationItem = {
   id: string;
@@ -24,14 +25,22 @@ type NotificationItem = {
   accent: string;
 };
 
-const TABS: NotificationCategory[] = ['Reminders', 'Achievements', 'System'];
+const TABS: NotificationCategory[] = ['Reminders', 'Achievements', 'Treats', 'System'];
 /** Short tab names, so a tab still fits beside its count of new items. */
-const TAB_LABEL: Record<NotificationCategory, string> = { Reminders: 'Reminders', Achievements: 'Badges', System: 'System' };
+const TAB_LABEL: Record<NotificationCategory, string> = { Reminders: 'Reminders', Achievements: 'Badges', Treats: 'Treats', System: 'System' };
 const TYPE_INFO: Record<NotificationCategory, { icon: keyof typeof Ionicons.glyphMap; accent: string; empty: string; setting: string }> = {
   Reminders: { icon: 'alarm-outline', accent: '#5B42D8', empty: 'Habit reminders you get will show here.', setting: 'Habit reminders' },
   Achievements: { icon: 'ribbon-outline', accent: '#2E9D5C', empty: 'Badges and streak milestones will show here.', setting: 'Badges and milestones' },
+  Treats: { icon: 'gift-outline', accent: '#E86F9E', empty: 'Treats from classmates will show here.', setting: 'Treats from classmates' },
   System: { icon: 'information-circle-outline', accent: '#2F86D8', empty: 'News about HabitAI will show here.', setting: 'News and updates' },
 };
+
+/** The tab of a server notification type: treats from classmates ('gift'), badges, system news, or reminders. */
+function categoryOf(type: string): NotificationCategory {
+  if (type === 'gift') return 'Treats';
+  if (type.includes('achievement')) return 'Achievements';
+  return type.includes('system') ? 'System' : 'Reminders';
+}
 
 // React Native Web colours the thumb of an "on" switch with activeThumbColor (teal by default).
 const WEB_THUMB = { activeThumbColor: '#FFFFFF' } as object;
@@ -39,7 +48,9 @@ const WEB_THUMB = { activeThumbColor: '#FFFFFF' } as object;
 export default function NotificationsScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
-  const { preferences, updatePreferences } = useAppColorScheme();
+  const { preferences, updatePreferences, isFaculty } = useAppColorScheme();
+  // Treats come from classmates on the leaderboard, so faculty have no Treats tab.
+  const tabs = isFaculty ? TABS.filter((tab) => tab !== 'Treats') : TABS;
   const [chosenTab, setChosenTab] = useState<NotificationCategory | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -61,7 +72,7 @@ export default function NotificationsScreen() {
         if (!active || !items) return;
         const mapped = items.map((item) => {
           const notification = item as { id: string; type: string; title: string; message: string; readAt?: number | null; createdAt: number };
-          const category: NotificationCategory = notification.type.includes('achievement') ? 'Achievements' : notification.type.includes('system') ? 'System' : 'Reminders';
+          const category = categoryOf(notification.type);
           return { id: notification.id, title: notification.title, message: notification.message, createdAt: notification.createdAt, category, icon: TYPE_INFO[category].icon, accent: TYPE_INFO[category].accent, readAt: notification.readAt };
         }).sort((left, right) => right.createdAt - left.createdAt);
         setNotifications(mapped);
@@ -90,7 +101,7 @@ export default function NotificationsScreen() {
   const unread = visible.filter((item) => !readIds.includes(item.id));
   const unreadIn = (tab: NotificationCategory) => unread.filter((item) => item.category === tab).length;
   // Until the student picks a tab, show the first one with something new.
-  const activeTab = chosenTab ?? TABS.find((tab) => unreadIn(tab) > 0) ?? 'Reminders';
+  const activeTab = chosenTab ?? tabs.find((tab) => unreadIn(tab) > 0) ?? 'Reminders';
   const shown = visible.filter((item) => item.category === activeTab && (!unreadOnly || !readIds.includes(item.id)));
   const sections = (['Today', 'Yesterday', 'Earlier'] as Section[])
     .map((section) => ({ section, items: shown.filter((item) => sectionFor(item.createdAt, now) === section) }))
@@ -103,6 +114,7 @@ export default function NotificationsScreen() {
     }
     if (item.category === 'Reminders') router.push('/(tabs)/habits');
     if (item.category === 'Achievements') router.push('/achievements');
+    if (item.category === 'Treats') router.push('/buddy');
   };
   const markAllRead = () => {
     const ids = unread.filter((item) => item.category === activeTab).map((item) => item.id);
@@ -140,7 +152,7 @@ export default function NotificationsScreen() {
               </View>
               <Switch value={enabled} onValueChange={(value) => updatePreferences({ notificationsEnabled: value })} trackColor={{ false: '#D8D8E2', true: themeColor('#5B42D8', 'backgroundColor') }} thumbColor="#FFFFFF" {...WEB_THUMB} accessibilityLabel="Show notifications" />
             </View>
-            {TABS.map((tab) => (
+            {tabs.map((tab) => (
               <View key={tab} style={[styles.settingRow, styles.settingBorder, !enabled && styles.settingOff]}>
                 <View style={[styles.settingIcon, { backgroundColor: `${TYPE_INFO[tab].accent}1F` }]}>
                   <Ionicons name={TYPE_INFO[tab].icon} size={18} color={themeColor(TYPE_INFO[tab].accent)} />
@@ -158,7 +170,7 @@ export default function NotificationsScreen() {
       ) : (
         <>
           <View style={styles.tabsRow} accessibilityRole="tablist">
-            {TABS.map((tab) => {
+            {tabs.map((tab) => {
               const selected = tab === activeTab;
               const count = unreadIn(tab);
               return (
@@ -239,7 +251,8 @@ const themedStyles = createThemedStyles({
   iconSpacer: { width: 44, height: 44 },
   title: { flex: 1, textAlign: 'center', fontSize: 20, fontWeight: '900', color: '#1F1C26' },
   tabsRow: { flexDirection: 'row', gap: 4, marginHorizontal: 18, marginBottom: 12, padding: 5, borderRadius: 18, backgroundColor: '#ECEAF5' },
-  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, minHeight: 42, borderRadius: 14, paddingHorizontal: 4 },
+  // Four tabs share the row by their label's width, so 'Reminders' and a count still fit on a small phone.
+  tab: { flexGrow: 1, flexShrink: 1, flexBasis: 'auto', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, minHeight: 42, borderRadius: 14, paddingHorizontal: 2 },
   tabActive: { backgroundColor: '#5B42D8' },
   tabText: { flexShrink: 1, fontSize: 13, fontWeight: '800', color: '#4B4D59' },
   tabTextActive: { color: '#FFFFFF' },

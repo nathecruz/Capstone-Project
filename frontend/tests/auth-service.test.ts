@@ -127,6 +127,20 @@ describe('auth service offline behavior', () => {
     });
   });
 
+  it('gives back why the server refused a check-in, with the account\'s own day', async () => {
+    jest.mocked(getSessionToken).mockResolvedValue('session-token');
+    fetchMock.mockResolvedValue(answer(409, { ok: false, code: 'DAY_CLOSED', message: 'Only today can be checked in. A missed day stays missed.', today: '2026-10-21', timeZone: 'Asia/Manila' }));
+    await expect(saveRemoteHabitCompletion({ habitId: 'habit-1', date: '2026-10-20', completed: true })).resolves.toEqual({
+      rejected: true, code: 'DAY_CLOSED', message: 'Only today can be checked in. A missed day stays missed.', today: '2026-10-21', timeZone: 'Asia/Manila',
+    });
+
+    // Too many check-ins (the rate limit) is a refusal too, without a code.
+    fetchMock.mockResolvedValue(answer(429, { ok: false, message: 'Too many check-ins. Please wait a few minutes and try again.' }));
+    await expect(saveRemoteHabitCompletion({ habitId: 'habit-1', date: '2026-10-21', completed: true })).resolves.toEqual({
+      rejected: true, code: undefined, message: 'Too many check-ins. Please wait a few minutes and try again.', today: undefined, timeZone: undefined,
+    });
+  });
+
   it('says there is no internet when sign-in fails on a phone with no connection', async () => {
     deviceOnline(false);
     fetchMock.mockRejectedValue(new TypeError('Network request failed'));

@@ -1,6 +1,8 @@
 import React from 'react';
-import { fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render } from '@testing-library/react-native';
 import SettingsPreferencesScreen from '@/app/settings-preferences';
+import { getRewards } from '@/authentication';
+import { loadRewards } from '@/hooks/use-rewards';
 
 const mockScrollTo = jest.fn();
 
@@ -68,8 +70,11 @@ const mockSetDarkMode = jest.fn();
 const mockClearLocalData = jest.fn();
 const mockRouter = { back: jest.fn(), push: jest.fn(), replace: jest.fn() };
 
+// Read when the screen navigates: the screen is imported (and this factory run) before mockRouter is set.
 jest.mock('expo-router', () => ({
-  router: mockRouter,
+  get router() {
+    return mockRouter;
+  },
 }));
 
 jest.mock('react-native-safe-area-context', () => {
@@ -82,6 +87,10 @@ jest.mock('react-native-safe-area-context', () => {
 jest.mock('@/components/ui/app-dialog', () => ({
   useAppDialog: () => mockShowAlert,
 }));
+
+// The reward sheets also hold the Buddy Showcase sheet, which this screen does not show.
+jest.mock('@/components/buddy', () => ({ BuddyAvatar: () => null }));
+jest.mock('@/hooks/use-buddy', () => ({ useBuddy: () => ({ buddy: null }) }));
 
 jest.mock('@/hooks/color-scheme-context', () => ({
   useAppColorScheme: () => ({
@@ -167,6 +176,33 @@ describe('SettingsPreferencesScreen', () => {
     await fireEvent.press(screen.getByLabelText('Ocean theme'));
 
     expect(mockUpdatePreferences).toHaveBeenCalledWith({ appTheme: 'ocean' });
+  });
+
+  it('sends a student without Premium Themes to that reward on the leaderboard', async () => {
+    jest.mocked(getRewards).mockResolvedValueOnce({ ok: true, rewards: [{ id: 'premium-theme', name: 'Premium Themes', cost: 200, description: 'Four app colour themes', permanent: true }], owned: [], title: '' } as never);
+    await act(async () => loadRewards());
+    try {
+      const screen = await render(<SettingsPreferencesScreen />);
+      expect(screen.getByText('Unlock Premium Themes for 200 tokens')).toBeTruthy();
+      await fireEvent.press(screen.getByLabelText('App theme'));
+      // Its redeem confirmation (or how many tokens are missing), not the top of the leaderboard.
+      expect(mockRouter.push).toHaveBeenCalledWith('/leaderboards?reward=premium-theme');
+    } finally {
+      // Owned again, as the other tests expect.
+      await act(async () => loadRewards());
+    }
+  });
+
+  it('lets a student stop classmates from sending treats', async () => {
+    const screen = await render(<SettingsPreferencesScreen />);
+    expect(screen.getByText('They see only your first name and last initial')).toBeTruthy();
+    // Allowed while the preference is unset (the row and its switch share the label).
+    const toggle = screen.getAllByLabelText('Let classmates send me treats').find((node) => node.props.accessibilityRole === 'switch')!;
+    expect(toggle.props.accessibilityState).toEqual({ checked: true });
+
+    await fireEvent.press(toggle);
+
+    expect(mockUpdatePreferences).toHaveBeenCalledWith({ allowGifts: false });
   });
 
   it('shows the region from sign-up locked, while the language can still be changed', async () => {

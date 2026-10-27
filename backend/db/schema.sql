@@ -337,3 +337,32 @@ CREATE TABLE IF NOT EXISTS streak_freeze_days (
   used_at BIGINT NOT NULL,
   PRIMARY KEY (user_id, freeze_date)
 );
+-- Weekly consistency bonus (services/weekly-bonus.js): the most check-ins that were ever due on a
+-- week's days already over, from its Monday to last_day, recorded before each save that can drop or
+-- reschedule habits, so deleting or reshaping a missed habit cannot raise that week's rate. The
+-- bonus itself is the ledger row `<user id>:token:week:<week start>`.
+CREATE TABLE IF NOT EXISTS weekly_due_marks (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  week_start DATE NOT NULL,
+  due INTEGER NOT NULL,
+  last_day DATE,
+  updated_at BIGINT NOT NULL,
+  PRIMARY KEY (user_id, week_start)
+);
+-- Tables made before last_day existed get it here; a mark with no last_day covers its whole week.
+ALTER TABLE weekly_due_marks ADD COLUMN IF NOT EXISTS last_day DATE;
+-- Treat gifts (services/buddy-gifts.js): a treat a student bought for a classmate's Habi, with one
+-- of the fixed cheers (message_id). local_date is the sender's account day, for the daily limit.
+-- The token spend itself is the sender's row in token_transactions; the classmate gets none.
+CREATE TABLE IF NOT EXISTS buddy_gifts (
+  id TEXT PRIMARY KEY,
+  sender_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  recipient_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  treat_id TEXT NOT NULL,
+  message_id INTEGER NOT NULL,
+  local_date DATE NOT NULL,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS buddy_gifts_sender_day_idx ON buddy_gifts(sender_id, local_date);
+CREATE INDEX IF NOT EXISTS buddy_gifts_recipient_created_idx ON buddy_gifts(recipient_id, created_at);
+CREATE INDEX IF NOT EXISTS buddy_gifts_pair_created_idx ON buddy_gifts(sender_id, recipient_id, created_at);

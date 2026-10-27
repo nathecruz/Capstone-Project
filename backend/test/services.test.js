@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { isTemplateValue, loadEnvironment } from '../config/env.js';
-import { originMatcher } from '../config/index.js';
+import { dateKeyOr, isTimeZone, originMatcher } from '../config/index.js';
+import { getPeriodRange, periodLabel, periodResetsAt } from '../lib/http.js';
 import { goalPlanSchema } from '../schemas.js';
 import { buildHabitContext, habitFrequency } from '../services/ai-context.js';
 import { FACULTY_CONTEXT, buildUserPrompt, cleanAnswer, forAudience, normalizeGoalPlan, systemPromptFor } from '../services/ai-prompts.js';
@@ -35,6 +36,14 @@ test('ALLOWED_ORIGINS entries match whatever their case or trailing slash', () =
   assert.equal(allowed('https://capstone-project-indol-five.vercel.app'), true);
   assert.equal(allowed('https://capstone-project-git-main-team-c14.vercel.app'), true);
   assert.equal(allowed('https://evil.example.org'), false);
+});
+
+test('CHECK_IN_CAP_FROM and APP_TIME_ZONE only take real values', () => {
+  assert.equal(dateKeyOr(' 2026-11-02 ', '2026-10-26'), '2026-11-02');
+  // Date.parse rolls these over to another day, but the database refuses them in every points query.
+  for (const value of ['2026-02-30', '2026-13-01', '2026-10-32', '26-10-26', '', undefined]) assert.equal(dateKeyOr(value, '2026-10-26'), '2026-10-26', String(value));
+  assert.equal(isTimeZone('Asia/Manila'), true);
+  for (const value of ['Mars/Olympus', '', ' ', null]) assert.equal(isTimeZone(value), false, String(value));
 });
 
 test('a real value in the root .env wins over a placeholder in backend/.env', async () => {
@@ -344,4 +353,93 @@ test('faculty accounts get AI advice for a teacher, students keep theirs', () =>
   assert.equal(systemPromptFor('coach', 'user'), systemPromptFor('coach'));
   assert.equal(forAudience('Plan goals.', 'admin'), 'Plan goals.');
   assert.equal(forAudience('Plan goals.', 'faculty'), `Plan goals.\n${FACULTY_CONTEXT}`);
+});
+
+test('leaderboard weeks and months follow the Manila calendar, not UTC', () => {
+  const manila = (local) => new Date(`${local}+08:00`);
+  // Sunday 23:59 is still last week; Monday 00:00 (Sunday 16:00 UTC) starts the new one.
+  assert.deepEqual(getPeriodRange('This Week', manila('2026-10-25T23:59:00')), { start: '2026-10-19', end: '2026-10-25' });
+  assert.deepEqual(getPeriodRange('This Week', manila('2026-10-26T00:00:00')), { start: '2026-10-26', end: '2026-11-01' });
+  assert.deepEqual(getPeriodRange('This Week', manila('2026-10-26T01:00:00')), { start: '2026-10-26', end: '2026-11-01' }, 'the old UTC week still started Oct 19 here');
+  // Oct 31 to Nov 1, and Dec 31 to Jan 1 (a week that spans two years).
+  assert.deepEqual(getPeriodRange('This Month', manila('2026-10-31T23:59:00')), { start: '2026-10-01', end: '2026-10-31' });
+  assert.deepEqual(getPeriodRange('This Month', manila('2026-11-01T00:00:00')), { start: '2026-11-01', end: '2026-11-30' });
+  assert.deepEqual(getPeriodRange('This Week', manila('2026-11-01T00:00:00')), { start: '2026-10-26', end: '2026-11-01' }, 'Sunday Nov 1 ends the week of Oct 26');
+  assert.deepEqual(getPeriodRange('This Month', manila('2026-12-31T23:59:00')), { start: '2026-12-01', end: '2026-12-31' });
+  assert.deepEqual(getPeriodRange('This Month', manila('2027-01-01T00:00:00')), { start: '2027-01-01', end: '2027-01-31' });
+  assert.deepEqual(getPeriodRange('This Week', manila('2026-12-31T23:59:00')), { start: '2026-12-28', end: '2027-01-03' });
+  assert.deepEqual(getPeriodRange('This Week', manila('2027-01-01T00:00:00')), { start: '2026-12-28', end: '2027-01-03' });
+  assert.deepEqual(getPeriodRange('This Month', manila('2028-02-10T12:00:00')), { start: '2028-02-01', end: '2028-02-29' }, 'a leap year');
+  assert.equal(getPeriodRange('All Time', manila('2026-10-26T00:00:00')), null);
+  assert.deepEqual(getPeriodRange('This Week', new Date('2026-10-25T20:00:00Z'), 'America/Los_Angeles'), { start: '2026-10-19', end: '2026-10-25' }, 'another campus zone');
+
+  assert.deepEqual([periodLabel({ start: '2026-10-26', end: '2026-11-01' }), periodLabel({ start: '2026-10-01', end: '2026-10-31' })], ['Oct 26 - Nov 1', 'Oct 1 - Oct 31']);
+});
+
+test('a leaderboard period resets at midnight after its last day, in the zone', () => {
+  assert.equal(periodResetsAt({ start: '2026-10-26', end: '2026-11-01' }), Date.parse('2026-11-02T00:00:00+08:00'));
+  assert.equal(periodResetsAt({ start: '2026-12-01', end: '2026-12-31' }, 'Asia/Manila'), Date.parse('2027-01-01T00:00:00+08:00'));
+  // Daylight saving: New York's clocks go back on Nov 1, 2026 and forward on Mar 14, 2027.
+  assert.equal(periodResetsAt({ start: '2026-10-26', end: '2026-10-31' }, 'America/New_York'), Date.parse('2026-11-01T00:00:00-04:00'));
+  assert.equal(periodResetsAt({ start: '2026-11-02', end: '2026-11-08' }, 'America/New_York'), Date.parse('2026-11-09T00:00:00-05:00'));
+  assert.equal(periodResetsAt({ start: '2027-03-01', end: '2027-03-13' }, 'America/New_York'), Date.parse('2027-03-14T00:00:00-05:00'));
+  assert.equal(periodResetsAt({ start: '2027-03-01', end: '2027-03-14' }, 'America/New_York'), Date.parse('2027-03-15T00:00:00-04:00'));
+});
+
+test('every ledger row has a kind: by its id, and by its label for spends from before ids named the kind', async () => {
+  const { SPEND_KINDS, tokenKind } = await import('../services/wallet.js');
+  const user = '3f0c2a9e-0000-4000-8000-000000000001';
+  const byId = {
+    [`${user}:token:check-in:h1:2026-10-26`]: 'check-in',
+    [`${user}:token:undo:h1:2026-10-01:1790000000000`]: 'undo',
+    [`${user}:token:daily-claim:2026-10-26`]: 'daily-claim',
+    [`${user}:token:challenge:2026-10-26`]: 'challenge',
+    [`${user}:token:daily:2026-10-26:early-bird`]: 'challenge',
+    [`${user}:token:quest:2026-10-26:check-ins`]: 'quest',
+    [`${user}:token:mystery:2026-10-26`]: 'mystery',
+    [`${user}:token:streak:account:2026-10-20:7`]: 'streak',
+    [`${user}:token:streak:h1:14`]: 'streak',
+    [`${user}:token:week:2026-10-19`]: 'weekly-bonus',
+    [`${user}:token:refund:9a1b`]: 'refund',
+    [`${user}:token:refund:coach:9a1b`]: 'refund',
+  };
+  // The id wins over the label.
+  for (const [id, kind] of Object.entries(byId)) assert.equal(tokenKind(id, 'Redeemed Premium Themes'), kind, id);
+  assert.equal(tokenKind(`${user}:token:test-grant`, 'Test grant'), 'other');
+  for (const kind of SPEND_KINDS) assert.equal(tokenKind(`${user}:token:spend:${kind}:6e2d`, 'Something else'), kind);
+  assert.deepEqual(SPEND_KINDS, ['reward', 'buddy-item', 'buddy-treat', 'gift', 'freeze', 'coach']);
+  // Older spends are plain UUIDs: their label tells the kind ('Buddy treat:' before 'Buddy:').
+  const legacy = { 'Redeemed Custom Title': 'reward', 'Buddy treat: Apple': 'buddy-treat', 'Buddy: Cap': 'buddy-item', 'Streak freeze': 'freeze', 'AI Coach': 'coach', 'Free tokens': 'other', 'AI Coach answer': 'other', 'Buddy treats': 'other' };
+  for (const [label, kind] of Object.entries(legacy)) assert.equal(tokenKind('9b3c7a52-1111-4222-8333-444455556666', label), kind, label);
+  assert.equal(tokenKind(`${user}:token:daily-claim:2026-10-26`, 'Daily claim: day 1'), 'daily-claim', "'daily-claim' is not a daily challenge");
+});
+
+test('a spend is a spend:<kind>:<uuid> row, written only when the balance covers it', async () => {
+  const { spendTokens } = await import('../services/wallet.js');
+  const writes = [];
+  const db = (balance) => ({
+    query: async (text, values) => {
+      if (text.startsWith('SELECT')) return { rows: [{ balance }] };
+      writes.push(values);
+      return { rowCount: 1, rows: [] };
+    },
+  });
+  const spent = await spendTokens(db(40), 'user-1', 30, 'Streak freeze', { kind: 'freeze', now: 1_790_000_000_000 });
+  assert.equal(spent.ok, true);
+  assert.equal(spent.balance, 10);
+  assert.match(spent.id, /^user-1:token:spend:freeze:[0-9a-f-]{36}$/);
+  assert.deepEqual(writes, [[spent.id, 'user-1', -30, 'Streak freeze', new Date(1_790_000_000_000).toISOString(), 1_790_000_000_000]]);
+  assert.deepEqual(await spendTokens(db(20), 'user-1', 30, 'Streak freeze', { kind: 'freeze' }), { ok: false, balance: 20 });
+  assert.equal(writes.length, 1, 'nothing is written without the tokens');
+  await assert.rejects(spendTokens(db(40), 'user-1', 10, 'AI Coach answer'), /spend kind/, 'every spend names its kind');
+});
+
+test('a history cursor names the row a page ended at, and anything else is refused', async () => {
+  const { historyCursor, readHistoryCursor } = await import('../services/wallet.js');
+  const row = { createdAt: '1790000000123', id: 'u1:token:spend:gift:7d3f' };
+  assert.deepEqual(readHistoryCursor(historyCursor(row)), { createdAt: 1_790_000_000_123, id: 'u1:token:spend:gift:7d3f' });
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  for (const cursor of ['not-a-cursor', '', encode([1.5, 'x']), encode(['1790000000123', 'x']), encode([1_790_000_000_123, '']), encode([1_790_000_000_123, 7]), encode({ createdAt: 1, id: 'x' })]) {
+    assert.equal(readHistoryCursor(cursor), null, cursor);
+  }
 });

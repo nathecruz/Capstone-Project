@@ -31,11 +31,18 @@ const timeZoneSchema = z.string().trim().min(1).max(80).refine((value) => {
   }
 }, 'Unknown time zone.');
 // `summary` is accepted for older app builds; the server now builds AI context from the database.
-export const buddyItemSchema = z.object({ itemId: z.string().trim().min(1).max(40) }).strict();
+// A weekly drop is sold only in its week, so buying one also sends the app's today (services/account-day.js).
+export const buddyItemSchema = z.object({ itemId: z.string().trim().min(1).max(40), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), timeZone: timeZoneSchema.optional() }).strict();
 export const buddyTreatSchema = z.object({ treatId: z.string().trim().min(1).max(40) }).strict();
 export const buddySaveSchema = z.object({ name: z.string().trim().min(1).max(20).optional(), head: z.string().max(40).optional(), hand: z.string().max(40).optional(), room: z.string().max(40).optional(), accessory: z.string().max(40).optional() }).strict();
 export const dayInputSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: timeZoneSchema.optional() }).strict();
+// A treat for a classmate (services/buddy-gifts.js): their leaderboard id, a treat, one of the 5
+// fixed cheers (GIFT_MESSAGES, no free text) and the app's today, for the daily limit.
+export const buddyGiftSchema = dayInputSchema.extend({ to: z.string().regex(/^[0-9a-f]{12}$/), treatId: z.string().trim().min(1).max(40), messageId: z.number().int().min(0).max(4) }).strict();
 export const rewardFrameSchema = z.object({ frame: z.string().max(20) }).strict();
+// A page of the token history (GET /api/wallet/history, from the query string): `before` is the
+// nextCursor of the page before (services/wallet.js historyCursor).
+export const walletHistorySchema = z.object({ filter: z.enum(['all', 'earned', 'spent']).default('all'), limit: z.coerce.number().int().min(1).max(50).default(30), before: z.string().min(1).max(500).optional() }).strict();
 export const mysteryBoxSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: timeZoneSchema.optional() }).strict();
 export const streakFreezeSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: timeZoneSchema.optional() }).strict();
 export const webPushDoneSchema = z.object({ token: z.string().min(20).max(1000) }).strict();

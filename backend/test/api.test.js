@@ -15,7 +15,8 @@ import { goalPlanSchema } from '../schemas.js';
 import { normalizeAppState } from '../services/app-state-sync.js';
 import { isValidCompletionDate } from '../services/completion-date.js';
 import { weekEndKey } from '../services/habit-week.js';
-import { weeklyQuests } from '../services/quests.js';
+import { BUDDY_DROPS, dropForWeek, weeksUntilDrop } from '../services/buddy.js';
+import { weekStartOf, weeklyQuests } from '../services/quests.js';
 import { retireRewards } from '../services/rewards.js';
 import { doneActionSecret, makeDoneToken } from '../services/web-push-actions.js';
 import { getSupportEmailConfig } from '../services/support-email.js';
@@ -96,30 +97,27 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
   });
   await new Promise((resolve) => mockMlService.listen(mlPort, '127.0.0.1', resolve));
 
-  const server = spawn(process.execPath, ['server.js'], {
-    cwd: path.resolve(import.meta.dirname, '..'),
-    env: {
-      ...process.env,
-      NODE_ENV: 'test',
-      DATABASE_URL: urlForSchema(testDatabaseUrl, schema),
-      PORT: String(port),
-      GROQ_API_KEY: '',
-      // Short, so the test can see a check-in lock without waiting 30 seconds.
-      CHECK_IN_UNDO_WINDOW_MS: '4000',
-      ML_SERVICE_API_KEY: 'dev-only-local-key',
-      ML_SERVICE_URL: `http://127.0.0.1:${mlPort}`,
-      WEB_PUSH_VAPID_PUBLIC_KEY: 'test-vapid-public-key',
-      WEB_PUSH_VAPID_PRIVATE_KEY: 'test-vapid-private-key',
-      WEB_PUSH_VAPID_SUBJECT: 'mailto:test@example.com',
-      // "Configured" SMTP that refuses connections: exercises verification and failure paths without sending mail.
-      SMTP_HOST: '127.0.0.1',
-      SMTP_PORT: String(deadSmtpPort),
-      SMTP_SECURE: 'false',
-      SMTP_USER: 'mailer@habitai.test',
-      SMTP_PASSWORD: 'not-a-real-password',
-    },
-    stdio: ['ignore', 'ignore', 'pipe'],
-  });
+  const serverEnv = {
+    ...process.env,
+    NODE_ENV: 'test',
+    DATABASE_URL: urlForSchema(testDatabaseUrl, schema),
+    PORT: String(port),
+    GROQ_API_KEY: '',
+    // Short, so the test can see a check-in lock without waiting 30 seconds.
+    CHECK_IN_UNDO_WINDOW_MS: '4000',
+    ML_SERVICE_API_KEY: 'dev-only-local-key',
+    ML_SERVICE_URL: `http://127.0.0.1:${mlPort}`,
+    WEB_PUSH_VAPID_PUBLIC_KEY: 'test-vapid-public-key',
+    WEB_PUSH_VAPID_PRIVATE_KEY: 'test-vapid-private-key',
+    WEB_PUSH_VAPID_SUBJECT: 'mailto:test@example.com',
+    // "Configured" SMTP that refuses connections: exercises verification and failure paths without sending mail.
+    SMTP_HOST: '127.0.0.1',
+    SMTP_PORT: String(deadSmtpPort),
+    SMTP_SECURE: 'false',
+    SMTP_USER: 'mailer@habitai.test',
+    SMTP_PASSWORD: 'not-a-real-password',
+  };
+  const server = spawn(process.execPath, ['server.js'], { cwd: path.resolve(import.meta.dirname, '..'), env: serverEnv, stdio: ['ignore', 'ignore', 'pipe'] });
   let serverErrors = '';
   server.stderr.on('data', (chunk) => { serverErrors += chunk; });
   const serverExit = new Promise((resolve) => server.once('exit', resolve));
@@ -134,16 +132,19 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
   });
 
   const baseUrl = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 90_000;
-  for (;;) {
-    try {
-      if ((await fetch(`${baseUrl}/healthz`)).ok) break;
-    } catch {
-      // still starting
+  const waitUntilUp = async (url, errors) => {
+    const deadline = Date.now() + 90_000;
+    for (;;) {
+      try {
+        if ((await fetch(`${url}/healthz`)).ok) return;
+      } catch {
+        // still starting
+      }
+      if (Date.now() > deadline) throw new Error(`Server did not start:\n${errors()}`);
+      await new Promise((resolve) => setTimeout(resolve, 250));
     }
-    if (Date.now() > deadline) throw new Error(`Server did not start:\n${serverErrors}`);
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
+  };
+  await waitUntilUp(baseUrl, () => serverErrors);
 
   /** Tokens from the rotating daily challenges (not "Finish N habits") in an answer's history. */
   const extraDailyTokens = (body) => body.tokenHistory.filter((item) => item.label.startsWith('Daily challenge: ')).reduce((sum, item) => sum + item.amount, 0);
@@ -390,7 +391,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
     const late = await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'habit-1', date: yesterday, completed: true, timeZone: 'UTC' }) });
     assert.equal(late.response.status, 409);
-    assert.equal(late.body.code, 'DAY_CLOSED');
+    assert.deepEqual([late.body.code, late.body.today, late.body.timeZone], ['DAY_CLOSED', today, 'UTC'], 'with the account\'s day, for the app to show');
 
     // habit-1 was checked in by the offline sync above; once the window has passed it is locked.
     await new Promise((resolve) => setTimeout(resolve, 4500));
@@ -501,7 +502,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     await db.query('UPDATE users SET email_verified_at = 1 WHERE email = $1', ['second@example.com']);
     const secondHeaders = { Authorization: `Bearer ${second.body.token}` };
     await request('/api/app-state', { method: 'PUT', headers: secondHeaders, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], label: 'Second user habit' }] }) });
-    const crossUser = await request('/api/habit-completions', { method: 'PUT', headers: secondHeaders, body: JSON.stringify({ habitId: 'habit-1', date: today, completed: true }) });
+    const crossUser = await request('/api/habit-completions', { method: 'PUT', headers: secondHeaders, body: JSON.stringify({ habitId: 'habit-1', date: today, completed: true, timeZone: 'UTC' }) });
     assert.equal(crossUser.body.points, 20, 'habit ids are scoped per user');
 
     const board = await request('/api/leaderboard?period=All%20Time', { headers: authHeaders });
@@ -874,7 +875,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
 
     const catalog = await request('/api/rewards', { headers });
     assert.equal(catalog.response.status, 200, JSON.stringify(catalog.body));
-    assert.deepEqual(catalog.body.rewards.map((reward) => [reward.id, reward.cost, reward.permanent]), [['profile-frames', 180, true], ['premium-theme', 200, true], ['custom-title', 250, true]], 'only rewards that do something are on sale');
+    assert.deepEqual(catalog.body.rewards.map((reward) => [reward.id, reward.cost, reward.permanent]), [['profile-frames', 180, true], ['premium-theme', 200, true], ['custom-title', 250, true], ['buddy-showcase', 300, true]], 'only rewards that do something are on sale');
     assert.deepEqual({ owned: catalog.body.owned, title: catalog.body.title }, { owned: [], title: '' });
     assert.equal((await request('/api/rewards/redeem', { method: 'POST', headers, body: JSON.stringify({ rewardId: 'grace-day', rewardName: 'Grace Day', tokenCost: 620 }) })).response.status, 400, 'retired rewards cannot be bought');
 
@@ -1001,6 +1002,821 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const beforeTreat = await live();
     await request('/api/buddy/treats', { method: 'POST', headers, body: JSON.stringify({ treatId: 'apple' }) });
     assert.deepEqual(changed(beforeTreat, await live()), ['buddy', 'wallet'], 'a treat feed syncs the buddy collection and the wallet');
+  });
+
+  /** A verified student made directly in the database, with a session (sign-ups are rate-limited per network). */
+  const student = async (firstName, lastName) => {
+    const id = crypto.randomUUID();
+    const handle = `${firstName}_${lastName}`.toLowerCase();
+    await db.query(
+      `INSERT INTO users(id, full_name, first_name, last_name, username, email, password_hash, created_at, email_verified_at, privacy_consent_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'not-a-password', $7, 1, 1)`,
+      [id, `${firstName} ${lastName}`, firstName, lastName, handle, `${handle}@example.com`, Date.now()],
+    );
+    const session = async () => {
+      const secret = crypto.randomBytes(32).toString('hex');
+      await db.query('INSERT INTO sessions(token_hash, user_id, expires_at) VALUES ($1, $2, $3)', [crypto.createHash('sha256').update(secret).digest('hex'), id, Date.now() + 60 * 60 * 1000]);
+      return { Authorization: `Bearer ${secret}` };
+    };
+    return { userId: id, headers: await session(), session };
+  };
+  const dateIn = (zone) => new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const grant = (userId, amount, id) => db.query("INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,$3,'Test grant',$4,$5)", [`${userId}:token:${id}`, userId, amount, new Date().toISOString(), Date.now()]);
+  let capped;
+
+  await t.test('tokens are paid for 6 check-ins a day; undoing, deleting and re-creating never pay more', async () => {
+    capped = await student('Cap', 'Tester');
+    const { headers, userId } = capped;
+    const ids = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7', 'h8'];
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: ids.map((id) => ({ ...appState.habits[0], id, label: `Habit ${id}` })) }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    const checkIn = (habitId, completed = true) => request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId, date: today, completed, timeZone: 'UTC' }) });
+    // Today's check-in tokens (and any undo row, which must never be written again).
+    const checkInRows = async () => (await db.query("SELECT amount FROM token_transactions WHERE user_id=$1 AND (id LIKE '%:token:check-in:%:' || $2::text OR id LIKE '%:token:undo:%')", [userId, today])).rows.map((row) => row.amount);
+    const paid = async () => (await checkInRows()).reduce((sum, amount) => sum + amount, 0);
+
+    for (const [index, habitId] of ids.slice(0, 6).entries()) {
+      const done = await checkIn(habitId);
+      assert.equal(done.response.status, 200, JSON.stringify(done.body));
+      assert.deepEqual([done.body.tokenCapped, done.body.paidCheckInsToday, done.body.paidCheckInsLimit], [false, index + 1, 6], habitId);
+    }
+    const seventh = await checkIn('h7');
+    assert.deepEqual([seventh.body.tokenCapped, seventh.body.paidCheckInsToday, seventh.body.paidCheckInsLimit], [true, 6, 6], 'the 7th check-in pays 0');
+    assert.deepEqual(seventh.body.habit.completionDates, [today], 'but it is kept, for the streak, challenges and quests');
+    assert.equal(await paid(), 30);
+
+    // Undoing the unpaid check-in takes nothing (it used to write -5); undoing a paid one frees its slot.
+    const undoCapped = await checkIn('h7', false);
+    assert.deepEqual([undoCapped.response.status, undoCapped.body.tokenCapped], [200, false]);
+    assert.deepEqual(await checkInRows(), [5, 5, 5, 5, 5, 5], 'undoing a capped check-in writes no negative row');
+    const undo = await checkIn('h6', false);
+    assert.equal(undo.body.paidCheckInsToday, 5, 'an undo frees a slot');
+    const eighth = await checkIn('h8');
+    assert.deepEqual([eighth.body.tokenCapped, eighth.body.paidCheckInsToday], [false, 6]);
+    assert.equal(await paid(), 30);
+
+    // Deleting a habit checked in today takes its +5 back, so delete + re-create + check-in pays 0.
+    // Earlier days keep theirs, so cleaning up history never makes a balance negative.
+    const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+    await db.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4)', [userId, 'h1', yesterday, Date.now()]);
+    await db.query("INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,5,'Completed Habit h1',$3,$4)", [`${userId}:token:check-in:h1:${yesterday}`, userId, new Date().toISOString(), Date.now()]);
+    const deleted = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...eighth.body.state, habits: eighth.body.state.habits.filter((habit) => habit.id !== 'h1'), baseUpdatedAt: eighth.body.updatedAt, baseState: eighth.body.state }) });
+    assert.deepEqual([deleted.response.status, deleted.body.merged], [200, false], JSON.stringify(deleted.body));
+    assert.equal(await paid(), 25, 'deleting a habit checked in today removes its +5');
+    assert.equal((await db.query('SELECT 1 FROM token_transactions WHERE id=$1', [`${userId}:token:check-in:h1:${yesterday}`])).rowCount, 1, "yesterday's +5 stays");
+    const recreated = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...deleted.body.state, habits: [...deleted.body.state.habits, { ...appState.habits[0], id: 'h1', label: 'Habit h1' }], baseUpdatedAt: deleted.body.updatedAt, baseState: deleted.body.state }) });
+    assert.equal(recreated.response.status, 200, JSON.stringify(recreated.body));
+    const again = await checkIn('h1');
+    assert.equal(again.response.status, 200, JSON.stringify(again.body));
+    assert.equal(await paid(), 30, 'after 6 paid check-ins, delete + re-create + check-in pays 0');
+    const renamed = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...again.body.state, habits: [...again.body.state.habits.filter((habit) => habit.id !== 'h2'), { ...appState.habits[0], id: 'h2-new', label: 'Habit h2' }], baseUpdatedAt: again.body.updatedAt, baseState: again.body.state }) });
+    assert.equal(renamed.response.status, 200, JSON.stringify(renamed.body));
+    assert.equal((await checkIn('h2-new')).body.tokenCapped, false);
+    assert.equal(await paid(), 30, 'the same under a new habit id');
+    assert.equal((await db.query('SELECT 1 FROM token_transactions WHERE user_id=$1 AND amount < 0', [userId])).rowCount, 0, 'nothing was ever charged back');
+  });
+
+  await t.test('the 121st check-in request in 15 minutes gets 429', async () => {
+    const headers = await capped.session();
+    const send = (sessionHeaders = headers) => request('/api/habit-completions', { method: 'PUT', headers: sessionHeaders, body: JSON.stringify({ habitId: 'missing', date: today, completed: true, timeZone: 'UTC' }) });
+    for (let sent = 0; sent < 120; sent += 20) {
+      const answers = await Promise.all(Array.from({ length: 20 }, () => send()));
+      assert.ok(answers.every((answer) => answer.response.status === 404), 'within the limit');
+    }
+    const over = await send();
+    assert.equal(over.response.status, 429);
+    assert.deepEqual(over.body, { ok: false, message: 'Too many check-ins. Please wait a few minutes and try again.' });
+    assert.equal((await request('/api/habit-completions', { headers })).response.status, 200, 'reading check-ins is not limited');
+    assert.equal((await send(capped.headers)).response.status, 404, 'the limit is per session');
+
+    // Token actions share one budget of 60 per session.
+    const walletHeaders = await capped.session();
+    const closedDay = JSON.stringify({ date: '2000-01-01', timeZone: 'UTC' });
+    const spend = (url, body = closedDay) => request(url, { method: 'POST', headers: walletHeaders, body });
+    for (let sent = 0; sent < 60; sent += 20) {
+      const answers = await Promise.all(Array.from({ length: 20 }, (_, index) => spend(['/api/daily-claim', '/api/mystery-box/open', '/api/streak-freezes/buy', '/api/buddy/treats', '/api/rewards/redeem'][index % 5], index % 5 >= 3 ? '{}' : closedDay)));
+      assert.ok(answers.every((answer) => [400, 409].includes(answer.response.status)), answers.map((answer) => answer.response.status).join(', '));
+      // Every closed day says which day the account is on.
+      assert.ok(answers.filter((answer) => answer.response.status === 409).every((answer) => answer.body.code === 'DAY_CLOSED' && answer.body.today === today && answer.body.timeZone === 'UTC'));
+    }
+    const overWallet = await spend('/api/buddy/items', JSON.stringify({ itemId: 'cap' }));
+    assert.deepEqual([overWallet.response.status, overWallet.body], [429, { ok: false, message: 'Too many token actions. Please wait a few minutes and try again.' }]);
+  });
+
+  await t.test('from the cap date a day counts 6 check-ins toward points, the leaderboard and Habi', async () => {
+    const { headers, userId } = await student('Ivy', 'Ocampo');
+    // 2026-10-27 is on or after CHECK_IN_CAP_FROM (2026-10-26); the check-ins are made in the database.
+    for (let index = 0; index < 8; index += 1) await db.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4)', [userId, `h${index}`, '2026-10-27', Date.now()]);
+    const points = async () => (await request('/api/leaderboard?period=All%20Time', { headers })).body.leaders.find((leader) => leader.isYou).points;
+    assert.equal(await points(), 120, 'a day with 8 check-ins after the cap date shows 120 points');
+    assert.equal((await request('/api/buddy', { headers })).body.buddy.checkIns, 6, 'Habi grows on the same 6');
+    // A day before the cap date keeps all 8, so no points already shown are lost.
+    for (let index = 0; index < 8; index += 1) await db.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4)', [userId, `h${index}`, '2026-10-25', Date.now()]);
+    assert.equal(await points(), 280);
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: Array.from({ length: 8 }, (_, index) => ({ ...appState.habits[0], id: `h${index}`, label: `Habit ${index}` })) }) });
+    assert.equal(saved.body.state.points, 280, 'the profile shows the same points');
+    assert.equal((await request('/api/leaderboard/sync', { method: 'POST', headers, body: JSON.stringify({}) })).body.points, 280);
+  });
+
+  await t.test('the account day: a western time zone or a habit\'s own zone cannot reopen a day', async () => {
+    const { headers, userId } = await student('Zoe', 'Travel');
+    const east = dateIn('Pacific/Kiritimati');
+    // Always one or two days before Kiritimati's.
+    const west = dateIn('Pacific/Pago_Pago');
+    const zone = async () => (await db.query('SELECT time_zone AS "timeZone", day_floor::text AS floor FROM users WHERE id=$1', [userId])).rows[0];
+    // The app opens in Kiritimati: the first zone is stored with no floor.
+    assert.equal((await request(`/api/daily-claim?date=${east}&timeZone=Pacific/Kiritimati`, { headers })).response.status, 200);
+    assert.deepEqual(await zone(), { timeZone: 'Pacific/Kiritimati', floor: null });
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], id: 'trip', label: 'Trip journal' }, { ...appState.habits[0], id: 'forever', label: 'Forever', activeUntil: '2030-01-01' }] }) });
+    assert.deepEqual(saved.body.state.habits.map((habit) => habit.activeUntil), [weekEndKey(east), weekEndKey(east)], 'a habit cannot be stamped past its week');
+    const first = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'trip', date: east, completed: true, timeZone: 'Pacific/Kiritimati' }) });
+    assert.equal(first.response.status, 200, JSON.stringify(first.body));
+
+    // Switching the phone to Pago Pago cannot reopen a day before Kiritimati's, for check-ins or claims.
+    const reopened = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'trip', date: west, completed: true, timeZone: 'Pacific/Pago_Pago' }) });
+    assert.equal(reopened.response.status, 409, JSON.stringify(reopened.body));
+    assert.deepEqual([reopened.body.code, reopened.body.today, reopened.body.timeZone], ['DAY_CLOSED', east, 'Pacific/Kiritimati']);
+    const claim = await request('/api/daily-claim', { method: 'POST', headers, body: JSON.stringify({ date: west, timeZone: 'Pacific/Pago_Pago' }) });
+    assert.deepEqual([claim.response.status, claim.body.code, claim.body.today], [409, 'DAY_CLOSED', east]);
+    assert.deepEqual(await zone(), { timeZone: 'Pacific/Kiritimati', floor: null }, 'a refused request changes nothing');
+
+    // An offline save whose habits claim another time zone cannot add that zone's day either.
+    const latest = (await request('/api/app-state', { headers })).body;
+    const forged = latest.state.habits.map((habit) => ({ ...habit, completionTimeZone: 'Pacific/Pago_Pago', completionDates: [...habit.completionDates, west] }));
+    const offline = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...latest.state, habits: forged, baseUpdatedAt: latest.updatedAt, baseState: latest.state }) });
+    assert.equal(offline.response.status, 200, JSON.stringify(offline.body));
+    const days = (await db.query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1 ORDER BY habit_id', [userId])).rows;
+    assert.deepEqual(days, [{ habitId: 'trip', date: east }], 'offline sync with a forged completionTimeZone cannot add yesterday');
+    // A forged last day sent later is cut back to the habit's week too.
+    const extended = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...offline.body.state, habits: offline.body.state.habits.map((habit) => ({ ...habit, activeUntil: '2030-01-01' })), baseUpdatedAt: offline.body.updatedAt, baseState: offline.body.state }) });
+    assert.deepEqual(extended.body.state.habits.map((habit) => habit.activeUntil), [weekEndKey(east), weekEndKey(east)]);
+  });
+
+  await t.test('the leaderboard follows the Manila calendar, with public row ids and no write-only rows', async () => {
+    const { headers, userId } = await student('Lea', 'Board');
+    process.env.DATABASE_URL ||= urlForSchema(testDatabaseUrl, schema);
+    const { getPeriodRange, periodLabel, periodResetsAt } = await import('../lib/http.js');
+    const { leaderboardRows } = await import('../routes/gamification.js');
+    for (const [habitId, date] of [['sunday', '2026-10-25'], ['monday', '2026-10-26'], ['later', '2026-11-02']]) {
+      await db.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4)', [userId, habitId, date, Date.now()]);
+    }
+    // Monday Oct 26, 02:00 in Manila (Sunday 18:00 UTC): the UTC week still ran from Oct 19.
+    const mondayRange = getPeriodRange('This Week', new Date('2026-10-25T18:00:00Z'));
+    assert.deepEqual(mondayRange, { start: '2026-10-26', end: '2026-11-01' });
+    const pointsIn = async (range) => (await leaderboardRows(db, userId, range)).find((row) => row.id === userId).points;
+    assert.equal(await pointsIn(mondayRange), 20, "only Monday counts: Sunday was last week's, and a check-in dated after the range never counts");
+    assert.equal(await pointsIn(getPeriodRange('This Week', new Date('2026-10-25T15:59:00Z'))), 20, 'Sunday 23:59 is still the week of Oct 19');
+    assert.equal(await pointsIn(null), 60);
+
+    const board = await request('/api/leaderboard?period=This%20Week', { headers });
+    assert.equal(board.response.status, 200, JSON.stringify(board.body));
+    const week = getPeriodRange('This Week');
+    assert.deepEqual(board.body.range, { ...week, timeZone: 'Asia/Manila', resetsAt: periodResetsAt(week) });
+    assert.equal(board.body.date, periodLabel(week));
+    const all = await request('/api/leaderboard?period=All%20Time', { headers });
+    assert.deepEqual([all.body.date, all.body.range], ['Since joining', null]);
+    const ids = all.body.leaders.map((leader) => leader.id);
+    assert.ok(ids.length >= 2 && ids.every((id) => /^[0-9a-f]{12}$/.test(id)), ids.join(', '));
+    assert.equal(new Set(ids).size, ids.length, 'every row has its own id');
+    const internal = (await db.query('SELECT id FROM users')).rows.map((row) => row.id);
+    assert.ok(internal.every((id) => !JSON.stringify(all.body).includes(id)), 'no internal user ids');
+    assert.ok(all.body.leaders.every((leader) => leader.canGift === !leader.isYou && leader.buddy === null), 'treats for classmates; no Buddy Showcase yet');
+
+    // Sync keeps only the student's own row, and writes nothing when it is already current.
+    const synced = await request('/api/leaderboard/sync', { method: 'POST', headers, body: JSON.stringify({ avatar: 'L' }) });
+    assert.deepEqual([synced.response.status, synced.body.points], [200, 60]);
+    const row = async () => (await db.query('SELECT points, avatar, xmin::text AS version FROM leaderboard_users WHERE user_id=$1', [userId])).rows[0];
+    const before = await row();
+    assert.deepEqual([before.points, before.avatar], [60, 'L']);
+    await request('/api/leaderboard/sync', { method: 'POST', headers, body: JSON.stringify({ avatar: 'L' }) });
+    assert.equal((await row()).version, before.version, 'nothing changed: no write');
+    const counts = (await db.query('SELECT (SELECT COUNT(*) FROM leaderboard_snapshots)::int AS snapshots, (SELECT COUNT(*) FROM leaderboard_daily_points)::int AS daily')).rows[0];
+    assert.deepEqual(counts, { snapshots: 0, daily: 0 }, '/sync writes no snapshot or daily-points rows');
+  });
+
+  await t.test('the AI Coach is charged once under the lock and gives the tokens back when the AI fails', async () => {
+    // A second API with an AI key, whose Groq calls go to a local stub.
+    let groqStatus = 200;
+    let groqAnswer = 'Do Trip journal at 9 PM tonight, before Sunday.';
+    const asked = [];
+    const groq = createServer(async (incoming, outgoing) => {
+      let body = '';
+      for await (const chunk of incoming) body += chunk;
+      outgoing.setHeader('Content-Type', 'application/json');
+      if (incoming.url.endsWith('/models')) return outgoing.end(JSON.stringify({ object: 'list', data: [{ id: 'llama-3.3-70b-versatile', object: 'model', active: true }] }));
+      asked.push(JSON.parse(body));
+      // Slow enough for a second question to arrive while the first is answered.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      outgoing.statusCode = groqStatus;
+      outgoing.end(JSON.stringify(groqStatus === 200 ? { choices: [{ message: { role: 'assistant', content: groqAnswer } }] } : { error: { message: 'The stub refused.' } }));
+    });
+    const groqPort = port + 4000;
+    await new Promise((resolve) => groq.listen(groqPort, '127.0.0.1', resolve));
+    const redirect = `globalThis.fetch = ((send) => (url, init) => send(String(url).replace('https://api.groq.com/openai/v1', 'http://127.0.0.1:${groqPort}'), init))(globalThis.fetch);`;
+    const aiPort = port + 3000;
+    const aiServer = spawn(process.execPath, ['--import', `data:text/javascript,${encodeURIComponent(redirect)}`, 'server.js'], {
+      cwd: path.resolve(import.meta.dirname, '..'),
+      env: { ...serverEnv, PORT: String(aiPort), GROQ_API_KEY: `gsk_${'stub'.repeat(13)}` },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let aiErrors = '';
+    aiServer.stderr.on('data', (chunk) => { aiErrors += chunk; });
+    const aiExit = new Promise((resolve) => aiServer.once('exit', resolve));
+    try {
+      const aiBase = `http://127.0.0.1:${aiPort}`;
+      await waitUntilUp(aiBase, () => aiErrors);
+      const { headers, userId } = await student('Cole', 'Coach');
+      await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], id: 'trip', label: 'Trip journal' }] }) });
+      const ask = async (mode = 'coach') => {
+        const response = await fetch(`${aiBase}/api/insights/assistant`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify({ question: 'What should I do next?', mode, timeZone: 'UTC' }) });
+        return { status: response.status, body: await response.json() };
+      };
+      const coachRows = async () => (await db.query("SELECT id, amount FROM token_transactions WHERE user_id=$1 AND id LIKE '%:coach:%' ORDER BY created_at, id", [userId])).rows;
+      const balance = async () => (await db.query('SELECT COALESCE(SUM(amount),0)::int AS sum FROM token_transactions WHERE user_id=$1', [userId])).rows[0].sum;
+
+      // Two questions at once with tokens for one: one answer and one 402.
+      await grant(userId, 10, 'coach-grant-1');
+      const both = await Promise.all([ask(), ask()]);
+      assert.deepEqual(both.map((answer) => answer.status).sort(), [200, 402], JSON.stringify(both.map((answer) => answer.body)));
+      const answered = both.find((answer) => answer.status === 200).body;
+      assert.deepEqual([answered.answer, answered.tokens], ['Do Trip journal at 9 PM tonight, before Sunday.', 0]);
+      assert.equal(both.find((answer) => answer.status === 402).body.error, 'You need 10 tokens to ask the AI Coach. Complete habits to earn more.');
+      assert.equal(asked.length, 1, 'the AI was asked once');
+      assert.deepEqual((await coachRows()).map((row) => [row.id.replace(/[0-9a-f-]{36}$/, '<uuid>'), row.amount]), [[`${userId}:token:spend:coach:<uuid>`, -10]]);
+      // The coach reads the planner history; its instructions say how to use it.
+      const [system, user] = asked[0].messages;
+      assert.match(system.content, /plannerHistory/);
+      assert.ok(JSON.parse(user.content.split('\n')[1]).plannerHistory.habits.some((habit) => habit.name === 'Trip journal'));
+
+      // The AI fails after the charge: the 10 tokens come back, once.
+      await grant(userId, 10, 'coach-grant-2');
+      groqStatus = 400;
+      const failed = await ask();
+      assert.equal(failed.status, 502);
+      assert.deepEqual(failed.body, { ok: false, error: 'The AI service is temporarily unavailable.', refunded: true, tokens: 10 });
+      assert.equal(await balance(), 10, 'a failing AI call leaves the balance unchanged');
+      const rows = await coachRows();
+      const spends = rows.filter((row) => row.id.includes(':token:spend:coach:'));
+      assert.equal(spends.length, 2);
+      assert.deepEqual(rows.filter((row) => row.id.includes(':token:refund:coach:')), [{ id: `${userId}:token:refund:coach:${spends[1].id.split(':').at(-1)}`, amount: 10 }], 'the refund names the charge it gives back');
+
+      // An empty answer is refunded the same way.
+      groqStatus = 200;
+      groqAnswer = '   ';
+      const empty = await ask();
+      assert.deepEqual([empty.status, empty.body], [502, { ok: false, error: 'The AI service is temporarily unavailable.', refunded: true, tokens: 10 }]);
+      assert.equal((await coachRows()).filter((row) => row.id.includes(':token:refund:coach:')).length, 2);
+      assert.equal(await balance(), 10);
+      groqAnswer = 'Do Trip journal at 9 PM tonight, before Sunday.';
+
+      // The free assistant costs nothing and gets no planner history.
+      groqStatus = 200;
+      const free = await ask('assistant');
+      assert.equal(free.status, 200, JSON.stringify(free.body));
+      assert.equal(JSON.parse(asked.at(-1).messages[1].content.split('\n')[1]).plannerHistory, undefined);
+      assert.equal(await balance(), 10);
+    } finally {
+      aiServer.kill();
+      await aiExit;
+      await new Promise((resolve) => groq.close(resolve));
+    }
+  });
+
+  const shiftDay = (date, days) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+  const checkInOn = (userId, habitId, date) => db.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4)', [userId, habitId, date, Date.now()]);
+
+  await t.test('the weekly bonus is worked out on the server, paid once, and deleting a missed habit cannot raise it', async () => {
+    const { headers, userId } = await student('Wes', 'Bonus');
+    // The account day is in UTC, so it is the test's today.
+    await db.query("UPDATE users SET time_zone='UTC' WHERE id=$1", [userId]);
+    const lastMonday = shiftDay(weekStartOf(today), -7);
+    const lastWeek = Array.from({ length: 7 }, (_, index) => shiftDay(lastMonday, index));
+    const habit = (id) => ({ ...appState.habits[0], id, label: id, startDate: lastMonday, activeUntil: lastWeek[6] });
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: ['walk', 'read', 'gym'].map(habit) }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    // Walk and read every day of last week, the gym never: 14 of 21 (66%).
+    for (const date of lastWeek) for (const habitId of ['walk', 'read']) await checkInOn(userId, habitId, date);
+
+    const day = `date=${today}&timeZone=UTC`;
+    assert.equal((await request('/api/weekly-bonus', { headers })).response.status, 400);
+    const closed = await request(`/api/weekly-bonus?date=${lastMonday}&timeZone=UTC`, { headers });
+    assert.deepEqual([closed.response.status, closed.body.code, closed.body.today, closed.body.timeZone], [409, 'DAY_CLOSED', today, 'UTC']);
+    const steady = { percent: 60, amount: 10, label: 'Steady week' };
+    const bonus = await request(`/api/weekly-bonus?${day}`, { headers });
+    assert.equal(bonus.response.status, 200, JSON.stringify(bonus.body));
+    const { weekStart, scheduled, done, percent, activeDays, eligible, tier, claimed, claimable } = bonus.body.lastWeek;
+    assert.deepEqual({ weekStart, scheduled, done, percent, activeDays, eligible, tier, claimed, claimable }, { weekStart: lastMonday, scheduled: 21, done: 14, percent: 66, activeDays: 7, eligible: true, tier: steady, claimed: false, claimable: true });
+    assert.equal(bonus.body.thisWeek.weekStart, weekStartOf(today));
+    assert.equal(bonus.body.tiers.length, 3);
+
+    // The gym habit is deleted after its days passed: the 7 check-ins it missed still count.
+    const deleted = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...saved.body.state, habits: saved.body.state.habits.filter((entry) => entry.id !== 'gym'), baseUpdatedAt: saved.body.updatedAt, baseState: saved.body.state }) });
+    assert.deepEqual([deleted.response.status, deleted.body.state.habits.length], [200, 2], JSON.stringify(deleted.body));
+    assert.deepEqual((await db.query('SELECT due FROM weekly_due_marks WHERE user_id=$1 AND week_start=$2', [userId, lastMonday])).rows, [{ due: 21 }]);
+    const after = (await request(`/api/weekly-bonus?${day}`, { headers })).body.lastWeek;
+    assert.deepEqual([after.scheduled, after.done, after.percent, after.tier], [21, 14, 66, steady], 'not 100% (+30)');
+
+    // Two devices claim at once: paid once, and both get the same amount.
+    const claim = () => request('/api/weekly-bonus/claim', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+    const claims = await Promise.all([claim(), claim()]);
+    assert.ok(claims.every((answer) => answer.response.status === 200), JSON.stringify(claims.map((answer) => answer.body)));
+    assert.deepEqual(claims.map((answer) => answer.body.alreadyClaimed).sort(), [false, true]);
+    for (const answer of claims) assert.deepEqual([answer.body.amount, answer.body.percent, answer.body.tier, answer.body.tokens], [10, 66, steady, 10]);
+    const first = claims.find((answer) => !answer.body.alreadyClaimed).body;
+    assert.ok(first.updatedAt > saved.body.updatedAt && first.points === 280, JSON.stringify(first));
+    const row = first.tokenHistory.find((item) => item.id === `week:${lastMonday}`);
+    assert.deepEqual([row?.amount, row?.label], [10, 'Weekly bonus: 66% (Steady week)']);
+    const again = await claim();
+    assert.deepEqual([again.response.status, again.body.amount, again.body.alreadyClaimed, again.body.tokens], [200, 10, true, 10], 'a second claim returns the same amount');
+    assert.deepEqual((await db.query("SELECT amount FROM token_transactions WHERE user_id=$1 AND id LIKE '%:token:week:%'", [userId])).rows, [{ amount: 10 }]);
+    const paid = (await request(`/api/weekly-bonus?${day}`, { headers })).body.lastWeek;
+    assert.deepEqual([paid.claimed, paid.claimedAmount, paid.claimable], [true, 10, false]);
+  });
+
+  await t.test('a missed habit deleted mid-week still counts the days it missed', async () => {
+    const { headers, userId } = await student('Mid', 'Week');
+    await db.query("UPDATE users SET time_zone='UTC' WHERE id=$1", [userId]);
+    const lastMonday = shiftDay(weekStartOf(today), -7);
+    const lastWeek = Array.from({ length: 7 }, (_, index) => shiftDay(lastMonday, index));
+    const habit = (id) => ({ ...appState.habits[0], id, label: id, startDate: lastMonday, activeUntil: lastWeek[6] });
+    // Walk and read every day of last week. A gym habit missed Monday and Tuesday was deleted on
+    // Wednesday: that save recorded its 6 due check-ins of Monday and Tuesday before deleting it.
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: ['walk', 'read'].map(habit) }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    for (const date of lastWeek) for (const habitId of ['walk', 'read']) await checkInOn(userId, habitId, date);
+    await db.query('INSERT INTO weekly_due_marks(user_id, week_start, due, last_day, updated_at) VALUES($1,$2,6,$3,$4)', [userId, lastMonday, lastWeek[1], Date.now()]);
+    const marked = (await request(`/api/weekly-bonus?date=${today}&timeZone=UTC`, { headers })).body.lastWeek;
+    assert.deepEqual([marked.scheduled, marked.done, marked.percent, marked.tier?.amount], [16, 14, 87, 20], 'Monday and Tuesday of the gym, then walk and read: not 14/14 (+30)');
+
+    // The next save joins the stored mark with the days after it, and keeps it.
+    const renamed = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...saved.body.state, habits: saved.body.state.habits.map((entry) => ({ ...entry, label: `${entry.label}!` })), baseUpdatedAt: saved.body.updatedAt, baseState: saved.body.state }) });
+    assert.equal(renamed.response.status, 200, JSON.stringify(renamed.body));
+    const rows = await db.query('SELECT due, last_day::text AS "lastDay" FROM weekly_due_marks WHERE user_id=$1 AND week_start=$2', [userId, lastMonday]);
+    assert.deepEqual(rows.rows, [{ due: 16, lastDay: lastWeek[6] }]);
+    const claim = await request('/api/weekly-bonus/claim', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+    assert.deepEqual([claim.response.status, claim.body.amount, claim.body.percent, claim.body.tier?.label], [200, 20, 87, 'Strong week'], JSON.stringify(claim.body));
+  });
+
+  await t.test('the weekly bonus: only last week can be claimed, and only from 60%', async () => {
+    const { headers, userId } = await student('Nia', 'Lowe');
+    await db.query("UPDATE users SET time_zone='UTC' WHERE id=$1", [userId]);
+    const claim = (date = today) => request('/api/weekly-bonus/claim', { method: 'POST', headers, body: JSON.stringify({ date, timeZone: 'UTC' }) });
+    const empty = await claim();
+    assert.deepEqual([empty.response.status, empty.body], [409, { ok: false, code: 'BONUS_NOT_EARNED', message: 'Last week had fewer than 7 scheduled check-ins.' }]);
+
+    // The week before last was perfect; last week reached 10 of 21 (47%).
+    const lastMonday = shiftDay(weekStartOf(today), -7);
+    const mondayBefore = shiftDay(lastMonday, -7);
+    const habit = (id, monday) => ({ ...appState.habits[0], id, label: id, startDate: monday, activeUntil: shiftDay(monday, 6) });
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [...['a', 'b', 'c'].map((id) => habit(id, mondayBefore)), ...['x', 'y', 'z'].map((id) => habit(id, lastMonday))] }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    for (let index = 0; index < 7; index += 1) {
+      for (const habitId of ['a', 'b', 'c']) await checkInOn(userId, habitId, shiftDay(mondayBefore, index));
+      await checkInOn(userId, 'x', shiftDay(lastMonday, index));
+      if (index < 3) await checkInOn(userId, 'y', shiftDay(lastMonday, index));
+    }
+    const low = await claim();
+    assert.deepEqual([low.response.status, low.body], [409, { ok: false, code: 'BONUS_NOT_EARNED', message: 'Last week reached 47%. Reach 60% this week for +10 tokens.' }]);
+    const status = (await request(`/api/weekly-bonus?date=${today}&timeZone=UTC`, { headers })).body.lastWeek;
+    assert.deepEqual([status.weekStart, status.percent, status.eligible, status.reason, status.tier, status.claimable], [lastMonday, 47, false, 'low-rate', null, false]);
+    // The week before last cannot be claimed: not from today, and not with one of its own days.
+    const old = await claim(shiftDay(mondayBefore, 6));
+    assert.deepEqual([old.response.status, old.body.code, old.body.today], [409, 'DAY_CLOSED', today]);
+    assert.equal((await db.query("SELECT 1 FROM token_transactions WHERE user_id=$1 AND id LIKE '%:token:week:%'", [userId])).rowCount, 0, 'no bonus was paid');
+  });
+
+  await t.test('the weekly drop is sold in its week, after 2 of 3 quests, from the Kid stage, once', async () => {
+    // A time zone where today is not a Monday, so yesterday is in the same week.
+    const zone = ['Etc/GMT+12', 'Etc/GMT-14'].find((candidate) => new Date(`${dateIn(candidate)}T00:00:00Z`).getUTCDay() !== 1);
+    const day = dateIn(zone);
+    const yesterday = shiftDay(day, -1);
+    const drop = dropForWeek(weekStartOf(day));
+    const other = BUDDY_DROPS.find((entry) => entry.id !== drop.id);
+    const buy = (headers, itemId, dayInput = { date: day, timeZone: zone }) => request('/api/buddy/items', { method: 'POST', headers, body: JSON.stringify({ itemId, ...dayInput }) });
+    const { headers, userId } = await student('Dina', 'Drop');
+    await db.query('UPDATE users SET time_zone=$2 WHERE id=$1', [userId, zone]);
+    await grant(userId, 400, 'drop-grant');
+
+    // A drop needs the account's today, and only this week's is on sale.
+    assert.deepEqual([(await buy(headers, drop.id, {})).response.status, (await buy(headers, drop.id, {})).body.message], [400, 'Send your today and time zone.']);
+    const closed = await buy(headers, drop.id, { date: yesterday, timeZone: zone });
+    assert.deepEqual([closed.response.status, closed.body.code, closed.body.today], [409, 'DAY_CLOSED', day]);
+    const gone = await buy(headers, other.id);
+    const weeks = weeksUntilDrop(other, weekStartOf(day));
+    assert.deepEqual([gone.response.status, gone.body], [410, { ok: false, code: 'DROP_GONE', message: `This drop is gone for now. It comes back in ${weeks} week${weeks === 1 ? '' : 's'}.` }]);
+    const baby = await buy(headers, drop.id);
+    assert.deepEqual([baby.response.status, baby.body.code, baby.body.message], [403, undefined, 'Habi needs to reach the Kid stage (10 check-ins) first.']);
+
+    // Seven habits, six of them checked in yesterday and today: 12 check-ins (one quest), no perfect day.
+    const ids = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7'];
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: ids.map((id) => ({ ...appState.habits[0], id, label: id })) }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    for (const date of [yesterday, day]) for (const habitId of ids.slice(0, 6)) await checkInOn(userId, habitId, date);
+    const questHabits = ids.map((id) => ({ id, frequency: 'Daily', startDate: '2026-01-01', reminderDays: [], meta: '' }));
+    const doneBy = (habitIds) => new Map([[yesterday, new Set(habitIds)], [day, new Set(habitIds)]]);
+    assert.equal(weeklyQuests(questHabits, doneBy(ids.slice(0, 6)), day).filter((quest) => quest.complete).length, 1);
+    const locked = await buy(headers, drop.id);
+    assert.deepEqual([locked.response.status, locked.body], [403, { ok: false, code: 'DROP_LOCKED', message: `Finish 2 of this week's 3 quests to unlock the ${drop.name}.` }]);
+    const lockedCard = (await request(`/api/buddy?date=${day}&timeZone=${encodeURIComponent(zone)}`, { headers })).body.buddy;
+    assert.deepEqual(lockedCard.drop, { item: drop, weekStart: weekStartOf(day), weekEnd: shiftDay(weekStartOf(day), 6), questsDone: 1, questsNeeded: 2, unlocked: false, owned: false });
+    assert.deepEqual([lockedCard.drops.length, lockedCard.dropsOwned, lockedCard.items.some((item) => item.id === 'aurora')], [12, 0, true]);
+
+    // The seventh habit too: two perfect days complete a second quest.
+    for (const date of [yesterday, day]) await checkInOn(userId, 'h7', date);
+    assert.ok(weeklyQuests(questHabits, doneBy(ids), day).filter((quest) => quest.complete).length >= 2);
+    const bought = await buy(headers, drop.id);
+    assert.equal(bought.response.status, 200, JSON.stringify(bought.body));
+    assert.deepEqual([bought.body.buddy[drop.slot], bought.body.buddy.owned, bought.body.tokens], [drop.id, [drop.id], 250], 'worn right away, for 150 tokens');
+    assert.deepEqual([bought.body.buddy.drop.owned, bought.body.buddy.drop.unlocked, bought.body.buddy.dropsOwned], [true, true, 1]);
+    assert.deepEqual(bought.body.tokenHistory.find((item) => item.amount === -150).label, `Buddy: ${drop.name} (weekly drop)`);
+    const twice = await buy(headers, drop.id);
+    assert.deepEqual([twice.response.status, twice.body.message], [409, 'You already have this item.']);
+
+    // Worn like any item, in its own slot only; another drop must be bought first.
+    assert.equal((await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ [drop.slot]: '' }) })).body.buddy[drop.slot], '');
+    const worn = await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ [drop.slot]: drop.id }) });
+    assert.deepEqual([worn.response.status, worn.body.buddy[drop.slot], worn.body.buddy.drop.item.id], [200, drop.id, drop.id]);
+    const wrongSlot = ['head', 'hand', 'accessory'].find((slot) => slot !== drop.slot);
+    assert.equal((await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ [wrongSlot]: drop.id }) })).response.status, 400);
+    assert.equal((await request('/api/buddy', { method: 'PUT', headers, body: JSON.stringify({ [other.slot]: other.id }) })).response.status, 400);
+    const listed = (await request('/api/buddy', { headers })).body.buddy;
+    assert.deepEqual([listed.drop, listed.dropsOwned, listed.owned], [null, 1, [drop.id]], 'without a date there is no drop card, but the collection counts');
+  });
+
+  await t.test('buying a shop item with a date never stores a new time zone', async () => {
+    const { headers, userId } = await student('Shop', 'Zone');
+    await db.query("UPDATE users SET time_zone='Asia/Manila' WHERE id=$1", [userId]);
+    await grant(userId, 100, 'shop-grant');
+    const east = 'Pacific/Kiritimati';
+    const bought = await request('/api/buddy/items', { method: 'POST', headers, body: JSON.stringify({ itemId: 'cap', date: dateIn(east), timeZone: east }) });
+    assert.deepEqual([bought.response.status, bought.body.buddy?.head, bought.body.tokens], [200, 'cap', 60], JSON.stringify(bought.body));
+    assert.equal((await db.query('SELECT time_zone FROM users WHERE id=$1', [userId])).rows[0].time_zone, 'Asia/Manila', 'only a drop is sold by the day');
+  });
+
+  const publicIdOf = async (userId) => (await db.query('SELECT public_id AS "publicId" FROM users WHERE id=$1', [userId])).rows[0].publicId;
+  const leadersFor = async (headers) => (await request('/api/leaderboard?period=All%20Time', { headers })).body.leaders;
+  /** Saves the preferences as the app does, on top of the latest state (a save without a base keeps changed keys). */
+  const savePreferences = async (headers, preferences) => {
+    const latest = (await request('/api/app-state', { headers })).body;
+    const state = latest.updatedAt ? { ...latest.state, baseUpdatedAt: latest.updatedAt, baseState: latest.state } : appState;
+    return request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...state, preferences }) });
+  };
+
+  await t.test('the Buddy Showcase shows Habi, as it is dressed, next to the name on the leaderboard', async () => {
+    const owner = await student('Sho', 'Case');
+    const classmate = await student('Nora', 'Plain');
+    const ownerId = await publicIdOf(owner.userId);
+    const classmateId = await publicIdOf(classmate.userId);
+    await grant(owner.userId, 700, 'showcase-grant');
+
+    // On sale for 300, bought once and kept.
+    const catalog = await request('/api/rewards', { headers: owner.headers });
+    assert.deepEqual(catalog.body.rewards.find((reward) => reward.id === 'buddy-showcase'), { id: 'buddy-showcase', name: 'Buddy Showcase', cost: 300, description: 'Show your Habi, with what it wears, next to your name on the leaderboard', permanent: true });
+    const redeem = () => request('/api/rewards/redeem', { method: 'POST', headers: owner.headers, body: JSON.stringify({ rewardId: 'buddy-showcase', rewardName: 'Buddy Showcase', tokenCost: 300 }) });
+    const bought = await redeem();
+    assert.deepEqual([bought.response.status, bought.body.tokens], [200, 400], JSON.stringify(bought.body));
+    assert.deepEqual([(await redeem()).response.status, (await request('/api/rewards', { headers: owner.headers })).body.owned], [409, ['buddy-showcase']], 'bought once');
+
+    // 12 check-ins (the Kid stage), a cap and a cookie; a forged row wears the cookie as a room, glasses
+    // never bought and an item that is not in the shop.
+    assert.equal((await savePreferences(owner.headers, {})).response.status, 200);
+    for (let day = 1; day <= 12; day += 1) await checkInOn(owner.userId, 'habit-1', `2026-01-${String(day).padStart(2, '0')}`);
+    for (const itemId of ['cap', 'cookie']) assert.equal((await request('/api/buddy/items', { method: 'POST', headers: owner.headers, body: JSON.stringify({ itemId }) })).response.status, 200, itemId);
+    await db.query("UPDATE user_buddy SET hand_item='laser-sword', room_item='cookie', accessory_item='glasses' WHERE user_id=$1", [owner.userId]);
+    const look = { stage: 'kid', checkIns: 10, head: 'cap', hand: '', accessory: '', room: '' };
+    const seen = await leadersFor(classmate.headers);
+    assert.deepEqual(seen.find((leader) => leader.id === ownerId).buddy, look, "the stage's least check-ins and only what was bought, in its slot");
+    assert.equal(seen.find((leader) => leader.id === classmateId).buddy, null, 'no showcase without the reward');
+    assert.deepEqual(Object.keys(look).sort(), Object.keys(seen.find((leader) => leader.id === ownerId).buddy).sort(), 'nothing about habits, times or streaks');
+    const own = (await leadersFor(owner.headers)).find((leader) => leader.isYou);
+    assert.deepEqual([own.id, own.buddy], [ownerId, look], 'shown on the own row too');
+
+    // "Show my Habi" off: no buddy. Hidden from the leaderboard: still hidden, Habi or not.
+    await savePreferences(owner.headers, { showBuddy: false });
+    assert.equal((await leadersFor(classmate.headers)).find((leader) => leader.id === ownerId).buddy, null);
+    await savePreferences(owner.headers, { showOnLeaderboard: false });
+    assert.ok(!(await leadersFor(classmate.headers)).some((leader) => leader.id === ownerId), 'a hidden student stays hidden');
+    assert.deepEqual((await leadersFor(owner.headers)).find((leader) => leader.isYou).buddy, look, 'but sees their own Habi');
+  });
+
+  await t.test('treats go to a classmate: only the sender pays, with the limits, a notification and a live update', async () => {
+    const zone = 'Asia/Manila';
+    const sender = await student('Gia', 'Giver');
+    const recipient = await student('Rio', 'Receiver');
+    const [third, fourth, fifth] = [await student('Tess', 'Third'), await student('Fern', 'Fourth'), await student('Fil', 'Fifth')];
+    const hidden = await student('Hal', 'Hidden');
+    const closed = await student('Olive', 'Off');
+    const faculty = await student('Prof', 'Gifts');
+    await db.query("UPDATE users SET role='faculty' WHERE id=$1", [faculty.userId]);
+    await savePreferences(hidden.headers, { showOnLeaderboard: false });
+    await savePreferences(closed.headers, { allowGifts: false });
+    await request('/api/buddy', { method: 'PUT', headers: recipient.headers, body: JSON.stringify({ name: 'Mochi' }) });
+    const ids = Object.fromEntries(await Promise.all(Object.entries({ sender, recipient, third, fourth, fifth, hidden, closed, faculty }).map(async ([key, account]) => [key, await publicIdOf(account.userId)])));
+    const send = (headers, to, treatId = 'apple', messageId = 0, dayInput = { date: dateIn(zone), timeZone: zone }) => request('/api/buddy/gifts', { method: 'POST', headers, body: JSON.stringify({ to, treatId, messageId, ...dayInput }) });
+    const refusal = (answer) => [answer.response.status, answer.body.code, answer.body.message];
+    const ledger = async (userId) => (await db.query('SELECT id, amount FROM token_transactions WHERE user_id=$1 ORDER BY created_at', [userId])).rows;
+    const live = async (headers) => (await request('/api/live', { headers })).body.versions;
+    const changed = (before, after) => Object.keys(after).filter((key) => after[key] !== before[key]).sort();
+
+    // canGift on the board: classmates who accept treats, not yourself, and never for faculty.
+    const board = await leadersFor(sender.headers);
+    const canGift = (id) => board.find((leader) => leader.id === id)?.canGift;
+    assert.deepEqual([canGift(ids.recipient), canGift(ids.closed), canGift(ids.sender), canGift(ids.hidden)], [true, false, false, undefined]);
+    assert.ok((await leadersFor(faculty.headers)).every((leader) => !leader.canGift));
+
+    assert.deepEqual(refusal(await send(sender.headers, ids.recipient)), [402, undefined, 'You need 15 more tokens for the Apple.'], 'not enough tokens');
+    await grant(sender.userId, 200, 'gift-grant');
+    assert.deepEqual(refusal(await send(sender.headers, ids.sender)), [400, 'SELF_GIFT', 'You cannot send a treat to yourself.']);
+    for (const to of [ids.hidden, ids.faculty, 'ffffffffffff']) assert.deepEqual(refusal(await send(sender.headers, to)), [404, 'RECIPIENT_NOT_FOUND', 'That classmate is not on the leaderboard.'], to);
+    assert.deepEqual(refusal(await send(sender.headers, ids.closed)), [403, 'GIFTS_OFF', 'This classmate is not accepting treats.']);
+    assert.deepEqual(refusal(await send(faculty.headers, ids.recipient)), [403, undefined, 'Only students can send treats to classmates.']);
+    assert.equal((await send(sender.headers, ids.recipient, 'apple', 0, { date: shiftDay(dateIn(zone), -1), timeZone: zone })).body.code, 'DAY_CLOSED');
+    assert.equal((await send(sender.headers, ids.recipient, 'apple', 5)).response.status, 400, 'one of the 5 cheers');
+    assert.equal((await send(sender.headers, ids.recipient, 'pizza')).response.status, 404, 'a treat from the shop');
+
+    // A cupcake for Rio's Habi: the sender pays 25, Rio pays and gets nothing, and is told.
+    const [senderLive, recipientLive] = [await live(sender.headers), await live(recipient.headers)];
+    const recipientLedger = await ledger(recipient.userId);
+    const cupcake = await send(sender.headers, ids.recipient, 'cupcake', 3);
+    assert.equal(cupcake.response.status, 200, JSON.stringify(cupcake.body));
+    assert.deepEqual({ ...cupcake.body.gift, id: typeof cupcake.body.gift.id }, { id: 'string', treatId: 'cupcake', to: ids.recipient, message: "Kaya mo 'yan!" });
+    assert.deepEqual([cupcake.body.sentToday, cupcake.body.leftToday, cupcake.body.tokens], [1, 2, 175]);
+    assert.deepEqual([cupcake.body.tokenHistory[0].label, cupcake.body.tokenHistory[0].amount], ['Gift: Cupcake to Rio R.', -25]);
+    assert.match((await ledger(sender.userId)).at(-1).id, new RegExp(`^${sender.userId}:token:spend:gift:[0-9a-f-]{36}$`));
+    assert.deepEqual(await ledger(recipient.userId), recipientLedger, 'tokens never move between accounts');
+    const notes = (await request('/api/notifications', { headers: recipient.headers })).body.notifications.filter((note) => note.type === 'gift');
+    assert.deepEqual(notes.map(({ id, title, message }) => ({ id, title, message })), [{ id: `${recipient.userId}:notification:gift:${cupcake.body.gift.id}`, title: '🧁 A treat for Mochi', message: "Gia G. sent Mochi a Cupcake: Kaya mo 'yan!" }], 'First L. and the fixed cheer, never the full name');
+    assert.deepEqual(changed(recipientLive, await live(recipient.headers)), ['buddy', 'notifications'], "the classmate's Habi updates live");
+    assert.deepEqual(changed(senderLive, await live(sender.headers)), ['buddy', 'wallet']);
+    const gifted = (await request(`/api/buddy?date=${dateIn(zone)}&timeZone=${encodeURIComponent(zone)}`, { headers: recipient.headers })).body.buddy;
+    assert.deepEqual([gifted.giftsToday, gifted.giftsReceived, gifted.giftsSent, gifted.giftMessages.length], [[{ treatId: 'cupcake', emoji: '🧁', from: 'Gia G.', message: "Kaya mo 'yan!" }], 1, 0, 5]);
+    assert.deepEqual((await request('/api/buddy', { headers: recipient.headers })).body.buddy.giftsToday.length, 1, 'also without a date, on the stored day');
+    assert.deepEqual([(await request('/api/buddy', { headers: sender.headers })).body.buddy.giftsSent, gifted.treatsFed], [1, 0], 'feeding your own Habi is separate');
+
+    // One treat per classmate a week, three a day, ten received in 24 hours.
+    assert.equal((await leadersFor(sender.headers)).find((leader) => leader.id === ids.recipient)?.canGift, false, 'no Send a treat for a classmate treated this week');
+    assert.deepEqual(refusal(await send(sender.headers, ids.recipient)), [429, 'GIFT_PAIR_LIMIT', 'You already sent Rio R. a treat this week.']);
+    assert.deepEqual([(await send(sender.headers, ids.third)).body.leftToday, (await send(sender.headers, ids.fourth)).body.leftToday], [1, 0]);
+    assert.deepEqual(refusal(await send(sender.headers, ids.fifth)), [429, 'GIFT_DAILY_LIMIT', 'You can send 3 treats a day. Try again tomorrow.']);
+    assert.equal((await ledger(sender.userId)).reduce((sum, row) => sum + row.amount, 0), 145, 'refusals cost nothing');
+    for (let index = 0; index < 10; index += 1) {
+      await db.query("INSERT INTO buddy_gifts(id,sender_id,recipient_id,treat_id,message_id,local_date,created_at) VALUES($1,$2,$3,'apple',0,$4,$5)", [crypto.randomUUID(), recipient.userId, fifth.userId, dateIn(zone), Date.now() - 60_000]);
+    }
+    assert.deepEqual(refusal(await send(third.headers, ids.fifth)), [429, 'RECIPIENT_FULL', 'Fil F. has received lots of treats today. Try again tomorrow.']);
+  });
+
+  await t.test('treat gifts hold under requests at the same moment: the limits, two-way gifts and a classmate who just opted out', async () => {
+    const zone = 'Asia/Manila';
+    const send = (from, to, timeZone = zone) => request('/api/buddy/gifts', { method: 'POST', headers: from.headers, body: JSON.stringify({ to, treatId: 'apple', messageId: 1, date: dateIn(timeZone), timeZone }) });
+    const refusal = (answer) => [answer.response.status, answer.body.code, answer.body.message];
+    const statuses = (answers) => answers.map((answer) => answer.response.status).sort();
+    const balance = async (userId) => (await db.query('SELECT COALESCE(SUM(amount), 0)::int AS sum FROM token_transactions WHERE user_id=$1', [userId])).rows[0].sum;
+    const funded = async (firstName, lastName) => {
+      const account = await student(firstName, lastName);
+      await grant(account.userId, 200, 'race-grant');
+      return { ...account, publicId: await publicIdOf(account.userId) };
+    };
+
+    // Five at once from one student: three go through, the other two are over the day's limit and cost nothing.
+    const racer = await funded('Rae', 'Racer');
+    const targets = await Promise.all(['One', 'Two', 'Three', 'Four', 'Five'].map((lastName) => funded('Kai', lastName)));
+    const burst = await Promise.all(targets.map((target) => send(racer, target.publicId)));
+    assert.deepEqual(statuses(burst), [200, 200, 200, 429, 429], JSON.stringify(burst.map((answer) => answer.body)));
+    assert.ok(burst.filter((answer) => answer.response.status === 429).every((answer) => answer.body.code === 'GIFT_DAILY_LIMIT'));
+    assert.equal(await balance(racer.userId), 200 - 3 * 15, 'only three are paid');
+    // A new time zone does not start a new day of treats: one on the same date keeps the count, and
+    // one still on yesterday (UTC-12, unless it is past 20:00 in Manila) is a closed day.
+    const sixth = await funded('Kai', 'Six');
+    assert.equal((await send(racer, sixth.publicId, 'Asia/Singapore')).body.code, 'GIFT_DAILY_LIMIT');
+    const west = 'Etc/GMT+12';
+    assert.equal((await send(racer, sixth.publicId, west)).body.code, dateIn(west) < dateIn(zone) ? 'DAY_CLOSED' : 'GIFT_DAILY_LIMIT');
+
+    // Two classmates sending each other a treat at the same moment both get through, with no deadlock.
+    const [ana, ben] = [await funded('Ana', 'Mutual'), await funded('Ben', 'Mutual')];
+    const mutual = await Promise.all([send(ana, ben.publicId), send(ben, ana.publicId)]);
+    assert.deepEqual(statuses(mutual), [200, 200], JSON.stringify(mutual.map((answer) => answer.body)));
+    // A treat from 30 hours ago was before today in every time zone: counted, but not on today's floor.
+    await db.query("INSERT INTO buddy_gifts(id,sender_id,recipient_id,treat_id,message_id,local_date,created_at) VALUES($1,$2,$3,'cake',4,$4,$5)", [crypto.randomUUID(), racer.userId, ana.userId, shiftDay(dateIn(zone), -1), Date.now() - 30 * 60 * 60 * 1000]);
+    const anaBuddy = (await request('/api/buddy', { headers: ana.headers })).body.buddy;
+    assert.deepEqual([anaBuddy.giftsToday, anaBuddy.giftsReceived, anaBuddy.giftsSent], [[{ treatId: 'apple', emoji: '🍎', from: 'Ben M.', message: 'Proud of you!' }], 2, 1]);
+
+    // Eleven classmates at once to one student: ten land, the eleventh finds them full.
+    const popular = await funded('Pia', 'Popular');
+    const fans = await Promise.all(Array.from({ length: 11 }, (_, index) => funded('Fan', `Number${index}`)));
+    const rush = await Promise.all(fans.map((fan) => send(fan, popular.publicId)));
+    assert.deepEqual(statuses(rush), [...Array(10).fill(200), 429], JSON.stringify(rush.map((answer) => answer.body)));
+    assert.equal(rush.find((answer) => answer.response.status === 429).body.code, 'RECIPIENT_FULL');
+    assert.equal((await db.query('SELECT COUNT(*)::int AS count FROM buddy_gifts WHERE recipient_id=$1', [popular.userId])).rows[0].count, 10);
+
+    // A deactivated classmate gets nothing.
+    const gone = await funded('Dee', 'Gone');
+    await db.query("UPDATE users SET status='deactivated' WHERE id=$1", [gone.userId]);
+    assert.deepEqual(refusal(await send(racer, gone.publicId)).slice(0, 2), [404, 'RECIPIENT_NOT_FOUND']);
+
+    // A classmate turns treats off (an app-state save holds their account) while a gift waits for
+    // it: the gift reads the setting that was saved, not the one from before it waited.
+    const giver = await funded('Gus', 'Waiting');
+    const shy = await funded('Ola', 'Optout');
+    assert.equal((await savePreferences(shy.headers, {})).response.status, 200);
+    const holder = await db.connect();
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [shy.userId]);
+      await holder.query(`UPDATE user_preferences SET preferences_json = preferences_json || '{"allowGifts": false}'::jsonb WHERE user_id=$1`, [shy.userId]);
+      const holderPid = (await holder.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      const pending = send(giver, shy.publicId);
+      const deadline = Date.now() + 10_000;
+      while (!(await db.query('SELECT 1 FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))', [holderPid])).rowCount) {
+        assert.ok(Date.now() < deadline, 'the gift waits for the classmate\'s account');
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      await holder.query('COMMIT');
+      assert.deepEqual(refusal(await pending), [403, 'GIFTS_OFF', 'This classmate is not accepting treats.']);
+    } catch (error) {
+      await holder.query('ROLLBACK');
+      throw error;
+    } finally {
+      holder.release();
+    }
+    assert.equal(await balance(giver.userId), 200, 'the refused gift cost nothing');
+  });
+
+  const ledgerOf = async (userId) => (await db.query('SELECT id, amount FROM token_transactions WHERE user_id=$1', [userId])).rows.map((row) => ({ id: row.id, amount: Number(row.amount) }));
+  const sumOf = (rows) => rows.reduce((sum, row) => sum + row.amount, 0);
+
+  await t.test('the Tokens screen is for students, on their today, from the ledger, and it never writes', async () => {
+    const { headers, userId } = await student('Tia', 'Tokens');
+    await db.query("UPDATE users SET time_zone='UTC' WHERE id=$1", [userId]);
+    const summaryFor = (query, asHeaders = headers) => request(`/api/wallet/summary?${query}`, { headers: asHeaders });
+    const day = `date=${today}&timeZone=UTC`;
+
+    // Faculty have no Tokens screen (system admins cannot use the app at all).
+    const faculty = await student('Fay', 'Culty');
+    await db.query("UPDATE users SET role='faculty' WHERE id=$1", [faculty.userId]);
+    for (const answer of [await summaryFor(day, faculty.headers), await request('/api/wallet/history', { headers: faculty.headers })]) {
+      assert.deepEqual([answer.response.status, answer.body], [403, { ok: false, message: 'Tokens are for students.' }]);
+    }
+    assert.equal((await request(`/api/wallet/summary?${day}`)).response.status, 401);
+    for (const query of ['', 'timeZone=UTC', `date=${today}&timeZone=Not%2FA_Zone`, `date=${today}&date=${today}&timeZone=UTC`]) {
+      const refused = await summaryFor(query);
+      assert.deepEqual([refused.response.status, refused.body.message], [400, 'Send your today and time zone.'], query);
+    }
+    const closed = await summaryFor(`date=${shiftDay(today, -1)}&timeZone=UTC`);
+    assert.deepEqual([closed.response.status, closed.body.ok, closed.body.code, closed.body.today, closed.body.timeZone], [409, false, 'DAY_CLOSED', today, 'UTC']);
+
+    // Two habits, one checked in; 100 granted tokens; a Streak Freeze bought.
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: ['h1', 'h2'].map((id) => ({ ...appState.habits[0], id, label: id })) }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    const done = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'h1', date: today, completed: true, timeZone: 'UTC' }) });
+    assert.equal(done.response.status, 200, JSON.stringify(done.body));
+    await grant(userId, 100, 'wallet-grant');
+    const freeze = await request('/api/streak-freezes/buy', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+    assert.equal(freeze.response.status, 200, JSON.stringify(freeze.body));
+
+    const before = await ledgerOf(userId);
+    const answer = await summaryFor(day);
+    assert.equal(answer.response.status, 200, JSON.stringify(answer.body));
+    const summary = answer.body;
+    const balance = sumOf(before);
+    const challengeTokens = sumOf(before.filter((row) => /:token:(challenge|daily):/.test(row.id)));
+    const earned = sumOf(before.filter((row) => row.amount > 0));
+    assert.deepEqual([summary.ok, summary.balance, summary.tokens], [true, balance, balance]);
+    assert.deepEqual(summary.today.checkIns, { paid: 1, limit: 6, perCheckIn: 5, earned: 5 });
+    assert.deepEqual(summary.today.dailyClaim, { claimed: false, day: 1, amount: 2, tomorrowAmount: 3 });
+    assert.deepEqual(summary.today.mysteryBox, { status: 'ready', amount: null, min: 3, max: 20 });
+    assert.equal(summary.today.challenges.earned, challengeTokens, 'the challenges paid so far');
+    // 2 (the daily reward) + 5 (h2, the one habit left) + the open challenges + 20 (the box).
+    assert.equal(summary.today.canStillEarn, 2 + 5 + summary.today.challenges.available + 20);
+
+    // This week: every row is from today, so earned minus spent is the balance.
+    const weekStart = weekStartOf(today);
+    const weekEnd = weekEndKey(today);
+    assert.deepEqual([summary.week.start, summary.week.end, summary.week.resetsAt], [weekStart, weekEnd, Date.parse(`${shiftDay(weekEnd, 1)}T00:00:00Z`)]);
+    assert.deepEqual([summary.week.earned, summary.week.spent, summary.week.bySink], [earned, 30, { freeze: 30 }]);
+    assert.deepEqual({ ...summary.week.bySource, challenge: summary.week.bySource.challenge ?? 0 }, { 'check-in': 5, other: 100, challenge: challengeTokens });
+    assert.deepEqual(summary.week.quests, { done: 0, total: 3, earned: 0, available: 50 });
+    assert.equal(summary.week.bonus.lastWeek.weekStart, shiftDay(weekStart, -7));
+    assert.deepEqual(summary.streak, { days: 1, next: { days: 7, bonus: 15, daysLeft: 6 } });
+    assert.deepEqual(summary.earn.map((row) => row.id), ['check-in', 'daily-claim', 'challenge', 'mystery', 'quest', 'weekly-bonus', 'streak']);
+
+    // What to spend on, against the balance.
+    const drop = dropForWeek(weekStart);
+    const spend = Object.fromEntries(summary.spend.map((row) => [row.id, row]));
+    assert.deepEqual(summary.spend.map((row) => row.target), ['freeze', 'buddy', 'buddy', 'reward:profile-frames', 'reward:premium-theme', 'reward:custom-title', 'reward:buddy-showcase', 'gift', 'coach']);
+    assert.deepEqual([spend['streak-freeze'].status, spend['streak-freeze'].held, spend['streak-freeze'].max, spend['streak-freeze'].cost], ['ready', 1, 2, 30]);
+    assert.deepEqual([spend['buddy-shop'].status, spend['buddy-shop'].cost, spend['buddy-shop'].from], ['ready', 40, true]);
+    assert.deepEqual([spend['weekly-drop'].status, spend['weekly-drop'].cost, spend['weekly-drop'].detail], ['locked', 150, `${drop.emoji} ${drop.name} · finish 2 of 3 quests (0/2)`]);
+    assert.deepEqual([spend['profile-frames'].status, spend['profile-frames'].short, spend['buddy-showcase'].cost], ['short', 180 - balance, 300]);
+    assert.deepEqual([spend['treat-gift'].status, spend['treat-gift'].detail], ['ready', '3 of 3 left today']);
+    assert.deepEqual([spend.coach.status, spend.coach.detail], ['ready', `Enough for ${Math.floor(balance / 10)} answers`]);
+    assert.equal(summary.affordable, 4, 'the freeze, a Habi item, a treat and the AI Coach');
+    const perDay = Math.round(earned / 7);
+    assert.deepEqual([summary.pace, summary.nextGoal], [{ perDay }, { id: 'profile-frames', title: 'Profile Frames', cost: 180, short: 180 - balance, days: Math.ceil((180 - balance) / perDay) }]);
+
+    // The daily reward and the box are counted once they are taken.
+    assert.equal((await request('/api/daily-claim', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) })).response.status, 200);
+    const box = await request('/api/mystery-box/open', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) });
+    assert.equal(box.response.status, 200, JSON.stringify(box.body));
+    const later = (await summaryFor(day)).body;
+    assert.deepEqual(later.today.dailyClaim, { claimed: true, day: 1, amount: 2, tomorrowAmount: 3 });
+    assert.deepEqual(later.today.mysteryBox, { status: 'opened', amount: box.body.amount, min: 3, max: 20 });
+    assert.equal(later.today.canStillEarn, 5 + later.today.challenges.available);
+    assert.deepEqual([later.balance, later.week.bySource['daily-claim'], later.week.bySource.mystery], [balance + 2 + box.body.amount, 2, box.body.amount]);
+
+    // It only reads: a new time zone is not stored and nothing is written.
+    const east = 'Pacific/Kiritimati';
+    const rows = (await ledgerOf(userId)).length;
+    const eastern = await summaryFor(`date=${dateIn(east)}&timeZone=${encodeURIComponent(east)}`);
+    assert.deepEqual([eastern.response.status, eastern.body.today?.date], [200, dateIn(east)], JSON.stringify(eastern.body));
+    assert.deepEqual((await db.query('SELECT time_zone AS "timeZone", day_floor AS "floor" FROM users WHERE id=$1', [userId])).rows[0], { timeZone: 'UTC', floor: null });
+    assert.equal((await ledgerOf(userId)).length, rows);
+
+    // The freeze is a spend:freeze:<uuid> row in the history.
+    const history = (await request('/api/wallet/history', { headers })).body;
+    const bought = history.items.find((item) => item.kind === 'freeze');
+    assert.match(bought?.id ?? '', /^spend:freeze:[0-9a-f-]{36}$/);
+    assert.deepEqual([bought.amount, bought.label], [-30, 'Streak freeze']);
+  });
+
+  await t.test('the token history: the whole ledger a page at a time, with totals over all of it', async () => {
+    const { headers, userId } = await student('Hal', 'History');
+    // A new student: nothing earned yet, so no pace and no days to the first goal.
+    const fresh = (await request(`/api/wallet/summary?date=${today}&timeZone=UTC`, { headers })).body;
+    assert.deepEqual([fresh.balance, fresh.affordable, fresh.today.canStillEarn, fresh.streak.days, fresh.pace.perDay], [0, 0, 2 + 20, 0, 0], JSON.stringify(fresh));
+    assert.deepEqual(fresh.nextGoal, { id: 'profile-frames', title: 'Profile Frames', cost: 180, short: 180, days: null });
+    assert.deepEqual((await request('/api/wallet/history', { headers })).body, { ok: true, items: [], nextCursor: null, totals: { earned: 0, spent: 0, balance: 0 } });
+
+    // 130 rows, two to a millisecond (so a page can end between two rows of the same time), every
+    // tenth an AI Coach answer, and a spend from before ids named their kind (a plain UUID).
+    const at = Date.now() - 60_000;
+    const rows = Array.from({ length: 130 }, (_, index) => (index % 10 === 0
+      ? { id: `${userId}:token:spend:coach:${crypto.randomUUID()}`, amount: -10, label: 'AI Coach answer', createdAt: at + Math.floor(index / 2) }
+      : { id: `${userId}:token:quest:2026-10-19:q${index}`, amount: 4, label: `Quest ${index}`, createdAt: at + Math.floor(index / 2) }));
+    rows.push({ id: crypto.randomUUID(), amount: -30, label: 'Streak freeze', createdAt: at - 1 });
+    await db.query(
+      `INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at)
+       SELECT r.id, $1, r.amount, r.label, $2, r.created_at FROM unnest($3::text[], $4::int[], $5::text[], $6::bigint[]) AS r(id, amount, label, created_at)`,
+      [userId, new Date(at).toISOString(), rows.map((row) => row.id), rows.map((row) => row.amount), rows.map((row) => row.label), rows.map((row) => row.createdAt)],
+    );
+    const publicId = (id) => id.replace(`${userId}:token:`, '');
+    // Newest first, then by id (byte order) within a millisecond.
+    const newestFirst = [...rows].sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)).map((row) => publicId(row.id));
+    const totals = { earned: 117 * 4, spent: 13 * 10 + 30, balance: 117 * 4 - 13 * 10 - 30 };
+    const history = (query) => request(`/api/wallet/history?${query}`, { headers });
+
+    /** Every page of `filter`, `limit` rows at a time, following nextCursor. */
+    const allPages = async (filter, limit) => {
+      const pages = [];
+      let before = null;
+      do {
+        const page = await history(`filter=${filter}&limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ''}`);
+        assert.equal(page.response.status, 200, JSON.stringify(page.body));
+        assert.deepEqual(page.body.totals, totals, 'the totals are over the whole ledger');
+        pages.push(page.body);
+        before = page.body.nextCursor;
+      } while (before && pages.length < 10);
+      return pages;
+    };
+    const pages = await allPages('all', 45);
+    assert.deepEqual(pages.map((page) => page.items.length), [45, 45, 41], 'the pages end between two rows of the same millisecond');
+    assert.equal(pages.at(-1).nextCursor, null);
+    const items = pages.flatMap((page) => page.items);
+    assert.deepEqual(items.map((item) => item.id), newestFirst, 'every row once, in order');
+    assert.ok(items.every((item) => !item.id.includes(userId)), 'ids are shown without the account prefix');
+    const legacy = items.at(-1);
+    assert.deepEqual([legacy.kind, legacy.amount, legacy.label, legacy.createdAt], ['freeze', -30, 'Streak freeze', at - 1]);
+    assert.deepEqual([...new Set(items.map((item) => item.kind))].sort(), ['coach', 'freeze', 'quest']);
+    assert.ok(rows.length > 100 && sumOf(rows) === totals.balance, 'more rows than the 100 the app state carries');
+
+    const spent = (await allPages('spent', 50)).flatMap((page) => page.items);
+    assert.deepEqual([spent.length, spent.every((item) => item.amount < 0)], [14, true]);
+    const earnedRows = (await allPages('earned', 50)).flatMap((page) => page.items);
+    assert.deepEqual([earnedRows.length, earnedRows.every((item) => item.amount > 0)], [117, true]);
+    const first = (await history('')).body;
+    assert.deepEqual([first.items.length, Boolean(first.nextCursor)], [30, true], '30 rows by default');
+
+    const forged = Buffer.from(JSON.stringify(['soon', 'x'])).toString('base64url');
+    for (const query of ['limit=51', 'limit=0', 'limit=ten', 'filter=refunds', 'before=not-a-cursor', `before=${forged}`, 'userId=someone-else']) {
+      assert.equal((await history(query)).response.status, 400, query);
+    }
+  });
+
+  await t.test('what can still be earned today leaves out a habit past its reminder time, which a check-in no longer pays', async () => {
+    const { headers, userId } = await student('Dee', 'Dline');
+    await db.query('UPDATE users SET time_zone=$2 WHERE id=$1', [userId, middayZone]);
+    const pills = { ...appState.habits[0], id: 'pills', label: 'Pills', reminderEnabled: true, reminderTime: '12:00 AM', reminderTimes: ['12:00 AM'] };
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], id: 'read', label: 'Read' }, pills] }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    const day = { date: dateIn(middayZone), timeZone: middayZone };
+    const summary = (await request(`/api/wallet/summary?date=${day.date}&timeZone=${encodeURIComponent(middayZone)}`, { headers })).body;
+    // 2 (the daily reward) + 5 (Read: Pills is missed for today) + the open challenges + 20 (the box).
+    assert.equal(summary.today.canStillEarn, 2 + 5 + summary.today.challenges.available + 20, JSON.stringify(summary.today));
+    const late = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'pills', completed: true, ...day }) });
+    assert.deepEqual([late.response.status, late.body.code], [409, 'PAST_DEADLINE']);
+    const done = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'read', completed: true, ...day }) });
+    assert.equal(done.response.status, 200, JSON.stringify(done.body));
+    const after = (await request(`/api/wallet/summary?date=${day.date}&timeZone=${encodeURIComponent(middayZone)}`, { headers })).body;
+    assert.deepEqual([after.today.checkIns.paid, after.today.canStillEarn], [1, 2 + after.today.challenges.available + 20], 'no habit is left that pays');
   });
 
   await t.test('issue reports store attachments in the database and validate content', async () => {

@@ -6,6 +6,8 @@ import { goalPlanSchema } from '../schemas.js';
 import {
   DEFAULT_HABIT_CATEGORIES,
   GOAL_PLANNER_SYSTEM,
+  assistantContext,
+  buildUserPrompt,
   forAudience,
   goalPlanJsonSchema,
   goalPlanJsonSchemaFor,
@@ -14,9 +16,10 @@ import {
   plannedHabitCount,
   plannedHabitTime,
   plannerCategories,
+  systemPromptFor,
 } from '../services/ai-prompts.js';
 import { rulesForecast } from '../services/forecast-rules.js';
-import { buildPlannerHistory, loadPlannerCategories, loadPlannerHistory, usualCheckInTime, withForecasts } from '../services/planner-history.js';
+import { buildPlannerHistory, loadPlannerCategories, loadPlannerHistory, usualCheckInTime, weekdayStrengths, withForecasts } from '../services/planner-history.js';
 
 // Wednesday Oct 21, 2026, noon in Manila: this week is Mon Oct 19 to Sun Oct 25.
 const now = new Date('2026-10-21T04:00:00.000Z');
@@ -89,6 +92,36 @@ test('the planner history lists current habits, then the newest ended ones, capp
   assert.deepEqual(signals[1], { habit_name: 'Drink water', streak: 0, completion_rate: 0.857, missed_days: 1, last_7_days: [1, 1, 1, 1, 1, 1, 0], priority: 'balanced', goal_type: 'health' });
   assert.deepEqual(signals[0].last_7_days, [0, 0, 0, 0, 1, 1, 0], 'Oct 15 to today');
   assert.equal(signals[0].streak, 2);
+});
+
+test('the planner history names the strongest and weakest weekday over the counted days', () => {
+  // Mondays 3/3 and Tuesdays 2/2 done; Wednesdays and Fridays 1/2 (Gym missed); other days once only.
+  const { history } = buildPlannerHistory({ habits, completions, now, timeZone });
+  assert.deepEqual([history.strongestWeekday, history.weakestWeekday], ['Mon', 'Wed'], 'ties go to the first day of the week');
+  assert.match(history.note, /strongestWeekday and weakestWeekday/);
+  const tally = (entries) => new Map(Object.entries(entries).map(([day, [done, scheduled]]) => [day, { done, scheduled }]));
+  assert.deepEqual(weekdayStrengths([tally({ Mon: [2, 2], Sat: [0, 2] }), tally({ Sat: [1, 1] })]), { strongestWeekday: 'Mon', weakestWeekday: 'Sat' });
+  assert.deepEqual(weekdayStrengths([tally({ Mon: [2, 2], Tue: [1, 1] })]), { strongestWeekday: null, weakestWeekday: null }, 'one weekday with enough days says nothing');
+  assert.deepEqual(weekdayStrengths([tally({ Mon: [1, 2], Tue: [1, 2] })]), { strongestWeekday: null, weakestWeekday: null }, 'all the same');
+  assert.deepEqual(buildPlannerHistory({ habits: [], completions: [], now, timeZone }).history.strongestWeekday, null);
+});
+
+test('the paid coach also reads the planner history; the free assistant does not', () => {
+  const { history } = buildPlannerHistory({ habits, completions, now, timeZone });
+  const base = { today: '2026-10-21', habits: [] };
+  const coach = buildUserPrompt({ question: 'What next?', context: assistantContext('coach', base, history) });
+  const assistant = buildUserPrompt({ question: 'What next?', context: assistantContext('assistant', base, history) });
+  const data = (prompt) => JSON.parse(prompt.split('\n')[1]);
+  assert.deepEqual(data(coach).plannerHistory, history);
+  assert.match(coach, /"usualCheckInTime"/);
+  assert.equal(data(assistant).plannerHistory, undefined);
+  assert.deepEqual(data(assistant), base, 'the assistant keeps exactly its context');
+  assert.deepEqual(assistantContext('coach', base, null), base, 'without the history the coach still answers');
+  // The coach is told to use it for one specific next step; the assistant's instructions are unchanged.
+  assert.match(systemPromptFor('coach'), /plannerHistory/);
+  assert.match(systemPromptFor('coach'), /one specific next step/);
+  assert.doesNotMatch(systemPromptFor('assistant'), /plannerHistory/);
+  assert.match(systemPromptFor('coach', 'faculty'), /faculty member/);
 });
 
 test('the planner history carries the account streak across weeks', () => {

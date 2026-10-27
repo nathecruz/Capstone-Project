@@ -18,6 +18,7 @@ describe('signing out on a shared device', () => {
   const seed = async (unsaved: boolean) => {
     await AsyncStorage.setItem(`habitai_app_state:${email}`, '{"habits":[]}');
     await AsyncStorage.setItem(`habitai_sync_base:${email}`, '{}');
+    await AsyncStorage.setItem(`habitai_token_cap_shown:${email}`, '2026-10-27');
     if (unsaved) await AsyncStorage.setItem(`habitai_unsaved:${email}`, '1');
     else await AsyncStorage.removeItem(`habitai_unsaved:${email}`);
   };
@@ -27,6 +28,7 @@ describe('signing out on a shared device', () => {
     await forgetAccountOnDevice(email);
     expect(await AsyncStorage.getItem(`habitai_app_state:${email}`)).toBeNull();
     expect(await AsyncStorage.getItem(`habitai_sync_base:${email}`)).toBeNull();
+    expect(await AsyncStorage.getItem(`habitai_token_cap_shown:${email}`)).toBeNull();
   });
 
   it('keeps check-ins that have not reached the server yet', async () => {

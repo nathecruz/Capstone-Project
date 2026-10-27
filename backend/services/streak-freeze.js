@@ -83,7 +83,7 @@ export async function buyStreakFreeze(db, userId, now = Date.now()) {
   await db.query('INSERT INTO user_streak_freezes(user_id,available,updated_at) VALUES($1,0,$2) ON CONFLICT DO NOTHING', [userId, now]);
   const held = Number((await db.query('SELECT available FROM user_streak_freezes WHERE user_id=$1', [userId])).rows[0].available);
   if (held >= STREAK_FREEZE_MAX) return { status: 409, message: `You already hold ${STREAK_FREEZE_MAX} streak freezes, the most you can keep.` };
-  const spent = await spendTokens(db, userId, STREAK_FREEZE_COST, 'Streak freeze', now);
+  const spent = await spendTokens(db, userId, STREAK_FREEZE_COST, 'Streak freeze', { kind: 'freeze', now });
   if (!spent.ok) return { status: 402, message: `You need ${STREAK_FREEZE_COST - spent.balance} more tokens for a streak freeze.` };
   await db.query('UPDATE user_streak_freezes SET available=available+1, updated_at=$2 WHERE user_id=$1', [userId, now]);
   return null;

@@ -1,14 +1,19 @@
 // Home's rewards as tabs: the daily reward, today's challenges and the weekly quests, one at a time
 // instead of three tall cards in a row. All three stay mounted (only the chosen one shows), so each
-// keeps its own data and live updates, and the tabs can say where something is waiting.
+// keeps its own data and live updates, and the tabs can say where something is waiting: the daily
+// reward, or last week's consistency bonus on the Quests tab. 'See all ways' opens the Tokens screen.
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { DailyChallengesCard, DailyClaimCard } from '@/components/daily-cards';
 import { WeeklyQuestsCard } from '@/components/engagement-cards';
 import type { Habit } from '@/hooks/app-state/types';
+import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useDailyChallenges } from '@/hooks/use-daily-challenges';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
+import { useWeeklyBonus } from '@/hooks/use-weekly-bonus';
+import { getLocalDateKey } from '@/utils/habit-visibility';
 import { weeklyQuests } from '@/utils/quests';
 
 type Tab = 'daily' | 'challenges' | 'quests';
@@ -17,9 +22,13 @@ type Tab = 'daily' | 'challenges' | 'quests';
 export function RewardsHub({ habits, now }: { habits: Habit[]; now: Date }) {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
+  // Tokens are the students' own: faculty have no Tokens screen.
+  const { isFaculty } = useAppColorScheme();
   // Read only: the challenges card below loads them.
   const challenges = useDailyChallenges(habits.length, false);
   const quests = weeklyQuests(habits, now);
+  // Waits until it is claimed or lapses, also after the Monday recap was closed.
+  const bonusWaiting = Boolean(useWeeklyBonus(getLocalDateKey(now)).bonus?.lastWeek.claimable);
   const [claimReady, setClaimReady] = useState<boolean | null>(null);
   // Whether the reward was waiting when Home opened: it picks the first tab, and claiming does not
   // switch tabs (the claimed card and its confetti stay in view).
@@ -36,14 +45,22 @@ export function RewardsHub({ habits, now }: { habits: Habit[]; now: Date }) {
   const tabs: { id: Tab; label: string; icon: keyof typeof Ionicons.glyphMap; status: string; waiting?: boolean }[] = [
     { id: 'daily', label: 'Daily', icon: 'gift', status: claimReady === true ? 'Ready to claim' : claimReady === false ? 'Claimed today' : '…', waiting: claimReady === true },
     { id: 'challenges', label: 'Challenges', icon: 'trophy', status: challenges.length ? `${challengesDone}/${challenges.length} done` : 'Today' },
-    { id: 'quests', label: 'Quests', icon: 'flag', status: quests.length ? `${questsDone}/${quests.length} done` : 'This week' },
+    { id: 'quests', label: 'Quests', icon: 'flag', status: bonusWaiting ? 'Bonus waiting' : quests.length ? `${questsDone}/${quests.length} done` : 'This week', waiting: bonusWaiting },
   ];
 
   return (
     <View style={styles.hub}>
       <View style={styles.header}>
         <Text style={styles.title}>Rewards</Text>
-        <Text style={styles.subtitle}>Earn tokens every day</Text>
+        <Text style={styles.subtitle}>
+          Earn tokens every day
+          {isFaculty ? null : (
+            <>
+              {' · '}
+              <Text style={styles.link} onPress={() => router.push('/wallet')} accessibilityRole="link">See all ways</Text>
+            </>
+          )}
+        </Text>
       </View>
       <View style={styles.tabs} accessibilityRole="tablist">
         {tabs.map((item) => {
@@ -60,7 +77,7 @@ export function RewardsHub({ habits, now }: { habits: Habit[]; now: Date }) {
               <View style={styles.tabTop}>
                 <Ionicons name={item.icon} size={15} color={active ? themeColor('#FFFFFF') : themeColor('#5B42D8')} />
                 <Text style={[styles.tabText, active && styles.tabTextActive]} numberOfLines={1}>{item.label}</Text>
-                {item.waiting ? <View style={styles.dot} /> : null}
+                {item.waiting ? <View style={styles.dot} testID={`${item.id}-waiting-dot`} /> : null}
               </View>
               <Text style={[styles.tabStatus, active && styles.tabStatusActive, item.waiting && !active && styles.tabStatusWaiting]} numberOfLines={1}>{item.status}</Text>
             </Pressable>
@@ -79,6 +96,7 @@ const themedStyles = createThemedStyles({
   header: { marginTop: 8 },
   title: { fontSize: 20, fontWeight: '900', color: '#1F1C26' },
   subtitle: { marginTop: 2, fontSize: 13, fontWeight: '600', color: '#8A8492' },
+  link: { fontWeight: '800', color: '#5B42D8' },
   tabs: { flexDirection: 'row', gap: 8 },
   tab: { flex: 1, minWidth: 0, minHeight: 58, alignItems: 'center', justifyContent: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 8, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E7E2F3' },
   tabActive: { backgroundColor: '#5B42D8', borderColor: '#5B42D8' },

@@ -8,8 +8,10 @@ import type { Habit } from '@/hooks/app-state/types';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useBuddy } from '@/hooks/use-buddy';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
+import { useWallet } from '@/hooks/use-wallet';
 import { buddyGrowth, buddyMood } from '@/utils/buddy';
 import { levelProgress } from '@/utils/engagement';
+import { getLocalDateKey } from '@/utils/habit-visibility';
 
 type TileProps = {
   tone: 'streak' | 'level' | 'tokens' | 'buddy' | 'rank';
@@ -52,6 +54,8 @@ export function BentoTiles({ habits, onFreeze, style }: { habits: Habit[]; onFre
   const themeColor = useThemeColor();
   const { points, tokens, streakFreeze, isFaculty, currentHabits, streak, bestStreak } = useAppColorScheme();
   const { buddy } = useBuddy();
+  // What the Tokens screen counts as affordable now (faculty have no tokens).
+  const affordable = useWallet(getLocalDateKey(), !isFaculty).summary?.affordable ?? 0;
   const frozenDays = streakFreeze?.frozenDays;
   const totalCheckIns = useMemo(() => habits.reduce((sum, habit) => sum + habit.completionDates.length, 0), [habits]);
   const freezes = streakFreeze?.available ?? 0;
@@ -104,10 +108,10 @@ export function BentoTiles({ habits, onFreeze, style }: { habits: Habit[]; onFre
           tone="tokens"
           label="Tokens"
           value={String(tokens)}
-          detail="Spend on themes, freezes and more"
+          detail={affordable > 0 ? `You can afford ${affordable} ${affordable === 1 ? 'thing' : 'things'}` : 'See how to earn and spend'}
           icon={iconBubble('wallet', '#2E9D5C')}
-          onPress={go('/leaderboards')}
-          accessibilityLabel={`${tokens} tokens. Open token rewards`}
+          onPress={go('/wallet')}
+          accessibilityLabel={`${tokens} tokens. Open Tokens`}
         />
       )}
       <BentoTile

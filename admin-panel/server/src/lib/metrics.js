@@ -12,6 +12,12 @@ export function addDays(dateKey, days) {
   return date.toISOString().slice(0, 10);
 }
 
+/** The Monday of the Monday-to-Sunday week of a day (YYYY-MM-DD). */
+export function mondayOf(dateKey) {
+  const offset = (new Date(`${dateKey}T00:00:00Z`).getUTCDay() + 6) % 7;
+  return addDays(dateKey, -offset);
+}
+
 export function dateRange(startKey, endKey) {
   const days = [];
   for (let key = startKey; key <= endKey; key = addDays(key, 1)) days.push(key);

@@ -7,7 +7,7 @@ import type { Habit } from '@/hooks/app-state/types';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useBuddy } from '@/hooks/use-buddy';
 import { createThemedStyles, useThemedStyles } from '@/hooks/use-themed-styles';
-import { buddyGrowth, buddyMood, MOOD_FACE, ROOM_LOOK, type Buddy, type BuddyMood } from '@/utils/buddy';
+import { buddyCatalog, buddyGrowth, buddyMood, MOOD_FACE, ROOM_LOOK, type Buddy, type BuddyMood } from '@/utils/buddy';
 
 /** Background and ring per stage: the buddy looks a little grander as it grows. */
 const STAGE_LOOK = [
@@ -18,11 +18,13 @@ const STAGE_LOOK = [
   { background: '#FFE3EF', ring: '#F28DB8' },
 ];
 
-const itemEmoji = (buddy: Buddy | null, id: string) => buddy?.items.find((item) => item.id === id)?.emoji ?? '';
+// Shop items and weekly drops are drawn the same way.
+const itemEmoji = (buddy: Buddy | null, id: string) => (id ? buddyCatalog(buddy).find((item) => item.id === id)?.emoji ?? '' : '');
 
 /**
  * The hamster with its stage, outfit, room and mood; it bobs gently, more when happy, slowly when
- * sleepy. Champs sparkle and Legends glow gold.
+ * sleepy. Champs sparkle and Legends glow gold. Small ones (next to names on the leaderboard) keep
+ * still and leave out the mood bubble, so a long board does not run dozens of animations.
  */
 export function BuddyAvatar({ buddy, checkIns, mood, size = 120 }: { buddy: Buddy | null; checkIns: number; mood: BuddyMood; size?: number }) {
   const styles = useThemedStyles(themedStyles);
@@ -31,9 +33,10 @@ export function BuddyAvatar({ buddy, checkIns, mood, size = 120 }: { buddy: Budd
   const room = buddy?.room ? ROOM_LOOK[buddy.room] : undefined;
   const legend = index >= 4;
   const champ = index >= 3;
+  const small = size < 40;
   const [bob] = useState(() => new Animated.Value(0));
   useEffect(() => {
-    if (mood === 'sad') {
+    if (mood === 'sad' || small) {
       bob.setValue(0);
       return;
     }
@@ -44,7 +47,7 @@ export function BuddyAvatar({ buddy, checkIns, mood, size = 120 }: { buddy: Budd
     ]));
     loop.start();
     return () => loop.stop();
-  }, [bob, mood]);
+  }, [bob, mood, small]);
   const lift = mood === 'ecstatic' ? -8 : -4;
   const head = itemEmoji(buddy, buddy?.head ?? '');
   const hand = itemEmoji(buddy, buddy?.hand ?? '');
@@ -72,9 +75,11 @@ export function BuddyAvatar({ buddy, checkIns, mood, size = 120 }: { buddy: Budd
         {hand ? <Text style={[styles.hand, { fontSize: size * 0.22, right: -size * 0.12, bottom: -size * 0.02 }]}>{hand}</Text> : null}
         {accessory ? <Text style={[styles.accessory, { fontSize: size * 0.2, left: -size * 0.12, bottom: size * 0.02 }]}>{accessory}</Text> : null}
       </Animated.View>
-      <View style={[styles.moodBubble, { width: size * 0.3, height: size * 0.3, borderRadius: size * 0.15 }]}>
-        <Text style={{ fontSize: size * 0.17 }}>{MOOD_FACE[mood]}</Text>
-      </View>
+      {!small && (
+        <View style={[styles.moodBubble, { width: size * 0.3, height: size * 0.3, borderRadius: size * 0.15 }]}>
+          <Text style={{ fontSize: size * 0.17 }}>{MOOD_FACE[mood]}</Text>
+        </View>
+      )}
     </View>
   );
 }

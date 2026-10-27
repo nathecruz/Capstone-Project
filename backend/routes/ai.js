@@ -10,6 +10,7 @@ import {
   BAD_HABIT_SYSTEM,
   DEFAULT_HABIT_CATEGORIES,
   GOAL_PLANNER_SYSTEM,
+  assistantContext,
   badHabitJsonSchema,
   badHabitPrompt,
   buildUserPrompt,
@@ -29,7 +30,7 @@ import { generateAiText, isAiConfigured } from '../services/groq.js';
 import { loadPlannerCategories, loadPlannerHistory } from '../services/planner-history.js';
 import { computeStreak, habitFromRow } from '../services/streaks.js';
 import { getFrozenDays } from '../services/streak-freeze.js';
-import { COACH_TOKEN_COST, getWallet, spendTokens, tokenBalance } from '../services/wallet.js';
+import { COACH_TOKEN_COST, getWallet, refundCoachAnswer, spendTokens } from '../services/wallet.js';
 
 const DEFAULT_TIME_ZONE = 'Asia/Manila';
 
@@ -84,6 +85,35 @@ function logAiError(feature, error) {
   console.error(`[ai] ${feature} failed: ${error?.status ?? error?.name ?? ''} ${String(error?.message ?? error).slice(0, 200)}`.trim());
 }
 
+/**
+ * What the coach knows beyond the assistant: the planner's history of the last 4 weeks, with
+ * forecasts (all of them wait at most PLANNER_FORECAST_CAP_MS). Without it the coach still answers.
+ */
+function coachHistory(userId, timeZone) {
+  return loadPlannerHistory({ query }, userId, timeZone, { ml: config.ml }).catch((error) => {
+    logAiError('coach history', error);
+    return null;
+  });
+}
+
+/** Charges an AI Coach answer under the account lock, so two questions at once cannot both use the same tokens. */
+function chargeCoach(userId) {
+  return withTransaction(async (db) => {
+    await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [userId]);
+    return spendTokens(db, userId, COACH_TOKEN_COST, 'AI Coach answer', { kind: 'coach' });
+  });
+}
+
+/** After an answer (or its refund), the new balance on every device: a fresh snapshot and the wallet. */
+function coachWallet(userId, refundOf = null) {
+  return withTransaction(async (db) => {
+    await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [userId]);
+    if (refundOf) await refundCoachAnswer(db, userId, refundOf);
+    await refreshSnapshot(userId, db);
+    return getWallet(db, userId);
+  });
+}
+
 /** The AI's advice for one habit (two tries for valid JSON), or null when it cannot give any. */
 async function writeHabitAdvice(stats, ml, role) {
   try {
@@ -111,35 +141,40 @@ export default function registerAiRoutes(app) {
     const mode = input.mode;
     if (!isAiConfigured()) return response.status(503).json({ ok: false, error: 'The AI service is not configured on the server.' });
 
-    // The coach costs tokens: check the balance first, charge only after a real answer.
-    if (mode === 'coach' && (await tokenBalance({ query }, session.userId)) < COACH_TOKEN_COST) {
+    // The coach costs tokens: charged before the AI is asked, and given back when no answer comes.
+    const charge = mode === 'coach' ? await chargeCoach(session.userId) : null;
+    if (charge && !charge.ok) {
       return response.status(402).json({ ok: false, error: `You need ${COACH_TOKEN_COST} tokens to ask the AI Coach. Complete habits to earn more.` });
     }
 
+    let answer = '';
+    let failed = false;
     try {
-      const context = mode === 'support'
-        ? { app: 'HabitAI' } // no personal data is needed to explain the app
-        : await loadAiContext(session.userId, input.timeZone || DEFAULT_TIME_ZONE);
-      const text = await generateAiText(buildUserPrompt({ question: input.question, context }), {
+      const timeZone = input.timeZone || DEFAULT_TIME_ZONE;
+      const [context, history] = mode === 'support'
+        ? [{ app: 'HabitAI' }, null] // no personal data is needed to explain the app
+        : await Promise.all([loadAiContext(session.userId, timeZone), mode === 'coach' ? coachHistory(session.userId, timeZone) : null]);
+      const text = await generateAiText(buildUserPrompt({ question: input.question, context: assistantContext(mode, context, history) }), {
         system: systemPromptFor(mode, session.role),
         maxOutputTokens: 800,
         temperature: 0.6,
       });
-      const answer = cleanAnswer(text);
-      if (!answer) return response.status(502).json({ ok: false, error: 'The AI service returned an empty response.' });
-      if (mode !== 'coach') return response.json({ ok: true, answer, mode });
-
-      const wallet = await withTransaction(async (db) => {
-        await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
-        await spendTokens(db, session.userId, COACH_TOKEN_COST, 'AI Coach');
-        await refreshSnapshot(session.userId, db);
-        return getWallet(db, session.userId);
-      });
-      response.json({ ok: true, answer, mode, tokens: wallet.tokens, tokenHistory: wallet.tokenHistory });
+      answer = cleanAnswer(text);
     } catch (error) {
       logAiError(mode, error);
-      response.status(502).json({ ok: false, error: 'The AI service is temporarily unavailable.' });
+      failed = true;
     }
+
+    if (charge && !answer) {
+      const wallet = await coachWallet(session.userId, charge.id);
+      return response.status(502).json({ ok: false, error: 'The AI service is temporarily unavailable.', refunded: true, tokens: wallet.tokens });
+    }
+    if (failed) return response.status(502).json({ ok: false, error: 'The AI service is temporarily unavailable.' });
+    if (!answer) return response.status(502).json({ ok: false, error: 'The AI service returned an empty response.' });
+    if (!charge) return response.json({ ok: true, answer, mode });
+
+    const wallet = await coachWallet(session.userId);
+    response.json({ ok: true, answer, mode, tokens: wallet.tokens, tokenHistory: wallet.tokenHistory });
   });
 
   // One habit, analysed: check-in facts from the database, the ML forecast and the AI's advice.

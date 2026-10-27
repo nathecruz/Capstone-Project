@@ -3,6 +3,7 @@
 //     server (3-way) even when the app started during a server cold start;
 //   - the unsaved flag: local changes that have not reached the server yet, so they are
 //     merged instead of being replaced by the server copy on the next launch.
+// Also the day the daily token limit was last shown, which signing out removes with the rest.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AppStateSyncBase } from '@/authentication/authService';
 
@@ -10,6 +11,8 @@ import type { AppStateSyncBase } from '@/authentication/authService';
 export const APP_STATE_KEY_PREFIX = 'habitai_app_state:';
 const BASE_KEY_PREFIX = 'habitai_sync_base:';
 const UNSAVED_KEY_PREFIX = 'habitai_unsaved:';
+/** The day the daily token limit was last shown to the account here: once a day, not once per visit. */
+export const TOKEN_CAP_SHOWN_KEY_PREFIX = 'habitai_token_cap_shown:';
 
 export async function loadSyncMeta(email: string): Promise<{ base: AppStateSyncBase | null; unsaved: boolean }> {
   try {
@@ -45,7 +48,7 @@ export async function forgetAccountOnDevice(email: string) {
   if (!email) return;
   try {
     if ((await AsyncStorage.getItem(`${UNSAVED_KEY_PREFIX}${email}`)) === '1') return;
-    await Promise.all([AsyncStorage.removeItem(`${APP_STATE_KEY_PREFIX}${email}`), AsyncStorage.removeItem(`${BASE_KEY_PREFIX}${email}`)]);
+    await Promise.all([APP_STATE_KEY_PREFIX, BASE_KEY_PREFIX, TOKEN_CAP_SHOWN_KEY_PREFIX].map((prefix) => AsyncStorage.removeItem(`${prefix}${email}`)));
   } catch {
     // Storage unavailable: nothing to remove.
   }

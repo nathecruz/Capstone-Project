@@ -42,6 +42,14 @@ export async function ensureNeonSchema({ log = () => {} } = {}) {
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_title TEXT NOT NULL DEFAULT ''");
   // The Profile Frames reward: the frame chosen for the student's photo.
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_frame TEXT NOT NULL DEFAULT ''");
+  // The account day (services/account-day.js): the student's time zone ('' until the app sends one)
+  // and the earliest day still open after a time zone change.
+  await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS time_zone TEXT NOT NULL DEFAULT ''");
+  await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS day_floor DATE');
+  // Leaderboard rows are known by this random 12-hex id, never by the internal user id. The default
+  // runs for each row, also for accounts that exist when the column is added.
+  await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS public_id TEXT NOT NULL DEFAULT substr(md5(random()::text || clock_timestamp()::text), 1, 12)');
+  await query('CREATE UNIQUE INDEX IF NOT EXISTS users_public_id_unique ON users(public_id)');
   // Habit Buddy rooms (backgrounds bought with tokens).
   await query("ALTER TABLE user_buddy ADD COLUMN IF NOT EXISTS room_item TEXT NOT NULL DEFAULT ''");
   // Habit Buddy gear: a worn accessory (scarf, glasses, medal...) alongside the hat and held item.
@@ -78,9 +86,9 @@ export async function ensureNeonSchema({ log = () => {} } = {}) {
   await withTransaction(seedCatalog);
 
   // Accounts created before email verification existed are treated as verified (once only).
-  // Token rewards that did nothing are retired and refunded; the real rewards' descriptions are kept
-  // current (now more themes and frames), so a new key re-syncs them.
-  await runOnce('token-rewards-real-2026-11', () => withTransaction((connection) => retireRewards(connection)));
+  // Token rewards that did nothing are retired and refunded; the real rewards' names, prices and
+  // descriptions are kept current (now with the Buddy Showcase), so a new key re-syncs them.
+  await runOnce('token-rewards-real-2026-12', () => withTransaction((connection) => retireRewards(connection)));
   await runOnce('email-verification-backfill', () => query('UPDATE users SET email_verified_at = created_at WHERE email_verified_at IS NULL'));
 
   // Accounts created with a single full name get a first and last name once; students can correct them in the app.

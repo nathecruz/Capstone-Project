@@ -139,6 +139,18 @@ export function levelProgress(points: number) {
   return { level, xp, toNext: POINTS_PER_LEVEL - xp, share: xp / POINTS_PER_LEVEL };
 }
 
+// The server pays tokens for the first 6 check-ins of a day; from CHECK_INS_CAPPED_FROM (a Monday)
+// a day also counts at most 6 toward points, levels, the leaderboard and Habi's growth (the
+// backend's PAID_CHECK_INS_PER_DAY and CHECK_IN_CAP_FROM). Later check-ins still count for streaks,
+// challenges and quests.
+export const COUNTED_CHECK_INS_PER_DAY = 6;
+export const CHECK_INS_CAPPED_FROM = '2026-10-26';
+
+/** Whether a check-in on `dateKey`, after `checkInsThatDay` others, adds points and grows Habi. */
+export function checkInCounts(dateKey: string, checkInsThatDay: number) {
+  return dateKey < CHECK_INS_CAPPED_FROM || checkInsThatDay < COUNTED_CHECK_INS_PER_DAY;
+}
+
 export const STREAK_MILESTONES = [3, 7, 14, 21, 30, 50, 75, 100, 150, 200, 365];
 
 /**
