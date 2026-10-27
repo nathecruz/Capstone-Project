@@ -95,6 +95,7 @@ flowchart TB
 | Habits | `GET /api/habit-categories`, `POST /api/habit/predict` |
 | Notifications | `GET /api/notifications`, `PATCH /api/notifications/:id`, `/api/web-push/*` |
 | Gamification | `POST /api/rewards/redeem`, `GET /api/leaderboard`, `POST /api/leaderboard/sync` |
+| Tokens | `GET /api/wallet/summary`, `GET /api/wallet/history`, `GET /api/weekly-bonus`, `POST /api/weekly-bonus/claim`, `POST /api/buddy/items` (shop and weekly drop), `POST /api/buddy/gifts` |
 | AI | `POST /api/insights/assistant` (modes `assistant`, `coach`, `support`), `POST /api/goals/generate` |
 | Support | `POST /api/support/reports`, `POST /api/support/suggestions` |
 | Health | `GET /healthz` (liveness), `GET /health` (dependencies) |
@@ -145,9 +146,19 @@ erDiagram
   - A day breaks it only when some habit was due and nothing was checked in.
   - Streak freezes, the streak milestone bonuses (once per run) and the streak badges follow it.
   - A habit's own streak stops at its last day.
-- `token_transactions` is the wallet ledger. The balance is its sum: +5 per check-in (id
-  unique per habit and day, so it cannot be earned twice), −5 when a check-in is undone,
-  −10 per AI Coach answer, and the reward cost on redemption.
+- `token_transactions` is the wallet ledger. The balance is its sum, and each row's id says
+  what it is (`tokenKind` in `wallet.js`, mirrored in `admin-panel/server/src/lib/token-kinds.js`).
+  - +5 per check-in (id unique per habit and day, so it cannot be earned twice), for the first 6
+    check-ins of an account day from 2026-10-26; −5 when a paid check-in is undone.
+  - Daily reward, challenges, mystery box, weekly quests, streak milestones and the Monday
+    weekly bonus (`:token:week:<weekStart>`, 10/20/30 at 60/75/90% of last week's due check-ins).
+  - Spends are `:token:spend:<kind>:<uuid>`: rewards, Habi items and the weekly drop, treats,
+    treat gifts, streak freezes and AI Coach answers (10, refunded when the AI fails).
+- The account day (`account-day.js`, `users.time_zone` and `day_floor`) decides which day a
+  check-in, claim or purchase belongs to; a time zone switch cannot reopen a day already over.
+- `weekly_due_marks` keeps each week's due check-ins for days already over, so deleting a
+  missed habit cannot raise the weekly bonus. `buddy_gifts` holds treats sent to classmates
+  (only the sender pays; 3 a day, 1 per classmate a week, 10 received a day).
 - `users.email_verified_at` and `users.privacy_consent_at` gate the app for new accounts;
   `email_verification_codes` holds hashed 6-digit codes (15 minutes, 5 attempts).
 
@@ -286,12 +297,12 @@ sequenceDiagram
   API->>API: auth + per-student AI rate limit (30 per 15 min)
   API->>DB: habits, 28 days of check-ins, goals
   API->>API: build compact context (streaks, last 7 days, habit needing attention)
+  API->>DB: Coach only: charge 10 tokens in the ledger (users row locked) before asking
   API->>G: system message (role + rules) + USER DATA + fenced question
   G-->>API: text
   API->>API: strip markdown, trim length
-  API-->>A: {answer}
-  API->>DB: Coach only: charge 10 tokens in the ledger after a successful answer
-  API-->>A: {answer, tokens, tokenHistory}
+  API->>DB: Coach only: refund the 10 tokens when the AI fails or answers nothing
+  API-->>A: {answer, tokens, tokenHistory} (Coach: 502 {refunded: true} on failure)
 ```
 
 - The **context is built from the database**, not from numbers the app reports, so answers
