@@ -122,7 +122,7 @@ test('treat gifts: 3 sent a day, 1 per classmate in 7 days, 10 received in 24 ho
   // One treat to the same classmate in any 7 days.
   assert.equal(limit([gift('bea', '2026-10-22', 7 * 24 - 1)]), 'GIFT_PAIR_LIMIT', '6 days 23 hours ago');
   assert.equal(limit([gift('bea', '2026-10-21', 7 * 24 + 1)]), null, 'over 7 days ago');
-  assert.equal(giftLimitRefusal({ sent: [gift('bea', '2026-10-27', 20)], received: [], today: '2026-10-28', recipientId: 'bea', recipientName: 'Bea S.', now }).message, 'You already sent Bea S. a treat this week.');
+  assert.equal(giftLimitRefusal({ sent: [gift('bea', '2026-10-27', 20)], received: [], today: '2026-10-28', recipientId: 'bea', recipientName: 'Bea S.', now }).message, 'You already sent Bea S. a treat in the last 7 days.');
   // The classmate receives at most 10 in any 24 hours.
   assert.equal(GIFTS_RECEIVED_PER_DAY, 10);
   const received = (count, hoursAgo) => Array.from({ length: count }, () => now - hoursAgo * hour);

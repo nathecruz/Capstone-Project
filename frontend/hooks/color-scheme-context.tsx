@@ -129,6 +129,8 @@ type ColorSchemeContextValue = {
   clearLocalData: () => void;
   /** Faculty accounts track their own habits in Faculty mode (faculty ideas, no student leaderboards). */
   isFaculty: boolean;
+  /** The signed-in account is loaded, so its role (isFaculty) is known. */
+  accountReady: boolean;
 };
 
 export type StreakFreeze = { available: number; max: number; cost: number; frozenDays: string[] };
@@ -1022,8 +1024,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       },
       clearLocalData,
       isFaculty: accountRole === 'faculty',
+      accountReady: Boolean(activeUserEmail),
     }),
-    [avatarImage, colorScheme, darkModeOverride, getAppStateSnapshot, goals, habits, currentHabits, streak, bestStreak, points, preferences, profile, ringInterval, snoozeFrequency, syncAppState, tokenHistory, tokens, undoUntil, accountRole, celebration, streakFreeze],
+    [avatarImage, colorScheme, darkModeOverride, getAppStateSnapshot, goals, habits, currentHabits, streak, bestStreak, points, preferences, profile, ringInterval, snoozeFrequency, syncAppState, tokenHistory, tokens, undoUntil, accountRole, activeUserEmail, celebration, streakFreeze],
   );
 
   const appTheme = isAppTheme(preferences.appTheme) ? preferences.appTheme : 'classic';

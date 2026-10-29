@@ -1578,7 +1578,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
 
     // One treat per classmate a week, three a day, ten received in 24 hours.
     assert.equal((await leadersFor(sender.headers)).find((leader) => leader.id === ids.recipient)?.canGift, false, 'no Send a treat for a classmate treated this week');
-    assert.deepEqual(refusal(await send(sender.headers, ids.recipient)), [429, 'GIFT_PAIR_LIMIT', 'You already sent Rio R. a treat this week.']);
+    assert.deepEqual(refusal(await send(sender.headers, ids.recipient)), [429, 'GIFT_PAIR_LIMIT', 'You already sent Rio R. a treat in the last 7 days.']);
     assert.deepEqual([(await send(sender.headers, ids.third)).body.leftToday, (await send(sender.headers, ids.fourth)).body.leftToday], [1, 0]);
     assert.deepEqual(refusal(await send(sender.headers, ids.fifth)), [429, 'GIFT_DAILY_LIMIT', 'You can send 3 treats a day. Try again tomorrow.']);
     assert.equal((await ledger(sender.userId)).reduce((sum, row) => sum + row.amount, 0), 145, 'refusals cost nothing');

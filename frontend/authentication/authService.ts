@@ -818,7 +818,7 @@ export type WeeklyBonus = {
   };
   tiers: WeeklyBonusTier[];
 };
-export type WeeklyBonusClaim = { amount: number; alreadyClaimed: boolean; percent: number; tier: WeeklyBonusTier | null; updatedAt?: number } & WalletResponse;
+export type WeeklyBonusClaim = { amount: number; alreadyClaimed: boolean; percent: number; tier: WeeklyBonusTier | null; updatedAt?: number | null } & WalletResponse;
 /** Last week's bonus and this week so far, for `date` (the device's today). */
 export const getWeeklyBonus = (date: string, timeZone = deviceTimeZone()) => authedRequest<WeeklyBonus>(`/api/weekly-bonus?${todayQuery(date, timeZone)}`);
 /**
