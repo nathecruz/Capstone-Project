@@ -16,13 +16,15 @@ import { config } from '../config/index.js';
 import { query, withTransaction } from '../db/client.js';
 import { runAll } from '../db/run-all.js';
 import { getAccountDay } from './account-day.js';
-import { longestAccountStreak } from './account-streak.js';
+import { accountStreakRun, longestAccountStreak } from './account-streak.js';
 import { sameState } from './app-state-sync.js';
 import { getDateKeyInTimeZone, isPastHabitDeadline } from './completion-date.js';
+import { syncDailyChallenges } from './daily-challenges.js';
 import { hasHabitEnded, isDateKey } from './habit-week.js';
+import { syncWeeklyQuests } from './quests.js';
 import { computeStreak } from './streaks.js';
 import { getFrozenDays } from './streak-freeze.js';
-import { applyWallet, awardCheckIn, countedCheckIns, getWallet, POINTS_PER_CHECK_IN } from './wallet.js';
+import { applyWallet, awardAccountStreakMilestones, awardCheckIn, countedCheckIns, getWallet, POINTS_PER_CHECK_IN } from './wallet.js';
 import { weeklyResetSnapshot } from './weekly-reset.js';
 
 export { sameState, stableStringify } from './app-state-sync.js';
@@ -219,13 +221,28 @@ export function earnedAchievements(habits, { today = todayFor(habits.find((habit
 
 /**
  * New check-ins a synced state may add (offline check-ins): the account's today only, never a day
- * from the habit's own (client-editable) time zone, not before the account's day floor, and only
- * within the habit's week, the same rules as PUT /api/habit-completions. A missed day cannot be
- * filled in later, even offline.
+ * from the habit's own (client-editable) time zone, not before the account's day floor, only within
+ * the habit's week and not past its last reminder time today, the same rules as PUT
+ * /api/habit-completions. A missed day cannot be filled in later, even offline.
  */
-function syncedCompletionDates(habit, { today, floor }) {
-  if (hasHabitEnded(habit, today) || (floor && today < floor)) return [];
+function syncedCompletionDates(habit, { today, floor, timeZone }, now = new Date()) {
+  if (hasHabitEnded(habit, today) || (floor && today < floor) || isPastHabitDeadline(habit, today, timeZone, now)) return [];
   return (Array.isArray(habit.completionDates) ? habit.completionDates : []).map(String).includes(today) ? [today] : [];
+}
+
+/**
+ * Pays the check-ins a synced state added today (`added`: their habit ids) as PUT
+ * /api/habit-completions pays one: a streak milestone they reach, then the day's challenges and the
+ * week's quests (each once, so a later check-in pays nothing twice). After the habits table is
+ * written, which the challenges and quests read.
+ */
+async function payForSyncedCheckIns(connection, userId, { habits, byHabit, added, day, now }) {
+  const after = habits.map((habit) => ({ ...habit, completionDates: byHabit.get(String(habit.id).trim()) || [] }));
+  const before = after.map((habit) => (added.includes(String(habit.id).trim()) ? { ...habit, completionDates: habit.completionDates.filter((date) => date !== day.today) } : habit));
+  const frozen = await getFrozenDays(connection, userId);
+  await awardAccountStreakMilestones(connection, userId, accountStreakRun(before, day.today, frozen), accountStreakRun(after, day.today, frozen), { timeZone: day.timeZone, now });
+  await syncDailyChallenges(connection, userId, day.today, day.timeZone, now);
+  await syncWeeklyQuests(connection, userId, day.today, now);
 }
 
 /** Mirrors the synced state into the relational tables inside the caller's transaction. */
@@ -253,6 +270,7 @@ export async function syncNormalizedState(userId, state, updatedAt, connection) 
   );
   if (habitIds.length === 0) await connection.query('DELETE FROM habit_completions WHERE user_id=$1', [userId]);
   else await connection.query('DELETE FROM habit_completions WHERE user_id=$1 AND NOT (habit_id = ANY($2::text[]))', [userId, habitIds]);
+  const added = [];
   for (const habit of habits) {
     const habitId = String(habit.id).trim();
     for (const date of syncedCompletionDates(habit, day)) {
@@ -260,7 +278,10 @@ export async function syncNormalizedState(userId, state, updatedAt, connection) 
         'INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING habit_id',
         [userId, habitId, date, updatedAt],
       );
-      if (inserted.rowCount) await awardCheckIn(connection, userId, habitId, date, habit.label, updatedAt);
+      if (inserted.rowCount) {
+        await awardCheckIn(connection, userId, habitId, date, habit.label, updatedAt);
+        added.push(habitId);
+      }
     }
   }
 
@@ -279,6 +300,7 @@ export async function syncNormalizedState(userId, state, updatedAt, connection) 
         isDateKey(habit.activeUntil) ? habit.activeUntil : ''],
     );
   }
+  if (added.length) await payForSyncedCheckIns(connection, userId, { habits, byHabit, added, day, now: updatedAt });
 
   await connection.query('DELETE FROM goals WHERE user_id=$1', [userId]);
   for (const goal of state.goals || []) {

@@ -68,7 +68,7 @@ jest.mock('@/authentication/authService', () => ({
   saveWebPushSubscription: jest.fn(),
   sendTestWebPush: jest.fn(),
 }));
-jest.mock('@/hooks/use-buddy', () => ({ adjustBuddyCheckIns: jest.fn(), getCachedBuddy: jest.fn(() => null), reloadBuddy: jest.fn() }));
+jest.mock('@/hooks/use-buddy', () => ({ adjustBuddyCheckIns: jest.fn(), getCachedBuddy: jest.fn(() => null), reloadBuddy: jest.fn(), syncBuddyCheckIns: jest.fn() }));
 jest.mock('@/hooks/use-rewards', () => ({ loadRewards: jest.fn() }));
 jest.mock('@/hooks/use-daily-challenges', () => ({ getKnownChallenges: jest.fn(() => []), loadDailyChallenges: jest.fn(), publishDailyChallenges: jest.fn() }));
 // What the reminders and the widget are given, render after render.

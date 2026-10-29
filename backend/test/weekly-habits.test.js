@@ -265,18 +265,28 @@ test('ML training joins a habit kept week after week into one series', () => {
 
 test('account streak milestones pay once per run of the streak', async () => {
   const ledger = new Map();
+  const paidAt = new Map();
   const db = {
-    query: async (_text, [id, , amount, label]) => {
+    query: async (text, params) => {
+      if (text.startsWith('SELECT')) return { rows: [...paidAt].map(([id, createdAt]) => ({ id, createdAt })) };
+      const [id, , amount, label, , createdAt] = params;
       if (ledger.has(id)) return { rowCount: 0 };
       ledger.set(id, { amount, label });
+      paidAt.set(id, createdAt);
       return { rowCount: 1 };
     },
   };
   const run = (streak, start) => ({ streak, start });
-  assert.equal(await awardAccountStreakMilestones(db, 'u1', run(6, '2026-10-13'), run(7, '2026-10-13')), 15);
+  const on = (day) => ({ timeZone: 'Asia/Manila', now: Date.parse(`${day}T12:00:00+08:00`) });
+  assert.equal(await awardAccountStreakMilestones(db, 'u1', run(6, '2026-10-13'), run(7, '2026-10-13'), on('2026-10-19')), 15);
   assert.deepEqual([...ledger], [['u1:token:streak:account:2026-10-13:7', { amount: 15, label: '7-day streak' }]]);
-  assert.equal(await awardAccountStreakMilestones(db, 'u1', run(6, '2026-10-13'), run(7, '2026-10-13')), 0, 'an undo and a new check-in pay nothing more');
-  assert.equal(await awardAccountStreakMilestones(db, 'u1', run(7, '2026-10-13'), run(7, '2026-10-13')), 0);
-  assert.equal(await awardAccountStreakMilestones(db, 'u1', run(6, '2026-11-02'), run(7, '2026-11-02')), 15, 'a new run after a break pays again');
-  assert.equal(await awardAccountStreakMilestones(db, 'u1', run(13, '2026-11-02'), run(30, '2026-11-02')), 75, 'a jump pays each milestone it clears');
+  assert.equal(await awardAccountStreakMilestones(db, 'u1', run(6, '2026-10-13'), run(7, '2026-10-13'), on('2026-10-19')), 0, 'an undo and a new check-in pay nothing more');
+  assert.equal(await awardAccountStreakMilestones(db, 'u1', run(7, '2026-10-13'), run(7, '2026-10-13'), on('2026-10-19')), 0);
+  // The habit that alone had the check-in of Oct 13 is deleted: the same run now seems to start on
+  // Oct 14 and reaches 7 again the next day, but it was paid on Oct 19, a day of this run.
+  assert.equal(await awardAccountStreakMilestones(db, 'u1', run(6, '2026-10-14'), run(7, '2026-10-14'), on('2026-10-20')), 0, 'deleting the first day does not pay the milestone again');
+  assert.equal(ledger.size, 1);
+  assert.equal(await awardAccountStreakMilestones(db, 'u1', run(6, '2026-10-22'), run(7, '2026-10-22'), on('2026-10-28')), 15, 'a new run after a break pays again');
+  assert.equal(await awardAccountStreakMilestones(db, 'u1', run(6, '2026-11-02'), run(7, '2026-11-02'), on('2026-11-08')), 15, 'and the next one');
+  assert.equal(await awardAccountStreakMilestones(db, 'u1', run(13, '2026-11-02'), run(30, '2026-11-02'), on('2026-12-01')), 75, 'a jump pays each milestone it clears');
 });

@@ -152,6 +152,16 @@ export function suppressSmallGroups(groups, threshold, sumKeys) {
 }
 
 /**
+ * The same rule for the token economy's balances: with fewer than k active students the median,
+ * the 90th percentile and the count over 1,000 could show one student's balance, so they are
+ * withheld (with no students there is nothing to show either way).
+ */
+export function withholdSmallBalances(balances, threshold) {
+  if (balances.students === 0 || balances.students >= threshold) return { ...balances, withheld: false };
+  return { students: balances.students, median: null, p90: null, over1000: null, withheld: true };
+}
+
+/**
  * SQL for a "(user_id, day)" activity stream since $start (a local date) in $tz.
  * Activity = a login, a habit check-in, a day the app was opened (user_activity_days,
  * recorded by the app backend), or an app-state sync still in the snapshot history.

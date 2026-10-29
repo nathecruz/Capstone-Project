@@ -2,10 +2,12 @@ import crypto from 'node:crypto';
 import { z } from 'zod';
 import { query, withTransaction } from '../db/client.js';
 import { accountChangeLimiter, loginLimiter, registerLimiter, resendVerificationLimiter } from '../http/rate-limits.js';
+import { leaderboardNameOf } from '../lib/display.js';
 import { authToken, hashToken, normalizeEmail, parse } from '../lib/http.js';
 import { namesFromInput } from '../lib/names.js';
 import { loginSchema, passwordSchema, profileSchema, registerSchema } from '../schemas.js';
 import { ADMIN_APP_MESSAGE, createSession, findUser, requireAuth, userFromRow } from '../services/accounts.js';
+import { GIFT_MESSAGES } from '../services/buddy-gifts.js';
 import { emailChangedEmail, passwordChangedEmail } from '../services/email-templates.js';
 import { sendVerificationCode, verificationEnabled, verifyCode } from '../services/email-verification.js';
 import { sendEmail } from '../services/mailer.js';
@@ -219,9 +221,9 @@ export default function registerAuthRoutes(app) {
     const session = await requireAuth(request, response, { allowUnverified: true });
     if (!session) return;
     const id = session.userId;
-    const [profile, habits, completions, goals, tokens, achievements, notifications, logins, preferences, reports, suggestions, buddy, buddyItems, freezeDays] = await Promise.all([
+    const [profile, habits, completions, goals, tokens, achievements, notifications, logins, preferences, reports, suggestions, buddy, buddyItems, treats, gifts, redemptions, freezeDays] = await Promise.all([
       query('SELECT first_name AS "firstName", last_name AS "lastName", full_name AS "fullName", username, email, date_of_birth AS "dateOfBirth", gender, region, about, custom_title AS "customTitle", profile_frame AS "profileFrame", created_at AS "createdAt", privacy_consent_at AS "privacyConsentAt" FROM users WHERE id=$1', [id]),
-      query('SELECT label, category, meta, goal, streak, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime" FROM habits WHERE user_id=$1 ORDER BY sort_order', [id]),
+      query('SELECT label, category, meta, frequency, start_date AS "startDate", active_until AS "activeUntil", goal, streak, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime" FROM habits WHERE user_id=$1 ORDER BY sort_order', [id]),
       query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1 ORDER BY completed_date', [id]),
       query('SELECT title, category, progress, status, details_json AS details FROM goals WHERE user_id=$1', [id]),
       query('SELECT amount, label, transaction_date AS date FROM token_transactions WHERE user_id=$1 ORDER BY transaction_date', [id]),
@@ -231,8 +233,18 @@ export default function registerAuthRoutes(app) {
       query('SELECT preferences_json AS preferences FROM user_preferences WHERE user_id=$1', [id]),
       query('SELECT topic, timing, description, status, attachment_name AS "attachmentName", created_at AS "createdAt" FROM issue_reports WHERE user_id=$1', [id]),
       query('SELECT suggestion, created_at AS "createdAt" FROM feature_suggestions WHERE user_id=$1', [id]),
-      query('SELECT name, head_item AS "head", hand_item AS "hand", room_item AS "room" FROM user_buddy WHERE user_id=$1', [id]),
+      query('SELECT name, head_item AS "head", hand_item AS "hand", accessory_item AS "accessory", room_item AS "room" FROM user_buddy WHERE user_id=$1', [id]),
       query('SELECT item_id AS "item", bought_at AS "boughtAt" FROM buddy_items WHERE user_id=$1 ORDER BY bought_at', [id]),
+      query('SELECT treat_id AS "treat", fed_count AS "count" FROM buddy_treats WHERE user_id=$1 ORDER BY treat_id', [id]),
+      // Treats sent and received: the classmate only as the leaderboard names them (First L.).
+      query(
+        `SELECT g.sender_id = $1 AS sent, g.treat_id AS "treat", g.message_id AS "messageId", g.created_at AS "at",
+                u.full_name AS "fullName", u.first_name AS "firstName", u.last_name AS "lastName"
+           FROM buddy_gifts g JOIN users u ON u.id = CASE WHEN g.sender_id = $1 THEN g.recipient_id ELSE g.sender_id END
+          WHERE g.sender_id = $1 OR g.recipient_id = $1 ORDER BY g.created_at`,
+        [id],
+      ),
+      query('SELECT r.name, rr.token_cost AS "tokenCost", rr.redeemed_at AS "redeemedAt" FROM reward_redemptions rr JOIN rewards r ON r.id = rr.reward_id WHERE rr.user_id=$1 ORDER BY rr.redeemed_at', [id]),
       query('SELECT freeze_date::text AS date FROM streak_freeze_days WHERE user_id=$1 ORDER BY freeze_date', [id]),
     ]);
     response.setHeader('Content-Disposition', `attachment; filename="habitai-my-data-${new Date().toISOString().slice(0, 10)}.json"`);
@@ -249,7 +261,12 @@ export default function registerAuthRoutes(app) {
       signIns: logins.rows,
       issueReports: reports.rows,
       featureSuggestions: suggestions.rows,
-      habitBuddy: buddy.rows[0] ? { ...buddy.rows[0], items: buddyItems.rows } : null,
+      habitBuddy: buddy.rows[0] ? { ...buddy.rows[0], items: buddyItems.rows, treatsFed: treats.rows } : null,
+      treatGifts: {
+        sent: gifts.rows.filter((gift) => gift.sent).map((gift) => ({ to: leaderboardNameOf(gift), treat: gift.treat, message: GIFT_MESSAGES[gift.messageId] ?? '', at: Number(gift.at) })),
+        received: gifts.rows.filter((gift) => !gift.sent).map((gift) => ({ from: leaderboardNameOf(gift), treat: gift.treat, message: GIFT_MESSAGES[gift.messageId] ?? '', at: Number(gift.at) })),
+      },
+      rewards: redemptions.rows,
       streakFreezeDays: freezeDays.rows.map((row) => row.date),
     });
   });

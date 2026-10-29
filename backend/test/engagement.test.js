@@ -239,6 +239,20 @@ test('daily challenges: finish N every day, plus two extras that fit the student
 
   // Nothing due today: no challenges.
   assert.deepEqual(dailyChallenges({ habits: [habit('a', { startDate: '2026-12-01' })], doneToday: new Map(), doneYesterday: new Set(), streaksBefore: new Map(), today }), []);
+
+  // For the Tokens screen: whether each challenge can still be finished today, from the time now and
+  // the habits that can still be checked in (d is past its last reminder time).
+  const dayOf = (id) => (id === 'finish' ? today : ['2026-10-04', '2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08'].find((day) => ROTATING_CHALLENGES[Math.floor(Date.parse(`${day}T00:00:00Z`) / 86_400_000) % ROTATING_CHALLENGES.length] === id));
+  const reachable = (id, minute, { done = new Map([['b', 9 * 60]]), closed = ['d'] } = {}) => dailyChallenges({
+    habits: ['a', 'b', 'c', 'd'].map((key) => habit(key)), doneToday: done, doneYesterday: new Set(['b', 'c']), streaksBefore: new Map([['a', 5]]),
+    today: dayOf(id), reach: { minute, isClosed: (entry) => closed.includes(entry.id) },
+  }).find((challenge) => challenge.id === id)?.reachable;
+  assert.deepEqual([reachable('finish', 21 * 60), reachable('finish', 21 * 60, { done: new Map(), closed: ['b', 'c', 'd'] })], [true, false], 'finish 3: 2 more with a and c open, not with only a');
+  assert.deepEqual([reachable('early-bird', 9 * 60 + 59, { done: new Map() }), reachable('early-bird', 10 * 60, { done: new Map() }), reachable('early-bird', 15 * 60)], [true, false, true], 'until 10 AM, or done already');
+  assert.deepEqual([reachable('two-by-noon', 11 * 60), reachable('two-by-noon', 12 * 60)], [true, false], 'one more before noon');
+  assert.deepEqual([reachable('comeback', 20 * 60), reachable('comeback', 20 * 60, { closed: ['a', 'd'] })], [true, false], 'a and d were missed yesterday');
+  assert.deepEqual([reachable('streak-keeper', 20 * 60), reachable('streak-keeper', 20 * 60, { closed: ['a'] })], [true, false], "a's streak");
+  assert.deepEqual([reachable('perfect-day', 20 * 60, { closed: [] }), reachable('perfect-day', 20 * 60)], [true, false], 'd can no longer be done');
   // The time of a check-in in the student's own time zone.
   assert.equal(minuteOfDay(Date.UTC(2026, 9, 4, 1, 30), 'Asia/Manila'), 9 * 60 + 30);
 });

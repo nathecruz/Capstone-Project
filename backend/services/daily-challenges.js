@@ -20,6 +20,9 @@ function shiftDay(dateKey, days) {
 }
 
 const dayNumber = (dateKey) => Math.floor(Date.parse(`${dateKey}T00:00:00Z`) / 86_400_000);
+// The time-of-day challenges count check-ins before these minutes of the day (10:00 and noon).
+const EARLY_BIRD_BEFORE = 10 * 60;
+const NOON = 12 * 60;
 // Due: active that day (from its start date to the end of its week) and scheduled.
 const dueOn = (habit, dateKey) => isHabitActiveOn(habit, dateKey) && isScheduledDay(habitSchedule(habit), dateKey);
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
@@ -31,8 +34,11 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
  * - doneToday: Map(habit id -> minute of the day it was checked in, in the student's time zone)
  * - doneYesterday: Set(habit id)
  * - streaksBefore: Map(habit id -> streak up to yesterday)
+ * - reach (optional): { minute, isClosed }, the minute of the day now and whether a habit can no
+ *   longer be checked in today (past its last reminder time). With it each challenge also says
+ *   whether it can still be finished today (`reachable`), for the Tokens screen.
  */
-export function dailyChallenges({ habits, doneToday, doneYesterday, streaksBefore, today }) {
+export function dailyChallenges({ habits, doneToday, doneYesterday, streaksBefore, today, reach = null }) {
   const due = habits.filter((habit) => dueOn(habit, today));
   if (!due.length) return [];
   const yesterday = shiftDay(today, -1);
@@ -43,8 +49,8 @@ export function dailyChallenges({ habits, doneToday, doneYesterday, streaksBefor
   const keepers = due.filter((habit) => (streaksBefore.get(habit.id) ?? 0) >= 2);
 
   const pool = {
-    'early-bird': () => ({ title: 'Check in before 10 AM', icon: 'sunny', target: 1, progress: minutes.some((minute) => minute < 600) ? 1 : 0, reward: CHALLENGE_REWARDS['early-bird'] }),
-    'two-by-noon': () => (due.length >= 2 ? { title: 'Check in twice before noon', icon: 'time', target: 2, progress: minutes.filter((minute) => minute < 720).length, reward: CHALLENGE_REWARDS['two-by-noon'] } : null),
+    'early-bird': () => ({ title: 'Check in before 10 AM', icon: 'sunny', target: 1, progress: minutes.some((minute) => minute < EARLY_BIRD_BEFORE) ? 1 : 0, reward: CHALLENGE_REWARDS['early-bird'] }),
+    'two-by-noon': () => (due.length >= 2 ? { title: 'Check in twice before noon', icon: 'time', target: 2, progress: minutes.filter((minute) => minute < NOON).length, reward: CHALLENGE_REWARDS['two-by-noon'] } : null),
     comeback: () => (missed.length ? {
       title: missed.length === 1 ? `Bounce back: do ${missed[0].label} today` : 'Bounce back: do a habit you missed yesterday',
       icon: 'refresh',
@@ -70,10 +76,27 @@ export function dailyChallenges({ habits, doneToday, doneYesterday, streaksBefor
     const challenge = pool[id]();
     if (challenge) extras.push({ id, ...challenge });
   }
+  // What can still be done today: the due habits not done that can still be checked in.
+  const open = reach ? due.filter((habit) => !doneToday.has(habit.id) && !reach.isClosed(habit)) : [];
+  const doable = (habit) => doneToday.has(habit.id) || open.includes(habit);
+  const left = (challenge) => challenge.target - challenge.progress;
+  const stillPossible = {
+    finish: (challenge) => left(challenge) <= open.length,
+    'early-bird': () => reach.minute < EARLY_BIRD_BEFORE && open.length > 0,
+    'two-by-noon': (challenge) => reach.minute < NOON && left(challenge) <= open.length,
+    comeback: () => missed.some((habit) => open.includes(habit)),
+    'streak-keeper': () => keepers.every(doable),
+    'perfect-day': () => due.every(doable),
+  };
   return [
     { id: 'finish', title: `Finish ${plural(finishTarget, 'habit')} today`, icon: 'trophy', target: finishTarget, progress: dueDone, reward: CHALLENGE_REWARDS.finish },
     ...extras,
-  ].map((challenge) => ({ ...challenge, date: today, progress: Math.min(challenge.progress, challenge.target), complete: challenge.progress >= challenge.target }));
+  ].map((challenge) => {
+    const progress = Math.min(challenge.progress, challenge.target);
+    const complete = challenge.progress >= challenge.target;
+    const shown = { ...challenge, date: today, progress, complete };
+    return reach ? { ...shown, reachable: complete || stillPossible[challenge.id](shown) } : shown;
+  });
 }
 
 /** The minute of the day (0 to 1439) of `time` in `timeZone`. */
@@ -87,8 +110,8 @@ export function minuteOfDay(time, timeZone = 'UTC') {
   }
 }
 
-/** Works out the student's challenges for `date` from the database. */
-export async function getDailyChallenges(db, userId, date, timeZone = 'UTC') {
+/** Works out the student's challenges for `date` from the database (`reach`: as for dailyChallenges). */
+export async function getDailyChallenges(db, userId, date, timeZone = 'UTC', reach = null) {
   const rows = (await db.query('SELECT id, label, meta, frequency, start_date, active_until, reminder_days FROM habits WHERE user_id=$1', [userId])).rows;
   const habits = rows.map((row) => ({ ...habitFromRow(row), id: String(row.id).replace(`${userId}:habit:`, ''), label: row.label }));
   const yesterday = shiftDay(date, -1);
@@ -110,7 +133,7 @@ export async function getDailyChallenges(db, userId, date, timeZone = 'UTC') {
     if (row.date < date) datesByHabit.set(habitId, [...(datesByHabit.get(habitId) ?? []), row.date]);
   }
   const streaksBefore = new Map(habits.map((habit) => [habit.id, computeStreak(habit, datesByHabit.get(habit.id) ?? [], yesterday, frozenDays)]));
-  return dailyChallenges({ habits, doneToday, doneYesterday, streaksBefore, today: date });
+  return dailyChallenges({ habits, doneToday, doneYesterday, streaksBefore, today: date, reach });
 }
 
 // "Finish N habits" keeps the id and label it had before there were three challenges.

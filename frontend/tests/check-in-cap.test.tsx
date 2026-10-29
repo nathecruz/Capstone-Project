@@ -1,14 +1,15 @@
 // The app state's side of the fair earning guard: a check-in past the day's paid limit (the server
 // answers tokenCapped) shows the daily token limit once a day and, from the day the counted cap
-// starts (26 October 2026), takes back Habi's optimistic growth and celebrates no level or growth;
-// a check-in refused because the account's day is not the phone's says which day it is.
+// starts (26 October 2026), a check-in past the day's six adds no points or tokens on the tap,
+// grows no Habi and celebrates no level or growth; the server's points then set Habi's count. A
+// check-in refused because the account's day is not the phone's says which day it is.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import React from 'react';
 import { getLocalDateKey } from '@/hooks/app-state/habit-progress';
 import { ColorSchemeProvider, useAppColorScheme, type Celebration } from '@/hooks/color-scheme-context';
 import { saveRemoteHabitCompletion } from '@/authentication/authService';
-import { adjustBuddyCheckIns, getCachedBuddy } from '@/hooks/use-buddy';
+import { adjustBuddyCheckIns, getCachedBuddy, syncBuddyCheckIns } from '@/hooks/use-buddy';
 import type { Buddy } from '@/utils/buddy';
 import { weekEndKey } from '@/utils/habit-week';
 
@@ -49,7 +50,7 @@ jest.mock('@/authentication/authService', () => ({
   saveWebPushSubscription: jest.fn(),
   sendTestWebPush: jest.fn(),
 }));
-jest.mock('@/hooks/use-buddy', () => ({ adjustBuddyCheckIns: jest.fn(), getCachedBuddy: jest.fn(() => null), reloadBuddy: jest.fn() }));
+jest.mock('@/hooks/use-buddy', () => ({ adjustBuddyCheckIns: jest.fn(), getCachedBuddy: jest.fn(() => null), reloadBuddy: jest.fn(), syncBuddyCheckIns: jest.fn() }));
 jest.mock('@/hooks/use-rewards', () => ({ loadRewards: jest.fn() }));
 jest.mock('@/hooks/use-daily-challenges', () => ({ getKnownChallenges: jest.fn(() => []), loadDailyChallenges: jest.fn(), publishDailyChallenges: jest.fn() }));
 jest.mock('@/hooks/app-state/use-habit-reminders', () => ({ useHabitReminders: () => undefined }));
@@ -84,6 +85,8 @@ function shown() {
 const notices = (seen: Celebration[]) => seen.filter((item) => item.kind === 'info');
 const checkIn = (id: string) => act(async () => app().toggleHabit(id));
 const buddyChanges = () => jest.mocked(adjustBuddyCheckIns).mock.calls.map(([delta]) => delta);
+/** Habi's count as last set from the server's points. */
+const syncedBuddy = () => jest.mocked(syncBuddyCheckIns).mock.calls.at(-1)?.[0];
 
 beforeEach(async () => {
   jest.clearAllMocks();
@@ -96,8 +99,9 @@ afterEach(() => {
 });
 
 describe('the daily token limit', () => {
-  it('is shown once a day, and Habi does not grow from a check-in past it', async () => {
-    jest.mocked(saveRemoteHabitCompletion).mockResolvedValue(capped);
+  it('is shown once a day, and a check-in past the day\'s six does not grow Habi', async () => {
+    onDay(CAPPED_DAY, { checkedIn: 6, points: 120 });
+    jest.mocked(saveRemoteHabitCompletion).mockResolvedValue({ ...capped, points: 120 });
     await open();
 
     await checkIn('read');
@@ -105,33 +109,58 @@ describe('the daily token limit', () => {
       id: `token-cap:${today}`, kind: 'info', icon: 'wallet-outline', title: 'Daily token limit reached',
       message: 'You have earned tokens for 6 check-ins today. This one still counts for your streak, challenges and quests.',
     }]);
-    // Grown on the tap, taken back with the server's answer; the wallet is the server's.
-    expect(buddyChanges()).toEqual([1, -1]);
+    // Habi does not grow on the tap, and its count is the server's (120 points / 20); the wallet is the server's.
+    expect(buddyChanges()).toEqual([]);
+    expect(syncedBuddy()).toBe(6);
     expect(app().tokens).toBe(30);
-    expect(app().points).toBe(140);
+    expect(app().points).toBe(120);
     // The check-in itself stays.
     expect(app().habits.find((item) => item.id === 'read')?.completionDates).toEqual([today]);
 
     await checkIn('walk');
     expect(notices(shown())).toEqual([]);
-    expect(buddyChanges()).toEqual([1, -1, 1, -1]);
+    expect(buddyChanges()).toEqual([]);
   });
 
-  it('is not shown for a paid check-in, and undoing a check-in past it leaves Habi as it is', async () => {
-    jest.mocked(saveRemoteHabitCompletion).mockResolvedValueOnce(paid);
+  it('is not shown for a paid check-in, and undoing a check-in past it changes neither Habi nor tokens', async () => {
+    onDay(CAPPED_DAY, { checkedIn: 5, points: 100 });
+    jest.mocked(saveRemoteHabitCompletion).mockResolvedValueOnce({ ...paid, points: 120 });
     await open();
     await checkIn('read');
     expect(notices(shown())).toEqual([]);
     expect(buddyChanges()).toEqual([1]);
 
-    jest.mocked(saveRemoteHabitCompletion).mockResolvedValueOnce(capped).mockResolvedValueOnce({ ...capped, tokenCapped: false });
+    jest.mocked(saveRemoteHabitCompletion).mockResolvedValueOnce({ ...capped, points: 120 });
     await checkIn('walk');
     shown();
-    expect(buddyChanges()).toEqual([1, 1, -1]);
-    // Undone right after the tap: it never grew Habi, so it does not shrink it either.
+    expect(buddyChanges()).toEqual([1]);
+    // Undone right after the tap (the answer never comes): it grew no Habi and paid no tokens, so
+    // its undo takes neither back.
+    jest.mocked(saveRemoteHabitCompletion).mockReturnValueOnce(new Promise(() => undefined));
     await checkIn('walk');
     expect(saveRemoteHabitCompletion).toHaveBeenLastCalledWith({ habitId: 'walk', date: today, completed: false });
-    expect(buddyChanges()).toEqual([1, 1, -1]);
+    expect(buddyChanges()).toEqual([1]);
+    expect([app().points, app().tokens]).toEqual([120, 30]);
+  });
+
+  it('adds points and tokens on the tap only for the day\'s counted and paid check-ins', async () => {
+    onDay(CAPPED_DAY, { checkedIn: 6, points: 120 });
+    jest.mocked(saveRemoteHabitCompletion).mockResolvedValue(null);
+    await open();
+    await checkIn('read');
+    // The server could not be reached: the seventh is shown done, worth nothing yet.
+    expect(app().habits.find((item) => item.id === 'read')?.completionDates).toEqual([today]);
+    expect([app().points, app().tokens]).toEqual([120, 30]);
+    expect(buddyChanges()).toEqual([]);
+  });
+
+  it('adds 20 points, 5 tokens and Habi\'s growth on the tap of a check-in that counts', async () => {
+    onDay(CAPPED_DAY, { checkedIn: 2, points: 40 });
+    jest.mocked(saveRemoteHabitCompletion).mockResolvedValue(null);
+    await open();
+    await checkIn('read');
+    expect([app().points, app().tokens]).toEqual([60, 35]);
+    expect(buddyChanges()).toEqual([1]);
   });
 
   it('is not shown again when the app is opened again the same day, and is shown the next day', async () => {
@@ -164,7 +193,7 @@ describe('the daily token limit', () => {
     expect(seen.map((item) => item.kind)).not.toContain('level');
     expect(seen.map((item) => item.kind)).not.toContain('buddy');
     expect(notices(seen).map((item) => item.id)).toEqual([`token-cap:${today}`]);
-    expect(buddyChanges()).toEqual([1, -1]);
+    expect(buddyChanges()).toEqual([]);
     expect(app().points).toBe(80);
   });
 });

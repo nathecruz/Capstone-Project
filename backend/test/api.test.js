@@ -11,52 +11,12 @@ import path from 'node:path';
 import test from 'node:test';
 import bcrypt from 'bcryptjs';
 import pg from 'pg';
-import { goalPlanSchema } from '../schemas.js';
 import { normalizeAppState } from '../services/app-state-sync.js';
-import { isValidCompletionDate } from '../services/completion-date.js';
 import { weekEndKey } from '../services/habit-week.js';
 import { BUDDY_DROPS, dropForWeek, weeksUntilDrop } from '../services/buddy.js';
 import { weekStartOf, weeklyQuests } from '../services/quests.js';
 import { retireRewards } from '../services/rewards.js';
 import { doneActionSecret, makeDoneToken } from '../services/web-push-actions.js';
-import { getSupportEmailConfig } from '../services/support-email.js';
-
-test('habit completion dates use the client time zone', () => {
-  const now = new Date('2026-09-30T12:00:00.000Z');
-  assert.equal(isValidCompletionDate('2026-10-01', 'Pacific/Kiritimati', now), true);
-  assert.equal(isValidCompletionDate('2026-10-01', 'UTC', now), false);
-  assert.equal(isValidCompletionDate('2026-10-02', 'Pacific/Kiritimati', now), false);
-  assert.equal(isValidCompletionDate('2026-10-01', 'Invalid/TimeZone', now), false);
-});
-
-test('goal plan schema strips uncalibrated numeric score fields', () => {
-  const plan = {
-    category: 'Health',
-    summary: 'Build a realistic routine with repeatable steps.',
-    intensity: 'Balanced',
-    focusAreas: ['Movement', 'Sleep', 'Planning'],
-    actionPlan: ['Walk today', 'Set a bedtime', 'Plan meals', 'Review progress'],
-    actionDueDates: ['Today', 'Tomorrow', 'In 3 days', 'In 7 days'],
-    nextMilestone: 'Complete the first week.',
-    risk: 'A busy day may interrupt the routine.',
-    riskAction: 'Restart with a five-minute walk.',
-    timeline: '30-60 days',
-    nextCheckIn: 'Oct 4, 2026',
-    status: 'Fresh plan',
-  };
-  const parsed = goalPlanSchema.safeParse({ ...plan, score: 91, confidence: 88 });
-  assert.equal(parsed.success, true);
-  assert.deepEqual(parsed.data, plan);
-});
-
-test('support email uses the configured inbox or falls back to the SMTP sender', () => {
-  const explicitInbox = getSupportEmailConfig({ SMTP_USER: 'mailer@habitai.app', SMTP_PASSWORD: 'smtp-secret-value', SUPPORT_EMAIL: 'support@habitai.app' });
-  assert.equal(explicitInbox.configured, true);
-  assert.equal(explicitInbox.recipient, 'support@habitai.app');
-  const senderFallback = getSupportEmailConfig({ SMTP_USER: 'mailer@habitai.app', SMTP_PASSWORD: 'smtp-secret-value' });
-  assert.equal(senderFallback.recipient, 'mailer@habitai.app');
-  assert.equal(getSupportEmailConfig({ SMTP_USER: 'mailer@habitai.app' }).configured, false);
-});
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL?.trim();
 
@@ -379,7 +339,11 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
 
     const offline = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], completionDates: [today] }] }) });
     assert.deepEqual(habitOne(offline.body.state).completionDates, [today], 'offline check-ins from a synced state are kept');
-    assert.equal(offline.body.state.tokens, 5);
+    // And paid as one sent directly: 5 and each of today's challenges it completed.
+    const challenges = (await request(`/api/daily-challenges?date=${today}&timeZone=UTC`, { headers: authHeaders })).body.challenges;
+    const paidChallenges = offline.body.state.tokenHistory.filter((item) => item.label.startsWith('Daily challenge'));
+    assert.deepEqual(paidChallenges.map((item) => item.amount).sort(), challenges.filter((challenge) => challenge.complete).map((challenge) => challenge.reward).sort(), JSON.stringify(challenges));
+    assert.equal(offline.body.state.tokens, 5 + paidChallenges.reduce((sum, item) => sum + item.amount, 0));
     stateUpdatedAt = offline.body.updatedAt;
 
     const unchanged = await request(`/api/app-state?since=${stateUpdatedAt}`, { headers: authHeaders });
@@ -1138,6 +1102,11 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.deepEqual([reopened.body.code, reopened.body.today, reopened.body.timeZone], ['DAY_CLOSED', east, 'Pacific/Kiritimati']);
     const claim = await request('/api/daily-claim', { method: 'POST', headers, body: JSON.stringify({ date: west, timeZone: 'Pacific/Pago_Pago' }) });
     assert.deepEqual([claim.response.status, claim.body.code, claim.body.today], [409, 'DAY_CLOSED', east]);
+    for (const path of ['/api/daily-claim', '/api/daily-challenges']) {
+      const closed = await request(`${path}?date=${west}&timeZone=Pacific/Pago_Pago`, { headers });
+      assert.deepEqual([closed.response.status, closed.body.code, closed.body.today, closed.body.timeZone], [409, 'DAY_CLOSED', east, 'Pacific/Kiritimati'], path);
+      assert.equal((await request(`${path}?timeZone=Pacific/Pago_Pago`, { headers })).response.status, 400, `${path} without a date`);
+    }
     assert.deepEqual(await zone(), { timeZone: 'Pacific/Kiritimati', floor: null }, 'a refused request changes nothing');
 
     // An offline save whose habits claim another time zone cannot add that zone's day either.
@@ -1284,6 +1253,53 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
 
   const shiftDay = (date, days) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
   const checkInOn = (userId, habitId, date) => db.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4)', [userId, habitId, date, Date.now()]);
+
+  await t.test('a check-in a synced state adds pays its challenge, and a habit past its reminder time takes none', async () => {
+    const { headers, userId } = await student('Sync', 'Saved');
+    await db.query('UPDATE users SET time_zone=$2 WHERE id=$1', [userId, middayZone]);
+    const day = dateIn(middayZone);
+    const ledgerIds = async () => (await db.query('SELECT id FROM token_transactions WHERE user_id=$1', [userId])).rows.map((row) => row.id.replace(`${userId}:token:`, ''));
+    const save = async (previous, habits) => {
+      const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify(previous ? { ...previous.state, habits, baseUpdatedAt: previous.updatedAt, baseState: previous.state } : { ...appState, habits }) });
+      assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+      return saved.body;
+    };
+    const walk = { ...appState.habits[0], id: 'walk', label: 'Walk' };
+    // The app could not reach the server when walk was checked in, so its next save carries it.
+    const first = await save(null, [walk]);
+    const second = await save(first, [{ ...walk, completionDates: [day] }]);
+    assert.ok((await ledgerIds()).includes(`check-in:walk:${day}`));
+    assert.ok((await ledgerIds()).includes(`challenge:${day}`), `"Finish 1 habit today" is paid as for a direct check-in: ${JSON.stringify(await ledgerIds())}`);
+
+    // Pills passed its reminder time today: a synced state cannot check it in late.
+    const pills = { ...appState.habits[0], id: 'pills', label: 'Pills', reminderEnabled: true, reminderTime: '12:00 AM', reminderTimes: ['12:00 AM'], completionDates: [day] };
+    await save(second, [...second.state.habits, pills]);
+    const done = (await db.query('SELECT habit_id AS "habitId" FROM habit_completions WHERE user_id=$1', [userId])).rows.map((row) => row.habitId);
+    assert.deepEqual(done, ['walk']);
+    assert.ok(!(await ledgerIds()).includes(`check-in:pills:${day}`));
+  });
+
+  await t.test('a streak milestone is not paid again when deleting a habit moves the first day of the run', async () => {
+    const { headers, userId } = await student('Run', 'Start');
+    await db.query("UPDATE users SET time_zone='UTC' WHERE id=$1", [userId]);
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: ['walk', 'extra'].map((id) => ({ ...appState.habits[0], id, label: id })) }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    // Extra alone was checked in 7 days ago and walk on each of the 6 days after: the 7-day bonus
+    // of that run was paid yesterday.
+    await checkInOn(userId, 'extra', shiftDay(today, -7));
+    for (let days = 6; days >= 1; days -= 1) await checkInOn(userId, 'walk', shiftDay(today, -days));
+    const paidId = `${userId}:token:streak:account:${shiftDay(today, -7)}:7`;
+    const yesterdayNoon = Date.parse(`${shiftDay(today, -1)}T12:00:00Z`);
+    await db.query("INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,15,'7-day streak',$3,$4)", [paidId, userId, new Date(yesterdayNoon).toISOString(), yesterdayNoon]);
+
+    // Deleting extra makes the same run start 6 days ago, so today's check-in reaches 7 days again.
+    const deleted = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...saved.body.state, habits: saved.body.state.habits.filter((entry) => entry.id !== 'extra'), baseUpdatedAt: saved.body.updatedAt, baseState: saved.body.state }) });
+    assert.equal(deleted.response.status, 200, JSON.stringify(deleted.body));
+    const walked = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'walk', date: today, completed: true, timeZone: 'UTC' }) });
+    assert.equal(walked.response.status, 200, JSON.stringify(walked.body));
+    const bonuses = (await db.query("SELECT id FROM token_transactions WHERE user_id=$1 AND id LIKE '%:token:streak:%'", [userId])).rows.map((row) => row.id);
+    assert.deepEqual(bonuses, [paidId], 'the 7-day bonus is not paid a second time');
+  });
 
   await t.test('the weekly bonus is worked out on the server, paid once, and deleting a missed habit cannot raise it', async () => {
     const { headers, userId } = await student('Wes', 'Bonus');
@@ -1552,6 +1568,13 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.deepEqual([gifted.giftsToday, gifted.giftsReceived, gifted.giftsSent, gifted.giftMessages.length], [[{ treatId: 'cupcake', emoji: '🧁', from: 'Gia G.', message: "Kaya mo 'yan!" }], 1, 0, 5]);
     assert.deepEqual((await request('/api/buddy', { headers: recipient.headers })).body.buddy.giftsToday.length, 1, 'also without a date, on the stored day');
     assert.deepEqual([(await request('/api/buddy', { headers: sender.headers })).body.buddy.giftsSent, gifted.treatsFed], [1, 0], 'feeding your own Habi is separate');
+    // Both students' data exports list the treat, naming the classmate only as First L.
+    const exportedGifts = async (who) => {
+      const { sent, received } = (await request('/api/auth/export', { headers: who.headers })).body.treatGifts;
+      return { sent: sent.map(({ at, ...gift }) => gift), received: received.map(({ at, ...gift }) => gift) };
+    };
+    assert.deepEqual(await exportedGifts(sender), { sent: [{ to: 'Rio R.', treat: 'cupcake', message: "Kaya mo 'yan!" }], received: [] });
+    assert.deepEqual(await exportedGifts(recipient), { sent: [], received: [{ from: 'Gia G.', treat: 'cupcake', message: "Kaya mo 'yan!" }] });
 
     // One treat per classmate a week, three a day, ten received in 24 hours.
     assert.equal((await leadersFor(sender.headers)).find((leader) => leader.id === ids.recipient)?.canGift, false, 'no Send a treat for a classmate treated this week');
@@ -1845,6 +1868,14 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const pruned = (await db.query('SELECT attachment_name AS name, attachment_data AS data FROM issue_reports WHERE description = $1', ['Valid attachment should be stored.'])).rows[0];
     assert.equal(pruned.data, null);
     assert.ok(pruned.name, 'the file name is kept');
+
+    // Weekly due marks are kept for last week's bonus and this week, not for old weeks.
+    const { pruneDueMarks } = await import('../services/retention.js');
+    const weekAgo = (weeks) => new Date(Date.now() - weeks * 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    await db.query('INSERT INTO weekly_due_marks(user_id, week_start, due, last_day, updated_at) VALUES($1,$2,9,$2,$4), ($1,$3,7,$3,$4)', [userId, weekAgo(6), weekAgo(1), Date.now()]);
+    assert.equal(await pruneDueMarks(db), 1);
+    const kept = (await db.query('SELECT week_start::text AS "weekStart" FROM weekly_due_marks WHERE user_id=$1', [userId])).rows.map((row) => row.weekStart);
+    assert.deepEqual([kept.includes(weekAgo(6)), kept.includes(weekAgo(1))], [false, true]);
   });
 
   await t.test('profile, login activity, multi-device merge and account deletion', async () => {

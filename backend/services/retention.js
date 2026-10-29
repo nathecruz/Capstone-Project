@@ -20,3 +20,12 @@ export async function pruneExpiredCodes(runner, now = Date.now()) {
   await runner.query('DELETE FROM password_reset_requests WHERE expires_at < $1', [now - DAY_MS]);
   await runner.query('DELETE FROM email_verification_codes WHERE expires_at < $1', [now - DAY_MS]);
 }
+
+/** Weekly due marks are only read for last week's bonus and this week (services/weekly-bonus.js). */
+export const DUE_MARK_RETENTION_DAYS = 28;
+
+/** Drops the due marks of weeks that started over 4 weeks ago; returns how many. */
+export async function pruneDueMarks(runner, now = Date.now()) {
+  const result = await runner.query('DELETE FROM weekly_due_marks WHERE week_start < $1::date', [new Date(now - DUE_MARK_RETENTION_DAYS * DAY_MS).toISOString().slice(0, 10)]);
+  return result.rowCount || 0;
+}

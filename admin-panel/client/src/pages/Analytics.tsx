@@ -88,7 +88,7 @@ function EconomyTable({ title, note, head, children }: { title: string; note?: R
 }
 
 /** Where tokens came from and went in the last 28 days, students only and aggregates only. */
-function TokenEconomyCard({ economy }: { economy: TokenEconomy }) {
+function TokenEconomyCard({ economy, k }: { economy: TokenEconomy; k: number }) {
   const earned = economy.byKind28.filter((row) => row.earned > 0).sort((a, b) => b.earned - a.earned);
   const spent = economy.byKind28.filter((row) => row.spent > 0).sort((a, b) => b.spent - a.spent);
   const thisWeek = economy.drops.at(-1)?.weekStart;
@@ -100,8 +100,17 @@ function TokenEconomyCard({ economy }: { economy: TokenEconomy }) {
         <EconomyTile label="Issued, 28 days" value={formatNumber(economy.issued28)} hint={`Plus ${formatNumber(economy.refunds28)} refunded`} />
         <EconomyTile label="Spent, 28 days" value={formatNumber(economy.spent28)} hint={`Plus ${formatNumber(economy.undone28)} taken back by undos`} />
         <EconomyTile label="Net, 28 days" value={signed(economy.issued28 - economy.spent28)} hint="Issued minus spent" />
-        <EconomyTile label="Median balance" value={formatNumber(balances.median)} hint={`90th percentile ${formatNumber(balances.p90)}, ${formatNumber(balances.students)} active students`} />
-        <EconomyTile label="Students over 1,000" value={formatNumber(balances.over1000)} hint="Many here means too few ways to spend" />
+        {balances.withheld ? (
+          <>
+            <EconomyTile label="Median balance" value="—" hint={`Hidden: ${formatNumber(balances.students)} active students, fewer than ${k}`} />
+            <EconomyTile label="Students over 1,000" value="—" hint="Hidden for groups this small" />
+          </>
+        ) : (
+          <>
+            <EconomyTile label="Median balance" value={formatNumber(balances.median)} hint={`90th percentile ${formatNumber(balances.p90)}, ${formatNumber(balances.students)} active students`} />
+            <EconomyTile label="Students over 1,000" value={formatNumber(balances.over1000)} hint="Many here means too few ways to spend" />
+          </>
+        )}
       </div>
 
       <div className="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
@@ -398,7 +407,7 @@ export function AnalyticsPage() {
             <CohortTable cohorts={data.cohorts} threshold={k} formatWeek={(week) => formatShortDay(week)} />
           </Card>
 
-          <TokenEconomyCard economy={data.economy} />
+          <TokenEconomyCard economy={data.economy} k={k} />
 
           <div className={cx('grid grid-cols-1 gap-5', showFlags && 'lg:grid-cols-2')}>
             {showFlags && <TokenFlagsCard />}

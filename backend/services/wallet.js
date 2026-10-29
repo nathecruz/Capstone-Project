@@ -3,6 +3,7 @@
 import crypto from 'node:crypto';
 import { config } from '../config/index.js';
 import { runAll } from '../db/run-all.js';
+import { getDateKeyInTimeZone } from './completion-date.js';
 
 export const POINTS_PER_CHECK_IN = 20;
 export const TOKENS_PER_CHECK_IN = 5;
@@ -141,11 +142,17 @@ export async function countedCheckIns(db, userId, { from = null, to = null } = {
  * Awards bonus tokens for account streak milestones newly crossed by a check-in. `before` and
  * `after` are the streak runs ({ streak, start }, services/account-streak.js) without and with it;
  * a milestone m is crossed when before.streak < m <= after.streak. Idempotent per run and
- * milestone. Returns the total tokens awarded.
+ * milestone. A milestone already paid on a day of this run is not paid again: the run then only
+ * starts later because check-ins of its first days were removed (their habit was deleted), not
+ * after a break. `timeZone` is the account day's zone. Returns the total tokens awarded.
  */
-export async function awardAccountStreakMilestones(db, userId, before, after, now = Date.now()) {
+export async function awardAccountStreakMilestones(db, userId, before, after, { timeZone = 'UTC', now = Date.now() } = {}) {
+  const crossed = crossedStreakMilestones(before.streak, after.streak);
+  if (!crossed.length) return 0;
+  const lastPaidOn = await streakMilestonePayDays(db, userId, timeZone);
   let awarded = 0;
-  for (const milestone of crossedStreakMilestones(before.streak, after.streak)) {
+  for (const milestone of crossed) {
+    if (after.start && lastPaidOn.get(milestone) >= after.start) continue;
     const bonus = STREAK_MILESTONE_BONUS[milestone];
     const inserted = await db.query(
       'INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING RETURNING id',
@@ -154,6 +161,21 @@ export async function awardAccountStreakMilestones(db, userId, before, after, no
     if (inserted.rowCount) awarded += bonus;
   }
   return awarded;
+}
+
+/** The day (in `timeZone`) each account streak milestone was last paid, by milestone. */
+async function streakMilestonePayDays(db, userId, timeZone) {
+  const result = await db.query(
+    `SELECT id, created_at AS "createdAt" FROM token_transactions WHERE user_id=$1 AND id LIKE $2 ESCAPE '\\'`,
+    [userId, `${escapeLike(userId)}:token:streak:account:%`],
+  );
+  const days = new Map();
+  for (const row of result.rows) {
+    const milestone = Number(String(row.id).split(':').at(-1));
+    const day = getDateKeyInTimeZone(new Date(Number(row.createdAt)), timeZone);
+    if (!(days.get(milestone) >= day)) days.set(milestone, day);
+  }
+  return days;
 }
 
 export async function tokenBalance(db, userId) {
