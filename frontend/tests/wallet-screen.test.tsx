@@ -348,8 +348,15 @@ describe('Tokens screen', () => {
     expect(historyMock).not.toHaveBeenCalled();
     mockContext.accountReady = true;
     screen.rerender(<WalletScreen />);
-    await act(async () => undefined);
+    await screen.findByText('Ways to earn');
+    await screen.findByText('Checked in: Read');
     expect(summaryMock).toHaveBeenCalledWith(today);
+    // That is the opening, which loads each once: not a return to the screen that loads them again.
+    expect(summaryMock).toHaveBeenCalledTimes(1);
+    expect(historyMock).toHaveBeenCalledTimes(1);
+    await act(async () => mockFocus.effect?.());
+    expect(summaryMock).toHaveBeenCalledTimes(2);
+    expect(historyMock).toHaveBeenCalledTimes(2);
   });
 
   it('sends faculty back without asking for a wallet', async () => {

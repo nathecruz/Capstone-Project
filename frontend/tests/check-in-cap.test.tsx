@@ -2,12 +2,14 @@
 // answers tokenCapped) shows the daily token limit once a day and, from the day the counted cap
 // starts (26 October 2026), a check-in past the day's six adds no points or tokens on the tap,
 // grows no Habi and celebrates no level or growth; the server's points then set Habi's count. A
+// refused or unsent check-in takes back only what its tap changed that is still on screen. A
 // check-in refused because the account's day is not the phone's says which day it is.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import React from 'react';
 import { getLocalDateKey } from '@/hooks/app-state/habit-progress';
 import { ColorSchemeProvider, useAppColorScheme, type Celebration } from '@/hooks/color-scheme-context';
+import { getCurrentSession, subscribeToAuthChanges } from '@/authentication/session';
 import { saveRemoteHabitCompletion } from '@/authentication/authService';
 import { adjustBuddyCheckIns, getCachedBuddy, syncBuddyCheckIns } from '@/hooks/use-buddy';
 import type { Buddy } from '@/utils/buddy';
@@ -87,9 +89,26 @@ const checkIn = (id: string) => act(async () => app().toggleHabit(id));
 const buddyChanges = () => jest.mocked(adjustBuddyCheckIns).mock.calls.map(([delta]) => delta);
 /** Habi's count as last set from the server's points. */
 const syncedBuddy = () => jest.mocked(syncBuddyCheckIns).mock.calls.at(-1)?.[0];
+/** Habi's count from `start` as the app changes it: a check-in adjusts it, the server's count replaces it. */
+function trackHabi(start: number) {
+  let count = start;
+  jest.mocked(adjustBuddyCheckIns).mockImplementation((delta) => { count = Math.max(0, count + delta); });
+  jest.mocked(syncBuddyCheckIns).mockImplementation((checkIns) => { count = checkIns; });
+  return () => count;
+}
+type CheckInAnswer = Awaited<ReturnType<typeof saveRemoteHabitCompletion>>;
+/** The next check-in request, answered only when the test gives the answer, so the app is used meanwhile. */
+function answerLater() {
+  let resolve: (answer: CheckInAnswer) => void = () => undefined;
+  jest.mocked(saveRemoteHabitCompletion).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+  return (answer: CheckInAnswer) => act(async () => resolve(answer));
+}
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  // Without the counting trackHabi gave them.
+  jest.mocked(adjustBuddyCheckIns).mockReset();
+  jest.mocked(syncBuddyCheckIns).mockReset();
   jest.mocked(getCachedBuddy).mockReturnValue(null);
   await AsyncStorage.clear();
   onDay(CAPPED_DAY);
@@ -198,6 +217,17 @@ describe('the daily token limit', () => {
   });
 });
 
+describe("Habi's growth before Habi is loaded", () => {
+  it('is celebrated from the counted check-ins the points hold, not every check-in', async () => {
+    // 980 points: 49 counted check-ins (more were made, but capped days count 6). The 50th makes a Teen.
+    onDay(CAPPED_DAY, { checkedIn: 2, points: 980 });
+    jest.mocked(saveRemoteHabitCompletion).mockResolvedValue({ ...paid, points: 1000 });
+    await open();
+    await checkIn('read');
+    expect(shown()[0]).toEqual(expect.objectContaining({ kind: 'buddy', title: 'Habi grew into a Teen!', message: "50 check-ins together. New looks are waiting in Habi's shop." }));
+  });
+});
+
 describe('the daily token limit before 26 October, when every check-in still counts', () => {
   it('is shown, and the seventh check-in still grows Habi', async () => {
     onDay(BEFORE_CAP, { checkedIn: 6, points: 80 });
@@ -225,6 +255,98 @@ describe('a check-in that does not reach the server', () => {
     // Shown again as checked in, and Habi's count with it.
     expect(app().habits.find((item) => item.id === 'read')?.completionDates).toEqual([today]);
     expect(buddyChanges()).toEqual([1, -1, 1]);
+  });
+});
+
+describe('check-ins answered after other taps', () => {
+  it('take back nothing of a refused check-in that the answer to an earlier one already replaced', async () => {
+    onDay(CAPPED_DAY, { checkedIn: 2, points: 40 });
+    const habi = trackHabi(2);
+    const answerRead = answerLater();
+    const answerWalk = answerLater();
+    await open();
+    await checkIn('read');
+    await checkIn('walk');
+    expect([app().points, app().tokens, habi()]).toEqual([80, 40, 4]);
+    // read's answer is the server's wallet with read and without walk, which the server then refused.
+    await answerRead({ ...paid, points: 60, tokens: 35 });
+    await answerWalk({ rejected: true, message: 'Habit not found.' });
+    expect(app().habits.find((item) => item.id === 'walk')?.completionDates).toEqual([]);
+    expect([app().points, app().tokens, habi()]).toEqual([60, 35, 3]);
+  });
+
+  it('take back a refused check-in that is still on screen', async () => {
+    onDay(CAPPED_DAY, { checkedIn: 2, points: 40 });
+    const habi = trackHabi(2);
+    const answerRead = answerLater();
+    const answerWalk = answerLater();
+    await open();
+    await checkIn('read');
+    await checkIn('walk');
+    await answerWalk({ rejected: true, message: 'Habit not found.' });
+    expect([app().points, app().tokens, habi()]).toEqual([60, 35, 3]);
+    await answerRead({ ...paid, points: 60, tokens: 35 });
+    expect([app().points, app().tokens, habi()]).toEqual([60, 35, 3]);
+  });
+
+  it('show an undo that could not be sent as checked in again, without adding back what the server\'s wallet already has', async () => {
+    onDay(CAPPED_DAY, { checkedIn: 2, points: 40 });
+    const habi = trackHabi(2);
+    jest.mocked(saveRemoteHabitCompletion).mockResolvedValueOnce({ ...paid, points: 60, tokens: 35 });
+    await open();
+    await checkIn('read');
+    const answerUndo = answerLater();
+    await checkIn('read');
+    expect([app().points, app().tokens, habi()]).toEqual([40, 30, 2]);
+    // Meanwhile the daily reward's answer brings the server's wallet, which still has read.
+    act(() => app().applyWallet({ points: 60, tokens: 39, tokenHistory: [] }));
+    await answerUndo(null);
+    expect(app().habits.find((item) => item.id === 'read')?.completionDates).toEqual([today]);
+    expect([app().points, app().tokens, habi()]).toEqual([60, 39, 3]);
+  });
+
+  it("keep the newest answer's wallet when an older answer comes back after it", async () => {
+    onDay(CAPPED_DAY, { checkedIn: 2, points: 40 });
+    const habi = trackHabi(2);
+    const answerRead = answerLater();
+    const answerWalk = answerLater();
+    await open();
+    await checkIn('read');
+    await checkIn('walk');
+    // The server saved walk last (updatedAt 3000); read's answer (2000) comes back after it.
+    await answerWalk({ ...paid, points: 80, tokens: 40, updatedAt: 3000 });
+    await answerRead({ ...paid, points: 60, tokens: 35, updatedAt: 2000 });
+    expect([app().points, app().tokens, habi()]).toEqual([80, 40, 4]);
+  });
+
+  it('ignore an answer that comes back after signing out', async () => {
+    const answerRead = answerLater();
+    await open();
+    await checkIn('read');
+    // Signed out before the answer came.
+    jest.mocked(getCurrentSession).mockResolvedValueOnce(null);
+    await act(async () => jest.mocked(subscribeToAuthChanges).mock.calls[0][0]());
+    await waitFor(() => expect(app().habits).toHaveLength(0));
+    await answerRead({ ...paid, points: 60, tokens: 35 });
+    expect([app().points, app().tokens]).toEqual([0, 0]);
+    expect(syncBuddyCheckIns).not.toHaveBeenCalled();
+  });
+
+  it('take no tokens back for undoing, before its answer, a check-in that paid none on the tap', async () => {
+    onDay(CAPPED_DAY, { checkedIn: 6, points: 120 });
+    const answerCheckIn = answerLater();
+    const answerUndo = answerLater();
+    await open();
+    await checkIn('read');
+    await checkIn('read');
+    expect(app().habits.find((item) => item.id === 'read')?.completionDates).toEqual([]);
+    expect([app().points, app().tokens]).toEqual([120, 30]);
+    // The server then says it paid nothing, and the undo could not be sent: done again, still 30 tokens.
+    await answerCheckIn({ ...capped, points: 120 });
+    shown();
+    await answerUndo(null);
+    expect(app().habits.find((item) => item.id === 'read')?.completionDates).toEqual([today]);
+    expect([app().points, app().tokens]).toEqual([120, 30]);
   });
 });
 

@@ -59,9 +59,14 @@ export default function WalletScreen() {
   }, [isFaculty]);
 
   // Back from a screen or sheet where tokens were spent or earned: the numbers load again at once,
-  // not at the next live pulse (the first focus is the opening, which loads them already).
+  // not at the next live pulse. The first focus once the account is a student's is the opening,
+  // which loads them already (also when the account loads while the screen is open).
   useFocusEffect(useCallback(() => {
-    if (focusedRef.current && student) reloadWallet();
+    if (!student) {
+      focusedRef.current = false;
+      return;
+    }
+    if (focusedRef.current) reloadWallet();
     focusedRef.current = true;
   }, [student]));
 

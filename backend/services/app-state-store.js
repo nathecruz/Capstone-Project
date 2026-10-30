@@ -245,8 +245,13 @@ async function payForSyncedCheckIns(connection, userId, { habits, byHabit, added
   await syncWeeklyQuests(connection, userId, day.today, now);
 }
 
-/** Mirrors the synced state into the relational tables inside the caller's transaction. */
-export async function syncNormalizedState(userId, state, updatedAt, connection) {
+/**
+ * Mirrors the synced state into the relational tables inside the caller's transaction. `updatedAt`
+ * is the snapshot's version, which follows the device's clock when that runs ahead (PUT
+ * /api/app-state); the check-ins the state adds are stamped and paid at `now`, the server's time,
+ * since the daily challenges read their time of day and an undo its age.
+ */
+export async function syncNormalizedState(userId, state, updatedAt, connection, now = Date.now()) {
   const rawHabits = Array.isArray(state.habits) ? state.habits : [];
   const seenHabitIds = new Set();
   const habits = rawHabits.filter((habit) => {
@@ -260,7 +265,7 @@ export async function syncNormalizedState(userId, state, updatedAt, connection) 
   // removed by a sync, only added (offline check-ins), so a stale device cannot erase them.
   // A deleted habit's tokens for today go too, so deleting and re-creating a habit to check it in
   // again pays nothing; earlier days keep theirs, so cleaning up history never makes a balance negative.
-  const day = await getAccountDay(connection, userId);
+  const day = await getAccountDay(connection, userId, new Date(now));
   const habitIds = habits.map((habit) => String(habit.id).trim());
   await connection.query(
     `DELETE FROM token_transactions WHERE user_id=$1 AND id IN (
@@ -273,13 +278,13 @@ export async function syncNormalizedState(userId, state, updatedAt, connection) 
   const added = [];
   for (const habit of habits) {
     const habitId = String(habit.id).trim();
-    for (const date of syncedCompletionDates(habit, day)) {
+    for (const date of syncedCompletionDates(habit, day, new Date(now))) {
       const inserted = await connection.query(
         'INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING habit_id',
-        [userId, habitId, date, updatedAt],
+        [userId, habitId, date, now],
       );
       if (inserted.rowCount) {
-        await awardCheckIn(connection, userId, habitId, date, habit.label, updatedAt);
+        await awardCheckIn(connection, userId, habitId, date, habit.label, now);
         added.push(habitId);
       }
     }
@@ -300,7 +305,7 @@ export async function syncNormalizedState(userId, state, updatedAt, connection) 
         isDateKey(habit.activeUntil) ? habit.activeUntil : ''],
     );
   }
-  if (added.length) await payForSyncedCheckIns(connection, userId, { habits, byHabit, added, day, now: updatedAt });
+  if (added.length) await payForSyncedCheckIns(connection, userId, { habits, byHabit, added, day, now });
 
   await connection.query('DELETE FROM goals WHERE user_id=$1', [userId]);
   for (const goal of state.goals || []) {

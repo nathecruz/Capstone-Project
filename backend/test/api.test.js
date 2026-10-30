@@ -1254,6 +1254,17 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
   const shiftDay = (date, days) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
   const checkInOn = (userId, habitId, date) => db.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4)', [userId, habitId, date, Date.now()]);
 
+  await t.test("an unchanged save answers with the ledger's wallet, not the stored snapshot's", async () => {
+    const { headers, userId } = await student('Una', 'Changed');
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], id: 'read', label: 'Read' }] }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    // Tokens a claim, a purchase or a gift pays or spends save no snapshot.
+    await grant(userId, 40, 'test:after-snapshot');
+    const again = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...saved.body.state, baseUpdatedAt: saved.body.updatedAt, baseState: saved.body.state }) });
+    assert.equal(again.response.status, 200, JSON.stringify(again.body));
+    assert.deepEqual([again.body.unchanged, again.body.updatedAt, again.body.state.tokens], [true, saved.body.updatedAt, 40]);
+  });
+
   await t.test('a check-in a synced state adds pays its challenge, and a habit past its reminder time takes none', async () => {
     const { headers, userId } = await student('Sync', 'Saved');
     await db.query('UPDATE users SET time_zone=$2 WHERE id=$1', [userId, middayZone]);
@@ -1277,6 +1288,29 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const done = (await db.query('SELECT habit_id AS "habitId" FROM habit_completions WHERE user_id=$1', [userId])).rows.map((row) => row.habitId);
     assert.deepEqual(done, ['walk']);
     assert.ok(!(await ledgerIds()).includes(`check-in:pills:${day}`));
+  });
+
+  await t.test("a check-in a synced state adds counts at the server's time, not the device clock the save carries", async () => {
+    const { headers, userId } = await student('Clock', 'Ahead');
+    await db.query('UPDATE users SET time_zone=$2 WHERE id=$1', [userId, middayZone]);
+    const day = dateIn(middayZone);
+    const walk = { ...appState.habits[0], id: 'walk', label: 'Walk' };
+    const first = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [walk] }) });
+    assert.equal(first.response.status, 200, JSON.stringify(first.body));
+    // It is about noon in middayZone; a phone clock 20 hours ahead reads 8 or 9 AM tomorrow.
+    const sentAt = Date.now();
+    const body = { ...first.body.state, habits: [{ ...walk, completionDates: [day] }], clientUpdatedAt: sentAt + 20 * 60 * 60 * 1000, baseUpdatedAt: first.body.updatedAt, baseState: first.body.state };
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify(body) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    const answeredAt = Date.now();
+    const { completedAt } = (await db.query('SELECT completed_at AS "completedAt" FROM habit_completions WHERE user_id=$1', [userId])).rows[0];
+    assert.ok(Number(completedAt) >= sentAt && Number(completedAt) <= answeredAt, `checked in at ${new Date(Number(completedAt)).toISOString()}, not now`);
+    // So "Check in before 10 AM" (always one of the two extras here: walk is the only habit) is not done at noon.
+    const challenges = (await request(`/api/daily-challenges?date=${day}&timeZone=${encodeURIComponent(middayZone)}`, { headers })).body.challenges;
+    assert.equal(challenges.find((challenge) => challenge.id === 'early-bird')?.complete, false, JSON.stringify(challenges));
+    const ledger = (await db.query('SELECT id, created_at AS "createdAt" FROM token_transactions WHERE user_id=$1', [userId])).rows;
+    assert.ok(!ledger.some((row) => row.id.endsWith(':early-bird')), JSON.stringify(ledger));
+    assert.ok(ledger.every((row) => Number(row.createdAt) <= answeredAt + 2), `every row it paid is dated now: ${JSON.stringify(ledger)}`);
   });
 
   await t.test('a streak milestone is not paid again when deleting a habit moves the first day of the run', async () => {
@@ -1586,6 +1620,10 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
       await db.query("INSERT INTO buddy_gifts(id,sender_id,recipient_id,treat_id,message_id,local_date,created_at) VALUES($1,$2,$3,'apple',0,$4,$5)", [crypto.randomUUID(), recipient.userId, fifth.userId, dateIn(zone), Date.now() - 60_000]);
     }
     assert.deepEqual(refusal(await send(third.headers, ids.fifth)), [429, 'RECIPIENT_FULL', 'Fil F. has received lots of treats today. Try again tomorrow.']);
+
+    // Feeding your own Habi stores no buddy row (naming it or buying an item does): the export still lists the treat.
+    assert.equal((await request('/api/buddy/treats', { method: 'POST', headers: sender.headers, body: JSON.stringify({ treatId: 'apple' }) })).response.status, 200);
+    assert.deepEqual((await request('/api/auth/export', { headers: sender.headers })).body.habitBuddy, { items: [], treatsFed: [{ treat: 'apple', count: 1 }] });
   });
 
   await t.test('treat gifts hold under requests at the same moment: the limits, two-way gifts and a classmate who just opted out', async () => {
@@ -1834,12 +1872,17 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const summary = (await request(`/api/wallet/summary?date=${day.date}&timeZone=${encodeURIComponent(middayZone)}`, { headers })).body;
     // 2 (the daily reward) + 5 (Read: Pills is missed for today) + the open challenges + 20 (the box).
     assert.equal(summary.today.canStillEarn, 2 + 5 + summary.today.challenges.available + 20, JSON.stringify(summary.today));
+    // Of today's challenges only the comeback (Read, missed yesterday) can still be finished: "Finish 2
+    // habits" needs Pills too, and it is past 10 AM and noon.
+    const offered = (await request(`/api/daily-challenges?date=${day.date}&timeZone=${encodeURIComponent(middayZone)}`, { headers })).body.challenges;
+    assert.equal(summary.today.challenges.available, offered.filter((challenge) => challenge.id === 'comeback').reduce((sum, challenge) => sum + challenge.reward, 0), JSON.stringify(offered));
     const late = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'pills', completed: true, ...day }) });
     assert.deepEqual([late.response.status, late.body.code], [409, 'PAST_DEADLINE']);
     const done = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'read', completed: true, ...day }) });
     assert.equal(done.response.status, 200, JSON.stringify(done.body));
     const after = (await request(`/api/wallet/summary?date=${day.date}&timeZone=${encodeURIComponent(middayZone)}`, { headers })).body;
     assert.deepEqual([after.today.checkIns.paid, after.today.canStillEarn], [1, 2 + after.today.challenges.available + 20], 'no habit is left that pays');
+    assert.equal(after.today.challenges.available, 0, 'and no challenge is left that can be finished today');
   });
 
   await t.test('issue reports store attachments in the database and validate content', async () => {
@@ -1869,12 +1912,14 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(pruned.data, null);
     assert.ok(pruned.name, 'the file name is kept');
 
-    // Weekly due marks are kept for last week's bonus and this week, not for old weeks.
+    // Weekly due marks are kept for last week's bonus and this week, not for old weeks. A student with
+    // no marks yet: every save marks last week's Monday, which on a Monday is a week ago.
     const { pruneDueMarks } = await import('../services/retention.js');
+    const { userId: marked } = await student('Prue', 'Marks');
     const weekAgo = (weeks) => new Date(Date.now() - weeks * 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    await db.query('INSERT INTO weekly_due_marks(user_id, week_start, due, last_day, updated_at) VALUES($1,$2,9,$2,$4), ($1,$3,7,$3,$4)', [userId, weekAgo(6), weekAgo(1), Date.now()]);
+    await db.query('INSERT INTO weekly_due_marks(user_id, week_start, due, last_day, updated_at) VALUES($1,$2,9,$2,$4), ($1,$3,7,$3,$4)', [marked, weekAgo(6), weekAgo(1), Date.now()]);
     assert.equal(await pruneDueMarks(db), 1);
-    const kept = (await db.query('SELECT week_start::text AS "weekStart" FROM weekly_due_marks WHERE user_id=$1', [userId])).rows.map((row) => row.weekStart);
+    const kept = (await db.query('SELECT week_start::text AS "weekStart" FROM weekly_due_marks WHERE user_id=$1', [marked])).rows.map((row) => row.weekStart);
     assert.deepEqual([kept.includes(weekAgo(6)), kept.includes(weekAgo(1))], [false, true]);
   });
 

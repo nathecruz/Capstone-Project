@@ -78,7 +78,9 @@ export default function registerAppStateRoutes(app) {
         : normalizeAppState(incomingState), currentState), currentState, new Date(), today);
 
       // Nothing the app owns changed (points, tokens and streaks are the server's): skip the write.
-      if (existing && sameClientState(state, currentState)) return { state: currentState, updatedAt: existingUpdatedAt, merged, unchanged: true };
+      // The stored snapshot's wallet can be older than the ledger (claims, purchases and gifts save
+      // no snapshot), so the answer carries the ledger's; the app sets Habi's count from its points.
+      if (existing && sameClientState(state, currentState)) return { state: applyWallet(currentState, await getWallet(connection, session.userId)), updatedAt: existingUpdatedAt, merged, unchanged: true };
 
       const updatedAt = Math.max(clientUpdatedAt || 0, Date.now());
       const savedUpdatedAt = Math.max(updatedAt, existingUpdatedAt || 0) + (existingUpdatedAt === updatedAt ? 1 : 0);

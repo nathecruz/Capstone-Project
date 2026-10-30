@@ -261,7 +261,8 @@ export default function registerAuthRoutes(app) {
       signIns: logins.rows,
       issueReports: reports.rows,
       featureSuggestions: suggestions.rows,
-      habitBuddy: buddy.rows[0] ? { ...buddy.rows[0], items: buddyItems.rows, treatsFed: treats.rows } : null,
+      // Feeding Habi stores no buddy row (naming it or buying an item does), so treats alone still count.
+      habitBuddy: buddy.rows[0] || buddyItems.rows.length || treats.rows.length ? { ...buddy.rows[0], items: buddyItems.rows, treatsFed: treats.rows } : null,
       treatGifts: {
         sent: gifts.rows.filter((gift) => gift.sent).map((gift) => ({ to: leaderboardNameOf(gift), treat: gift.treat, message: GIFT_MESSAGES[gift.messageId] ?? '', at: Number(gift.at) })),
         received: gifts.rows.filter((gift) => !gift.sent).map((gift) => ({ from: leaderboardNameOf(gift), treat: gift.treat, message: GIFT_MESSAGES[gift.messageId] ?? '', at: Number(gift.at) })),
