@@ -337,6 +337,16 @@ CREATE TABLE IF NOT EXISTS streak_freeze_days (
   used_at BIGINT NOT NULL,
   PRIMARY KEY (user_id, freeze_date)
 );
+-- The account streak's past (services/streak-history.js): a day that is over keeps the kind it had
+-- (counts: a check-in, breaks: a miss, neutral: nothing due) when a save of the habits would change
+-- it, so deleting a missed habit or changing a schedule cannot rewrite the streak.
+CREATE TABLE IF NOT EXISTS streak_kept_days (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  day DATE NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('counts', 'breaks', 'neutral')),
+  kept_at BIGINT NOT NULL,
+  PRIMARY KEY (user_id, day)
+);
 -- Weekly consistency bonus (services/weekly-bonus.js): the most check-ins that were ever due on a
 -- week's days already over, from its Monday to last_day, recorded before each save that can drop or
 -- reschedule habits, so deleting or reshaping a missed habit cannot raise that week's rate. The

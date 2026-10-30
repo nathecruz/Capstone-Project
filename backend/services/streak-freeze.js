@@ -2,6 +2,7 @@
 // one bad day does not wipe out a long account streak (services/account-streak.js). A frozen day
 // neither counts toward nor breaks a streak (also a habit's own, services/streaks.js). Used
 // freezes are in streak_freeze_days, held ones in user_streak_freezes.
+import { runAll } from '../db/run-all.js';
 import { isHabitActiveOn } from './habit-week.js';
 import { habitFromRow, habitSchedule, isScheduledDay } from './streaks.js';
 import { spendTokens } from './wallet.js';
@@ -21,18 +22,21 @@ function shiftDay(dateKey, days) {
  * first day with a check-in is where the streak runs on. All of the days are frozen or none, so a
  * freeze is never spent on a streak it cannot save. `habits`: [{ id, frequency, startDate,
  * activeUntil, reminderDays, meta }] (also past weeks'); `doneByHabit`: Map(id -> Set(date));
- * `frozen`: Set of days already frozen.
+ * `frozen`: Set of days already frozen; `keptDays`: the days that keep their kind whatever the
+ * habits are now ({ day: 'counts' | 'breaks' | 'neutral' }, services/streak-history.js).
  */
-export function daysToFreeze(habits, doneByHabit, frozen, today, available) {
+export function daysToFreeze(habits, doneByHabit, frozen, today, available, keptDays = {}) {
   if (available <= 0) return [];
-  const checkedIn = new Set([...doneByHabit.values()].flatMap((dates) => [...dates]));
+  const kept = new Map(Object.entries(keptDays ?? {}));
+  const checkedIn = new Set([...[...doneByHabit.values()].flatMap((dates) => [...dates]), ...[...kept].filter(([, kind]) => kind === 'counts').map(([day]) => day)]);
   const firstCheckIn = [...checkedIn].reduce((first, day) => (!first || day < first ? day : first), null);
   if (!firstCheckIn) return [];
   const schedules = habits.map((habit) => ({ habit, schedule: habitSchedule(habit) }));
+  const missed = (day) => (kept.has(day) ? kept.get(day) === 'breaks' : schedules.some(({ habit, schedule }) => isHabitActiveOn(habit, day) && isScheduledDay(schedule, day)));
   const misses = [];
   for (let day = shiftDay(today, -1); day >= firstCheckIn; day = shiftDay(day, -1)) {
     if (checkedIn.has(day)) return misses;
-    if (frozen.has(day) || !schedules.some(({ habit, schedule }) => isHabitActiveOn(habit, day) && isScheduledDay(schedule, day))) continue;
+    if (frozen.has(day) || !missed(day)) continue;
     misses.push(day);
     if (misses.length > available) return [];
   }
@@ -45,13 +49,23 @@ export async function getFrozenDays(db, userId) {
   return result.rows.map((row) => row.date);
 }
 
-/** Freezes held, the price, and the days already covered. */
+/** The days the account streak keeps whatever the habits are now: { day: 'counts' | 'breaks' | 'neutral' } (services/streak-history.js). */
+export async function getKeptDays(db, userId) {
+  const result = await db.query('SELECT day::text AS day, kind FROM streak_kept_days WHERE user_id=$1 ORDER BY day', [userId]);
+  return Object.fromEntries(result.rows.map((row) => [row.day, row.kind]));
+}
+
+/**
+ * Freezes held, the price, the days already covered, and the days the streak keeps (the app counts
+ * the account streak with both).
+ */
 export async function getStreakFreezeStatus(db, userId) {
-  const [held, frozenDays] = await Promise.all([
-    db.query('SELECT available FROM user_streak_freezes WHERE user_id=$1', [userId]),
-    getFrozenDays(db, userId),
+  const [held, frozenDays, keptDays] = await runAll(db, [
+    () => db.query('SELECT available FROM user_streak_freezes WHERE user_id=$1', [userId]),
+    () => getFrozenDays(db, userId),
+    () => getKeptDays(db, userId),
   ]);
-  return { available: Number(held.rows[0]?.available ?? 0), max: STREAK_FREEZE_MAX, cost: STREAK_FREEZE_COST, frozenDays };
+  return { available: Number(held.rows[0]?.available ?? 0), max: STREAK_FREEZE_MAX, cost: STREAK_FREEZE_COST, frozenDays, keptDays };
 }
 
 /** Uses held freezes for the missed days before `today`; returns the days frozen. Call inside a transaction that locked the user row. */
@@ -59,10 +73,11 @@ export async function applyStreakFreezes(db, userId, today, now = Date.now()) {
   const held = await db.query('SELECT available FROM user_streak_freezes WHERE user_id=$1', [userId]);
   const available = Number(held.rows[0]?.available ?? 0);
   if (available <= 0) return [];
-  const [rows, completions, frozenDays] = await Promise.all([
-    db.query('SELECT id, meta, frequency, start_date, active_until, reminder_days FROM habits WHERE user_id=$1', [userId]),
-    db.query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1', [userId]),
-    getFrozenDays(db, userId),
+  const [rows, completions, frozenDays, keptDays] = await runAll(db, [
+    () => db.query('SELECT id, meta, frequency, start_date, active_until, reminder_days FROM habits WHERE user_id=$1', [userId]),
+    () => db.query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1', [userId]),
+    () => getFrozenDays(db, userId),
+    () => getKeptDays(db, userId),
   ]);
   const habits = rows.rows.map((row) => ({ ...habitFromRow(row), id: String(row.id).replace(`${userId}:habit:`, '') }));
   const doneByHabit = new Map();
@@ -70,7 +85,7 @@ export async function applyStreakFreezes(db, userId, today, now = Date.now()) {
     if (!doneByHabit.has(row.habitId)) doneByHabit.set(row.habitId, new Set());
     doneByHabit.get(row.habitId).add(row.date);
   }
-  const days = daysToFreeze(habits, doneByHabit, new Set(frozenDays), today, available);
+  const days = daysToFreeze(habits, doneByHabit, new Set(frozenDays), today, available, keptDays);
   for (const day of days) {
     await db.query('INSERT INTO streak_freeze_days(user_id,freeze_date,used_at) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [userId, day, now]);
   }

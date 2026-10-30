@@ -29,7 +29,7 @@ import { HABIT_ANALYSIS_SYSTEM, habitAnalysisJsonSchema, habitAnalysisPrompt, ha
 import { generateAiText, isAiConfigured } from '../services/groq.js';
 import { loadPlannerCategories, loadPlannerHistory } from '../services/planner-history.js';
 import { computeStreak, habitFromRow } from '../services/streaks.js';
-import { getFrozenDays } from '../services/streak-freeze.js';
+import { getFrozenDays, getKeptDays } from '../services/streak-freeze.js';
 import { COACH_TOKEN_COST, getWallet, refundCoachAnswer, spendTokens } from '../services/wallet.js';
 
 const DEFAULT_TIME_ZONE = 'Asia/Manila';
@@ -45,7 +45,7 @@ export async function loadAiContext(userId, timeZone = DEFAULT_TIME_ZONE) {
     query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1', [userId]),
     query('SELECT title, category, progress, status, details_json AS details FROM goals WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 5', [userId]),
   ]);
-  const frozenDays = await getFrozenDays({ query }, userId);
+  const [frozenDays, keptDays] = await Promise.all([getFrozenDays({ query }, userId), getKeptDays({ query }, userId)]);
   const datesByHabit = new Map();
   for (const completion of completions.rows) {
     if (!datesByHabit.has(completion.habitId)) datesByHabit.set(completion.habitId, []);
@@ -60,7 +60,7 @@ export async function loadAiContext(userId, timeZone = DEFAULT_TIME_ZONE) {
     goals: goals.rows,
     timeZone,
     // The account streak needs every check-in, not only the last 4 weeks' (services/account-streak.js).
-    accountStreakDays: accountStreak(habitRows.map(({ row, id }) => ({ ...habitFromRow(row), completionDates: datesByHabit.get(id) || [] })), today, frozenDays),
+    accountStreakDays: accountStreak(habitRows.map(({ row, id }) => ({ ...habitFromRow(row), completionDates: datesByHabit.get(id) || [] })), today, frozenDays, keptDays),
     frozenDays,
   });
 }

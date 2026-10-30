@@ -221,7 +221,7 @@ export default function registerAuthRoutes(app) {
     const session = await requireAuth(request, response, { allowUnverified: true });
     if (!session) return;
     const id = session.userId;
-    const [profile, habits, completions, goals, tokens, achievements, notifications, logins, preferences, reports, suggestions, buddy, buddyItems, treats, gifts, redemptions, freezeDays] = await Promise.all([
+    const [profile, habits, completions, goals, tokens, achievements, notifications, logins, preferences, reports, suggestions, buddy, buddyItems, treats, gifts, redemptions, freezeDays, keptDays] = await Promise.all([
       query('SELECT first_name AS "firstName", last_name AS "lastName", full_name AS "fullName", username, email, date_of_birth AS "dateOfBirth", gender, region, about, custom_title AS "customTitle", profile_frame AS "profileFrame", created_at AS "createdAt", privacy_consent_at AS "privacyConsentAt" FROM users WHERE id=$1', [id]),
       query('SELECT label, category, meta, frequency, start_date AS "startDate", active_until AS "activeUntil", goal, streak, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime" FROM habits WHERE user_id=$1 ORDER BY sort_order', [id]),
       query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1 ORDER BY completed_date', [id]),
@@ -246,6 +246,7 @@ export default function registerAuthRoutes(app) {
       ),
       query('SELECT r.name, rr.token_cost AS "tokenCost", rr.redeemed_at AS "redeemedAt" FROM reward_redemptions rr JOIN rewards r ON r.id = rr.reward_id WHERE rr.user_id=$1 ORDER BY rr.redeemed_at', [id]),
       query('SELECT freeze_date::text AS date FROM streak_freeze_days WHERE user_id=$1 ORDER BY freeze_date', [id]),
+      query('SELECT day::text AS day, kind FROM streak_kept_days WHERE user_id=$1 ORDER BY day', [id]),
     ]);
     response.setHeader('Content-Disposition', `attachment; filename="habitai-my-data-${new Date().toISOString().slice(0, 10)}.json"`);
     response.json({
@@ -269,6 +270,8 @@ export default function registerAuthRoutes(app) {
       },
       rewards: redemptions.rows,
       streakFreezeDays: freezeDays.rows.map((row) => row.date),
+      // Days of the account streak kept as they were when habits were deleted or rescheduled.
+      streakKeptDays: keptDays.rows,
     });
   });
 

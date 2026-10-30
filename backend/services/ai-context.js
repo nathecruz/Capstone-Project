@@ -59,10 +59,11 @@ function weekResults(habit, dates, from, lastDay) {
  * @param {Date} [input.now]
  * @param {string} [input.timeZone]
  * @param {string[]} [input.frozenDays]  days a streak freeze covered
+ * @param {Object<string,string>} [input.keptDays]  days the account streak keeps (services/streak-history.js)
  * @param {number} [input.accountStreakDays]  the account streak, when the caller has every check-in
  *   (otherwise it is counted from `completions`, so at most 4 weeks)
  */
-export function buildHabitContext({ habits = [], completions = [], goals = [], now = new Date(), timeZone = 'Asia/Manila', frozenDays = [], accountStreakDays }) {
+export function buildHabitContext({ habits = [], completions = [], goals = [], now = new Date(), timeZone = 'Asia/Manila', frozenDays = [], keptDays = {}, accountStreakDays }) {
   const today = dateKeyInZone(now, timeZone);
   const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone }).format(now);
   const last7 = Array.from({ length: 7 }, (_, index) => shiftDay(today, index - 6));
@@ -132,7 +133,7 @@ export function buildHabitContext({ habits = [], completions = [], goals = [], n
       bestCurrentStreakDays: Math.max(0, ...habitFacts.map((habit) => habit.currentStreakDays)),
       accountStreakDays: Number.isFinite(accountStreakDays)
         ? accountStreakDays
-        : accountStreak(all.map(({ fields, dates }) => ({ ...fields, completionDates: [...dates] })), today, frozenDays),
+        : accountStreak(all.map(({ fields, dates }) => ({ ...fields, completionDates: [...dates] })), today, frozenDays, keptDays),
       dailyHabitNeedingAttention: needsAttention?.name ?? null,
     },
     habits: habitFacts,

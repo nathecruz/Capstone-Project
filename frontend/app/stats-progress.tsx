@@ -21,7 +21,8 @@ export default function StatsProgressScreen() {
   const compactLayout = width < 360;
   const { completed } = getHabitProgressSummary(currentHabits);
   const frozenDays = streakFreeze?.frozenDays;
-  const history = useMemo(() => historyStats(habits, new Date(), frozenDays), [frozenDays, habits]);
+  const keptDays = streakFreeze?.keptDays;
+  const history = useMemo(() => historyStats(habits, new Date(), frozenDays, keptDays), [frozenDays, habits, keptDays]);
   const consistency = history.last30Rate;
   const completionHistory = getRecentCompletionHistory(habits, 7);
   const maximumDailyCompletions = Math.max(1, ...completionHistory.map((entry) => entry.count));

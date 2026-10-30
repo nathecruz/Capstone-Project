@@ -43,10 +43,11 @@ export default function AchievementsScreen() {
   const styles = useThemedStyles(themedStyles);
   const { isDarkMode, habits, goals, points, streakFreeze } = useAppColorScheme();
   const frozenDays = streakFreeze?.frozenDays;
+  const keptDays = streakFreeze?.keptDays;
   const { isCentered: wide } = useResponsiveLayout();
   const [activeTab, setActiveTab] = useState<'Badges' | 'Milestones'>('Badges');
-  const badges = useMemo(() => badgeProgress(habits, goals, new Date(), frozenDays), [frozenDays, habits, goals]);
-  const rows = useMemo(() => milestones(habits, points, new Date(), frozenDays), [frozenDays, habits, points]);
+  const badges = useMemo(() => badgeProgress(habits, goals, new Date(), frozenDays, keptDays), [frozenDays, habits, goals, keptDays]);
+  const rows = useMemo(() => milestones(habits, points, new Date(), frozenDays, keptDays), [frozenDays, habits, keptDays, points]);
   // Earned first, then the ones closest to being earned.
   const ordered = [...badges].sort((a, b) => Number(b.earned) - Number(a.earned) || b.share - a.share);
   const earnedCount = badges.filter((badge) => badge.earned).length;

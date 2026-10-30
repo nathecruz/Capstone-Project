@@ -17,6 +17,8 @@ import {
   syncNormalizedState,
 } from '../services/app-state-store.js';
 import { setCheckIn } from '../services/check-ins.js';
+import { getKeptDays } from '../services/streak-freeze.js';
+import { keepStreakDays } from '../services/streak-history.js';
 import { applyWallet, getWallet, PAID_CHECK_INS_PER_DAY } from '../services/wallet.js';
 import { notifyReminderChange } from '../services/web-push-clock.js';
 import { recordDueMarks } from '../services/weekly-bonus.js';
@@ -88,10 +90,15 @@ export default function registerAppStateRoutes(app) {
       // only one that can drop or reschedule them), so deleting a missed habit cannot raise the
       // weekly bonus (services/weekly-bonus.js).
       await recordDueMarks(connection, session.userId, today);
+      // Likewise a day that is over keeps the kind it had for the account streak (a check-in, a miss
+      // or nothing due), whatever this save deletes or reschedules (services/streak-history.js). An
+      // account's first save has no stored habits to keep days from: its habits set the past.
+      const keptNow = currentState ? await keepStreakDays(connection, session.userId, { before: currentState.habits, after: state.habits, today }) : 0;
       await syncNormalizedState(session.userId, state, savedUpdatedAt, connection);
       const serverState = await buildServerState(session.userId, state, connection);
       await saveUserAppState(session.userId, serverState, savedUpdatedAt, connection);
-      return { state: serverState, updatedAt: savedUpdatedAt, merged, unchanged: false };
+      // With days newly kept, the answer carries all of them, so the app's streak follows at once.
+      return { state: serverState, updatedAt: savedUpdatedAt, merged, unchanged: false, ...(keptNow ? { keptDays: await getKeptDays(connection, session.userId) } : {}) };
     });
     if (result.rejected) return response.status(409).json({ ok: false, code: 'STATE_NOT_LOADED', error: 'This device has not loaded your data yet. Nothing was changed.' });
     // New or changed reminder times are sent on their minute, not after the next plan refresh.

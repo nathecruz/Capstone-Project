@@ -9,7 +9,7 @@ import { AppState } from 'react-native';
 import { getLocalDateKey } from '@/hooks/app-state/habit-progress';
 import { initialPreferences, initialProfile } from '@/hooks/app-state/types';
 import { ColorSchemeProvider, useAppColorScheme, type Habit } from '@/hooks/color-scheme-context';
-import { saveRemoteAppState, saveRemoteHabitCompletion } from '@/authentication/authService';
+import { saveRemoteAppState, saveRemoteHabitCompletion, syncStreakFreezes } from '@/authentication/authService';
 import { weekEndKey } from '@/utils/habit-week';
 
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
@@ -25,6 +25,8 @@ type Snapshot = { updatedAt: number; state: { habits: Record<string, unknown>[] 
 let mockServer: Snapshot;
 // How long the server takes to answer a check-in (ms).
 let mockCheckInDelay = 0;
+// The days of the account streak the next save keeps, which its answer carries (a habit deleted).
+let mockKeptDays: Record<string, string> | undefined;
 const mockTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 function mockStamp(state: Snapshot['state']) {
   const end = weekEndKey(getLocalDateKey());
@@ -33,7 +35,7 @@ function mockStamp(state: Snapshot['state']) {
 function mockSaveState(state: Snapshot['state'], base: { updatedAt: number } | null) {
   const merged = Number(base?.updatedAt) !== mockServer.updatedAt;
   mockServer = { updatedAt: mockServer.updatedAt + 1, state: mockStamp(merged ? mockServer.state : state) };
-  return { ok: true, state: mockServer.state, updatedAt: mockServer.updatedAt, merged };
+  return { ok: true, state: mockServer.state, updatedAt: mockServer.updatedAt, merged, ...(mockKeptDays ? { keptDays: mockKeptDays } : {}) };
 }
 function mockCheckIn({ habitId, date, completed }: { habitId: string; date: string; completed: boolean }) {
   const habit = mockServer.state.habits.find((item) => item.id === habitId);
@@ -121,6 +123,7 @@ const saves = () => (saveRemoteAppState as jest.Mock).mock.calls.length;
 beforeEach(async () => {
   jest.clearAllMocks();
   mockCheckInDelay = 0;
+  mockKeptDays = undefined;
   mockReminded.length = 0;
   mockWidget.length = 0;
   await AsyncStorage.clear();
@@ -209,5 +212,32 @@ describe('the streak', () => {
     expect(app().streak).toBe(7);
     expect(app().bestStreak).toBe(7);
     expect(app().celebration).toMatchObject({ kind: 'streak', title: '7-day streak!', message: '7 days in a row with a check-in. +15 tokens! Keep the flame going!' });
+  });
+
+  describe('keeps the miss of a deleted habit', () => {
+    // Six days in a row on a habit that has ended; gym, started yesterday, was missed; read is done today.
+    const older = habit('older', { startDate: day(-30), activeUntil: day(-2), completionDates: [-7, -6, -5, -4, -3, -2].map(day) });
+    const gym = habit('gym', { startDate: day(-1), activeUntil: weekEndKey(today) });
+    const read = habit('read', { activeUntil: weekEndKey(today), completionDates: [today] });
+    const freezes = (keptDays: Record<string, string>) => ({ ok: true, available: 0, max: 2, cost: 30, frozenDays: [], keptDays, used: [] });
+
+    it('with the days kept that the save answers with', async () => {
+      (syncStreakFreezes as jest.Mock).mockResolvedValueOnce(freezes({}));
+      await open([older, gym, read]);
+      expect(app().streak).toBe(1);
+      // Deleting gym leaves yesterday with nothing due; the server keeps its miss and says so.
+      mockKeptDays = { [day(-1)]: 'breaks' };
+      act(() => app().deleteHabit('gym'));
+      await wait();
+      expect(saveRemoteAppState).toHaveBeenCalled();
+      expect(app().streakFreeze?.keptDays).toEqual({ [day(-1)]: 'breaks' });
+      expect([app().streak, app().bestStreak]).toEqual([1, 6]);
+    });
+
+    it('on another device, with the days kept that the freeze status brings', async () => {
+      (syncStreakFreezes as jest.Mock).mockResolvedValueOnce(freezes({ [day(-1)]: 'breaks' }));
+      await open([older, read]);
+      expect([app().streak, app().bestStreak]).toEqual([1, 6]);
+    });
   });
 });

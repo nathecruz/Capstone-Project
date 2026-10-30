@@ -202,6 +202,7 @@ test('the planner history is read from the habits and check-ins of the student',
       if (/FROM habits\b/.test(sql)) return { rows: habits.map((habit) => ({ ...habit, id: `user-1:habit:${habit.id}` })) };
       if (/FROM habit_completions/.test(sql)) return { rows: completions };
       if (/FROM streak_freeze_days/.test(sql)) return { rows: [{ date: '2026-10-18' }] };
+      if (/FROM streak_kept_days/.test(sql)) return { rows: [] };
       throw new Error(`unexpected query ${sql}`);
     },
   };

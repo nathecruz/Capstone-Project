@@ -2,7 +2,7 @@
 // shows how close the next one is. (They used to look only at today, so most never unlocked and
 // earned ones disappeared the next day.)
 import type { Goal, Habit } from '@/hooks/app-state/types';
-import { longestAccountStreak } from '@/utils/account-streak';
+import { longestAccountStreak, type KeptDays } from '@/utils/account-streak';
 import { levelProgress, timeOfDayFor } from '@/utils/engagement';
 import { getLocalDateKey } from '@/utils/habit-visibility';
 import { isHabitActiveOn } from '@/utils/habit-week';
@@ -131,13 +131,13 @@ const BADGES: (Omit<BadgeProgress, 'current' | 'earned' | 'share'> & { measure: 
 
 /**
  * Every habit counts, also those of past weeks (habits last one week): the badges are history. The
- * streak is the longest account streak (days in a row with a check-in, utils/account-streak.ts), and
- * "Track 5 habits" counts every habit ever made.
+ * streak is the longest account streak (days in a row with a check-in, utils/account-streak.ts), with
+ * the days the server kept (`keptDays`), and "Track 5 habits" counts every habit ever made.
  */
-function measure(habits: Habit[], goals: Goal[], today: string, frozenDays: string[]): Measures {
+function measure(habits: Habit[], goals: Goal[], today: string, frozenDays: string[], keptDays: KeptDays): Measures {
   const weekly = weeks(habits, today);
   return {
-    bestStreak: longestAccountStreak(habits, today, frozenDays),
+    bestStreak: longestAccountStreak(habits, today, frozenDays, keptDays),
     morning: checkIns(habits, (habit) => timeOfDayFor(habit) === 'morning'),
     focus: checkIns(habits, (habit) => FOCUS_CATEGORIES.has(habit.category)),
     bestWeek: Math.round(Math.max(0, ...weekly.map((week) => week.rate)) * 100),
@@ -152,8 +152,8 @@ function measure(habits: Habit[], goals: Goal[], today: string, frozenDays: stri
 }
 
 /** Every badge with how far along it is; earned ones stay earned because they come from history. */
-export function badgeProgress(habits: Habit[], goals: Goal[] = [], now = new Date(), frozenDays: string[] = []): BadgeProgress[] {
-  const measures = measure(habits, goals, getLocalDateKey(now), frozenDays);
+export function badgeProgress(habits: Habit[], goals: Goal[] = [], now = new Date(), frozenDays: string[] = [], keptDays: KeptDays = {}): BadgeProgress[] {
+  const measures = measure(habits, goals, getLocalDateKey(now), frozenDays, keptDays);
   return BADGES.map(({ measure: read, ...badge }) => {
     const current = read(measures);
     return { ...badge, current, earned: current >= badge.target, share: Math.min(1, current / badge.target) };
@@ -178,11 +178,11 @@ export function badgeRemaining(badge: BadgeProgress) {
 export type Milestone = { id: string; title: string; icon: string; color: string; unit: string; current: number; steps: number[]; next: number | null; reached: number[] };
 
 /** Counted milestones: check-ins, best (account) streak, level and perfect days, each with the next step. */
-export function milestones(habits: Habit[], points: number, now = new Date(), frozenDays: string[] = []): Milestone[] {
+export function milestones(habits: Habit[], points: number, now = new Date(), frozenDays: string[] = [], keptDays: KeptDays = {}): Milestone[] {
   const today = getLocalDateKey(now);
   const rows = [
     { id: 'check-ins', title: 'Check-ins', icon: 'checkmark-done', color: '#5B42D8', unit: 'check-ins', current: habits.reduce((sum, habit) => sum + habit.completionDates.length, 0), steps: [10, 25, 50, 100, 250, 500] },
-    { id: 'streak', title: 'Best streak', icon: 'flame', color: '#F08A3C', unit: 'days', current: longestAccountStreak(habits, today, frozenDays), steps: [3, 7, 14, 30, 50, 100] },
+    { id: 'streak', title: 'Best streak', icon: 'flame', color: '#F08A3C', unit: 'days', current: longestAccountStreak(habits, today, frozenDays, keptDays), steps: [3, 7, 14, 30, 50, 100] },
     { id: 'level', title: 'Level', icon: 'star', color: '#E7A72F', unit: 'level', current: levelProgress(points).level, steps: [2, 5, 10, 20, 50] },
     { id: 'perfect-days', title: 'Perfect days', icon: 'sparkles', color: '#3BAA74', unit: 'days', current: perfectDayCount(habits, today), steps: [1, 5, 10, 25, 50] },
   ];
@@ -193,7 +193,7 @@ export function milestones(habits: Habit[], points: number, now = new Date(), fr
  * All-time numbers for the stats screens: total check-ins, the longest account streak and
  * completion rates over recent days (a habit counts only on the days of its week).
  */
-export function historyStats(habits: Habit[], now = new Date(), frozenDays: string[] = []) {
+export function historyStats(habits: Habit[], now = new Date(), frozenDays: string[] = [], keptDays: KeptDays = {}) {
   const today = getLocalDateKey(now);
   const rate = (days: number) => {
     let due = 0;
@@ -209,7 +209,7 @@ export function historyStats(habits: Habit[], now = new Date(), frozenDays: stri
   const daysThisWeek = ((new Date(year, month - 1, day).getDay() + 6) % 7) + 1;
   return {
     totalCheckIns: habits.reduce((sum, habit) => sum + habit.completionDates.length, 0),
-    bestStreak: longestAccountStreak(habits, today, frozenDays),
+    bestStreak: longestAccountStreak(habits, today, frozenDays, keptDays),
     thisWeekRate: rate(daysThisWeek),
     last7Rate: rate(7),
     last30Rate: rate(30),

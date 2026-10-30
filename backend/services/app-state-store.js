@@ -23,7 +23,7 @@ import { syncDailyChallenges } from './daily-challenges.js';
 import { hasHabitEnded, isDateKey } from './habit-week.js';
 import { syncWeeklyQuests } from './quests.js';
 import { computeStreak } from './streaks.js';
-import { getFrozenDays } from './streak-freeze.js';
+import { getFrozenDays, getKeptDays } from './streak-freeze.js';
 import { applyWallet, awardAccountStreakMilestones, awardCheckIn, countedCheckIns, getWallet, POINTS_PER_CHECK_IN } from './wallet.js';
 import { weeklyResetSnapshot } from './weekly-reset.js';
 
@@ -209,13 +209,13 @@ export async function pruneAllSnapshots() {
  * The seven-day streak follows the account streak, like the app's badge: the longest run of days
  * with a check-in (services/account-streak.js), so it stays earned once reached.
  */
-export function earnedAchievements(habits, { today = todayFor(habits.find((habit) => habit.completionTimeZone)?.completionTimeZone), frozenDays = [] } = {}) {
+export function earnedAchievements(habits, { today = todayFor(habits.find((habit) => habit.completionTimeZone)?.completionTimeZone), frozenDays = [], keptDays = {} } = {}) {
   const earned = new Set();
   if (habits.length > 0) earned.add('first-habit');
   if (habits.length >= 3) earned.add('habit-builder');
   if (habits.some((habit) => habit.reminderEnabled && /AM/i.test(habit.reminderTime || ''))) earned.add('early-bird');
   if (habits.some((habit) => habit.category === 'Mind' && habit.done)) earned.add('focus-master');
-  if (habits.some((habit) => Number(habit.streak) >= 7) || longestAccountStreak(habits, today, frozenDays) >= 7) earned.add('streak-week');
+  if (habits.some((habit) => Number(habit.streak) >= 7) || longestAccountStreak(habits, today, frozenDays, keptDays) >= 7) earned.add('streak-week');
   return [...earned];
 }
 
@@ -240,7 +240,8 @@ async function payForSyncedCheckIns(connection, userId, { habits, byHabit, added
   const after = habits.map((habit) => ({ ...habit, completionDates: byHabit.get(String(habit.id).trim()) || [] }));
   const before = after.map((habit) => (added.includes(String(habit.id).trim()) ? { ...habit, completionDates: habit.completionDates.filter((date) => date !== day.today) } : habit));
   const frozen = await getFrozenDays(connection, userId);
-  await awardAccountStreakMilestones(connection, userId, accountStreakRun(before, day.today, frozen), accountStreakRun(after, day.today, frozen), { timeZone: day.timeZone, now });
+  const kept = await getKeptDays(connection, userId);
+  await awardAccountStreakMilestones(connection, userId, accountStreakRun(before, day.today, frozen, kept), accountStreakRun(after, day.today, frozen, kept), { timeZone: day.timeZone, now });
   await syncDailyChallenges(connection, userId, day.today, day.timeZone, now);
   await syncWeeklyQuests(connection, userId, day.today, now);
 }
@@ -321,7 +322,7 @@ export async function syncNormalizedState(userId, state, updatedAt, connection, 
 
   // Achievements are upserted, so earned dates and the read state of their
   // notifications survive later syncs (they used to be recreated every time).
-  const earned = earnedAchievements(serverHabits, { frozenDays: await getFrozenDays(connection, userId) });
+  const earned = earnedAchievements(serverHabits, { frozenDays: await getFrozenDays(connection, userId), keptDays: await getKeptDays(connection, userId) });
   await connection.query('DELETE FROM user_achievements WHERE user_id=$1 AND NOT (achievement_id = ANY($2::text[]))', [userId, earned]);
   await connection.query(
     `DELETE FROM notifications WHERE user_id=$1 AND type='achievement'
