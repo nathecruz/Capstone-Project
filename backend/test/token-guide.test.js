@@ -127,6 +127,9 @@ test('what can still be earned today: the unclaimed reward, the paid check-ins l
   assert.equal(canStillEarnToday({ dailyClaim: { claimedToday: false, amount: 4 }, paidToday: 1, openHabits: 2, challenges, mysteryBox: { status: 'locked' } }), 4 + 10 + 14 + 20, 'only the habits still open');
   assert.equal(canStillEarnToday({ dailyClaim: { claimedToday: true, amount: 4 }, paidToday: 7, openHabits: 3, challenges, mysteryBox: { status: 'opened' } }), 14, 'no paid check-ins left');
   assert.equal(canStillEarnToday({ dailyClaim: { claimedToday: true, amount: 15 }, paidToday: 0, openHabits: 0, challenges: [], mysteryBox: { status: 'opened' } }), 0);
+  // A challenge that can no longer be finished today (before 10 AM, but it is past 10) is not offered.
+  const late = [{ complete: false, reward: 5, reachable: false }, { complete: false, reward: 10, reachable: true }];
+  assert.equal(canStillEarnToday({ dailyClaim: { claimedToday: true, amount: 4 }, paidToday: 2, openHabits: 1, challenges: late, mysteryBox: { status: 'opened' } }), 5 + 10);
 });
 
 test('the pace counts what was earned in the last 7 days, without refunds, a day on average', () => {

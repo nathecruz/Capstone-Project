@@ -150,7 +150,8 @@ export default function registerEngagementRoutes(app) {
     const session = await requireAuth(request, response);
     if (!session) return;
     const day = await queryDay(request, session.userId);
-    if (!day?.ok) return response.status(400).json({ ok: false, message: 'Send your today and time zone.' });
+    if (!day) return response.status(400).json({ ok: false, message: 'Send your today and time zone.' });
+    if (!day.ok) return response.status(409).json(dayClosedBody(day, 'That day is over. Your challenges follow your today.'));
     response.json({ ok: true, challenges: await getDailyChallenges({ query }, session.userId, day.today, day.timeZone) });
   });
 
@@ -159,7 +160,8 @@ export default function registerEngagementRoutes(app) {
     const session = await requireAuth(request, response);
     if (!session) return;
     const day = await queryDay(request, session.userId);
-    if (!day?.ok) return response.status(400).json({ ok: false, message: 'Send your today and time zone.' });
+    if (!day) return response.status(400).json({ ok: false, message: 'Send your today and time zone.' });
+    if (!day.ok) return response.status(409).json(dayClosedBody(day, 'That day is over. Claim today\'s reward instead.'));
     response.json({ ok: true, ...await getDailyClaim({ query }, session.userId, day.today) });
   });
 

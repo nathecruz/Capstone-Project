@@ -30,7 +30,7 @@ export function giftLimitRefusal({ sent, received, today, recipientId, recipient
     return refusal(429, 'GIFT_DAILY_LIMIT', `You can send ${GIFTS_PER_DAY} treats a day. Try again tomorrow.`);
   }
   if (sent.some((gift) => gift.recipientId === recipientId && gift.createdAt > now - PAIR_WINDOW_MS)) {
-    return refusal(429, 'GIFT_PAIR_LIMIT', `You already sent ${recipientName} a treat this week.`);
+    return refusal(429, 'GIFT_PAIR_LIMIT', `You already sent ${recipientName} a treat in the last 7 days.`);
   }
   if (received.filter((at) => at > now - DAY_MS).length >= GIFTS_RECEIVED_PER_DAY) {
     return refusal(429, 'RECIPIENT_FULL', `${recipientName} has received lots of treats today. Try again tomorrow.`);

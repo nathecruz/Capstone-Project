@@ -115,7 +115,7 @@ describe('sending a treat', () => {
   });
 
   it("shows the server's message when it refuses the treat", async () => {
-    jest.mocked(sendBuddyGift).mockResolvedValue({ ok: false, code: 'GIFT_PAIR_LIMIT', message: 'You already sent Maria R. a treat this week.' });
+    jest.mocked(sendBuddyGift).mockResolvedValue({ ok: false, code: 'GIFT_PAIR_LIMIT', message: 'You already sent Maria R. a treat in the last 7 days.' });
     const { screen, onSent } = open(maria);
     fireEvent.press(screen.getByText('Send a treat'));
     fireEvent.press(screen.getByLabelText('Apple, 15 tokens'));
@@ -123,7 +123,7 @@ describe('sending a treat', () => {
       fireEvent.press(screen.getByText('Send 🍎 Apple · 15 tokens'));
     });
     expect(sendBuddyGift).toHaveBeenCalledWith({ to: '0a1b2c3d4e5f', treatId: 'apple', messageId: 0 }, getLocalDateKey());
-    expect(screen.getByText('You already sent Maria R. a treat this week.')).toBeTruthy();
+    expect(screen.getByText('You already sent Maria R. a treat in the last 7 days.')).toBeTruthy();
     expect(mockContext.applyWallet).not.toHaveBeenCalled();
     expect(onSent).not.toHaveBeenCalled();
   });

@@ -38,7 +38,7 @@ jest.mock('@/authentication/session', () => {
   return { subscribeToAuthChanges: (listener: () => void) => { listeners.push(listener); return () => undefined; }, mockSignOut: () => listeners.forEach((listener) => listener()) };
 });
 // The rest is what Home's tiles read.
-const mockContext = { tokens: 120, isFaculty: false, isDarkMode: false, points: 0, streakFreeze: null, currentHabits: [], streak: 0, bestStreak: 0 };
+const mockContext = { tokens: 120, isFaculty: false, accountReady: true, isDarkMode: false, points: 0, streakFreeze: null, currentHabits: [], streak: 0, bestStreak: 0 };
 jest.mock('@/hooks/color-scheme-context', () => ({ useAppColorScheme: () => mockContext }));
 jest.mock('@/hooks/use-buddy', () => ({ useBuddy: () => ({ buddy: null }) }));
 jest.mock('@/components/streak-freeze-sheet', () => {
@@ -137,6 +137,7 @@ beforeEach(() => {
   // A new account: the wallet store starts empty.
   jest.requireMock<{ mockSignOut: () => void }>('@/authentication/session').mockSignOut();
   mockContext.isFaculty = false;
+  mockContext.accountReady = true;
   delete mockParams.section;
   summaryMock.mockImplementation(async () => summaryWith());
   historyMock.mockImplementation(async (query: { filter?: string; before?: string | null }) => historyAnswer(query));
@@ -336,6 +337,26 @@ describe('Tokens screen', () => {
     expect(screen.getByText('All')).toBeTruthy();
     expect(screen.getByText('Show less')).toBeTruthy();
     expect(screen.getByText('Mon, Oct 20')).toBeTruthy();
+  });
+
+  it('asks for nothing until the account is loaded, then shows the wallet', async () => {
+    mockContext.accountReady = false;
+    const screen = render(<WalletScreen />);
+    await act(async () => undefined);
+    expect(screen.getByText('Counting your tokens...')).toBeTruthy();
+    expect(summaryMock).not.toHaveBeenCalled();
+    expect(historyMock).not.toHaveBeenCalled();
+    mockContext.accountReady = true;
+    screen.rerender(<WalletScreen />);
+    await screen.findByText('Ways to earn');
+    await screen.findByText('Checked in: Read');
+    expect(summaryMock).toHaveBeenCalledWith(today);
+    // That is the opening, which loads each once: not a return to the screen that loads them again.
+    expect(summaryMock).toHaveBeenCalledTimes(1);
+    expect(historyMock).toHaveBeenCalledTimes(1);
+    await act(async () => mockFocus.effect?.());
+    expect(summaryMock).toHaveBeenCalledTimes(2);
+    expect(historyMock).toHaveBeenCalledTimes(2);
   });
 
   it('sends faculty back without asking for a wallet', async () => {

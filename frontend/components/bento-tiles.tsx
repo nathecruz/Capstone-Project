@@ -52,10 +52,10 @@ export function BentoTile({ tone, label, value, unit, detail, icon, onPress, acc
 export function BentoTiles({ habits, onFreeze, style }: { habits: Habit[]; onFreeze: () => void; style?: object | false }) {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
-  const { points, tokens, streakFreeze, isFaculty, currentHabits, streak, bestStreak } = useAppColorScheme();
+  const { points, tokens, streakFreeze, isFaculty, accountReady, currentHabits, streak, bestStreak } = useAppColorScheme();
   const { buddy } = useBuddy();
-  // What the Tokens screen counts as affordable now (faculty have no tokens).
-  const affordable = useWallet(getLocalDateKey(), !isFaculty).summary?.affordable ?? 0;
+  // What the Tokens screen counts as affordable now (faculty have no tokens; asked once the role is known).
+  const affordable = useWallet(getLocalDateKey(), !isFaculty && accountReady).summary?.affordable ?? 0;
   const frozenDays = streakFreeze?.frozenDays;
   const totalCheckIns = useMemo(() => habits.reduce((sum, habit) => sum + habit.completionDates.length, 0), [habits]);
   const freezes = streakFreeze?.available ?? 0;

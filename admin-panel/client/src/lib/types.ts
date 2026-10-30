@@ -144,8 +144,8 @@ export interface TokenEconomy {
   spent28: number;
   undone28: number;
   byKind28: TokenKindTotal[];
-  /** Balances of the students active in the 28 days (never below 0). */
-  balances: { students: number; median: number; p90: number; over1000: number };
+  /** Balances of the students active in the 28 days (never below 0); withheld below the anonymity threshold. */
+  balances: { students: number; median: number | null; p90: number | null; over1000: number | null; withheld: boolean };
   /** The last 4 weeks whose bonus can be claimed (the newest is last week): claims by amount, gold 30, silver 20, bronze 10. */
   weeklyBonus: { weekStart: string; claims: number; gold: number; silver: number; bronze: number }[];
   /** The last 4 weeks, this one included. */

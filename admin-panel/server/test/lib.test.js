@@ -15,6 +15,7 @@ import {
   streakBucket,
   suppressSmallGroups,
   todayInZone,
+  withholdSmallBalances,
 } from '../src/lib/metrics.js';
 import { generatePassword, passwordProblem } from '../src/lib/passwords.js';
 import { hasPermission, permissionsFor } from '../src/lib/permissions.js';
@@ -81,6 +82,13 @@ test('k-anonymity merges or withholds small groups', () => {
   const withheld = suppressSmallGroups([{ label: 'A', students: 5 }, { label: 'B', students: 1 }], 3, []);
   assert.deepEqual(withheld.rows.map((row) => row.label), ['A']);
   assert.equal(withheld.withheldStudents, 1);
+});
+
+test('token balances of fewer active students than the threshold are withheld', () => {
+  const two = { students: 2, median: 640, p90: 1180, over1000: 1 };
+  assert.deepEqual(withholdSmallBalances(two, 3), { students: 2, median: null, p90: null, over1000: null, withheld: true }, "two students' balances could be told apart");
+  assert.deepEqual(withholdSmallBalances({ ...two, students: 3 }, 3), { ...two, students: 3, withheld: false });
+  assert.deepEqual(withholdSmallBalances({ students: 0, median: 0, p90: 0, over1000: 0 }, 3), { students: 0, median: 0, p90: 0, over1000: 0, withheld: false }, 'nothing to hide without students');
 });
 
 test('category rows keep a stable color slot per managed category', () => {

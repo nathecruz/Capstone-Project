@@ -9,7 +9,7 @@ import { accountStreakRun } from './account-streak.js';
 import { BUDDY_ITEMS, BUDDY_STAGES, BUDDY_TREATS, buddyStageIndex, DROP_COST, getBuddy } from './buddy.js';
 import { GIFTS_PER_DAY, giftsSentOn } from './buddy-gifts.js';
 import { isPastHabitDeadline } from './completion-date.js';
-import { CHALLENGE_REWARDS, DAILY_CHALLENGE_COUNT, getDailyChallenges } from './daily-challenges.js';
+import { CHALLENGE_REWARDS, DAILY_CHALLENGE_COUNT, getDailyChallenges, minuteOfDay } from './daily-challenges.js';
 import { DAILY_CLAIM_REWARDS, getDailyClaim } from './daily-claims.js';
 import { isHabitActiveOn, weekEndKey } from './habit-week.js';
 import { getMysteryBox, MYSTERY_MAX, MYSTERY_REWARDS } from './mystery-box.js';
@@ -150,14 +150,18 @@ export function spendRows({ balance, rewards, owned, freezes, buddy, giftsSentTo
   ];
 }
 
+/** A challenge or quest not finished that can still be (a challenge says so when it cannot: `reachable` false). */
+const stillOpen = (entry) => !entry.complete && entry.reachable !== false;
+
 /**
  * The most that can still be earned today: the daily reward if it is not claimed, +5 for each habit
  * due today, not done and not past its last reminder time (`openHabits`, up to the paid check-ins
- * left), the challenges not finished and, while the mystery box is not opened, its top prize.
+ * left), the challenges that can still be finished today and, while the mystery box is not opened,
+ * its top prize (a new habit's check-in can still unlock it).
  */
 export function canStillEarnToday({ dailyClaim, paidToday, openHabits, challenges, mysteryBox }) {
   const checkIns = TOKENS_PER_CHECK_IN * Math.min(Math.max(0, PAID_CHECK_INS_PER_DAY - paidToday), openHabits);
-  const unfinished = challenges.filter((challenge) => !challenge.complete).reduce((sum, challenge) => sum + challenge.reward, 0);
+  const unfinished = challenges.filter(stillOpen).reduce((sum, challenge) => sum + challenge.reward, 0);
   return (dailyClaim.claimedToday ? 0 : dailyClaim.amount) + checkIns + unfinished + (mysteryBox.status === 'opened' ? 0 : MYSTERY_MAX);
 }
 
@@ -211,11 +215,11 @@ export function streakGoal(days) {
   return { days, next: milestone ? { days: milestone, bonus: STREAK_MILESTONE_BONUS[milestone], daysLeft: milestone - days } : null };
 }
 
-/** Done, total, paid and still open of a list of daily challenges or weekly quests. */
+/** Done, total, paid and still to earn of a list of daily challenges or weekly quests. */
 function progressOf(list) {
   const rewards = (entries) => entries.reduce((sum, entry) => sum + entry.reward, 0);
   const done = list.filter((entry) => entry.complete);
-  return { done: done.length, total: list.length, earned: rewards(done), available: rewards(list.filter((entry) => !entry.complete)) };
+  return { done: done.length, total: list.length, earned: rewards(done), available: rewards(list.filter(stillOpen)) };
 }
 
 /**
@@ -227,13 +231,12 @@ export async function getWalletSummary(db, userId, { today, timeZone }, now = Da
   const weekStart = weekStartOf(today);
   const weekEnd = weekEndKey(today);
   const weekStartsAt = periodResetsAt({ end: shiftDay(weekStart, -1) }, timeZone);
-  const [balance, ledger, paidToday, dailyClaim, challenges, quests, mysteryBox, habits, completions, saved, rewards, buddy, freezes, bonus, giftsSentToday] = await runAll(db, [
+  const [balance, ledger, paidToday, dailyClaim, quests, mysteryBox, habits, completions, saved, rewards, buddy, freezes, bonus, giftsSentToday] = await runAll(db, [
     () => tokenBalance(db, userId),
     // The week's rows and the last 7 days' (for the pace).
     () => db.query('SELECT id, amount, label, created_at AS "createdAt" FROM token_transactions WHERE user_id=$1 AND created_at >= $2', [userId, Math.min(weekStartsAt, now - PACE_DAYS * DAY_MS)]),
     () => paidCheckIns(db, userId, today),
     () => getDailyClaim(db, userId, today),
-    () => getDailyChallenges(db, userId, today, timeZone),
     () => getWeeklyQuests(db, userId, today),
     () => getMysteryBox(db, userId, today),
     () => loadHabits(db, userId),
@@ -258,6 +261,8 @@ export async function getWalletSummary(db, userId, { today, timeZone }, now = Da
   const reminders = new Map((Array.isArray(saved.rows[0]?.habits) ? saved.rows[0].habits : []).map((habit) => [String(habit?.id), habit]));
   const missed = (habit) => isPastHabitDeadline(reminders.get(habit.id), today, timeZone, new Date(now));
   const openHabits = habits.filter((habit) => isHabitActiveOn(habit, today) && isScheduledDay(habitSchedule(habit), today) && !doneToday(habit) && !missed(habit)).length;
+  // Which challenges can still be finished: the time-of-day ones close at 10 AM and noon.
+  const challenges = await getDailyChallenges(db, userId, today, timeZone, { minute: minuteOfDay(now, timeZone), isClosed: missed });
   const streak = accountStreakRun(habits.map((habit) => ({ ...habit, completionDates: datesByHabit.get(habit.id) ?? [] })), today, freezes.frozenDays).streak;
   const spend = spendRows({ balance, rewards: rewards.rewards, owned: rewards.owned, freezes, buddy, giftsSentToday });
   const perDay = pacePerDay(rows, now);

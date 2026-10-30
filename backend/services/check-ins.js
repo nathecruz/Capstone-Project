@@ -61,7 +61,7 @@ export async function setCheckIn(connection, { userId, habitId, date, timeZone, 
       const after = withCompletionDates(saved.state.habits, await getServerCompletions(userId, connection));
       const before = after.map((entry) => (entry.id === habitId ? { ...entry, completionDates: entry.completionDates.filter((day) => day !== date) } : entry));
       const frozen = await getFrozenDays(connection, userId);
-      await awardAccountStreakMilestones(connection, userId, accountStreakRun(before, date, frozen), accountStreakRun(after, date, frozen), now);
+      await awardAccountStreakMilestones(connection, userId, accountStreakRun(before, date, frozen), accountStreakRun(after, date, frozen), { timeZone, now });
     }
   } else {
     const removed = await connection.query('DELETE FROM habit_completions WHERE user_id=$1 AND habit_id=$2 AND completed_date=$3', [userId, habitId, date]);
@@ -80,7 +80,7 @@ export async function setCheckIn(connection, { userId, habitId, date, timeZone, 
     }),
   };
   const updatedAt = Math.max(now, Number(saved.updatedAt) + 1);
-  await syncNormalizedState(userId, state, updatedAt, connection);
+  await syncNormalizedState(userId, state, updatedAt, connection, now);
   const dailyChallenges = await syncDailyChallenges(connection, userId, date, timeZone || 'UTC', now);
   await syncWeeklyQuests(connection, userId, date, now);
   const serverState = await buildServerState(userId, state, connection);

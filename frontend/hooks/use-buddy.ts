@@ -27,6 +27,14 @@ export function adjustBuddyCheckIns(delta: number) {
   if (cached) publishBuddy({ ...cached, checkIns: Math.max(0, cached.checkIns + delta) });
 }
 
+/**
+ * The server's count of the check-ins Habi grows on (its points / 20: both count the same
+ * check-ins), so the count cannot drift from the server's after undos, deleted habits or other devices.
+ */
+export function syncBuddyCheckIns(checkIns: number) {
+  if (cached && cached.checkIns !== checkIns) publishBuddy({ ...cached, checkIns });
+}
+
 /** Loads the buddy again (it changed on the server) and shares it with every screen. */
 export async function reloadBuddy() {
   const result = await getBuddy(getLocalDateKey());

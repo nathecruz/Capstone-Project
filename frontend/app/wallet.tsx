@@ -35,12 +35,15 @@ export default function WalletScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const insets = useSafeAreaInsets();
-  const { tokens, isFaculty } = useAppColorScheme();
+  const { tokens, isFaculty, accountReady } = useAppColorScheme();
   const { section } = useLocalSearchParams<{ section?: string }>();
   const wantsHistory = section === 'history';
   const today = getLocalDateKey();
-  const { summary, status } = useWallet(today, !isFaculty);
-  const history = useWalletHistory(!isFaculty);
+  // Until the account is loaded its role is not known: nothing is asked for (a faculty account
+  // opened at /wallet would only get 403s), and the screen shows that it is loading.
+  const student = !isFaculty && accountReady;
+  const { summary, status } = useWallet(today, student);
+  const history = useWalletHistory(student);
   const [showAll, setShowAll] = useState(wantsHistory);
   const [freezeOpen, setFreezeOpen] = useState(false);
   // Where the history starts, once the rows above it show the summary (for ?section=history).
@@ -56,11 +59,16 @@ export default function WalletScreen() {
   }, [isFaculty]);
 
   // Back from a screen or sheet where tokens were spent or earned: the numbers load again at once,
-  // not at the next live pulse (the first focus is the opening, which loads them already).
+  // not at the next live pulse. The first focus once the account is a student's is the opening,
+  // which loads them already (also when the account loads while the screen is open).
   useFocusEffect(useCallback(() => {
-    if (focusedRef.current && !isFaculty) reloadWallet();
+    if (!student) {
+      focusedRef.current = false;
+      return;
+    }
+    if (focusedRef.current) reloadWallet();
     focusedRef.current = true;
-  }, [isFaculty]));
+  }, [student]));
 
   useEffect(() => {
     if (!wantsHistory || scrolledRef.current || historyY === null) return;
@@ -82,7 +90,7 @@ export default function WalletScreen() {
     if (history.filter !== 'all') void loadWalletHistory('all');
   };
 
-  const balance = summary?.tokens ?? tokens;
+  const balance = summary?.tokens ?? (accountReady ? tokens : '…');
   const statusStyle: Record<WalletSpendStatus, object> = { owned: styles.statusOwned, ready: styles.statusReady, short: styles.statusShort, locked: styles.statusLocked, full: styles.statusFull };
   const visibleHistory: WalletHistoryItem[] = showAll ? history.items : history.items.slice(0, HISTORY_PREVIEW);
 

@@ -151,6 +151,24 @@ export function checkInCounts(dateKey: string, checkInsThatDay: number) {
   return dateKey < CHECK_INS_CAPPED_FROM || checkInsThatDay < COUNTED_CHECK_INS_PER_DAY;
 }
 
+// What a check-in that counts is worth on the server (backend/services/wallet.js). Habi grows on
+// the same counted check-ins, so the server's points / POINTS_PER_CHECK_IN is Habi's count.
+export const POINTS_PER_CHECK_IN = 20;
+export const TOKENS_PER_CHECK_IN = 5;
+
+/**
+ * How a check-in on `dateKey` (completed) or its undo changes the day, with `checkInsBefore`
+ * check-ins that day before the change, until the server answers: `counted` (+1, 0 or -1, for
+ * points and Habi) and `tokens` (+5 for one of the day's paid check-ins; an undo takes 5 back
+ * unless the check-in was `capped`, so it paid nothing).
+ */
+export function checkInChange(dateKey: string, checkInsBefore: number, completed: boolean, capped = false) {
+  if (completed) {
+    return { counted: checkInCounts(dateKey, checkInsBefore) ? 1 : 0, tokens: checkInsBefore < COUNTED_CHECK_INS_PER_DAY ? TOKENS_PER_CHECK_IN : 0 };
+  }
+  return { counted: checkInCounts(dateKey, checkInsBefore - 1) ? -1 : 0, tokens: capped ? 0 : -TOKENS_PER_CHECK_IN };
+}
+
 export const STREAK_MILESTONES = [3, 7, 14, 21, 30, 50, 75, 100, 150, 200, 365];
 
 /**

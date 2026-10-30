@@ -7,10 +7,12 @@ import { goalPlanSchema } from '../schemas.js';
 import { buildHabitContext, habitFrequency } from '../services/ai-context.js';
 import { FACULTY_CONTEXT, buildUserPrompt, cleanAnswer, forAudience, normalizeGoalPlan, systemPromptFor } from '../services/ai-prompts.js';
 import { keepCompletedGoalSteps, sameState, stableStringify } from '../services/app-state-sync.js';
+import { isValidCompletionDate } from '../services/completion-date.js';
 import { escapeHtml, passwordChangedEmail, passwordResetCodeEmail } from '../services/email-templates.js';
 import { getEmailConfig, sendEmail } from '../services/mailer.js';
 import { createMlWaker } from '../services/ml-wake.js';
 import { passwordStrength } from '../services/passwords.js';
+import { getSupportEmailConfig } from '../services/support-email.js';
 
 test('recognises template values copied from .env.example', () => {
   for (const value of ['', 'your-groq-api-key','replace-with-a-long-random-secret', 'postgresql://user:password@ep-example.us-east-2.aws.neon.tech/habitai', 'your-email@gmail.com', 'xxxx']) {
@@ -442,4 +444,46 @@ test('a history cursor names the row a page ended at, and anything else is refus
   for (const cursor of ['not-a-cursor', '', encode([1.5, 'x']), encode(['1790000000123', 'x']), encode([1_790_000_000_123, '']), encode([1_790_000_000_123, 7]), encode({ createdAt: 1, id: 'x' })]) {
     assert.equal(readHistoryCursor(cursor), null, cursor);
   }
+});
+
+test('habit completion dates use the client time zone', () => {
+  const now = new Date('2026-09-30T12:00:00.000Z');
+  assert.equal(isValidCompletionDate('2026-10-01', 'Pacific/Kiritimati', now), true);
+  assert.equal(isValidCompletionDate('2026-10-01', 'UTC', now), false);
+  assert.equal(isValidCompletionDate('2026-10-02', 'Pacific/Kiritimati', now), false);
+  assert.equal(isValidCompletionDate('2026-10-01', 'Invalid/TimeZone', now), false);
+});
+
+test('goal plan schema strips uncalibrated numeric score fields', () => {
+  const plan = {
+    category: 'Health',
+    summary: 'Build a realistic routine with repeatable steps.',
+    intensity: 'Balanced',
+    focusAreas: ['Movement', 'Sleep', 'Planning'],
+    actionPlan: ['Walk today', 'Set a bedtime', 'Plan meals', 'Stretch after class', 'Drink water at lunch', 'Review progress'],
+    actionDueDates: ['Today', 'Tomorrow', 'In 2 days', 'In 3 days', 'In 5 days', 'In 7 days'],
+    habits: [{ name: 'Evening walk', category: 'Health', frequency: 'Daily', days: [], time: '06:30 PM', reason: 'An easy start you can repeat every day.' }],
+    habitSuggestions: ['Evening walk', 'Lights out by 11'],
+    weeklyRoadmap: ['Week 1: walk and sleep on time', 'Week 2: add meal planning'],
+    nextMilestone: 'Complete the first week.',
+    successMetric: 'Walk on 5 of 7 days.',
+    motivation: 'Small daily steps add up.',
+    risk: 'A busy day may interrupt the routine.',
+    riskAction: 'Restart with a five-minute walk.',
+    timeline: '30-60 days',
+    nextCheckIn: 'Oct 4, 2026',
+    status: 'Fresh plan',
+  };
+  const parsed = goalPlanSchema.safeParse({ ...plan, score: 91, confidence: 88, potential: 0.9 });
+  assert.equal(parsed.success, true, JSON.stringify(parsed.error?.issues));
+  assert.deepEqual(parsed.data, plan);
+});
+
+test('support email uses the configured inbox or falls back to the SMTP sender', () => {
+  const explicitInbox = getSupportEmailConfig({ SMTP_USER: 'mailer@habitai.app', SMTP_PASSWORD: 'smtp-secret-value', SUPPORT_EMAIL: 'support@habitai.app' });
+  assert.equal(explicitInbox.configured, true);
+  assert.equal(explicitInbox.recipient, 'support@habitai.app');
+  const senderFallback = getSupportEmailConfig({ SMTP_USER: 'mailer@habitai.app', SMTP_PASSWORD: 'smtp-secret-value' });
+  assert.equal(senderFallback.recipient, 'mailer@habitai.app');
+  assert.equal(getSupportEmailConfig({ SMTP_USER: 'mailer@habitai.app' }).configured, false);
 });

@@ -21,6 +21,7 @@ import {
   streakBucket,
   suppressSmallGroups,
   todayInZone,
+  withholdSmallBalances,
 } from '../lib/metrics.js';
 import { getSettings } from '../lib/settings.js';
 import { loadLiveStreaks } from '../lib/streaks.js';
@@ -88,9 +89,9 @@ function countBy(items, keyOf, order) {
  * students active in those days (over 1,000 banked hints that spending options are too weak), the
  * weekly bonus claims and Weekly Drops of the last 4 weeks, the other sinks, the student-days over
  * the check-in cap, and the rewards on sale. Tables a newer app backend adds are only read once they
- * exist (queryIfTable).
+ * exist (queryIfTable). The balances are withheld below the anonymity threshold `k`.
  */
-export async function computeEconomy(tz, today) {
+export async function computeEconomy(tz, today, k) {
   const start = addDays(today, -(ECONOMY_DAYS - 1));
   const thisWeek = mondayOf(today);
   // A bonus is claimed for the week before, so its weeks end last week; this week's drop is on sale now.
@@ -187,7 +188,7 @@ export async function computeEconomy(tz, today) {
     spent28: totals.spent,
     undone28: totals.undone,
     byKind28,
-    balances: balances.rows[0],
+    balances: withholdSmallBalances(balances.rows[0], k),
     weeklyBonus: bonusWeeks.map((weekStart) => ({ claims: 0, gold: 0, silver: 0, bronze: 0, ...bonusByWeek.get(weekStart), weekStart })),
     drops: dropWeeks.map((weekStart) => ({ weekStart, bought: dropsByWeek.get(weekStart) ?? 0 })),
     showcaseOwners: fact.showcaseOwners,
@@ -258,7 +259,7 @@ export async function computeAnalytics(range) {
               count(DISTINCT g.user_id)::int AS students
          FROM goals g JOIN users u ON u.id = g.user_id AND u.role = 'user' GROUP BY 1 ORDER BY 2 DESC`,
     ),
-    computeEconomy(tz, today),
+    computeEconomy(tz, today, k),
     query(
       `SELECT a.name, count(ua.user_id)::int AS students
          FROM achievements a
