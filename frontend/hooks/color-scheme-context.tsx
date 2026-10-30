@@ -13,7 +13,7 @@ import { buddyGrowth } from '@/utils/buddy';
 import { checkInChange, checkInCounts, isHabitLockedMissed, levelProgress, POINTS_PER_CHECK_IN, streakMilestone, STREAK_MILESTONE_BONUS, todayAgenda } from '@/utils/engagement';
 import { weeklyQuests } from '@/utils/quests';
 import { computeStreak } from '@/utils/streaks';
-import { accountStreak, longestAccountStreak } from '@/utils/account-streak';
+import { accountStreak, longestAccountStreak, type KeptDays } from '@/utils/account-streak';
 import { currentHabits as habitsOfThisWeek, habitActiveUntil, hasHabitEnded } from '@/utils/habit-week';
 import { applyRemoteCompletionDates, applyVisibleOrder, getLocalDateKey, withServerActiveUntil } from './app-state/habit-progress';
 import { AppThemeContext, DarkModeContext } from './dark-mode-context';
@@ -133,7 +133,8 @@ type ColorSchemeContextValue = {
   accountReady: boolean;
 };
 
-export type StreakFreeze = { available: number; max: number; cost: number; frozenDays: string[] };
+/** `keptDays`: the days that are over and keep their kind in the account streak, whatever habits were deleted or rescheduled since. */
+export type StreakFreeze = { available: number; max: number; cost: number; frozenDays: string[]; keptDays: KeptDays };
 
 /** 'info' is a notice about a check-in (the daily token limit, a closed day), shown without confetti. */
 export type Celebration = { id: string; kind: 'buddy' | 'streak' | 'freeze' | 'badge' | 'quest' | 'level' | 'challenge' | 'allDone' | 'bonus' | 'info'; icon: string; title: string; message: string; color?: string };
@@ -183,14 +184,22 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   // Streak freezes: days they covered count as neither done nor missed in every streak.
   const [streakFreeze, setStreakFreeze] = useState<StreakFreeze | null>(null);
   const frozenDaysRef = useRef<string[]>([]);
+  const keptDaysRef = useRef<KeptDays>({});
   /** Shows what the server said about freezes, and celebrates the days a freeze just saved. */
-  const takeFreezeStatus = (status: { available: number; max: number; cost: number; frozenDays: string[]; used?: string[] }) => {
+  const takeFreezeStatus = (status: { available: number; max: number; cost: number; frozenDays: string[]; keptDays?: KeptDays; used?: string[] }) => {
     frozenDaysRef.current = status.frozenDays;
-    setStreakFreeze({ available: status.available, max: status.max, cost: status.cost, frozenDays: status.frozenDays });
+    keptDaysRef.current = status.keptDays ?? {};
+    setStreakFreeze({ available: status.available, max: status.max, cost: status.cost, frozenDays: status.frozenDays, keptDays: keptDaysRef.current });
     if (!status.used?.length) return;
     const days = status.used.map((day) => new Date(`${day}T00:00:00`).toLocaleDateString('en-US', { weekday: 'long' })).join(' and ');
     celebrate({ id: `freeze:${status.used.join(',')}`, kind: 'freeze', icon: 'snow', color: '#4BA3FF', title: 'Streak saved!', message: `A streak freeze covered ${days}, so your streak lives on.` });
   };
+  /** The kept days a save answered with (it deleted or rescheduled a habit), so the streak follows at once. */
+  const takeKeptDays = useCallback((keptDays: KeptDays | undefined) => {
+    if (!keptDays) return;
+    keptDaysRef.current = keptDays;
+    setStreakFreeze((current) => (current ? { ...current, keptDays } : current));
+  }, []);
   // At midnight a new day starts: yesterday's check-ins lock and unfinished habits become
   // missed, without waiting for a reload. A held freeze may now cover yesterday.
   const [dayKey, setDayKey] = useState(() => getLocalDateKey());
@@ -258,8 +267,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   // `dayKey` changes at midnight, so a new week hides last week's habits without a reload.
   const currentHabits = useMemo(() => habitsOfThisWeek(habits, dayKey), [habits, dayKey]);
   const frozenDays = streakFreeze?.frozenDays;
-  const streak = useMemo(() => accountStreak(habits, dayKey, frozenDays), [habits, dayKey, frozenDays]);
-  const bestStreak = useMemo(() => longestAccountStreak(habits, dayKey, frozenDays), [habits, dayKey, frozenDays]);
+  const keptDays = streakFreeze?.keptDays;
+  const streak = useMemo(() => accountStreak(habits, dayKey, frozenDays, keptDays), [habits, dayKey, frozenDays, keptDays]);
+  const bestStreak = useMemo(() => longestAccountStreak(habits, dayKey, frozenDays, keptDays), [habits, dayKey, frozenDays, keptDays]);
   // Only this week's habits are reminded and shown on the home-screen widget.
   useHabitReminders({ habits: currentHabits, preferences, ringInterval, snoozeFrequency, ready: stateHydrated });
   useHomeWidget(currentHabits, streak);
@@ -464,6 +474,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         setSyncBase({ updatedAt: result.updatedAt, state: result.state });
         setUnsaved(false);
         applyWallet(result.state);
+        takeKeptDays(result.keptDays);
         if (!result.merged) {
           // The server gives habits without a last active day one (habits last one week). Without
           // it here too, this state never matched the saved one and every change was saved again.
@@ -712,17 +723,18 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     const habitsBefore = withDates(habit.completionDates.filter((date) => date !== dateKey));
     const habitsAfter = withDates([...habit.completionDates.filter((date) => date !== dateKey), dateKey]);
     const frozen = frozenDaysRef.current;
+    const kept = keptDaysRef.current;
     // The account streak (days in a row with a check-in, across all habits and weeks) without and
     // with this check-in, as the server counts it for the milestone bonus (services/check-ins.js).
-    const milestone = streakMilestone(accountStreak(habitsBefore, dateKey, frozen), accountStreak(habitsAfter, dateKey, frozen));
+    const milestone = streakMilestone(accountStreak(habitsBefore, dateKey, frozen, kept), accountStreak(habitsAfter, dateKey, frozen, kept));
     // Past the day's counted check-ins it adds no points and does not grow Habi (the server's cap).
     const counts = checkInCounts(dateKey, habitsBefore.filter((item) => item.completionDates.includes(dateKey)).length);
     const levelBefore = levelProgress(points).level;
     const levelAfter = levelProgress(points + (counts ? POINTS_PER_CHECK_IN : 0)).level;
     // "All done" is about this week's habits; those of past weeks are only history.
     const agendaAfter = todayAgenda(habitsOfThisWeek(habitsAfter, dateKey), now);
-    const earnedBefore = new Set(badgeProgress(habits, goals, now, frozen).filter((badge) => badge.earned).map((badge) => badge.id));
-    const newBadge = badgeProgress(habitsAfter, goals, now, frozen).find((badge) => badge.earned && !earnedBefore.has(badge.id));
+    const earnedBefore = new Set(badgeProgress(habits, goals, now, frozen, kept).filter((badge) => badge.earned).map((badge) => badge.id));
+    const newBadge = badgeProgress(habitsAfter, goals, now, frozen, kept).find((badge) => badge.earned && !earnedBefore.has(badge.id));
     const questsBefore = new Set(weeklyQuests(habits, now).filter((quest) => quest.complete).map((quest) => quest.id));
     const newQuest = weeklyQuests(habitsAfter, now).find((quest) => quest.complete && !questsBefore.has(quest.id));
     // The buddy grows up with this check-in (the rarest moment, so it comes first).
@@ -963,6 +975,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       setSyncBase({ updatedAt: result.updatedAt, state: result.state });
       setUnsaved(false);
       applyWallet(result.state);
+      takeKeptDays(result.keptDays);
     } else if (!syncBaseRef.current || clientOwnedKey(syncBaseRef.current.state) !== clientOwnedKey(state)) {
       setUnsaved(true);
     }
@@ -982,7 +995,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       setGoals(Array.isArray(savedState.goals) ? savedState.goals as Goal[] : []);
     }
     return { state: savedState ?? state, ok: Boolean(savedState), merged: Boolean(result?.merged) };
-  }, [applyWallet, getAppStateSnapshot, setSyncBase, setUnsaved]);
+  }, [applyWallet, getAppStateSnapshot, setSyncBase, setUnsaved, takeKeptDays]);
   useEffect(() => {
     syncAppStateRef.current = syncAppState;
   }, [syncAppState]);

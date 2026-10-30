@@ -263,7 +263,7 @@ export async function getWalletSummary(db, userId, { today, timeZone }, now = Da
   const openHabits = habits.filter((habit) => isHabitActiveOn(habit, today) && isScheduledDay(habitSchedule(habit), today) && !doneToday(habit) && !missed(habit)).length;
   // Which challenges can still be finished: the time-of-day ones close at 10 AM and noon.
   const challenges = await getDailyChallenges(db, userId, today, timeZone, { minute: minuteOfDay(now, timeZone), isClosed: missed });
-  const streak = accountStreakRun(habits.map((habit) => ({ ...habit, completionDates: datesByHabit.get(habit.id) ?? [] })), today, freezes.frozenDays).streak;
+  const streak = accountStreakRun(habits.map((habit) => ({ ...habit, completionDates: datesByHabit.get(habit.id) ?? [] })), today, freezes.frozenDays, freezes.keptDays).streak;
   const spend = spendRows({ balance, rewards: rewards.rewards, owned: rewards.owned, freezes, buddy, giftsSentToday });
   const perDay = pacePerDay(rows, now);
   return {

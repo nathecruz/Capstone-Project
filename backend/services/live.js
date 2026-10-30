@@ -14,7 +14,7 @@ export async function getLiveVersions(db, userId) {
        (SELECT COALESCE(MAX(created_at), 0) || ':' || COUNT(*) FILTER (WHERE read_at IS NULL) FROM notifications WHERE user_id = u.id) AS notifications,
        (SELECT COUNT(*) FILTER (WHERE read_at IS NULL) FROM notifications WHERE user_id = u.id)::int AS unread,
        (SELECT COALESCE(MAX(claimed_at), 0) FROM daily_claims WHERE user_id = u.id)::text AS claims,
-       (SELECT COALESCE(MAX(updated_at), 0) FROM user_streak_freezes WHERE user_id = u.id) || ':' || (SELECT COUNT(*) FROM streak_freeze_days WHERE user_id = u.id) AS freezes
+       (SELECT COALESCE(MAX(updated_at), 0) FROM user_streak_freezes WHERE user_id = u.id) || ':' || (SELECT COUNT(*) FROM streak_freeze_days WHERE user_id = u.id) || ':' || (SELECT COUNT(*) FROM streak_kept_days WHERE user_id = u.id) AS freezes
      FROM users u WHERE u.id = $1`,
     [userId],
   )).rows[0];

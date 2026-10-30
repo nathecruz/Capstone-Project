@@ -1313,6 +1313,32 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.ok(ledger.every((row) => Number(row.createdAt) <= answeredAt + 2), `every row it paid is dated now: ${JSON.stringify(ledger)}`);
   });
 
+  await t.test('deleting a missed habit keeps its miss in the account streak', async () => {
+    const { headers, userId } = await student('Miss', 'Kept');
+    await db.query("UPDATE users SET time_zone='UTC' WHERE id=$1", [userId]);
+    const habit = (id, startDate, extra = {}) => ({ ...appState.habits[0], id, label: id, startDate, ...extra });
+    // Walk was done on its three days, then ended; gym started yesterday and was missed; read is done today.
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [habit('walk', shiftDay(today, -4), { activeUntil: shiftDay(today, -2) }), habit('gym', shiftDay(today, -1)), habit('read', today)] }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    assert.equal(saved.body.keptDays, undefined, 'the first save sets the past: it keeps no day');
+    for (const days of [4, 3, 2]) await checkInOn(userId, 'walk', shiftDay(today, -days));
+    await checkInOn(userId, 'read', today);
+    const streakDays = async () => (await request(`/api/wallet/summary?date=${today}&timeZone=UTC`, { headers })).body.streak.days;
+    assert.equal(await streakDays(), 1, 'yesterday broke it');
+
+    // Deleting gym used to leave yesterday with nothing due, so the streak ran on to 4 days.
+    const deleted = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...saved.body.state, habits: saved.body.state.habits.filter((entry) => entry.id !== 'gym'), baseUpdatedAt: saved.body.updatedAt, baseState: saved.body.state }) });
+    assert.equal(deleted.response.status, 200, JSON.stringify(deleted.body));
+    assert.deepEqual(deleted.body.keptDays, { [shiftDay(today, -1)]: 'breaks' }, 'the answer carries the kept days for the app');
+    assert.equal(await streakDays(), 1);
+    assert.deepEqual((await request('/api/streak-freezes', { headers })).body.keptDays, { [shiftDay(today, -1)]: 'breaks' });
+    // A save that changes no habit's days keeps nothing more, and says nothing about it.
+    const renamed = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...deleted.body.state, habits: deleted.body.state.habits.map((entry) => ({ ...entry, label: `${entry.label}!` })), baseUpdatedAt: deleted.body.updatedAt, baseState: deleted.body.state }) });
+    assert.equal(renamed.response.status, 200, JSON.stringify(renamed.body));
+    assert.equal(renamed.body.keptDays, undefined);
+    assert.equal((await db.query('SELECT COUNT(*)::int AS n FROM streak_kept_days WHERE user_id=$1', [userId])).rows[0].n, 1);
+  });
+
   await t.test('a streak milestone is not paid again when deleting a habit moves the first day of the run', async () => {
     const { headers, userId } = await student('Run', 'Start');
     await db.query("UPDATE users SET time_zone='UTC' WHERE id=$1", [userId]);

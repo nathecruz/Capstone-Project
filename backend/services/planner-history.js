@@ -9,7 +9,7 @@ import { DEFAULT_HABIT_CATEGORIES, formatClock, plannerCategories } from './ai-p
 import { forecastFor, rulesForecast } from './forecast-rules.js';
 import { mlSignal } from './habit-analysis.js';
 import { hasHabitEnded, isDateKey, weekEndKey } from './habit-week.js';
-import { getFrozenDays } from './streak-freeze.js';
+import { getFrozenDays, getKeptDays } from './streak-freeze.js';
 import { computeStreak, habitFromRow, habitSchedule, isScheduledDay } from './streaks.js';
 
 const DEFAULT_TIME_ZONE = 'Asia/Manila';
@@ -133,7 +133,7 @@ export function weekdayStrengths(tallies) {
  * ({ habitId, date, completedAt }). Lists the current habits, then the newest ended in the last
  * 4 weeks, at most 12. `signals` lines up with `history.habits`.
  */
-export function buildPlannerHistory({ habits = [], completions = [], frozenDays = [], now = new Date(), timeZone = DEFAULT_TIME_ZONE }) {
+export function buildPlannerHistory({ habits = [], completions = [], frozenDays = [], keptDays = {}, now = new Date(), timeZone = DEFAULT_TIME_ZONE }) {
   const today = dateKeyInZone(now, timeZone);
   const windowStart = shiftDay(today, -(LOOKBACK_DAYS - 1));
   const byHabit = new Map();
@@ -157,7 +157,7 @@ export function buildPlannerHistory({ habits = [], completions = [], frozenDays 
       note: listed.length
         ? 'habits: the last 4 weeks, current ones first. Habits last one week (Monday to Sunday): status "ended" habits finished with their week and are history only; "current" ones run this week. scheduledDays and checkIns count from the start date to today or the habit\'s last day. completionRate is checkIns / scheduledDays (null before any counted day). usualCheckInTime is when the student usually checked it in. mlForecast is the machine-learning forecast for continuing it. strongestWeekday and weakestWeekday are the weekdays with the best and worst check-in rate over these habits (null with too little data).'
         : 'No habits in the last 4 weeks (for example a new student): plan from the goal alone.',
-      accountStreakDays: accountStreak(rows.map(({ habit, completions: habitCompletions }) => ({ ...habit, completionDates: habitCompletions.map((item) => item.date) })), today, frozenDays),
+      accountStreakDays: accountStreak(rows.map(({ habit, completions: habitCompletions }) => ({ ...habit, completionDates: habitCompletions.map((item) => item.date) })), today, frozenDays, keptDays),
       currentHabitNames: current.map(({ row }) => String(row.label || '').trim()).filter(Boolean),
       ...weekdayStrengths(listed.map(({ weekdays }) => weekdays)),
       habits: listed.map(({ facts }) => facts),
@@ -201,16 +201,18 @@ export async function withForecasts({ history, signals }, { forecast, capMs = PL
 
 /** The planner's history of this student, read from the database (`db.query`), with ML forecasts from `ml` (config.ml). */
 export async function loadPlannerHistory(db, userId, timeZone = DEFAULT_TIME_ZONE, { ml = {}, now = new Date() } = {}) {
-  const [habits, completions, frozenDays] = await runAll(db, [
+  const [habits, completions, frozenDays, keptDays] = await runAll(db, [
     () => db.query('SELECT id, label, category, meta, frequency, start_date, reminder_days, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime", active_until AS "activeUntil" FROM habits WHERE user_id=$1 ORDER BY sort_order, id', [userId]),
     // Every check-in: the account streak can be older than 4 weeks.
     () => db.query('SELECT habit_id AS "habitId", completed_date::text AS date, completed_at AS "completedAt" FROM habit_completions WHERE user_id=$1', [userId]),
     () => getFrozenDays(db, userId),
+    () => getKeptDays(db, userId),
   ]);
   const built = buildPlannerHistory({
     habits: habits.rows.map((row) => ({ ...row, id: String(row.id).replace(`${userId}:habit:`, '') })),
     completions: completions.rows,
     frozenDays,
+    keptDays,
     now,
     timeZone,
   });

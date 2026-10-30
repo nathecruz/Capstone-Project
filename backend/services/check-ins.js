@@ -8,7 +8,7 @@ import { isPastHabitDeadline } from './completion-date.js';
 import { hasHabitEnded } from './habit-week.js';
 import { syncWeeklyQuests } from './quests.js';
 import { syncDailyChallenges } from './daily-challenges.js';
-import { getFrozenDays } from './streak-freeze.js';
+import { getFrozenDays, getKeptDays } from './streak-freeze.js';
 import { awardAccountStreakMilestones, awardCheckIn, paidCheckIns, PAID_CHECK_INS_PER_DAY, revokeCheckIn } from './wallet.js';
 
 /** The snapshot's habits (also those of past weeks) with their check-ins from the database. */
@@ -61,7 +61,8 @@ export async function setCheckIn(connection, { userId, habitId, date, timeZone, 
       const after = withCompletionDates(saved.state.habits, await getServerCompletions(userId, connection));
       const before = after.map((entry) => (entry.id === habitId ? { ...entry, completionDates: entry.completionDates.filter((day) => day !== date) } : entry));
       const frozen = await getFrozenDays(connection, userId);
-      await awardAccountStreakMilestones(connection, userId, accountStreakRun(before, date, frozen), accountStreakRun(after, date, frozen), { timeZone, now });
+      const kept = await getKeptDays(connection, userId);
+      await awardAccountStreakMilestones(connection, userId, accountStreakRun(before, date, frozen, kept), accountStreakRun(after, date, frozen, kept), { timeZone, now });
     }
   } else {
     const removed = await connection.query('DELETE FROM habit_completions WHERE user_id=$1 AND habit_id=$2 AND completed_date=$3', [userId, habitId, date]);

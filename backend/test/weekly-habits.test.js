@@ -2,7 +2,7 @@
 // Dates: Monday October 12 to Sunday October 18, 2026 is "last week"; October 19 starts "this week".
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { accountStreak, accountStreakRun, longestAccountStreak } from '../services/account-streak.js';
+import { accountStreak, accountStreakRun, changedDayKinds, longestAccountStreak } from '../services/account-streak.js';
 import { buildHabitContext } from '../services/ai-context.js';
 import { canStillCheckIn, secondsUntilCheckInCloses } from '../services/completion-date.js';
 import { dailyChallenges } from '../services/daily-challenges.js';
@@ -166,6 +166,40 @@ test('daily challenges only look at the habits active today', () => {
   assert.deepEqual(dailyChallenges({ habits: [lastWeek('old')], doneToday: new Map(), doneYesterday: new Set(), streaksBefore: new Map(), today: '2026-10-19' }), [], 'nothing due today');
 });
 
+test('a day that is over keeps its kind when a habit is deleted, rescheduled or backdated', () => {
+  const today = '2026-10-21';
+  const done = (habit, dates) => ({ ...habit, completionDates: dates });
+  const walk = done(lastWeek('walk'), days('2026-10-12', '2026-10-18'));
+  const read = done(daily('read', today, '2026-10-25'), [today]);
+
+  // Gym, missed on Monday and Tuesday, is deleted: those days had nothing else due.
+  const gym = done(thisWeek('gym'), []);
+  assert.equal(accountStreak([walk, gym, read], today), 1);
+  assert.equal(accountStreak([walk, read], today), 8, 'deleting the missed habit used to mend the streak');
+  const missed = changedDayKinds([walk, gym, read], [walk, read], today);
+  assert.deepEqual(missed, { '2026-10-19': 'breaks', '2026-10-20': 'breaks' });
+  assert.equal(accountStreak([walk, read], today, [], missed), 1, 'the misses are kept');
+  assert.equal(longestAccountStreak([walk, read], today, [], missed), 7);
+  assert.deepEqual(accountStreakRun([walk, read], today, ['2026-10-19', '2026-10-20'], missed), { streak: 8, start: '2026-10-12' }, 'a streak freeze still covers a kept miss');
+
+  // A habit done on Monday and Tuesday is deleted: its check-ins are kept.
+  const tw = done(thisWeek('tw'), ['2026-10-19', '2026-10-20', today]);
+  const checkIns = changedDayKinds([walk, tw], [walk], today);
+  assert.deepEqual(checkIns, { '2026-10-19': 'counts', '2026-10-20': 'counts' });
+  assert.deepEqual([accountStreak([walk], today), accountStreak([walk], today, [], checkIns)], [7, 9], "today's check-in went with it; today is not over");
+
+  // A new habit dated back to Monday adds no misses to the days already over.
+  const backdated = done(thisWeek('new'), []);
+  const neutral = changedDayKinds([walk, read], [walk, read, backdated], today);
+  assert.deepEqual(neutral, { '2026-10-19': 'neutral', '2026-10-20': 'neutral' });
+  assert.deepEqual([accountStreak([walk, read, backdated], today), accountStreak([walk, read, backdated], today, [], neutral)], [1, 8]);
+
+  // A schedule that leaves the days as they were keeps nothing; days already kept stay as kept.
+  assert.deepEqual(changedDayKinds([walk, read], [walk, { ...read, label: 'Read more' }], today), {});
+  assert.deepEqual(changedDayKinds([walk, gym, read], [walk, read], today, [], missed), {});
+  assert.equal(accountStreak([], today, [], { '2026-10-19': 'counts', '2026-10-20': 'counts' }), 2, 'kept days count without any habit left');
+});
+
 test('a streak freeze saves the account streak, past days with nothing due', () => {
   const done = (entries) => new Map(Object.entries(entries).map(([id, dates]) => [id, new Set(dates)]));
   // Sunday was missed; Monday had no habit yet (this week's starts on Tuesday).
@@ -177,6 +211,10 @@ test('a streak freeze saves the account streak, past days with nothing due', () 
   assert.deepEqual(daysToFreeze([thisWeek('a'), thisWeek('b')], done({ a: ['2026-10-19', '2026-10-20'] }), new Set(), '2026-10-21', 2), []);
   // No check-in ever: no streak to save.
   assert.deepEqual(daysToFreeze([thisWeek('a')], new Map(), new Set(), '2026-10-21', 2), []);
+  // The kept days count as they were: a deleted habit's miss is frozen, a deleted habit's check-in ends the run back.
+  assert.deepEqual(daysToFreeze([lastWeek('w')], done({ w: days('2026-10-12', '2026-10-18') }), new Set(), '2026-10-21', 2, { '2026-10-19': 'breaks' }), ['2026-10-19']);
+  assert.deepEqual(daysToFreeze([thisWeek('a')], new Map(), new Set(), '2026-10-21', 2, { '2026-10-19': 'counts' }), ['2026-10-20']);
+  assert.deepEqual(daysToFreeze([thisWeek('a')], done({ a: ['2026-10-18'] }), new Set(), '2026-10-21', 2, { '2026-10-19': 'neutral', '2026-10-20': 'counts' }), [], 'nothing missed since');
 });
 
 test('habit facts stop at the end of the habit\'s week', () => {

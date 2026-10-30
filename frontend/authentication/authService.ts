@@ -14,6 +14,7 @@ import {
   subscribeToAuthChanges,
   type SessionUser,
 } from './session';
+import type { KeptDays } from '@/utils/account-streak';
 
 export {
   getCurrentSession,
@@ -751,7 +752,8 @@ export const saveRewardFrame = (frame: string) => authedRequest<{ frame: string 
 /** Sets the title under the student's name ('' removes it); needs the Custom Title reward. */
 export const saveRewardTitle = (title: string) => authedRequest<{ title: string }>('/api/rewards/title', { method: 'PUT', body: JSON.stringify({ title }) });
 
-export type StreakFreezeStatus = { available: number; max: number; cost: number; frozenDays: string[]; used: string[] };
+/** `keptDays`: the days that are over and keep their kind in the account streak (utils/account-streak.ts). */
+export type StreakFreezeStatus = { available: number; max: number; cost: number; frozenDays: string[]; keptDays?: KeptDays; used: string[] };
 /** Uses held streak freezes for days missed before `date` (the device's today) and returns the status. */
 export const syncStreakFreezes = (date: string) => authedRequest<StreakFreezeStatus>('/api/streak-freezes/sync', { method: 'POST', body: JSON.stringify({ date, timeZone: deviceTimeZone() }) });
 /** A version of each kind of the student's data (changes whenever that data does), and unread notifications. */
@@ -947,7 +949,8 @@ export async function saveRemoteAppState(state: AppStateSyncPayload, base: AppSt
   if (!token) return null;
 
   try {
-    return await apiRequest<{ ok: boolean; state?: AppStateSyncPayload; updatedAt?: number; merged?: boolean; unchanged?: boolean }>('/api/app-state', {
+    // `keptDays` comes when the save kept days of the account streak (a habit deleted or rescheduled).
+    return await apiRequest<{ ok: boolean; state?: AppStateSyncPayload; updatedAt?: number; merged?: boolean; unchanged?: boolean; keptDays?: KeptDays }>('/api/app-state', {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({

@@ -7,6 +7,9 @@ import { isHabitScheduledOn, type StreakHabit } from './streaks';
 const MAX_LOOKBACK_DAYS = 1100;
 
 type AccountStreakHabit = StreakHabit & { completionDates: string[] };
+type DayKind = 'counts' | 'neutral' | 'breaks';
+/** The days that are over and keep the kind they had before a save changed the habits: { day: kind }. */
+export type KeptDays = Record<string, DayKind>;
 
 function shiftDay(dateKey: string, days: number) {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -17,29 +20,34 @@ function shiftDay(dateKey: string, days: number) {
  * Walks the days from `from` to `to` (YYYY-MM-DD): a day with a check-in counts; a day breaks the
  * run only when some habit was due (active and scheduled) and none was checked in. Days with
  * nothing due, days a streak freeze covered and `today` (not over yet) neither count nor break it.
+ * A day that is over keeps the kind it had before a later save changed the habits (`keptDays`, from
+ * the server), so deleting or rescheduling a habit cannot erase a miss or a check-in, or add a miss.
  */
-function dayKinds(habits: AccountStreakHabit[], today: string, frozenDays: string[]) {
+function dayKinds(habits: AccountStreakHabit[], today: string, frozenDays: string[], keptDays: KeptDays) {
   const checkedIn = new Set(habits.flatMap((habit) => habit.completionDates));
   const frozen = new Set(frozenDays);
-  return (day: string): 'counts' | 'neutral' | 'breaks' => {
-    if (checkedIn.has(day)) return 'counts';
+  const kept = new Map(Object.entries(keptDays));
+  return (day: string): DayKind => {
+    if (checkedIn.has(day) || kept.get(day) === 'counts') return 'counts';
     if (day === today || frozen.has(day)) return 'neutral';
+    const keptKind = kept.get(day);
+    if (keptKind) return keptKind;
     return habits.some((habit) => isHabitActiveOn(habit, day) && isHabitScheduledOn(habit, day)) ? 'breaks' : 'neutral';
   };
 }
 
-/** The first day worth looking at: the earliest start date or check-in of any habit. */
-function firstDay(habits: AccountStreakHabit[], today: string) {
-  const days = habits.flatMap((habit) => [habit.startDate ?? '', ...habit.completionDates]).filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(day) && day <= today);
+/** The first day worth looking at: the earliest start date, check-in or kept day. */
+function firstDay(habits: AccountStreakHabit[], today: string, keptDays: KeptDays) {
+  const days = [...habits.flatMap((habit) => [habit.startDate ?? '', ...habit.completionDates]), ...Object.keys(keptDays)].filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(day) && day <= today);
   const earliest = days.length ? days.reduce((min, day) => (day < min ? day : min)) : today;
   const limit = shiftDay(today, -(MAX_LOOKBACK_DAYS - 1));
   return earliest < limit ? limit : earliest;
 }
 
 /** The current streak: days in a row with a check-in, counting back from `today`. */
-export function accountStreak(habits: AccountStreakHabit[], today: string, frozenDays: string[] = []) {
-  const kind = dayKinds(habits, today, frozenDays);
-  const first = firstDay(habits, today);
+export function accountStreak(habits: AccountStreakHabit[], today: string, frozenDays: string[] = [], keptDays: KeptDays = {}) {
+  const kind = dayKinds(habits, today, frozenDays, keptDays);
+  const first = firstDay(habits, today, keptDays);
   let streak = 0;
   for (let day = today; day >= first; day = shiftDay(day, -1)) {
     const result = kind(day);
@@ -50,11 +58,11 @@ export function accountStreak(habits: AccountStreakHabit[], today: string, froze
 }
 
 /** The longest run of days with a check-in, up to `today`, under the same rules. */
-export function longestAccountStreak(habits: AccountStreakHabit[], today: string, frozenDays: string[] = []) {
-  const kind = dayKinds(habits, today, frozenDays);
+export function longestAccountStreak(habits: AccountStreakHabit[], today: string, frozenDays: string[] = [], keptDays: KeptDays = {}) {
+  const kind = dayKinds(habits, today, frozenDays, keptDays);
   let best = 0;
   let run = 0;
-  for (let day = firstDay(habits, today); day <= today; day = shiftDay(day, 1)) {
+  for (let day = firstDay(habits, today, keptDays); day <= today; day = shiftDay(day, 1)) {
     const result = kind(day);
     if (result === 'counts') best = Math.max(best, (run += 1));
     else if (result === 'breaks') run = 0;

@@ -60,7 +60,8 @@ export default function ProfileScreen() {
   const compactLayout = width < 360;
   // Badges from the whole history: earned first, and the one closest to being earned.
   const frozenDays = streakFreeze?.frozenDays;
-  const badges = useMemo(() => badgeProgress(habits, goals, new Date(), frozenDays), [frozenDays, habits, goals]);
+  const keptDays = streakFreeze?.keptDays;
+  const badges = useMemo(() => badgeProgress(habits, goals, new Date(), frozenDays, keptDays), [frozenDays, habits, goals, keptDays]);
   const earnedBadges = badges.filter((badge) => badge.earned).length;
   const badgeStrip = [...badges].sort((a, b) => Number(b.earned) - Number(a.earned) || b.share - a.share).slice(0, 6);
   const upcomingBadge = nextBadge(badges);

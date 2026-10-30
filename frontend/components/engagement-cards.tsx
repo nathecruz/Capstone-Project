@@ -74,8 +74,8 @@ export function LevelBar({ points, streak = 0, freezes, onPress, style }: { poin
 /** The badge closest to being earned, with what is left; opens Achievements. */
 export function NextBadgeCard({ habits, goals, style }: { habits: Habit[]; goals: Goal[]; style?: object | false }) {
   const styles = useThemedStyles(themedStyles);
-  const frozenDays = useAppColorScheme().streakFreeze?.frozenDays;
-  const progress = useMemo(() => badgeProgress(habits, goals, new Date(), frozenDays), [frozenDays, goals, habits]);
+  const { frozenDays, keptDays } = useAppColorScheme().streakFreeze ?? {};
+  const progress = useMemo(() => badgeProgress(habits, goals, new Date(), frozenDays, keptDays), [frozenDays, goals, habits, keptDays]);
   const next = nextBadge(progress);
   if (!habits.length || !next) return null;
   const earned = progress.filter((badge) => badge.earned).length;
