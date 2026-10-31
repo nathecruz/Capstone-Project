@@ -15,10 +15,24 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      # A throwaway PostgreSQL for the API integration test.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: habitai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
-      # Optional repository secret: a Neon branch (direct, non-pooler host) for the API integration test.
-      # The test runs inside a random private schema and drops it afterwards.
-      TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+      # The API integration test runs inside a random private schema and drops it afterwards: on the
+      # optional repository secret (a Neon branch, direct non-pooler host) or else on the service above.
+      TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/habitai' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,7 +44,6 @@ jobs:
       - run: npm run lint
       - run: npm run test:unit
       - name: API integration test (PostgreSQL)
-        if: env.TEST_DATABASE_URL != ''
         run: node --test test/api.test.js
       - name: Environment checker tests
         working-directory: .

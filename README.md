@@ -58,12 +58,13 @@ The integration test needs `TEST_DATABASE_URL` (use a Neon branch, direct host w
 `-pooler`); it creates a random private schema, runs the real server against it and drops
 the schema afterwards. Without the variable it is skipped. GitHub Actions
 (`.github/workflows/ci.yml`) runs backend, frontend and ML checks on every push and pull
-request, and the integration test too when the `TEST_DATABASE_URL` secret is set.
+request, with the integration test on a throwaway PostgreSQL service (or on the database of
+the `TEST_DATABASE_URL` secret, when it is set).
 
 Configuration: the backend reads `backend/.env` and then the root `.env`; a value that is
 still a template placeholder (for example `your-groq-api-key`) is ignored in favour of a
-real one from the other file. Neon Auth (`AUTH_URL`, `JWKS_URL`, `EXPO_PUBLIC_AUTH_URL`) is
-optional: sign-in uses the backend's own accounts and hashed session tokens.
+real one from the other file. Neon Auth (`AUTH_URL`, `JWKS_URL`) is optional: sign-in uses the
+backend's own accounts and hashed session tokens.
 
 ## ML service setup
 
@@ -116,8 +117,8 @@ npm run frontend
 Docker Compose runs the backend, ML service, and a production static frontend
 served by Nginx. Copy `.env.example` to `.env`, set a real `DATABASE_URL` for
 Neon/PostgreSQL, replace `ML_SERVICE_API_KEY` with a long random value, and set
-the public `EXPO_PUBLIC_API_URL`, `EXPO_PUBLIC_AI_API_URL`, and
-`EXPO_PUBLIC_AUTH_URL` values as appropriate. Then run:
+the public `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_AI_API_URL` values as
+appropriate. Then run:
 
 ```bash
 docker compose up --build
