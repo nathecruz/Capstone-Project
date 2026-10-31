@@ -60,7 +60,6 @@ services:
       args:
         EXPO_PUBLIC_API_URL: ${EXPO_PUBLIC_API_URL:-http://localhost:8787}
         EXPO_PUBLIC_AI_API_URL: ${EXPO_PUBLIC_AI_API_URL:-http://localhost:8787}
-        EXPO_PUBLIC_AUTH_URL: ${EXPO_PUBLIC_AUTH_URL:-http://localhost:8787}
     ports:
       - "8081:80"
     depends_on:

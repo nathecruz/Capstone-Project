@@ -28,16 +28,16 @@ The root `render.yaml` deploys all services as one Blueprint:
 
 - `habitai-ml`: FastAPI service. Render generates its `ML_SERVICE_API_KEY`.
 - `habitai-backend`: Express API. Its ML service URL and API key are linked automatically.
-- `habitai-frontend`: Expo web export hosted as a Static Site. Its API URLs are linked automatically to the backend; its Neon Auth URL is provided separately.
+- `habitai-frontend`: Expo web export hosted as a Static Site. Its API URLs are linked automatically to the backend.
 - `habitai-admin`: Admin Panel (`admin-panel/`, Docker). It builds the React client, serves it from its Express API, reuses the backend's `DATABASE_URL`, and applies its own idempotent migration at start-up.
 - `habitai-web-push` (commented out in `render.yaml`): Cron job that sends Web Push reminders every minute. Render cron jobs are paid, so it is disabled until the workspace has a payment method; see below.
 
-1. Create or connect a Neon project and have its `DATABASE_URL` ready. Neon Auth (`AUTH_URL`, `JWKS_URL`, `EXPO_PUBLIC_AUTH_URL`) is optional: HabitAI signs users in with its own accounts and hashed session tokens. If you set them, the JWKS URL must end in `/.well-known/jwks.json`.
+1. Create or connect a Neon project and have its `DATABASE_URL` ready. Neon Auth (`AUTH_URL`, `JWKS_URL`) is optional: HabitAI signs users in with its own accounts and hashed session tokens. If you set them, the JWKS URL must end in `/.well-known/jwks.json`.
 2. Push the repository to GitHub.
 3. In Render, select **New** -> **Blueprint** and connect this repository.
-4. Provide the prompted values, including backend Neon credentials, `ALLOWED_ORIGINS`, the Groq API key (`GROQ_API_KEY` from console.groq.com, used by the goal planner, habit coach, and support/progress assistant), email settings, and the frontend `EXPO_PUBLIC_AUTH_URL`. `SUPPORT_EMAIL` is optional; if omitted, issue reports go to the configured SMTP sender. For `ALLOWED_ORIGINS`, enter the frontend's Render origin (for example, `https://habitai-frontend.onrender.com`). If Render assigns a different URL, update it in the backend after the first sync.
+4. Provide the prompted values, including backend Neon credentials, `ALLOWED_ORIGINS`, the Groq API key (`GROQ_API_KEY` from console.groq.com, used by the goal planner, habit coach, and support/progress assistant), and email settings. `SUPPORT_EMAIL` is optional; if omitted, issue reports go to the configured SMTP sender. For `ALLOWED_ORIGINS`, enter the frontend's Render origin (for example, `https://habitai-frontend.onrender.com`). If Render assigns a different URL, update it in the backend after the first sync.
 5. Deploy the Blueprint. Keep `ML_MODEL_RELEASE_APPROVED=false` until real approved training outcomes and an independent holdout report have been verified.
-6. `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_AI_API_URL` are injected from the backend URL. `EXPO_PUBLIC_AUTH_URL` must point to the Neon Auth client endpoint. It is compiled into the public web bundle, so it must be a public URL, never a secret. Render only prompts for `sync: false` values when a Blueprint is first created; add or update this value in the service's Environment settings after that.
+6. `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_AI_API_URL` are injected from the backend URL. Render only prompts for `sync: false` values when a Blueprint is first created; add or update them in each service's Environment settings after that.
 
 ### Android app builds
 
@@ -87,7 +87,6 @@ The Render free web service sleeps after 15 minutes without traffic and takes up
 For Vercel frontend-only hosting, either set the project root to `frontend` (recommended) or leave it at the repository root. The frontend config supports the first option; the root `vercel.json` supports the second. Add these build-time environment variables in Project Settings:
 
 - `EXPO_PUBLIC_API_URL`: deployed backend HTTPS URL
-- `EXPO_PUBLIC_AUTH_URL`: Neon Auth client endpoint
 
 With `frontend` as the project root, Vercel runs `npm ci` and `npm run export:web`, publishing `dist`. With the repository root, it runs `npm --prefix frontend ci` and `npm --prefix frontend run export:web`, publishing `frontend/dist`. Both configs rewrite direct route requests such as `/login` to `index.html`.
 

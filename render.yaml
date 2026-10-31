@@ -212,5 +212,3 @@ services:
           type: web
           name: habitai-backend
           envVarKey: RENDER_EXTERNAL_URL
-      - key: EXPO_PUBLIC_AUTH_URL
-        value: https://ep-plain-flower-b3ie6u23.neonauth.c-4.ap-southeast-1.aws.neon.tech/habit_tracker_db/auth
