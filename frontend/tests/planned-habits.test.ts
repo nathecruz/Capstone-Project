@@ -24,6 +24,8 @@ describe('habitFromPlan', () => {
       reminderSoundEnabled: true,
       smartReminderEnabled: false,
       isBadHabit: false,
+      // A walk is proven with the step counter (utils/habit-templates.ts suggestedProof).
+      proof: { type: 'steps', steps: 2000 },
     });
   });
 
@@ -43,13 +45,15 @@ describe('habitFromPlan', () => {
     expect(habitFromPlan(planned({ frequency: 'Custom', days: [] }), DEFAULT_HABIT_CATEGORIES, '2026-10-21')).toMatchObject({ meta: 'Daily • 07:30 AM', frequency: 'Daily', reminderDays: [] });
   });
 
-  it('uses the managed categories, and a category the app does not know keeps its label with an icon from the name', () => {
-    const managed = [{ label: 'Fitness', icon: 'barbell-outline', color: '#FF7A45' }];
-    expect(habitFromPlan(planned({ category: 'fitness' }), managed, '2026-10-21')).toMatchObject({ category: 'Fitness', icon: 'barbell-outline', color: '#FF7A45' });
+  it('files a habit under Health or Academics with the managed look, and a category the app does not know by the habit\'s name', () => {
+    const managed = [{ label: 'Health', icon: 'fitness-outline', color: '#FF7A45' }, { label: 'Academics', icon: 'book-outline', color: '#4B82D8' }];
+    expect(habitFromPlan(planned({ category: 'health' }), managed, '2026-10-21')).toMatchObject({ category: 'Health', icon: 'fitness-outline', color: '#FF7A45' });
 
     const unknown = habitFromPlan(planned({ name: 'Drink water', category: 'Wellness' }), DEFAULT_HABIT_CATEGORIES, '2026-10-21');
-    expect(unknown).toMatchObject({ category: 'Wellness', icon: 'water-outline', color: '#57B991' });
-    expect(plannedHabitLook(planned({ category: '  ' }), DEFAULT_HABIT_CATEGORIES)).toMatchObject({ category: 'Other', icon: 'ellipsis-horizontal' });
+    expect(unknown).toMatchObject({ category: 'Health', icon: 'heart-outline', color: '#E58D8D', proof: { type: 'photo' } });
+    expect(plannedHabitLook(planned({ name: 'Review notes', category: '  ' }), DEFAULT_HABIT_CATEGORIES)).toMatchObject({ category: 'Academics', icon: 'school-outline' });
+    // Not among the managed ones: the label stays, with an icon from the name.
+    expect(plannedHabitLook(planned({ name: 'Drink water' }), [{ label: 'Academics', icon: 'book-outline', color: '#4B82D8' }])).toMatchObject({ category: 'Health', icon: 'water-outline', color: '#57B991' });
   });
 });
 
@@ -80,8 +84,8 @@ describe('readPlannedHabits', () => {
       null,
     ])).toEqual([
       { name: 'Morning walk', category: 'Health', frequency: 'Daily', days: [], time: '07:30 AM', reason: 'You walked 6 of 7 days.' },
-      { name: 'Stretch', category: 'Mind', frequency: 'Custom', days: ['Mon', 'Fri'], time: '09:30 PM', reason: 'A fresh start.' },
-      { name: 'Review notes', category: 'Other', frequency: 'Daily', days: [], time: '07:00 AM', reason: '' },
+      { name: 'Stretch', category: 'Health', frequency: 'Custom', days: ['Mon', 'Fri'], time: '09:30 PM', reason: 'A fresh start.' },
+      { name: 'Review notes', category: 'Academics', frequency: 'Daily', days: [], time: '07:00 AM', reason: '' },
     ]);
   });
 

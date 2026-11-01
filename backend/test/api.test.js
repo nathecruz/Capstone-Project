@@ -1339,6 +1339,24 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal((await db.query('SELECT COUNT(*)::int AS n FROM streak_kept_days WHERE user_id=$1', [userId])).rows[0].n, 1);
   });
 
+  await t.test('habits are Health or Academics: the categories the app gets, and new habits of older apps', async () => {
+    // The Admin Panel's table (admin-panel/server/src/db/admin-schema.sql), with an older category still active.
+    await db.query(`CREATE TABLE IF NOT EXISTS habit_categories (id TEXT PRIMARY KEY, label TEXT NOT NULL, icon TEXT NOT NULL DEFAULT 'ellipse-outline', color TEXT NOT NULL DEFAULT '#7A6AED', description TEXT NOT NULL DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0, is_active BOOLEAN NOT NULL DEFAULT TRUE, created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL)`);
+    await db.query("INSERT INTO habit_categories(id,label,sort_order,is_active,created_at,updated_at) VALUES ('mind','Mind',0,TRUE,1,1),('health','Health',1,TRUE,1,1),('academics','academics',2,TRUE,1,1),('other','Other',3,FALSE,1,1) ON CONFLICT DO NOTHING");
+    const categories = await request('/api/habit-categories');
+    assert.deepEqual(categories.body.categories.map((category) => category.label), ['Health', 'Academics']);
+
+    const { headers } = await student('Focus', 'Areas');
+    const habit = (id, label, category) => ({ ...appState.habits[0], id, label, category, startDate: today });
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [habit('notes', 'Review notes', 'Mind'), habit('calm', 'Meditate', 'Bad Habit'), habit('walk', 'Walk', 'Health')] }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    assert.deepEqual(saved.body.state.habits.map((item) => item.category), ['Academics', 'Health', 'Health'], 'an older app\'s new habits are filed under their area');
+    // A stored habit keeps what it has; only habits new to the server are filed.
+    const edited = { ...saved.body.state, habits: saved.body.state.habits.map((item) => (item.id === 'walk' ? { ...item, category: 'Lifestyle' } : item)), baseUpdatedAt: saved.body.updatedAt, baseState: saved.body.state };
+    const again = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify(edited) });
+    assert.equal(again.body.state.habits.find((item) => item.id === 'walk').category, 'Lifestyle');
+  });
+
   await t.test('a streak milestone is not paid again when deleting a habit moves the first day of the run', async () => {
     const { headers, userId } = await student('Run', 'Start');
     await db.query("UPDATE users SET time_zone='UTC' WHERE id=$1", [userId]);

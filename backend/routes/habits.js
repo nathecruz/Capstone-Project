@@ -5,13 +5,16 @@ import { parse } from '../lib/http.js';
 import { habitPredictionSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
 import { forecastFor } from '../services/forecast-rules.js';
+import { focusCategory } from '../services/habit-rules.js';
 
 export default function registerHabitRoutes(app) {
-  // System-wide habit categories managed from the Admin Panel. Clients fall back to their built-in list when this is empty.
+  // System-wide habit categories managed from the Admin Panel, limited to the two areas habits are
+  // about: Health and Academics (services/habit-rules.js). Clients fall back to their built-in list
+  // when this is empty.
   app.get('/api/habit-categories', async (_request, response) => {
     try {
       const result = await query('SELECT id, label, icon, color, description FROM habit_categories WHERE is_active ORDER BY sort_order, label');
-      response.json({ ok: true, categories: result.rows });
+      response.json({ ok: true, categories: result.rows.filter((row) => focusCategory(row.label)).map((row) => ({ ...row, label: focusCategory(row.label) })) });
     } catch (error) {
       if (error?.code === '42P01') return response.json({ ok: true, categories: [] });
       throw error;

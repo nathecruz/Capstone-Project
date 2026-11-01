@@ -48,6 +48,19 @@ export async function migrate({ force = false, log = console.log } = {}) {
       }
     });
 
+    // Habits are limited to Health and Academics (routes/categories.js): once, hide the other
+    // categories and make sure the two exist and are active.
+    await seedOnce(client, 'focus:health-academics', async () => {
+      await client.query("UPDATE habit_categories SET is_active = (lower(label) IN ('health', 'academics')), updated_at = $1 WHERE is_active <> (lower(label) IN ('health', 'academics'))", [now]);
+      for (const category of defaultCategories.filter((item) => ['health', 'academics'].includes(item.id))) {
+        await client.query(
+          `INSERT INTO habit_categories(id, label, icon, color, description, sort_order, is_active, created_at, updated_at)
+           SELECT $1, $2, $3, $4, $5, 0, TRUE, $6, $6 WHERE NOT EXISTS (SELECT 1 FROM habit_categories WHERE lower(label) = lower($2))`,
+          [category.id, category.label, category.icon, category.color, category.description, now],
+        );
+      }
+    });
+
     const templatesSeeded = await seedOnce(client, 'seed:notification_templates', async () => {
       for (const template of defaultTemplates) {
         await client.query(

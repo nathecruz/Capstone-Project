@@ -17,6 +17,7 @@ import {
   syncNormalizedState,
 } from '../services/app-state-store.js';
 import { setCheckIn } from '../services/check-ins.js';
+import { withHabitRules } from '../services/habit-rules.js';
 import { getKeptDays } from '../services/streak-freeze.js';
 import { keepStreakDays } from '../services/streak-history.js';
 import { applyWallet, getWallet, PAID_CHECK_INS_PER_DAY } from '../services/wallet.js';
@@ -74,10 +75,11 @@ export default function registerAppStateRoutes(app) {
       // Done goal steps stay done, whatever the device sends. Every habit gets its last active day
       // (habits last one week) for the account's today: one it already has is kept, even if an older
       // app version drops it, and no app can extend a habit past its week or revive an ended one.
+      // A new habit is filed under Health or Academics (services/habit-rules.js).
       const { today } = await getAccountDay(connection, session.userId);
-      const state = stampActiveUntil(keepCompletedGoalSteps(merged
+      const state = withHabitRules(stampActiveUntil(keepCompletedGoalSteps(merged
         ? withNewIncomingCheckIns(mergeAppState(baseState || {}, currentState, incomingState), baseState, incomingState)
-        : normalizeAppState(incomingState), currentState), currentState, new Date(), today);
+        : normalizeAppState(incomingState), currentState), currentState, new Date(), today), currentState, today);
 
       // Nothing the app owns changed (points, tokens and streaks are the server's): skip the write.
       // The stored snapshot's wallet can be older than the ledger (claims, purchases and gifts save

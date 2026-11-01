@@ -27,6 +27,7 @@ import { refreshSnapshot } from '../services/app-state-store.js';
 import { forecastFor } from '../services/forecast-rules.js';
 import { HABIT_ANALYSIS_SYSTEM, habitAnalysisJsonSchema, habitAnalysisPrompt, habitAnalysisSchema, habitStats, mlSignal, mlSummary } from '../services/habit-analysis.js';
 import { generateAiText, isAiConfigured } from '../services/groq.js';
+import { focusCategories, focusCategory } from '../services/habit-rules.js';
 import { loadPlannerCategories, loadPlannerHistory } from '../services/planner-history.js';
 import { computeStreak, habitFromRow } from '../services/streaks.js';
 import { getFrozenDays, getKeptDays } from '../services/streak-freeze.js';
@@ -298,8 +299,10 @@ export default function registerAiRoutes(app) {
     const input = parse(habitClassificationSchema, request, response);
     if (!input) return;
 
+    // Only Health and Academics can be suggested, whatever an older app sends.
+    const categories = focusCategories(input.categories);
     try {
-      const text = await generateAiText(badHabitPrompt(input.name, { category: input.category, categories: input.categories }), { system: BAD_HABIT_SYSTEM, schema: badHabitJsonSchema, maxOutputTokens: 200, temperature: 0 });
+      const text = await generateAiText(badHabitPrompt(input.name, { category: input.category, categories }), { system: BAD_HABIT_SYSTEM, schema: badHabitJsonSchema, maxOutputTokens: 200, temperature: 0 });
       let raw;
       try {
         raw = JSON.parse(text);
@@ -308,7 +311,7 @@ export default function registerAiRoutes(app) {
       }
       const reason = typeof raw?.reason === 'string' ? raw.reason.trim().slice(0, 300) : '';
       const isHabit = raw?.isHabit !== false;
-      const suggestedCategory = typeof raw?.suggestedCategory === 'string' ? raw.suggestedCategory.trim().slice(0, 60) : '';
+      const suggestedCategory = categories.find((category) => category === focusCategory(raw?.suggestedCategory)) ?? '';
       // Only judge the category for a genuine, non-bad habit; a clear mismatch needs an explicit false.
       const categoryFits = !isHabit || raw?.isBadHabit === true || !input.category || raw?.categoryFits !== false;
       response.json({ ok: true, isHabit, isBadHabit: isHabit && raw?.isBadHabit === true, categoryFits, suggestedCategory, reason });

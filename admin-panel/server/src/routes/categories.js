@@ -11,6 +11,13 @@ const router = Router();
 const canView = requirePermission('categories:view');
 const canManage = requirePermission('categories:manage');
 
+// HabitAI's habits are about Health and Academics (the study's scope; backend/services/habit-rules.js):
+// those two stay active and keep their names, and no other category can be added or turned on.
+// Older categories stay listed, hidden, for the habits that still use them.
+export const FOCUS_LABELS = ['health', 'academics'];
+const isFocus = (label) => FOCUS_LABELS.includes(String(label ?? '').trim().toLowerCase());
+const FOCUS_ONLY = 'HabitAI habits are limited to Health and Academics.';
+
 // Ionicons names understood by the HabitAI app (verified against @expo/vector-icons).
 export const CATEGORY_ICONS = [
   'heart-outline', 'bulb-outline', 'locate-outline', 'leaf-outline', 'school-outline', 'ellipsis-horizontal',
@@ -80,6 +87,7 @@ async function assertLabelFree(label, exceptId = null) {
 
 router.post('/', canManage, async (request, response) => {
   const input = validate(createSchema, request.body);
+  if (!isFocus(input.label)) throw new HttpError(409, `${FOCUS_ONLY} A new category cannot be added.`);
   await assertLabelFree(input.label);
   let id = slugify(input.label);
   const existing = await query('SELECT id FROM habit_categories WHERE id = $1 OR id LIKE $2', [id, `${id}-%`]);
@@ -103,6 +111,11 @@ router.patch('/:id', canManage, async (request, response) => {
   const { rows } = await query('SELECT id, label, icon, color, description, is_active AS "isActive" FROM habit_categories WHERE id = $1', [request.params.id]);
   const before = rows[0];
   if (!before) throw new HttpError(404, 'Category not found.');
+  if (input.label !== undefined && input.label.toLowerCase() !== before.label.toLowerCase() && (isFocus(before.label) || !isFocus(input.label))) {
+    throw new HttpError(409, `${FOCUS_ONLY} ${isFocus(before.label) ? `"${before.label}" keeps its name.` : 'Only those two names can be used.'}`);
+  }
+  if (input.isActive === true && !before.isActive && !isFocus(before.label)) throw new HttpError(409, `${FOCUS_ONLY} "${before.label}" stays hidden.`);
+  if (input.isActive === false && isFocus(before.label)) throw new HttpError(409, `${FOCUS_ONLY} "${before.label}" stays available.`);
 
   if (input.label && input.label.toLowerCase() !== before.label.toLowerCase()) {
     await assertLabelFree(input.label, before.id);
@@ -151,6 +164,7 @@ router.delete('/:id', canManage, async (request, response) => {
   const { rows } = await query('SELECT id, label, is_active AS "isActive" FROM habit_categories WHERE id = $1', [request.params.id]);
   const category = rows[0];
   if (!category) throw new HttpError(404, 'Category not found.');
+  if (isFocus(category.label)) throw new HttpError(409, `${FOCUS_ONLY} "${category.label}" cannot be deleted.`);
   const used = await query('SELECT count(*)::int AS count FROM habits WHERE lower(category) = lower($1)', [category.label]);
   if (used.rows[0].count > 0) {
     throw new HttpError(409, `"${category.label}" is used by ${used.rows[0].count} habit(s). Deactivate it instead so existing habits keep their category.`);

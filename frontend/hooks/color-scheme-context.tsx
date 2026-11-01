@@ -97,7 +97,8 @@ type ColorSchemeContextValue = {
   streak: number;
   /** The longest such run. */
   bestStreak: number;
-  addHabit: (habit: Omit<Habit, 'id' | 'goal' | 'progress' | 'total' | 'streak' | 'done' | 'completionDates'> & { goal: number }) => void;
+  /** Adds a habit and returns its id. */
+  addHabit: (habit: Omit<Habit, 'id' | 'goal' | 'progress' | 'total' | 'streak' | 'done' | 'completionDates'> & { goal: number }) => string;
   toggleHabit: (id: string) => void;
   toggleHabitForDate: (id: string, date: Date) => void;
   /** True while today's check-in of this habit can still be undone (right after the tap). */
@@ -688,8 +689,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
 
   const addHabit = (habit: Omit<Habit, 'id' | 'goal' | 'progress' | 'total' | 'streak' | 'done' | 'completionDates'> & { goal: number }) => {
     const goal = Math.max(1, habit.goal || 1);
+    const id = `habit-${Date.now()}-${nextHabitId++}`;
     setHabits((current) => [...current, {
-      id: `habit-${Date.now()}-${nextHabitId++}`,
+      id,
       startDate: habit.startDate,
       label: habit.label,
       meta: habit.meta,
@@ -711,9 +713,11 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       smartReminderEnabled: habit.smartReminderEnabled ?? false,
       isBadHabit: Boolean(habit.isBadHabit),
       badHabitReason: habit.badHabitReason || undefined,
+      ...(habit.proof ? { proof: habit.proof } : {}),
       // Habits last one week: it leaves the lists after the Sunday of the week it starts in.
       activeUntil: habit.activeUntil ?? habitActiveUntil(habit.startDate, getLocalDateKey()),
     }]);
+    return id;
   };
 
   /** Picks the best thing to celebrate about a check-in: streak milestone, level, challenge, all done. */

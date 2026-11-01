@@ -1,5 +1,6 @@
 // System instructions, prompt builders and output guards for every AI feature.
 // Keeping them in one module makes the AI behaviour reviewable and testable.
+import { FOCUS_CATEGORIES, focusCategories, focusCategoryFor } from './habit-rules.js';
 import { economyGuide } from './token-guide.js';
 import { COACH_TOKEN_COST, PAID_CHECK_INS_PER_DAY, POINTS_PER_CHECK_IN } from './wallet.js';
 
@@ -108,8 +109,8 @@ export const GOAL_CATEGORIES = ['Career', 'Health', 'Finance', 'Education', 'Rel
 export const GOAL_INTENSITIES = ['High focus', 'Balanced', 'Quick win'];
 export const GOAL_TIMELINES = ['7-14 days', '30-60 days', '90 days'];
 
-/** The app's built-in habit categories (frontend/constants/habit-categories.ts) without Bad Habit. */
-export const DEFAULT_HABIT_CATEGORIES = ['Health', 'Mind', 'Productivity', 'Lifestyle', 'Academics', 'Other'];
+/** The app's habit categories (frontend/constants/habit-categories.ts): Health and Academics (services/habit-rules.js). */
+export const DEFAULT_HABIT_CATEGORIES = [...FOCUS_CATEGORIES];
 export const PLANNED_HABIT_FREQUENCIES = ['Daily', 'Weekly', 'Custom'];
 const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 /** Planned reminder times stay between 05:00 AM and 10:30 PM (minutes of the day). */
@@ -117,20 +118,16 @@ const EARLIEST_TIME = 5 * 60;
 const LATEST_TIME = 22 * 60 + 30;
 const DEFAULT_HABIT_TIME = '07:00 AM';
 
-/** The habit categories the planner may choose from these labels: unique, without Bad Habit, else the defaults. */
+/** The habit categories the planner may choose from these labels: Health and Academics among them, else both. */
 export function plannerCategories(labels) {
-  const seen = new Set();
-  const categories = (Array.isArray(labels) ? labels : [])
-    .map((label) => String(label ?? '').replace(/\s+/g, ' ').trim().slice(0, 60))
-    .filter((label) => {
-      const key = label.toLowerCase();
-      if (!label || /^bad habits?$/.test(key) || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .slice(0, 20);
-  return categories.length ? categories : [...DEFAULT_HABIT_CATEGORIES];
+  return focusCategories(labels);
 }
+
+// What the planner adds when its habits are all of one area, so the week has both.
+const BALANCE_HABITS = {
+  Health: { name: 'Walk 2,000 steps', time: '05:30 PM' },
+  Academics: { name: 'Study for 30 minutes', time: '07:00 PM' },
+};
 
 /** How many habits to plan for "Habits to focus on" ("3 habits", "4 habits", "5 habits"): 3 to 5, 4 by default. */
 export function plannedHabitCount(focusTarget) {
@@ -194,7 +191,7 @@ Turn an achievable goal into a rich, practical plan that fits their chosen timel
 - focusAreas has exactly 3 short themes (2 to 4 words each).
 - habits has exactly the number of habits asked for, and they serve the goal. In HabitAI a habit lasts one week: these are for THIS week (Monday to Sunday), start today and end on Sunday. For each habit:
   - name: short and specific, at most 40 characters (e.g. "Study 1 hour", "Sleep by 11 PM").
-  - category: one of the allowed habit categories.
+  - category: one of the allowed habit categories, Health or Academics. With 2 or more habits, plan at least one of each so the week is balanced.
   - frequency "Daily" with days [], or "Weekly" or "Custom" with the days to do it (Mon, Tue, Wed, Thu, Fri, Sat, Sun).
   - time: the reminder time as "hh:mm AM" or "hh:mm PM", between 05:00 AM and 10:30 PM.
   - reason: at most 140 characters, citing the student history (for example "You checked in 6 of 7 days last week"), or saying it is a fresh start when the history has nothing for it.
@@ -324,7 +321,6 @@ function plannedDays(value) {
  */
 function plannedHabits(value, { habitCount, categories, currentHabitNames }) {
   const allowed = plannerCategories(categories);
-  const fallbackCategory = allowed.includes('Other') ? 'Other' : allowed[0];
   const taken = new Set((Array.isArray(currentHabitNames) ? currentHabitNames : []).map(nameKey));
   const habits = [];
   for (const item of Array.isArray(value) ? value : []) {
@@ -340,14 +336,26 @@ function plannedHabits(value, { habitCount, categories, currentHabitNames }) {
     const scheduled = frequency !== 'Daily' && repeats ? frequency : 'Daily';
     habits.push({
       name,
-      category: allowed.find((label) => label.toLowerCase() === nameKey(habit.category)) ?? fallbackCategory,
+      category: allowed.find((label) => label === focusCategoryFor({ label: name, category: habit.category })) ?? allowed[0],
       frequency: scheduled,
       days: scheduled === 'Daily' ? [] : days,
       time: plannedHabitTime(habit.time) ?? DEFAULT_HABIT_TIME,
       reason: clip(habit.reason, 140) || 'A fresh start for this week.',
     });
   }
-  return habits;
+  return balancedHabits(habits, { allowed, taken });
+}
+
+/**
+ * Two or more planned habits of one area only: the last one makes way for a habit of the other area
+ * (BALANCE_HABITS), unless the student already has it this week.
+ */
+function balancedHabits(habits, { allowed, taken }) {
+  const missing = allowed.find((category) => !habits.some((habit) => habit.category === category));
+  if (habits.length < 2 || !missing || !BALANCE_HABITS[missing]) return habits;
+  const { name, time } = BALANCE_HABITS[missing];
+  if (taken.has(nameKey(name))) return habits;
+  return [...habits.slice(0, -1), { name, category: missing, frequency: 'Daily', days: [], time, reason: `Balances your week with a ${missing} habit.` }];
 }
 
 /**
