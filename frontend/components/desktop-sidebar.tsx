@@ -41,14 +41,13 @@ export const DESKTOP_SIDEBAR_WIDTH = 248;
 type NavItem = { key: string; name: string; label: string; focused: boolean; onPress: () => void };
 
 function SidebarView({ items, onAdd, current, asTabs }: { items: NavItem[]; onAdd?: () => void; current?: string; asTabs: boolean }) {
-  const { isDarkMode, profile, isFaculty } = useAppColorScheme();
+  const { isDarkMode, profile } = useAppColorScheme();
   const appTheme = useAppTheme();
   const colors = themeSheet(isDarkMode ? darkColors : lightColors, appTheme);
   const styles = themeSheet(baseStyles, appTheme);
   const firstName = profile.firstName || profile.fullName.split(' ')[0] || '';
-  // Tokens are the students' own: faculty have no Tokens screen.
   const footerLinks = [
-    ...(isFaculty ? [] : [{ label: 'Tokens', icon: 'wallet-outline' as IconName, href: '/wallet' as Href, focused: Boolean(current && TOKEN_PAGES.has(current)) }]),
+    { label: 'Tokens', icon: 'wallet-outline' as IconName, href: '/wallet' as Href, focused: Boolean(current && TOKEN_PAGES.has(current)) },
     { label: 'Settings', icon: 'options-outline' as IconName, href: '/settings-preferences' as Href, focused: Boolean(current && SETTINGS_PAGES.has(current)) },
     { label: 'Help & Support', icon: 'help-circle-outline' as IconName, href: '/help-support' as Href, focused: Boolean(current && HELP_PAGES.has(current)) },
   ];

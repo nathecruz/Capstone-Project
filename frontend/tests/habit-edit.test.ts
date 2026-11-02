@@ -32,8 +32,8 @@ describe('editedHabitFields', () => {
   });
 
   it('takes the icon and color of a new category', () => {
-    expect(editedHabitFields(habit(), { label: 'Read', category: 'Mind', frequency: 'Daily' }, DEFAULT_HABIT_CATEGORIES))
-      .toMatchObject({ category: 'Mind', icon: 'bulb-outline', color: '#7A6AED' });
+    expect(editedHabitFields(habit(), { label: 'Read', category: 'Academics', frequency: 'Daily' }, DEFAULT_HABIT_CATEGORIES))
+      .toMatchObject({ category: 'Academics', icon: 'school-outline', color: '#57B991' });
   });
 
   it('renames the schedule in meta and keeps the reminder times', () => {

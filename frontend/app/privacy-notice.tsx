@@ -22,6 +22,7 @@ const SECTIONS: { title: string; items: string[] }[] = [
     items: [
       'Account details: full name, username, email address, date of birth, gender, region, and your password (stored only as a secure hash).',
       'App data you create: habits, check-ins, streaks, goals, reminders, preferences, points, tokens and rewards.',
+      'Proof of your check-ins: when a Focus timer or a walk proves a check-in, its start and end time (and the steps your phone counted); when a photo proves it, the photo you take. Steps are counted only while the Walk screen is open, and only the total is sent.',
       'Usage and security data: sign-in date, time and device name, and push-notification subscriptions for your devices.',
       'Support data: issue reports, feature suggestions, and any screenshot or video you attach.',
     ],
@@ -32,6 +33,7 @@ const SECTIONS: { title: string; items: string[] }[] = [
       'To run the app: sign you in, sync your data across devices, send reminders and verification codes, and show progress, rewards and leaderboards.',
       'To give AI guidance: when you ask the AI Coach or assistants, your question and a summary of your habits and check-ins (without your name or email) are sent to Groq, our AI provider, to generate the answer.',
       'To plan your goals: when you use the AI goal planner, your text and your recent habit history are sent to Groq, without your name or email. The history covers the habits of your last 4 weeks (names, categories, schedules and reminder times), how often you checked in and at what time of day, their forecasts from our prediction model, and your streak. It is used only to make your plan and this week\'s habits.',
+      'To help you start a new habit: when you add one, its name, category and proof and your answers to its follow-up questions are sent to Groq, without your name or email, to ask one more question about it and give you a tip.',
       'To keep accounts secure and to answer support requests.',
       'For research on the app\'s effect on student habits: PSAU faculty only see aggregated, anonymized statistics. Groups too small to hide individuals are combined or withheld.',
     ],
@@ -41,7 +43,7 @@ const SECTIONS: { title: string; items: string[] }[] = [
     items: [
       'You can see all of your data in the app.',
       'Other students only see your first name and last initial on leaderboards, and you can hide yourself in Settings & Preferences.',
-      'Authorized HabitAI administrators can view account and support details to manage accounts and help you. Their actions are logged.',
+      'Authorized HabitAI administrators can view account and support details to manage accounts and help you, and the proofs of your check-ins, including their photos, to keep the study\'s data honest. Their actions, including opening a photo, are logged. Faculty never see your photos.',
       'Service providers that host or process data for us: Neon (database), Render/Vercel (app hosting), Groq (AI answers) and Brevo (email delivery). We do not sell your data.',
     ],
   },
@@ -50,6 +52,7 @@ const SECTIONS: { title: string; items: string[] }[] = [
     items: [
       'Your data is kept while your account exists. Deleting your account (Settings & Preferences > Delete Account) permanently removes your profile, habits, check-ins, goals, notifications and reports.',
       'Verification and password-reset codes expire within 15 minutes. Old copies of your synced app data are trimmed automatically.',
+      'Check-in photos are deleted 14 days after they are taken; the record that the check-in was proven stays with your check-ins.',
     ],
   },
   {
@@ -113,7 +116,7 @@ export default function PrivacyNoticeScreen() {
             <Text style={styles.bannerText}>We updated how HabitAI explains the data it uses. Please review and accept this notice to continue.</Text>
           </View>
         )}
-        <Text style={styles.updated}>Effective October 21, 2026</Text>
+        <Text style={styles.updated}>Effective November 2, 2026</Text>
         {SECTIONS.map((section) => (
           <View key={section.title} style={styles.section}>
             <Text style={styles.sectionTitle}>{section.title}</Text>

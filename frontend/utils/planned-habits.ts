@@ -3,8 +3,10 @@
 // `addHabit`, which stamps the end of the week (`activeUntil`).
 import type { Ionicons } from '@expo/vector-icons';
 import type { HabitCategory } from '@/authentication';
+import { focusCategoryFor } from '@/constants/habit-categories';
 import type { Habit, PlannedHabit } from '@/hooks/app-state/types';
 import { habitIcon } from '@/utils/habit-icons';
+import { suggestedProof } from '@/utils/habit-templates';
 import { formatReminderTime, parseReminderTime } from '@/utils/reminder-time';
 
 /** What `addHabit` takes (the context fills in the id, progress and check-ins). */
@@ -48,7 +50,7 @@ export function readPlannedHabits(value: unknown): PlannedHabit[] | undefined {
     const repeats = frequency !== 'Daily' && days.length > 0;
     habits.push({
       name,
-      category: typeof raw.category === 'string' && raw.category.trim() ? raw.category.trim() : 'Other',
+      category: focusCategoryFor({ label: name, category: typeof raw.category === 'string' ? raw.category : '' }),
       frequency: repeats ? frequency : 'Daily',
       days: repeats ? days : [],
       time: plannedTime(raw.time) ?? DEFAULT_TIME,
@@ -64,12 +66,11 @@ export function plannedDaysText(planned: PlannedHabit) {
 }
 
 /**
- * The category, icon and colour of a planned habit, from the managed categories (any case).
- * Categories come from the Admin Panel, so one may be missing from the app's list: its label is
- * kept, with an icon from the habit's name.
+ * The category (Health or Academics), icon and colour of a planned habit, from the managed
+ * categories. One missing from the app's list keeps its label, with an icon from the habit's name.
  */
 export function plannedHabitLook(planned: PlannedHabit, categories: HabitCategory[]) {
-  const label = planned.category.trim() || 'Other';
+  const label = focusCategoryFor({ label: planned.name, category: planned.category });
   const category = categories.find((item) => item.label.toLowerCase() === label.toLowerCase());
   return {
     category: category?.label ?? label,
@@ -81,7 +82,8 @@ export function plannedHabitLook(planned: PlannedHabit, categories: HabitCategor
 /**
  * The `addHabit` input for a planned habit, built like the Add habit screen builds it: the meta
  * ("Daily • 07:30 AM", "Weekly • 07:30 AM" or "Selected days • 07:30 AM • Mon, Wed"), the
- * category's icon and colour, a reminder at the planned time with sound, and today as start date.
+ * category's icon and colour, a reminder at the planned time with sound, today as start date, and
+ * the proof its name suggests.
  */
 export function habitFromPlan(planned: PlannedHabit, categories: HabitCategory[], today: string): NewHabit {
   const { category, icon, color } = plannedHabitLook(planned, categories);
@@ -105,6 +107,7 @@ export function habitFromPlan(planned: PlannedHabit, categories: HabitCategory[]
     reminderSoundEnabled: true,
     smartReminderEnabled: false,
     isBadHabit: false,
+    proof: suggestedProof(planned.name),
   };
 }
 

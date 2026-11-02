@@ -128,6 +128,11 @@ function CategoryModal({ open, category, icons, onClose, onSaved }: {
   );
 }
 
+// HabitAI's habits are limited to Health and Academics (server routes/categories.js): those two stay
+// available, and the older categories stay listed, hidden, for the habits that still use them.
+const FOCUS_LABELS = ['health', 'academics'];
+const isFocus = (label: string) => FOCUS_LABELS.includes(label.trim().toLowerCase());
+
 export function CategoriesPage() {
   const { can } = useAuth();
   const toast = useToast();
@@ -161,12 +166,14 @@ export function CategoriesPage() {
   }
 
   const categories = data?.categories ?? [];
+  // Only a missing Health or Academics can be added back.
+  const focusMissing = FOCUS_LABELS.some((label) => !categories.some((category) => category.label.toLowerCase() === label));
   return (
     <>
       <PageHeader
         title="Habit categories"
-        description="System-wide categories students choose from when creating a habit. Changes reach the app the next time the Add habit screen opens."
-        actions={manage && <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setCreating(true)}>New category</Button>}
+        description="Habits are limited to Health and Academics: students choose one of them when creating a habit. You can change their icon, colour and description; older categories stay hidden for the habits that still use them. Changes reach the app the next time the Add habit screen opens."
+        actions={manage && data && focusMissing && <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setCreating(true)}>New category</Button>}
       />
       {error && <div className="mb-4"><Alert tone="critical">{error}</Alert></div>}
       {!data ? (loading && <Spinner />) : (
@@ -206,13 +213,13 @@ export function CategoriesPage() {
                         </div>
                       </Td>
                       <Td>
-                        {manage ? (
+                        {manage && !isFocus(category.label) && category.isActive ? (
                           <div className="flex items-center gap-2">
                             <Switch
                               label={`${category.label} available in the app`}
                               checked={category.isActive}
                               disabled={busy}
-                              onChange={(value) => void act(() => patch<CategoriesResponse>(`/categories/${category.id}`, { isActive: value }), value ? `${category.label} is now available.` : `${category.label} was hidden from the app.`)}
+                              onChange={(value) => void act(() => patch<CategoriesResponse>(`/categories/${category.id}`, { isActive: value }), `${category.label} was hidden from the app.`)}
                             />
                             <span className="text-xs text-ink-2">{category.isActive ? 'Active' : 'Hidden'}</span>
                           </div>
@@ -225,13 +232,15 @@ export function CategoriesPage() {
                         <Td align="right">
                           <div className="flex justify-end gap-0.5">
                             <IconButton label={`Edit ${category.label}`} onClick={() => setEditing(category)}><Pencil className="size-4" /></IconButton>
-                            <IconButton
-                              label={category.habitCount ? `${category.label} is in use and cannot be deleted` : `Delete ${category.label}`}
-                              disabled={category.habitCount > 0}
-                              onClick={() => setDeleting(category)}
-                            >
-                              <Trash2 className="size-4" />
-                            </IconButton>
+                            {!isFocus(category.label) && (
+                              <IconButton
+                                label={category.habitCount ? `${category.label} is in use and cannot be deleted` : `Delete ${category.label}`}
+                                disabled={category.habitCount > 0}
+                                onClick={() => setDeleting(category)}
+                              >
+                                <Trash2 className="size-4" />
+                              </IconButton>
+                            )}
                           </div>
                         </Td>
                       )}

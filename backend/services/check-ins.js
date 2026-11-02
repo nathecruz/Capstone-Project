@@ -4,7 +4,9 @@
 import { config } from '../config/index.js';
 import { accountStreakRun } from './account-streak.js';
 import { buildServerState, getLatestAppState, getServerCompletions, saveUserAppState, syncNormalizedState } from './app-state-store.js';
+import { deleteProof, saveProof, verifyProof } from './check-in-proof.js';
 import { isPastHabitDeadline } from './completion-date.js';
+import { habitProof } from './habit-rules.js';
 import { hasHabitEnded } from './habit-week.js';
 import { syncWeeklyQuests } from './quests.js';
 import { syncDailyChallenges } from './daily-challenges.js';
@@ -23,13 +25,14 @@ function withCompletionDates(habits, completions) {
 
 /**
  * Returns null when the habit does not exist, { pastDeadline: true } or { ended: true } when a new
- * check-in is closed, { locked: true } when an undo is too late, else { serverState, updatedAt,
- * label, dailyChallenges, tokenCapped, paidCheckInsToday }. tokenCapped is true when this request
- * made a check-in that is over the day's paid limit (it counts, but pays no tokens). Call inside a
- * transaction; the date must already be checked to be the account's today (services/account-day.js)
- * and `timeZone` is the account day's zone.
+ * check-in is closed, { proofRefused } when the habit needs a proof (services/check-in-proof.js)
+ * that `proof` does not give, { locked: true } when an undo is too late, else { serverState,
+ * updatedAt, label, dailyChallenges, tokenCapped, paidCheckInsToday }. tokenCapped is true when this
+ * request made a check-in that is over the day's paid limit (it counts, but pays no tokens). Call
+ * inside a transaction; the date must already be checked to be the account's today
+ * (services/account-day.js) and `timeZone` is the account day's zone.
  */
-export async function setCheckIn(connection, { userId, habitId, date, timeZone, completed, now = Date.now() }) {
+export async function setCheckIn(connection, { userId, habitId, date, timeZone, completed, proof = null, now = Date.now() }) {
   // Serialises concurrent check-ins and saves from several devices of the same user.
   await connection.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [userId]);
   const saved = await getLatestAppState(userId, connection);
@@ -40,10 +43,19 @@ export async function setCheckIn(connection, { userId, habitId, date, timeZone, 
   // before then stands, so Done tapped again later is not "missed"), and once the habit's week has
   // ended (it is only history then); an undo still follows the undo-window rule below.
   const ended = hasHabitEnded(habit, date);
-  if (completed && (ended || isPastHabitDeadline(habit, date, timeZone, new Date(now)))) {
-    const done = await connection.query('SELECT 1 FROM habit_completions WHERE user_id=$1 AND habit_id=$2 AND completed_date=$3', [userId, habitId, date]);
-    if (!done.rowCount) return ended ? { ended: true } : { pastDeadline: true };
+  const alreadyDone = completed && (await connection.query('SELECT 1 FROM habit_completions WHERE user_id=$1 AND habit_id=$2 AND completed_date=$3', [userId, habitId, date])).rowCount > 0;
+  const pastDeadline = (at) => isPastHabitDeadline(habit, date, timeZone, new Date(at));
+  if (completed && !alreadyDone && ended) return { ended: true };
+  // A habit with a proof is checked in only with it; a timer or walk that started before the habit's
+  // last reminder time may end after it.
+  const required = completed && !alreadyDone ? habitProof(habit) : null;
+  let proofRecord = null;
+  if (required) {
+    const verified = await verifyProof(connection, { userId, habitId, date, required, proof, now });
+    if (!verified.ok) return pastDeadline(now) ? { pastDeadline: true } : { proofRefused: verified };
+    proofRecord = verified.record;
   }
+  if (completed && !alreadyDone && pastDeadline(proofRecord?.startedAt ?? now)) return { pastDeadline: true };
 
   if (!completed) {
     const existing = await connection.query('SELECT completed_at AS "completedAt" FROM habit_completions WHERE user_id=$1 AND habit_id=$2 AND completed_date=$3', [userId, habitId, date]);
@@ -55,6 +67,7 @@ export async function setCheckIn(connection, { userId, habitId, date, timeZone, 
   if (completed) {
     const inserted = await connection.query('INSERT INTO habit_completions(user_id,habit_id,completed_date,completed_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING habit_id', [userId, habitId, date, now]);
     if (inserted.rowCount) {
+      if (proofRecord) await saveProof(connection, { userId, habitId, date, record: proofRecord, now });
       award = await awardCheckIn(connection, userId, habitId, date, habit.label, now);
       // Bonus tokens when this check-in pushes the account streak (days in a row with a check-in,
       // across all habits and weeks) past a milestone: once per run of the streak and milestone.
@@ -66,7 +79,10 @@ export async function setCheckIn(connection, { userId, habitId, date, timeZone, 
     }
   } else {
     const removed = await connection.query('DELETE FROM habit_completions WHERE user_id=$1 AND habit_id=$2 AND completed_date=$3', [userId, habitId, date]);
-    if (removed.rowCount) await revokeCheckIn(connection, userId, habitId, date);
+    if (removed.rowCount) {
+      await revokeCheckIn(connection, userId, habitId, date);
+      await deleteProof(connection, { userId, habitId, date });
+    }
   }
 
   // Reflect the change in the snapshot too, so the sync below cannot re-add an undone check-in.

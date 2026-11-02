@@ -1,5 +1,6 @@
 // System instructions, prompt builders and output guards for every AI feature.
 // Keeping them in one module makes the AI behaviour reviewable and testable.
+import { FOCUS_CATEGORIES, focusCategories, focusCategoryFor } from './habit-rules.js';
 import { economyGuide } from './token-guide.js';
 import { COACH_TOKEN_COST, PAID_CHECK_INS_PER_DAY, POINTS_PER_CHECK_IN } from './wallet.js';
 
@@ -15,9 +16,9 @@ Rules:
 
 const APP_GUIDE = `
 HabitAI app guide (the only features that exist):
-- Add a habit: open the Add tab, enter a name, pick a category, frequency (Daily, Weekly, Monthly or Custom days), target count, start date, and up to 2 reminder times, then save.
+- Add a habit: on the Add tab, tap a ready-made habit to add it in one tap, or enter a name, pick Health or Academics (the only two areas), frequency (Daily, Weekly, Monthly or Custom days), target count, start date, up to 2 reminder times and how its check-in is proven (Focus timer, steps or photo), then save. A few follow-up questions come next: their answers set the habit's reminder time and amount, and a short tip follows. The Habits tab shows the balance between Health and Academics habits and suggests one for a missing area.
 - Weekly habits: a habit lasts one week (Monday to Sunday), from its start date to that Sunday. After Sunday it leaves Home and the habit lists and gets no more reminders, but its check-ins stay in stats, history and the streak. Each week, add new habits on the Add tab or plan them with the AI on the Goals tab.
-- Complete a habit: tap the check control on the Home or Habits tab any time during the day. Undo is offered for a few seconds right after; then the check-in is locked. Only today can be checked in: once a scheduled day ends without a check-in, it counts as missed and cannot be filled in later.
+- Complete a habit: tap the check control on the Home or Habits tab during the day. A habit is checked in with its proof: a timer habit opens its Focus timer and counts once the full time has run, a steps habit opens the Walk screen (HabitAI must stay open on it while the phone counts; on the web, or a phone without a step counter, a photo of the walk proves it), and a photo habit opens the camera. Undo is offered for a few seconds right after; then the check-in is locked. Only today can be checked in, until the habit's last reminder time: once a scheduled day ends without a check-in, it counts as missed and cannot be filled in later.
 - Edit a habit: tap the pencil on a habit card in the Habits tab to rename it or change its category or schedule (check-ins are kept), or to delete it.
 - Habit analysis: Insights > Predictions shows each habit's chance of success from the machine-learning model and AI advice on the best way and time to do it.
 - Streaks: the main streak counts the days in a row with at least one check-in, across all habits and weeks. It stops on a day when habits were due and none was checked in; a Streak Freeze (bought with tokens from the streak tile on Home) covers a missed day. Each habit also shows its own streak; history is kept.
@@ -32,7 +33,8 @@ ${economyGuide()}
 - Profile > Personal Information: edit name, username, email, birthday and bio.
 - Help & Support: FAQ, Report an Issue (screenshots or video up to 10 MB) and Suggest a Feature.
 - Data syncs to the student's account automatically when signed in.
-- Faculty accounts use the same app in Faculty mode for their own habits. They are not shown on student leaderboards, and their class's progress is in Class Pulse in the HabitAI Admin Panel.`.trim();
+- Faculty accounts use the same app in Faculty mode for their own habits. They earn tokens like students and spend them on their Rewards screen (Profile > Rewards), but they are not shown on student leaderboards, so the Buddy Showcase and treats for classmates are not for them. Their class's progress is in Class Pulse in the HabitAI Admin Panel.
+- What HabitAI cannot do (Help & Support > What HabitAI can and cannot do): it needs an internet connection (no offline mode; after a quiet while the server takes up to a minute to wake); proof makes fake check-ins harder, not impossible (a timer can run while the student does something else, a phone can be shaken, a photo can be staged); only Health and Academics habits; habits last one week; steps are counted only in the Android app with the Walk screen open; AI answers can be wrong and predictions are estimates from simple rules until a trained model is approved; proof photos are deleted after 14 days.`.trim();
 
 const SYSTEM_PROMPTS = {
   coach: `You are HabitAI Coach, the personal habit coach inside HabitAI, a habit tracker used by PSAU students.
@@ -52,7 +54,7 @@ ${APP_GUIDE}`,
  * their own habits: the advice must fit a teacher's day, not a student's.
  */
 export const FACULTY_CONTEXT = `This user is a PSAU faculty member (a teacher who may also do research, advising and administrative work), not a student.
-Tailor everything to a faculty member's day: lesson preparation, grading and feedback, consultations with students, research and writing, meetings, and their own rest, health and family time. Do not talk about studying for exams, attending classes as a student, or student leaderboards. Faculty accounts have no tokens, rewards or Tokens screen, so do not suggest them.`;
+Tailor everything to a faculty member's day: lesson preparation, grading and feedback, consultations with students, research and writing, meetings, and their own rest, health and family time. Do not talk about studying for exams, attending classes as a student, or student leaderboards. Faculty earn tokens like students and can spend them on Premium Themes, Profile Frames, a Custom Title, Habi's shop, Streak Freeze and AI Coach answers (on the Rewards and Tokens screens), but they are not on the leaderboard, so never suggest treats for classmates or the Buddy Showcase.`;
 
 /** The instruction for an AI feature, adjusted for faculty accounts. */
 export function forAudience(system, role) {
@@ -108,8 +110,8 @@ export const GOAL_CATEGORIES = ['Career', 'Health', 'Finance', 'Education', 'Rel
 export const GOAL_INTENSITIES = ['High focus', 'Balanced', 'Quick win'];
 export const GOAL_TIMELINES = ['7-14 days', '30-60 days', '90 days'];
 
-/** The app's built-in habit categories (frontend/constants/habit-categories.ts) without Bad Habit. */
-export const DEFAULT_HABIT_CATEGORIES = ['Health', 'Mind', 'Productivity', 'Lifestyle', 'Academics', 'Other'];
+/** The app's habit categories (frontend/constants/habit-categories.ts): Health and Academics (services/habit-rules.js). */
+export const DEFAULT_HABIT_CATEGORIES = [...FOCUS_CATEGORIES];
 export const PLANNED_HABIT_FREQUENCIES = ['Daily', 'Weekly', 'Custom'];
 const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 /** Planned reminder times stay between 05:00 AM and 10:30 PM (minutes of the day). */
@@ -117,20 +119,16 @@ const EARLIEST_TIME = 5 * 60;
 const LATEST_TIME = 22 * 60 + 30;
 const DEFAULT_HABIT_TIME = '07:00 AM';
 
-/** The habit categories the planner may choose from these labels: unique, without Bad Habit, else the defaults. */
+/** The habit categories the planner may choose from these labels: Health and Academics among them, else both. */
 export function plannerCategories(labels) {
-  const seen = new Set();
-  const categories = (Array.isArray(labels) ? labels : [])
-    .map((label) => String(label ?? '').replace(/\s+/g, ' ').trim().slice(0, 60))
-    .filter((label) => {
-      const key = label.toLowerCase();
-      if (!label || /^bad habits?$/.test(key) || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .slice(0, 20);
-  return categories.length ? categories : [...DEFAULT_HABIT_CATEGORIES];
+  return focusCategories(labels);
 }
+
+// What the planner adds when its habits are all of one area, so the week has both.
+const BALANCE_HABITS = {
+  Health: { name: 'Walk 2,000 steps', time: '05:30 PM' },
+  Academics: { name: 'Study for 30 minutes', time: '07:00 PM' },
+};
 
 /** How many habits to plan for "Habits to focus on" ("3 habits", "4 habits", "5 habits"): 3 to 5, 4 by default. */
 export function plannedHabitCount(focusTarget) {
@@ -194,7 +192,7 @@ Turn an achievable goal into a rich, practical plan that fits their chosen timel
 - focusAreas has exactly 3 short themes (2 to 4 words each).
 - habits has exactly the number of habits asked for, and they serve the goal. In HabitAI a habit lasts one week: these are for THIS week (Monday to Sunday), start today and end on Sunday. For each habit:
   - name: short and specific, at most 40 characters (e.g. "Study 1 hour", "Sleep by 11 PM").
-  - category: one of the allowed habit categories.
+  - category: one of the allowed habit categories, Health or Academics. With 2 or more habits, plan at least one of each so the week is balanced.
   - frequency "Daily" with days [], or "Weekly" or "Custom" with the days to do it (Mon, Tue, Wed, Thu, Fri, Sat, Sun).
   - time: the reminder time as "hh:mm AM" or "hh:mm PM", between 05:00 AM and 10:30 PM.
   - reason: at most 140 characters, citing the student history (for example "You checked in 6 of 7 days last week"), or saying it is a fresh start when the history has nothing for it.
@@ -324,7 +322,6 @@ function plannedDays(value) {
  */
 function plannedHabits(value, { habitCount, categories, currentHabitNames }) {
   const allowed = plannerCategories(categories);
-  const fallbackCategory = allowed.includes('Other') ? 'Other' : allowed[0];
   const taken = new Set((Array.isArray(currentHabitNames) ? currentHabitNames : []).map(nameKey));
   const habits = [];
   for (const item of Array.isArray(value) ? value : []) {
@@ -340,14 +337,26 @@ function plannedHabits(value, { habitCount, categories, currentHabitNames }) {
     const scheduled = frequency !== 'Daily' && repeats ? frequency : 'Daily';
     habits.push({
       name,
-      category: allowed.find((label) => label.toLowerCase() === nameKey(habit.category)) ?? fallbackCategory,
+      category: allowed.find((label) => label === focusCategoryFor({ label: name, category: habit.category })) ?? allowed[0],
       frequency: scheduled,
       days: scheduled === 'Daily' ? [] : days,
       time: plannedHabitTime(habit.time) ?? DEFAULT_HABIT_TIME,
       reason: clip(habit.reason, 140) || 'A fresh start for this week.',
     });
   }
-  return habits;
+  return balancedHabits(habits, { allowed, taken });
+}
+
+/**
+ * Two or more planned habits of one area only: the last one makes way for a habit of the other area
+ * (BALANCE_HABITS), unless the student already has it this week.
+ */
+function balancedHabits(habits, { allowed, taken }) {
+  const missing = allowed.find((category) => !habits.some((habit) => habit.category === category));
+  if (habits.length < 2 || !missing || !BALANCE_HABITS[missing]) return habits;
+  const { name, time } = BALANCE_HABITS[missing];
+  if (taken.has(nameKey(name))) return habits;
+  return [...habits.slice(0, -1), { name, category: missing, frequency: 'Daily', days: [], time, reason: `Balances your week with a ${missing} habit.` }];
 }
 
 /**

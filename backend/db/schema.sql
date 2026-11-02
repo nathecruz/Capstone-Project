@@ -337,6 +337,33 @@ CREATE TABLE IF NOT EXISTS streak_freeze_days (
   used_at BIGINT NOT NULL,
   PRIMARY KEY (user_id, freeze_date)
 );
+-- Proof for check-ins (services/check-in-proof.js): a Focus timer or step session starts here, so
+-- the time it took is the server's; each proven check-in keeps its proof, a photo only for
+-- config.proofs.photoRetentionDays (then the bytes go and the record stays).
+CREATE TABLE IF NOT EXISTS proof_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  habit_id TEXT NOT NULL,
+  session_date DATE NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('timer', 'steps')),
+  target INTEGER NOT NULL,
+  started_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS proof_sessions_habit_idx ON proof_sessions(user_id, habit_id, session_date);
+CREATE TABLE IF NOT EXISTS check_in_proofs (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  habit_id TEXT NOT NULL,
+  completed_date DATE NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('timer', 'steps', 'photo')),
+  minutes INTEGER,
+  steps INTEGER,
+  started_at BIGINT,
+  photo BYTEA,
+  photo_type TEXT,
+  created_at BIGINT NOT NULL,
+  PRIMARY KEY (user_id, habit_id, completed_date)
+);
+CREATE INDEX IF NOT EXISTS check_in_proofs_created_idx ON check_in_proofs(created_at);
 -- The account streak's past (services/streak-history.js): a day that is over keeps the kind it had
 -- (counts: a check-in, breaks: a miss, neutral: nothing due) when a save of the habits would change
 -- it, so deleting a missed habit or changing a schedule cannot rewrite the streak.

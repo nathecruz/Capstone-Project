@@ -1,12 +1,15 @@
 // Focus timer: a countdown for one habit. When it ends the habit is checked off for today, so
 // "Read for 20 minutes" is done by doing it here. The time left is worked out from the end time,
-// so it stays right when the browser slows timers in a background tab.
+// so it stays right when the browser slows timers in a background tab. A habit proven with the
+// Focus timer (utils/habit-templates.ts) runs its own minutes, in a session that starts on the
+// server: its check-in counts once that much time has passed there (backend/services/check-in-proof.js).
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { startProofSession } from '@/authentication/authService';
 import { Confetti } from '@/components/confetti';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { focusMinutesFor, isHabitLockedMissed, todayAgenda } from '@/utils/engagement';
@@ -27,7 +30,7 @@ function clock(ms: number) {
 export default function FocusScreen() {
   const params = useLocalSearchParams<{ id?: string }>();
   // Only this week's habits can be focused on and checked in (habits last one week).
-  const { currentHabits: habits, toggleHabit } = useAppColorScheme();
+  const { currentHabits: habits, toggleHabit, checkInWithProof } = useAppColorScheme();
   const [habitId, setHabitId] = useState(typeof params.id === 'string' ? params.id : '');
   const habit = habits.find((item) => item.id === habitId) ?? null;
   const today = getLocalDateKey();
@@ -39,8 +42,16 @@ export default function FocusScreen() {
     const agenda = todayAgenda(habits);
     return agenda.open.filter((item) => !agenda.missed.includes(item));
   }, [habits]);
+  // Its check-in is proven by this timer: its own minutes, timed by the server.
+  const timerProof = habit?.proof?.type === 'timer' && !doneToday && !missedNow ? habit.proof : null;
+  // Proven by a walk or a photo: the timer is focus time only.
+  const otherProof = Boolean(habit?.proof && habit.proof.type !== 'timer');
+  const lengthFor = (item: typeof habit | undefined) => (item?.proof?.type === 'timer' ? item.proof.minutes : focusMinutesFor(item?.label ?? ''));
 
-  const [minutes, setMinutes] = useState(() => focusMinutesFor(habit?.label ?? ''));
+  const [minutes, setMinutes] = useState(() => lengthFor(habit));
+  const [sessionId, setSessionId] = useState('');
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState('');
   const [phase, setPhase] = useState<Phase>('idle');
   const [endAt, setEndAt] = useState(0);
   const [leftMs, setLeftMs] = useState(minutes * 60_000);
@@ -51,11 +62,13 @@ export default function FocusScreen() {
   const choose = (id: string) => {
     const next = habits.find((item) => item.id === id);
     setHabitId(id);
-    const length = focusMinutesFor(next?.label ?? '');
+    const length = lengthFor(next);
     setMinutes(length);
     setLeftMs(length * 60_000);
     setPhase('idle');
     setCheckedOff(false);
+    setSessionId('');
+    setStartError('');
   };
   const pickLength = (length: number) => {
     setMinutes(length);
@@ -79,12 +92,17 @@ export default function FocusScreen() {
       setLeftMs(0);
       if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       if (habit && !habit.completionDates.includes(getLocalDateKey()) && !isHabitLockedMissed(habit, new Date())) {
-        toggleHabit(habit.id);
-        setCheckedOff(true);
+        if (habit.proof?.type === 'timer' && sessionId) {
+          checkInWithProof(habit.id, { sessionId });
+          setCheckedOff(true);
+        } else if (!habit.proof) {
+          toggleHabit(habit.id);
+          setCheckedOff(true);
+        }
       }
     }, 250);
     return () => clearInterval(timer);
-  }, [endAt, habit, phase, toggleHabit]);
+  }, [checkInWithProof, endAt, habit, phase, sessionId, toggleHabit]);
 
   // Web: the time left shows in the browser tab, so it can be seen from another tab.
   useEffect(() => {
@@ -110,13 +128,30 @@ export default function FocusScreen() {
     return () => loop.stop();
   }, [breath, phase]);
 
-  const start = () => {
+  const run = () => {
     finishedRef.current = false;
     const current = Date.now();
     setNowMs(current);
     setEndAt(current + (phase === 'paused' ? leftMs : totalMs));
     setPhase('running');
     setCheckedOff(false);
+  };
+  // A timer that proves the check-in starts its session on the server first (a pause only adds time).
+  const start = async () => {
+    if (!timerProof || !habit || phase === 'paused' || sessionId) {
+      run();
+      return;
+    }
+    setStarting(true);
+    setStartError('');
+    const session = await startProofSession(habit.id, today);
+    setStarting(false);
+    if (!session.ok) {
+      setStartError(session.message);
+      return;
+    }
+    setSessionId(session.sessionId);
+    run();
   };
   const pause = () => {
     setLeftMs(Math.max(0, endAt - Date.now()));
@@ -126,6 +161,7 @@ export default function FocusScreen() {
     setPhase('idle');
     setLeftMs(minutes * 60_000);
     setCheckedOff(false);
+    setSessionId('');
   };
   const leave = () => (router.canGoBack() ? router.back() : router.replace('/(tabs)'));
 
@@ -185,7 +221,7 @@ export default function FocusScreen() {
           </View>
         ) : (
           <>
-            {phase === 'idle' && (
+            {phase === 'idle' && !timerProof && (
               <View style={styles.presets}>
                 {[...new Set([...PRESETS, focusMinutesFor(habit?.label ?? '')])].sort((a, b) => a - b).map((length) => (
                   <Pressable key={length} style={[styles.preset, minutes === length && styles.presetActive]} onPress={() => pickLength(length)} accessibilityRole="button" accessibilityState={{ selected: minutes === length }}>
@@ -201,14 +237,19 @@ export default function FocusScreen() {
                   <Text style={styles.secondaryText}>Reset</Text>
                 </Pressable>
               )}
-              <Pressable style={({ pressed }) => [styles.primary, pressed && styles.pressed]} onPress={phase === 'running' ? pause : start} accessibilityRole="button">
+              <Pressable style={({ pressed }) => [styles.primary, (pressed || starting) && styles.pressed]} onPress={phase === 'running' ? pause : () => void start()} disabled={starting} accessibilityRole="button" accessibilityState={{ busy: starting }}>
                 <Ionicons name={phase === 'running' ? 'pause' : 'play'} size={18} color="#3B2699" />
-                <Text style={styles.primaryText}>{phase === 'running' ? 'Pause' : phase === 'paused' ? 'Resume' : 'Start focus'}</Text>
+                <Text style={styles.primaryText}>{starting ? 'Starting…' : phase === 'running' ? 'Pause' : phase === 'paused' ? 'Resume' : 'Start focus'}</Text>
               </Pressable>
             </View>
+            {startError ? <Text style={styles.note} accessibilityLiveRegion="polite">{startError}</Text> : null}
             {habit && !doneToday && (missedNow
               ? <Text style={styles.note}>{habit.label} is missed for today, so this is focus time only.</Text>
-              : <Text style={styles.note}>When the timer ends, {habit.label} is checked off for today.</Text>
+              : timerProof
+                ? <Text style={styles.note}>Focus for the full {timerProof.minutes} minutes to check off {habit.label}. HabitAI counts the time, so it is your proof.</Text>
+                : otherProof
+                  ? <Text style={styles.note}>This is focus time only: {habit.label} is checked in with its {habit.proof?.type === 'steps' ? 'steps' : 'photo'}.</Text>
+                  : <Text style={styles.note}>When the timer ends, {habit.label} is checked off for today.</Text>
             )}
           </>
         )}

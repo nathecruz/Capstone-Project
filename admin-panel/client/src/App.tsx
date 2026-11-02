@@ -11,6 +11,7 @@ import { ClassPulsePage } from './pages/ClassPulse';
 import { LoginPage } from './pages/Login';
 import { NotificationsPage } from './pages/Notifications';
 import { OverviewPage } from './pages/Overview';
+import { ProofsPage } from './pages/Proofs';
 import { RegisterPage } from './pages/Register';
 import { SettingsPage } from './pages/Settings';
 import { SupportPage } from './pages/Support';
@@ -50,6 +51,7 @@ function AppRoutes() {
         <Route path="categories" element={<Guard permission="categories:view"><CategoriesPage /></Guard>} />
         <Route path="notifications" element={<Guard permission="notifications:view"><NotificationsPage /></Guard>} />
         <Route path="support" element={<Guard permission="support:view"><SupportPage /></Guard>} />
+        <Route path="proofs" element={<Guard permission="proofs:view"><ProofsPage /></Guard>} />
         <Route path="audit" element={<Guard permission="audit:view"><AuditLogPage /></Guard>} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

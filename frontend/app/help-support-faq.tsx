@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import React, { useState } from 'react';
 import { Platform, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,9 +20,11 @@ export default function HelpSupportFaqScreen() {
   // Phones swipe through the topics; wide screens (mouse, no swipe) show them all.
   const wrapTopics = width >= 700;
   const support = useSupportChat();
+  // ?topic=<a section's title> opens on that topic.
+  const { topic: linkedTopic } = useLocalSearchParams<{ topic?: string }>();
   const [search, setSearch] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
-  const [topic, setTopic] = useState(ALL);
+  const [topic, setTopic] = useState(() => (faqSections.some((section) => section.title === linkedTopic) ? String(linkedTopic) : ALL));
   const [openQuestion, setOpenQuestion] = useState<string | null>(null);
 
   const query = search.trim();

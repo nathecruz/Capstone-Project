@@ -5,22 +5,23 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getHabitCategories, type HabitCategory } from '@/authentication';
+import { HabitAddedSheet, type AddedHabit } from '@/components/habit-added-sheet';
 import { ReminderTimesEditor } from '@/components/reminder-time-sheet';
 import { useAppDialog } from '@/components/ui/app-dialog';
-import { FACULTY_HABIT_IDEAS } from '@/constants/faculty';
-import { DEFAULT_HABIT_CATEGORIES } from '@/constants/habit-categories';
-import { requestNotificationAccess, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { DEFAULT_HABIT_CATEGORIES, FOCUS_CATEGORIES, focusCategory, focusCategoryList, type FocusCategory } from '@/constants/habit-categories';
+import { habitTemplatesFor, type HabitTemplate } from '@/constants/habit-templates';
+import { requestNotificationAccess, useAppColorScheme, type HabitProof } from '@/hooks/color-scheme-context';
 import { useAppTheme } from '@/hooks/dark-mode-context';
 import { themeSheet, themedColor, withReadableText } from '@/hooks/use-themed-styles';
 import { detectBadHabit } from '@/utils/habit-detection';
 import { classifyHabit } from '@/utils/ai-client';
+import { habitFromTemplate, normalizedProof, proofIcon, proofText, STEP_TARGET, suggestedProof, TIMER_MINUTES } from '@/utils/habit-templates';
 
 const frequencies = ['Daily', 'Weekly', 'Monthly', 'Custom'];
-const popularHabits = ['Drink Water', 'Exercise / Workout', 'Read a Book', 'Sleep Early', 'Meditate', 'Eat Healthy'];
-const allPopularHabits = [
-  ...popularHabits,
-  'Journal', 'Practice Gratitude', 'Walk 10,000 Steps', 'Save Money',
-  'Learn a Language', 'Take Vitamins', 'Plan Tomorrow', 'Limit Screen Time',
+const proofTypes: { type: HabitProof['type']; label: string; hint: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { type: 'timer', label: 'Focus timer', hint: 'Counts when the timer ends', icon: 'timer-outline' },
+  { type: 'steps', label: 'Steps', hint: 'Counted by your phone', icon: 'footsteps-outline' },
+  { type: 'photo', label: 'Photo', hint: 'Taken when you are done', icon: 'camera-outline' },
 ];
 const repeatOptions = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const customFrequencyPresets = ['Weekdays only', 'Twice a week'];
@@ -41,11 +42,12 @@ export default function AddScreen() {
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
   const compactDayButton = compactLayout ? 30 : 34;
-  const { isDarkMode, addHabit: createHabit, ringInterval, snoozeFrequency, isFaculty } = useAppColorScheme();
-  // Faculty mode suggests habits for a teacher's day instead of a student's.
-  const habitIdeas = isFaculty ? FACULTY_HABIT_IDEAS.slice(0, popularHabits.length) : popularHabits;
-  const allHabitIdeas = isFaculty ? FACULTY_HABIT_IDEAS : allPopularHabits;
-  const { habit: selectedHabit } = useLocalSearchParams<{ habit?: string }>();
+  const { isDarkMode, addHabit: createHabit, ringInterval, snoozeFrequency, isFaculty, currentHabits } = useAppColorScheme();
+  // Faculty mode offers habits for a teacher's day instead of a student's.
+  const templates = habitTemplatesFor(isFaculty);
+  // `category` comes from the Health and Academics balance card (components/habit-balance-card.tsx).
+  const { habit: selectedHabit, category: selectedCategory } = useLocalSearchParams<{ habit?: string; category?: string }>();
+  const [templateCategory, setTemplateCategory] = useState<FocusCategory>(() => focusCategory(selectedCategory) ?? 'Health');
   const appTheme = useAppTheme();
   const styles = themeSheet(baseStyles, appTheme);
   const dark: Partial<typeof darkStyles> = isDarkMode ? themeSheet(darkStyles, appTheme) : {};
@@ -53,7 +55,9 @@ export default function AddScreen() {
   const iconInk = isDarkMode ? '#E6E1F0' : '#403A4A';
   const [name, setName] = useState(selectedHabit ?? '');
   const [categories, setCategories] = useState<HabitCategory[]>(DEFAULT_HABIT_CATEGORIES);
-  const [category, setCategory] = useState('Health');
+  const [category, setCategory] = useState<string>(() => focusCategory(selectedCategory) ?? 'Health');
+  // How the check-in is proven: suggested from the name until the student picks one.
+  const [chosenProof, setChosenProof] = useState<HabitProof | null>(null);
   const [frequency, setFrequency] = useState('Daily');
   const [startDate, setStartDate] = useState(() => formatDate(new Date()));
   const [startDatePickerVisible, setStartDatePickerVisible] = useState(false);
@@ -64,11 +68,9 @@ export default function AddScreen() {
   const [repeatDays, setRepeatDays] = useState(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
   const [reminderSoundEnabled, setReminderSoundEnabled] = useState(true);
   const [smartReminder, setSmartReminder] = useState(false);
-  const [popularVisible, setPopularVisible] = useState(false);
   const [smartInfoVisible, setSmartInfoVisible] = useState(false);
-  const [habitAddedVisible, setHabitAddedVisible] = useState(false);
+  const [addedHabit, setAddedHabit] = useState<AddedHabit | null>(null);
   const [adding, setAdding] = useState(false);
-  const [addedHabitSummary, setAddedHabitSummary] = useState({ name: '', schedule: '', reminder: '' });
   const [messageVisible, setMessageVisible] = useState(false);
   const [messageContent, setMessageContent] = useState({ title: '', body: '' });
   const [cancelVisible, setCancelVisible] = useState(false);
@@ -78,8 +80,9 @@ export default function AddScreen() {
     let active = true;
     void getHabitCategories().then((managed) => {
       if (!active || !managed?.length) return;
-      setCategories(managed);
-      setCategory((current) => (managed.some((item) => item.label === current) ? current : managed[0].label));
+      const focus = focusCategoryList(managed);
+      setCategories(focus);
+      setCategory((current) => (focus.some((item) => item.label === current) ? current : focus[0].label));
     });
     return () => {
       active = false;
@@ -89,6 +92,29 @@ export default function AddScreen() {
   const showMessage = (title: string, body: string) => {
     setMessageContent({ title, body });
     setMessageVisible(true);
+  };
+
+  const proof = chosenProof ?? suggestedProof(name);
+
+  const alreadyThisWeek = (label: string) => currentHabits.some((habit) => habit.label.trim().toLowerCase() === label.trim().toLowerCase());
+
+  // One tap adds a ready-made habit: daily, its reminder and its proof set.
+  const addTemplate = (template: HabitTemplate) => {
+    if (alreadyThisWeek(template.label)) {
+      showMessage('Already in your habits', `You already have "${template.label}" this week.`);
+      return;
+    }
+    const habit = habitFromTemplate(template, categories, formatDate(new Date()));
+    const id = createHabit(habit);
+    setAddedHabit({ id, label: habit.label, category: habit.category, schedule: 'Daily', reminder: template.reminderTime, proof: habit.proof });
+  };
+
+  const chooseProof = (type: HabitProof['type']) => {
+    if (proof.type === type) setChosenProof(proof);
+    else setChosenProof(type === 'timer' ? { type, minutes: TIMER_MINUTES.default } : type === 'steps' ? { type, steps: STEP_TARGET.default } : { type });
+  };
+  const adjustProof = (direction: -1 | 1) => {
+    setChosenProof(normalizedProof(proof.type === 'timer' ? { type: 'timer', minutes: proof.minutes + direction * 5 } : proof.type === 'steps' ? { type: 'steps', steps: proof.steps + direction * 500 } : proof));
   };
 
   const toggleRepeatDay = (day: string) => {
@@ -136,6 +162,7 @@ export default function AddScreen() {
   const addHabit = async () => {
     if (adding) return;
     if (!name.trim()) { showMessage('Habit name required', 'Give your new habit a name first.'); return; }
+    if (alreadyThisWeek(name)) { showMessage('Already in your habits', `You already have "${name.trim()}" this week.`); return; }
     if ((frequency === 'Custom' || frequency === 'Weekly') && !repeatDays.length) { showMessage('Choose repeat days', 'Select at least one day for this schedule.'); return; }
     setAdding(true);
     let detected: { isHabit: boolean; isBadHabit: boolean; categoryFits: boolean; suggestedCategory: string; reason: string };
@@ -144,28 +171,26 @@ export default function AddScreen() {
     } finally {
       setAdding(false);
     }
-    // The AI only advises; it never blocks the habit. A bad habit goes to the Bad Habit category; a
-    // good habit under a clearly wrong category is filed under the fitting one the AI suggests.
+    // The AI only advises; it never blocks the habit. A habit under a clearly wrong category is filed
+    // under the fitting one the AI suggests (Health or Academics); a bad habit is marked as one.
     let resolvedCategory = category;
-    if (detected.isBadHabit) {
-      resolvedCategory = 'Bad Habit';
-    } else if (!detected.categoryFits && detected.suggestedCategory) {
+    if (!detected.categoryFits && detected.suggestedCategory) {
       const suggestion = categories.find((item) => item.label === detected.suggestedCategory);
       if (suggestion) resolvedCategory = suggestion.label;
     }
     if (resolvedCategory !== category) setCategory(resolvedCategory);
-    const selectedCategory = categories.find((item) => item.label === resolvedCategory) ?? categories[0];
+    const resolved = categories.find((item) => item.label === resolvedCategory) ?? categories[0];
     if (detected.isBadHabit) {
-      showMessage('Bad habit detected', detected.reason || 'This habit can harm your daily routine or productivity. We filed it under Bad Habit so you can work on it.');
+      showMessage('Bad habit detected', detected.reason || 'This habit can harm your daily routine or productivity. We marked it as a bad habit so you can work on it.');
     }
-    createHabit({
+    const id = createHabit({
       startDate,
       label: name.trim(),
       meta: `${frequency === 'Custom' ? customFrequency : frequency} • ${reminder ? reminderTimes.join(', ') : 'Anytime'}${frequency === 'Custom' ? ` • ${repeatDays.join(', ')}` : ''}`,
       category: resolvedCategory,
       frequency,
-      icon: (selectedCategory?.icon || 'ellipse-outline') as keyof typeof Ionicons.glyphMap,
-      color: selectedCategory?.color || '#57B991',
+      icon: (resolved?.icon || 'ellipse-outline') as keyof typeof Ionicons.glyphMap,
+      color: resolved?.color || '#57B991',
       goal: 1,
       reminderEnabled: reminder && reminderTimes.length > 0,
       reminderTime: reminderTimes[0] || '07:00 AM',
@@ -175,14 +200,17 @@ export default function AddScreen() {
       smartReminderEnabled: smartReminder,
       isBadHabit: detected.isBadHabit,
       badHabitReason: detected.reason,
+      proof: normalizedProof(proof),
     });
-    setAddedHabitSummary({
-      name: name.trim(),
+    setAddedHabit({
+      id,
+      label: name.trim(),
+      category: resolvedCategory,
       schedule: frequency === 'Custom' ? `${customFrequency} • ${repeatDays.join(', ')}` : frequency,
-      reminder: reminder ? `${reminderTimes.length} reminder${reminderTimes.length === 1 ? '' : 's'}` : 'Reminders off',
+      reminder: reminder ? reminderTimes.join(', ') || 'No time set' : 'Reminders off',
+      proof: normalizedProof(proof),
     });
     resetForm();
-    setHabitAddedVisible(true);
   };
 
   const toggleSmartReminder = async () => {
@@ -213,6 +241,7 @@ export default function AddScreen() {
 
   const resetForm = () => {
     setName('');
+    setChosenProof(null);
     setCategory(categories[0]?.label ?? 'Health');
     setFrequency('Daily');
     setStartDate(formatDate(new Date()));
@@ -231,9 +260,9 @@ export default function AddScreen() {
   };
 
 
-  const selectedCategory = categories.find((item) => item.label === category);
-  const categoryColor = selectedCategory?.color || '#5B42D8';
-  const categoryIcon = (selectedCategory?.icon || 'ellipse-outline') as keyof typeof Ionicons.glyphMap;
+  const chosenCategory = categories.find((item) => item.label === category);
+  const categoryColor = chosenCategory?.color || '#5B42D8';
+  const categoryIcon = (chosenCategory?.icon || 'ellipse-outline') as keyof typeof Ionicons.glyphMap;
   const scheduleText = frequency === 'Custom' ? `${customFrequency} · ${repeatDays.join(', ') || 'no days'}` : frequency;
   const close = () => {
     if (name.trim()) {
@@ -269,6 +298,7 @@ export default function AddScreen() {
           {[
             { icon: 'calendar-outline' as const, text: scheduleText },
             { icon: (reminder ? 'notifications-outline' : 'notifications-off-outline') as keyof typeof Ionicons.glyphMap, text: reminder ? reminderTimes.join(', ') || 'No time set' : 'No reminder' },
+            { icon: proofIcon(proof), text: proofText(proof) },
           ].map((chip) => (
             <View key={chip.icon} style={[styles.previewChip, dark.previewChip]}>
               <Ionicons name={chip.icon} size={12} color={accent} />
@@ -279,23 +309,48 @@ export default function AddScreen() {
       </View>
     </View>
 
-    {section(1, 'What do you want to do?', 'Name it, then pick a category.')}
+    {section(1, 'Add in one tap', 'Ready-made habits with the reminder and proof already set.')}
+    <View style={[styles.card, dark.card]}>
+      <View style={[styles.segment, dark.segment]} accessibilityRole="radiogroup" accessibilityLabel="Ready-made habits for">
+        {FOCUS_CATEGORIES.map((item) => {
+          const active = templateCategory === item;
+          return (
+            <Pressable key={item} style={[styles.segmentOption, active && [styles.segmentOptionActive, dark.segmentOptionActive]]} onPress={() => setTemplateCategory(item)} accessibilityRole="radio" accessibilityState={{ checked: active }} accessibilityLabel={`${item} ready-made habits`}>
+              <Text style={[styles.segmentText, dark.segmentText, active && styles.segmentTextActive, active && dark.segmentTextActive]}>{item}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <View style={styles.templateList}>
+        {templates.filter((template) => template.category === templateCategory).map((template) => {
+          const added = alreadyThisWeek(template.label);
+          const color = categories.find((item) => item.label === template.category)?.color || '#5B42D8';
+          return (
+            <Pressable key={template.id} style={({ pressed }) => [styles.templateRow, dark.templateRow, pressed && styles.pressed]} onPress={() => addTemplate(template)} disabled={added} accessibilityRole="button" accessibilityState={{ disabled: added }} accessibilityLabel={added ? `${template.label}, already in your habits` : `Add ${template.label}, reminder ${template.reminderTime}, proof ${proofText(template.proof)}`}>
+              <View style={[styles.templateIcon, { backgroundColor: `${color}22` }]}><Ionicons name={template.icon} size={20} color={color} /></View>
+              <View style={styles.templateCopy}>
+                <Text style={[styles.templateTitle, dark.templateTitle]} numberOfLines={2}>{template.label}</Text>
+                <View style={styles.templateMeta}>
+                  <Ionicons name={proofIcon(template.proof)} size={12} color={accent} />
+                  <Text style={[styles.templateMetaText, dark.templateMetaText]} numberOfLines={1}>{template.reminderTime} · {proofText(template.proof)}</Text>
+                </View>
+              </View>
+              <Ionicons name={added ? 'checkmark-circle' : 'add-circle'} size={28} color={added ? '#49B878' : accent} />
+            </Pressable>
+          );
+        })}
+      </View>
+      <Pressable style={({ pressed }) => [styles.moreLink, pressed && styles.pressed]} onPress={() => router.push('/all-habits')} accessibilityRole="button">
+        <Text style={[styles.moreText, dark.moreText]}>More ideas</Text>
+        <Ionicons name="arrow-forward" size={14} color={accent} />
+      </Pressable>
+    </View>
+
+    {section(2, 'Or make your own', 'Name it, then pick Health or Academics.')}
     <View style={[styles.card, dark.card]}>
       <Text style={[styles.fieldLabel, dark.fieldLabel]}>Habit name</Text>
-      <TextInput value={name} onChangeText={setName} placeholder="e.g., Drink Water" placeholderTextColor="#A19AAA" style={[styles.input, dark.input, nameFocused && styles.inputFocused, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null]} maxLength={40} onFocus={() => setNameFocused(true)} onBlur={() => setNameFocused(false)} accessibilityLabel="Habit name" />
+      <TextInput value={name} onChangeText={setName} placeholder="e.g., Study for 30 minutes" placeholderTextColor="#A19AAA" style={[styles.input, dark.input, nameFocused && styles.inputFocused, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null]} maxLength={40} onFocus={() => setNameFocused(true)} onBlur={() => setNameFocused(false)} accessibilityLabel="Habit name" />
       <Text style={[styles.counter, dark.counter]}>{name.length}/40</Text>
-      <Text style={[styles.fieldLabel, dark.fieldLabel]}>Quick ideas</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.ideaRow} keyboardShouldPersistTaps="handled">
-        {habitIdeas.map((habit) => (
-          <Pressable key={habit} style={({ pressed }) => [styles.ideaChip, dark.ideaChip, name === habit && styles.ideaChipActive, pressed && styles.pressed]} onPress={() => setName(habit)} accessibilityRole="button" accessibilityLabel={`Use ${habit}`}>
-            <Text style={[styles.ideaText, dark.ideaText, name === habit && styles.ideaTextActive]}>{habit}</Text>
-          </Pressable>
-        ))}
-        <Pressable style={({ pressed }) => [styles.ideaChip, styles.moreChip, dark.moreChip, pressed && styles.pressed]} onPress={() => router.push('/all-habits')} accessibilityRole="button">
-          <Text style={[styles.moreText, dark.moreText]}>More ideas</Text>
-          <Ionicons name="arrow-forward" size={14} color={accent} />
-        </Pressable>
-      </ScrollView>
       <Text style={[styles.fieldLabel, dark.fieldLabel]}>Category</Text>
       <View style={styles.categoryGrid}>
         {categories.map((item) => {
@@ -311,7 +366,30 @@ export default function AddScreen() {
       </View>
     </View>
 
-    {section(2, 'How often?', 'Choose when it repeats and how many times.')}
+    {section(3, 'How you prove it', 'A check-in counts once it is proven, so your progress is real.')}
+    <View style={[styles.card, dark.card]}>
+      <View style={styles.proofGrid} accessibilityRole="radiogroup" accessibilityLabel="Proof">
+        {proofTypes.map((option) => {
+          const active = proof.type === option.type;
+          return (
+            <Pressable key={option.type} style={({ pressed }) => [styles.proofTile, dark.proofTile, active && [styles.proofTileActive, dark.proofTileActive], pressed && styles.pressed]} onPress={() => chooseProof(option.type)} accessibilityRole="radio" accessibilityState={{ checked: active }} accessibilityLabel={`${option.label}: ${option.hint}`}>
+              <Ionicons name={option.icon} size={20} color={accent} />
+              <Text style={[styles.proofLabel, dark.proofLabel, active && styles.proofLabelActive, active && dark.proofLabelActive]}>{option.label}</Text>
+              <Text style={[styles.proofHint, dark.proofHint]}>{option.hint}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {proof.type !== 'photo' && (
+        <View style={[styles.proofStepper, dark.proofStepper]}>
+          <Pressable style={({ pressed }) => [styles.stepperButton, dark.stepperButton, pressed && styles.pressed]} onPress={() => adjustProof(-1)} accessibilityRole="button" accessibilityLabel={proof.type === 'timer' ? 'Five minutes less' : '500 steps fewer'}><Ionicons name="remove" size={18} color={accent} /></Pressable>
+          <Text style={[styles.stepperValue, dark.stepperValue]} accessibilityLiveRegion="polite">{proofText(proof)}</Text>
+          <Pressable style={({ pressed }) => [styles.stepperButton, dark.stepperButton, pressed && styles.pressed]} onPress={() => adjustProof(1)} accessibilityRole="button" accessibilityLabel={proof.type === 'timer' ? 'Five minutes more' : '500 steps more'}><Ionicons name="add" size={18} color={accent} /></Pressable>
+        </View>
+      )}
+    </View>
+
+    {section(4, 'How often?', 'Choose when it repeats and how many times.')}
     <View style={[styles.card, dark.card]}>
       <View style={[styles.segment, dark.segment]} accessibilityRole="radiogroup" accessibilityLabel="Frequency">
         {frequencies.map((item) => {
@@ -364,7 +442,7 @@ export default function AddScreen() {
       {startDatePickerVisible && Platform.OS !== 'web' && <DateTimePicker value={new Date(`${startDate}T00:00:00`)} mode="date" minimumDate={new Date()} onChange={(_event, date) => { setStartDatePickerVisible(false); if (date) setStartDate(formatDate(date)); }} />}
     </View>
 
-    {section(3, 'Reminders', 'Get a nudge at the times you choose.')}
+    {section(5, 'Reminders', 'Get a nudge at the times you choose.')}
     <View style={[styles.reminderSection, dark.reminderSection]}>
       <Pressable style={[styles.reminderHeader, dark.reminderHeader, !reminder && styles.reminderHeaderClosed, reminderPermissionPending && styles.reminderHeaderPending]} onPress={() => void toggleReminder()} disabled={reminderPermissionPending} accessibilityRole="switch" accessibilityState={{ checked: reminder, disabled: reminderPermissionPending }} accessibilityLabel="Toggle custom reminders">
         <View style={styles.reminderTitleWrap}>
@@ -387,12 +465,12 @@ export default function AddScreen() {
       </>}
     </View>
     <Modal visible={smartInfoVisible} transparent animationType="fade" onRequestClose={() => setSmartInfoVisible(false)}><View style={styles.smartModalBackdrop}><View style={[styles.smartModalCard, dark.smartModalCard]}><View style={[styles.smartModalIcon, dark.smartModalIcon]}><Ionicons name="sparkles" size={26} color={accent} /></View><Text style={[styles.smartModalTitle, dark.smartModalTitle]}>Smart Reminder enabled</Text><Text style={[styles.smartModalBody, dark.smartModalBody]}>After you save this habit, recent activity and available prediction guidance will be used to choose a reminder time.</Text><View style={[styles.smartModalStatus, dark.smartModalStatus]}><Ionicons name="notifications-outline" size={17} color="#3C9A63" /><Text style={[styles.smartModalStatusText, dark.smartModalStatusText]}>Reminder starts after saving</Text></View><Pressable style={styles.smartModalButton} onPress={() => setSmartInfoVisible(false)} accessibilityRole="button"><Text style={styles.smartModalButtonText}>Done</Text></Pressable></View></View></Modal>
-    <Modal visible={habitAddedVisible} transparent animationType="fade" onRequestClose={() => setHabitAddedVisible(false)}><View style={styles.successModalBackdrop}><View style={[styles.successModalCard, dark.successModalCard]}><View style={styles.successModalIcon}><Ionicons name="checkmark" size={28} color="#FFFFFF" /></View><Text style={[styles.successModalTitle, dark.successModalTitle]}>Habit added successfully</Text><Text style={[styles.successModalBody, dark.successModalBody]}>Your new habit is ready to track.</Text><View style={[styles.successSummary, dark.successSummary]}><Text style={[styles.successHabitName, dark.successHabitName]}>{addedHabitSummary.name}</Text><View style={styles.successSummaryRow}><Ionicons name="calendar-outline" size={16} color={accent} /><Text style={[styles.successSummaryText, dark.successSummaryText]}>{addedHabitSummary.schedule}</Text></View><View style={styles.successSummaryRow}><Ionicons name="notifications-outline" size={16} color={accent} /><Text style={[styles.successSummaryText, dark.successSummaryText]}>{addedHabitSummary.reminder}</Text></View></View><Pressable style={styles.successModalButton} onPress={() => { setHabitAddedVisible(false); router.replace('/(tabs)/habits'); }} accessibilityRole="button"><Text style={styles.successModalButtonText}>View My Habits</Text><Ionicons name="arrow-forward" size={17} color="#FFFFFF" /></Pressable></View></View></Modal>
+    <HabitAddedSheet habit={addedHabit} onClose={() => setAddedHabit(null)} onViewHabits={() => { setAddedHabit(null); router.replace('/(tabs)/habits'); }} />
     <Modal visible={messageVisible} transparent animationType="fade" onRequestClose={() => setMessageVisible(false)}><View style={styles.messageModalBackdrop}><View style={[styles.messageModalCard, dark.messageModalCard]}><View style={[styles.messageModalIcon, dark.messageModalIcon]}><Ionicons name="alert-circle" size={27} color="#D98932" /></View><Text style={[styles.messageModalTitle, dark.messageModalTitle]}>{messageContent.title}</Text><Text style={[styles.messageModalBody, dark.messageModalBody]}>{messageContent.body}</Text><Pressable style={styles.messageModalButton} onPress={() => setMessageVisible(false)} accessibilityRole="button"><Text style={styles.messageModalButtonText}>OK</Text></Pressable></View></View></Modal>
     <Modal visible={cancelVisible} transparent animationType="fade" onRequestClose={() => setCancelVisible(false)}><View style={styles.cancelModalBackdrop}><View style={[styles.cancelModalCard, dark.cancelModalCard]}><View style={[styles.cancelModalIcon, dark.cancelModalIcon]}><Ionicons name="refresh-outline" size={27} color={accent} /></View><Text style={[styles.cancelModalTitle, dark.cancelModalTitle]}>Clear this habit?</Text><Text style={[styles.cancelModalBody, dark.cancelModalBody]}>Your current inputs will be cleared and you&apos;ll return to My Habits.</Text><View style={styles.cancelModalActions}><Pressable style={[styles.keepEditingButton, dark.keepEditingButton]} onPress={() => setCancelVisible(false)} accessibilityRole="button"><Text style={[styles.keepEditingText, dark.keepEditingText]}>Keep Editing</Text></Pressable><Pressable style={styles.clearExitButton} onPress={cancelHabitForm} accessibilityRole="button"><Text style={styles.clearExitText}>Clear &amp; Exit</Text></Pressable></View></View></View></Modal>
     <Pressable style={({ pressed }) => [styles.addHabitButton, (pressed || adding) && styles.pressed]} onPress={addHabit} disabled={adding} accessibilityRole="button" accessibilityState={{ disabled: adding, busy: adding }}><Ionicons name={adding ? 'sparkles' : 'add'} size={21} color="#FFFFFF" /><Text style={styles.addHabitText}>{adding ? 'Checking habit…' : 'Add habit'}</Text></Pressable>
     <Pressable style={({ pressed }) => [styles.cancelButton, pressed && styles.pressed]} onPress={() => setCancelVisible(true)} accessibilityRole="button"><Ionicons name="refresh-outline" size={17} color={accent} /><Text style={[styles.cancelText, dark.cancelText]}>Clear form</Text></Pressable>
-  </View></ScrollView><Modal visible={popularVisible} transparent animationType="slide" onRequestClose={() => setPopularVisible(false)}><View style={styles.modalBackdrop}><View style={[styles.modalCard, dark.modalCard]}><View style={styles.modalHeader}><View><Text style={[styles.modalTitle, dark.modalTitle]}>Popular Habits</Text><Text style={[styles.modalSubtitle, dark.modalSubtitle]}>Choose a habit to add to your form.</Text></View><Pressable onPress={() => setPopularVisible(false)} accessibilityLabel="Close popular habits"><Ionicons name="close" size={22} color={iconInk} /></Pressable></View><ScrollView showsVerticalScrollIndicator={false}>{allHabitIdeas.map((habit) => <Pressable key={habit} style={[styles.modalHabit, dark.modalHabit]} onPress={() => { setName(habit); setPopularVisible(false); }}><View style={[styles.modalHabitIcon, dark.modalHabitIcon]}><Ionicons name="add" size={18} color={accent} /></View><Text style={[styles.modalHabitText, dark.modalHabitText]}>{habit}</Text><Ionicons name="chevron-forward" size={17} color="#A19AAA" /></Pressable>)}</ScrollView></View></View></Modal></SafeAreaView>;
+  </View></ScrollView></SafeAreaView>;
 }
 
 const baseStyles = StyleSheet.create(withReadableText({
@@ -435,14 +513,6 @@ const baseStyles = StyleSheet.create(withReadableText({
   soundKnob: { width: 17, height: 17, borderRadius: 9, backgroundColor: '#FFFFFF' },
   soundKnobOn: { alignSelf: 'flex-end' },
   smartRow: { flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#F0EEF4', paddingTop: 13, marginTop: 4 },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(36, 32, 54, 0.45)', justifyContent: 'flex-end' },
-  modalCard: { maxHeight: '82%', backgroundColor: '#FFFFFF', borderTopLeftRadius: 26, borderTopRightRadius: 26, padding: 22, paddingBottom: 30 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 },
-  modalTitle: { fontSize: 19, fontWeight: '800', color: '#302B3B' },
-  modalSubtitle: { fontSize: 11, color: '#827C8C', marginTop: 4 },
-  modalHabit: { minHeight: 56, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F0EEF3' },
-  modalHabitIcon: { width: 34, height: 34, borderRadius: 11, backgroundColor: '#F1ECFF', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  modalHabitText: { flex: 1, fontSize: 13, color: '#393440', fontWeight: '700' },
   optional: { color: '#9993A0', fontSize: 10, fontWeight: '600' },
   toggle: { width: 39, height: 23, borderRadius: 12, backgroundColor: '#D8D4DF', padding: 3, justifyContent: 'center' },
   toggleOn: { backgroundColor: '#5B42D8' },
@@ -457,17 +527,6 @@ const baseStyles = StyleSheet.create(withReadableText({
   smartModalStatusText: { fontSize: 11, color: '#3C9A63', fontWeight: '800' },
   smartModalButton: { width: '100%', height: 44, borderRadius: 12, backgroundColor: '#5B42D8', alignItems: 'center', justifyContent: 'center', marginTop: 14 },
   smartModalButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
-  successModalBackdrop: { flex: 1, backgroundColor: 'rgba(29, 23, 49, 0.5)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  successModalCard: { width: '100%', maxWidth: 350, backgroundColor: '#FFFFFF', borderRadius: 24, padding: 24, alignItems: 'center', shadowColor: '#000000', shadowOpacity: 0.18, shadowRadius: 20, shadowOffset: { width: 0, height: 9 }, elevation: 10 },
-  successModalIcon: { width: 62, height: 62, borderRadius: 31, backgroundColor: '#49B878', alignItems: 'center', justifyContent: 'center', marginBottom: 15 },
-  successModalTitle: { fontSize: 20, fontWeight: '900', color: '#302B3B', textAlign: 'center' },
-  successModalBody: { fontSize: 12, color: '#777282', fontWeight: '600', marginTop: 7, textAlign: 'center' },
-  successSummary: { width: '100%', backgroundColor: '#F7F4FF', borderWidth: 1, borderColor: '#E6DEFF', borderRadius: 15, padding: 14, marginTop: 18, gap: 10 },
-  successHabitName: { fontSize: 16, color: '#302B3B', fontWeight: '900', marginBottom: 2 },
-  successSummaryRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  successSummaryText: { flex: 1, fontSize: 11, color: '#625B72', fontWeight: '700' },
-  successModalButton: { width: '100%', height: 46, borderRadius: 13, backgroundColor: '#5B42D8', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 16 },
-  successModalButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
   content: { paddingBottom: 120 },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 16, paddingTop: 8 },
   headerCopy: { flex: 1, minWidth: 0 },
@@ -493,13 +552,24 @@ const baseStyles = StyleSheet.create(withReadableText({
   input: { minHeight: 52, backgroundColor: '#FAF9FD', borderRadius: 14, borderWidth: 1.5, borderColor: '#E6E2F0', paddingHorizontal: 14, fontSize: 16, color: '#1F1C26' },
   inputFocused: { borderColor: '#8E7AE8', backgroundColor: '#FFFFFF' },
   counter: { alignSelf: 'flex-end', fontSize: 11, fontWeight: '700', color: '#8A8497', marginTop: 5, marginBottom: 8 },
-  ideaRow: { gap: 8, paddingBottom: 14 },
-  ideaChip: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 36, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: '#E1DAF7', backgroundColor: '#FAF8FF' },
-  ideaChipActive: { backgroundColor: '#5B42D8', borderColor: '#5B42D8' },
-  ideaText: { fontSize: 13, fontWeight: '700', color: '#4A4458' },
-  ideaTextActive: { color: '#FFFFFF' },
-  moreChip: { borderStyle: 'dashed', borderColor: '#B8AAEE', backgroundColor: '#FFFFFF' },
   moreText: { fontSize: 13, fontWeight: '800', color: '#5B42D8' },
+  moreLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, minHeight: 40, marginTop: 6 },
+  templateList: { gap: 8, marginTop: 12 },
+  templateRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 64, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 16, borderWidth: 1, borderColor: '#EEEAF5', backgroundColor: '#FAF9FD' },
+  templateIcon: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  templateCopy: { flex: 1, minWidth: 0 },
+  templateTitle: { fontSize: 14, fontWeight: '800', color: '#1F1C26' },
+  templateMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
+  templateMetaText: { flexShrink: 1, fontSize: 12, fontWeight: '700', color: '#6E6887' },
+  proofGrid: { flexDirection: 'row', gap: 8 },
+  proofTile: { flex: 1, minWidth: 0, alignItems: 'center', gap: 4, paddingHorizontal: 6, paddingVertical: 12, borderRadius: 14, borderWidth: 1.5, borderColor: '#EEEAF5', backgroundColor: '#FFFFFF' },
+  proofTileActive: { borderColor: '#5B42D8', backgroundColor: '#F7F4FF' },
+  proofLabel: { fontSize: 13, fontWeight: '800', color: '#5C5670', textAlign: 'center' },
+  proofLabelActive: { color: '#1F1C26', fontWeight: '900' },
+  proofHint: { fontSize: 11, lineHeight: 14, fontWeight: '600', color: '#7A7488', textAlign: 'center' },
+  proofStepper: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 12, padding: 8, borderRadius: 14, backgroundColor: '#F8F6FF' },
+  stepperButton: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  stepperValue: { flex: 1, fontSize: 14, fontWeight: '900', color: '#2D2A3D', textAlign: 'center' },
   categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   categoryTile: { flexGrow: 1, flexBasis: '30%', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 74, paddingHorizontal: 6, paddingVertical: 10, borderRadius: 14, borderWidth: 1.5, borderColor: '#EEEAF5', backgroundColor: '#FFFFFF' },
   categoryTileActive: { backgroundColor: '#F7F4FF' },
@@ -587,24 +657,12 @@ const darkStyles = StyleSheet.create({
   cancelModalBody: darkMuted,
   keepEditingButton: { borderColor: '#40365C' },
   keepEditingText: darkLink,
-  successModalCard: darkModal,
-  successModalTitle: darkInk,
-  successModalBody: darkMuted,
-  successSummary: { backgroundColor: '#221D33', borderColor: '#3A3150' },
-  successHabitName: darkInk,
-  successSummaryText: { color: '#CFC8DE' },
   smartModalCard: darkModal,
   smartModalIcon: darkTint,
   smartModalTitle: darkInk,
   smartModalBody: darkMuted,
   smartModalStatus: { backgroundColor: '#1D3028' },
   smartModalStatusText: { color: '#7FD3A2' },
-  modalCard: darkModal,
-  modalTitle: darkInk,
-  modalSubtitle: darkMuted,
-  modalHabit: { borderBottomColor: '#302B3B' },
-  modalHabitIcon: darkTint,
-  modalHabitText: { color: '#E6E1F0' },
   preview: { backgroundColor: '#1D1A24', borderColor: '#3A3150' },
   previewLabel: darkMuted,
   previewTitle: darkInk,
@@ -618,10 +676,18 @@ const darkStyles = StyleSheet.create({
   fieldLabel: { color: '#E6E1F0' },
   input: { ...darkField, color: '#F2EFF8' },
   counter: darkMuted,
-  ideaChip: { backgroundColor: '#25212E', borderColor: '#3B3647' },
-  ideaText: { color: '#D7D1E0' },
-  moreChip: { backgroundColor: '#1D1A24', borderColor: '#6A52E0' },
   moreText: darkLink,
+  templateRow: { backgroundColor: '#25212E', borderColor: '#3B3647' },
+  templateTitle: darkInk,
+  templateMetaText: darkMuted,
+  proofTile: { backgroundColor: '#25212E', borderColor: '#3B3647' },
+  proofTileActive: { backgroundColor: '#2A2440', borderColor: '#8E7AE8' },
+  proofLabel: { color: '#CFC8DE' },
+  proofLabelActive: darkInk,
+  proofHint: darkMuted,
+  proofStepper: { backgroundColor: '#25212E' },
+  stepperButton: { backgroundColor: '#1D1A24' },
+  stepperValue: darkInk,
   categoryTile: { backgroundColor: '#25212E', borderColor: '#3B3647' },
   categoryTileActive: { backgroundColor: '#2A2440' },
   categoryText: { color: '#CFC8DE' },

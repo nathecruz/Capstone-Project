@@ -109,9 +109,10 @@ function weeklyDropRow({ drop, checkIns }, balance) {
  * Everything to spend tokens on, with its status against the raw `balance` ('owned', 'ready',
  * 'short' with `short`, 'locked' or 'full'). `rewards` and `owned` are getRewards', `freezes`
  * getStreakFreezeStatus', `buddy` getBuddy's with this week's drop, and `giftsSentToday` the treats
- * sent to classmates on the account day.
+ * sent to classmates on the account day. `faculty` have no treats for classmates (only students send
+ * them, services/buddy-gifts.js).
  */
-export function spendRows({ balance, rewards, owned, freezes, buddy, giftsSentToday }) {
+export function spendRows({ balance, rewards, owned, freezes, buddy, giftsSentToday, faculty = false }) {
   const giftsLeft = Math.max(0, GIFTS_PER_DAY - giftsSentToday);
   const answers = Math.max(0, Math.floor(balance / COACH_TOKEN_COST));
   return [
@@ -137,7 +138,7 @@ export function spendRows({ balance, rewards, owned, freezes, buddy, giftsSentTo
       ...(reward.permanent && owned.includes(reward.id) ? { status: 'owned' } : priced(reward.cost, balance)),
       target: `reward:${reward.id}`,
     })),
-    {
+    ...(faculty ? [] : [{
       id: 'treat-gift',
       title: 'Treats for classmates',
       detail: giftsLeft ? `${giftsLeft} of ${GIFTS_PER_DAY} left today` : `${GIFTS_PER_DAY} sent today · more tomorrow`,
@@ -145,7 +146,7 @@ export function spendRows({ balance, rewards, owned, freezes, buddy, giftsSentTo
       from: true,
       ...(giftsLeft ? priced(TREAT_COST, balance) : { status: 'full' }),
       target: 'gift',
-    },
+    }]),
     { id: 'coach', title: 'AI Coach', detail: `Enough for ${plural(answers, 'answer')}`, cost: COACH_TOKEN_COST, from: false, ...priced(COACH_TOKEN_COST, balance), target: 'coach' },
   ];
 }
@@ -225,9 +226,9 @@ function progressOf(list) {
 /**
  * The Tokens screen for the account day `day` ({ today, timeZone }, services/account-day.js): the
  * API's wallet summary without `ok`. The week is Monday to Sunday of `today`, from 00:00 Monday in
- * the account's zone.
+ * the account's zone. For `faculty`, without what only students can buy (spendRows, getRewards).
  */
-export async function getWalletSummary(db, userId, { today, timeZone }, now = Date.now()) {
+export async function getWalletSummary(db, userId, { today, timeZone }, { faculty = false, now = Date.now() } = {}) {
   const weekStart = weekStartOf(today);
   const weekEnd = weekEndKey(today);
   const weekStartsAt = periodResetsAt({ end: shiftDay(weekStart, -1) }, timeZone);
@@ -243,7 +244,7 @@ export async function getWalletSummary(db, userId, { today, timeZone }, now = Da
     () => db.query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1', [userId]),
     // The habits as a check-in reads them (services/check-ins.js), for their reminder times.
     () => db.query(`SELECT state_json->'habits' AS habits FROM user_app_state WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 1`, [userId]),
-    () => getRewards(db, userId),
+    () => getRewards(db, userId, { faculty }),
     () => getBuddy(db, userId, { today }),
     () => getStreakFreezeStatus(db, userId),
     () => getWeeklyBonus(db, userId, { today, timeZone }),
@@ -264,7 +265,7 @@ export async function getWalletSummary(db, userId, { today, timeZone }, now = Da
   // Which challenges can still be finished: the time-of-day ones close at 10 AM and noon.
   const challenges = await getDailyChallenges(db, userId, today, timeZone, { minute: minuteOfDay(now, timeZone), isClosed: missed });
   const streak = accountStreakRun(habits.map((habit) => ({ ...habit, completionDates: datesByHabit.get(habit.id) ?? [] })), today, freezes.frozenDays, freezes.keptDays).streak;
-  const spend = spendRows({ balance, rewards: rewards.rewards, owned: rewards.owned, freezes, buddy, giftsSentToday });
+  const spend = spendRows({ balance, rewards: rewards.rewards, owned: rewards.owned, freezes, buddy, giftsSentToday, faculty });
   const perDay = pacePerDay(rows, now);
   return {
     balance,

@@ -216,13 +216,15 @@ test('the planner history is read from the habits and check-ins of the student',
   assert.ok(history.habits.every((habit) => habit.mlForecast && typeof habit.mlForecast.completionProbability === 'number'), 'without an ML service the rules answer');
 });
 
-test('the planner chooses from the app\'s habit categories, never Bad Habit', async () => {
-  assert.deepEqual(plannerCategories(['Health', ' Bad Habit ', 'health', 'Sleep', '', null]), ['Health', 'Sleep']);
+test('the planner chooses Health or Academics among the app\'s habit categories, never another', async () => {
+  assert.deepEqual(plannerCategories(['Health', ' Bad Habit ', 'health', 'Sleep', '', null]), ['Health']);
+  assert.deepEqual(plannerCategories(['academics', 'Mind', 'Health']), ['Academics', 'Health']);
+  assert.deepEqual(plannerCategories(['Mind', 'Other']), DEFAULT_HABIT_CATEGORIES);
   assert.deepEqual(plannerCategories([]), DEFAULT_HABIT_CATEGORIES);
-  assert.deepEqual(DEFAULT_HABIT_CATEGORIES, ['Health', 'Mind', 'Productivity', 'Lifestyle', 'Academics', 'Other']);
+  assert.deepEqual(DEFAULT_HABIT_CATEGORIES, ['Health', 'Academics']);
 
   const rows = (labels) => ({ query: async () => ({ rows: labels.map((label) => ({ label })) }) });
-  assert.deepEqual(await loadPlannerCategories(rows(['Health', 'Bad Habit', 'Faith'])), ['Health', 'Faith']);
+  assert.deepEqual(await loadPlannerCategories(rows(['Health', 'Bad Habit', 'Faith'])), ['Health']);
   assert.deepEqual(await loadPlannerCategories({ query: async () => { throw Object.assign(new Error('no table'), { code: '42P01' }); } }), DEFAULT_HABIT_CATEGORIES);
   await assert.rejects(loadPlannerCategories({ query: async () => { throw new Error('connection lost'); } }));
 });
@@ -335,8 +337,8 @@ test('planned habits are cleaned: names, repeats, current habits, days, times an
   assert.deepEqual(parsed.data.habits, plan.habits, 'the schema keeps the planned habits');
   assert.deepEqual(plan.habits.slice(0, 3), [
     { name: 'Drink water', category: 'Health', frequency: 'Daily', days: [], time: '07:30 AM', reason: 'You checked in 6 of 7 days last week.' },
-    { name: 'Gym', category: 'Other', frequency: 'Custom', days: ['Mon', 'Wed', 'Fri'], time: '10:30 PM', reason: 'A fresh start for this week.' },
-    { name: 'Stretch', category: 'Other', frequency: 'Daily', days: [], time: '07:00 AM', reason: 'Fresh start.' },
+    { name: 'Gym', category: 'Health', frequency: 'Custom', days: ['Mon', 'Wed', 'Fri'], time: '10:30 PM', reason: 'A fresh start for this week.' },
+    { name: 'Stretch', category: 'Health', frequency: 'Daily', days: [], time: '07:00 AM', reason: 'Fresh start.' },
   ]);
   const long = plan.habits[3];
   assert.ok(long.name.length <= 40 && !long.name.endsWith('…') && 'Plan tomorrow before bed with a short checklist'.startsWith(long.name), long.name);
@@ -347,6 +349,21 @@ test('planned habits are cleaned: names, repeats, current habits, days, times an
   assert.deepEqual(plan.habitSuggestions, ['Drink water', 'Gym', 'Stretch'], 'older app builds get the first 3 names');
 });
 
+test('planned habits are Health or Academics, and a week of one area gets a habit of the other', () => {
+  const habit = (name, category) => ({ name, category, frequency: 'Daily', days: [], time: '07:00 PM', reason: 'Fresh start.' });
+  const plan = (habits, currentHabitNames = []) => normalizeGoalPlan({ ...rawPlan, habits }, { timeline: '7-14 days', now, timeZone, habitCount: 3, currentHabitNames }).habits;
+  // A category the app does not have is replaced by the area the name fits.
+  assert.deepEqual(plan([habit('Read 20 pages', 'Mind'), habit('Jog', 'Fitness')]).map((item) => item.category), ['Academics', 'Health']);
+  // All Academics: the last one makes way for a Health habit.
+  const lopsided = plan([habit('Study 1 hour', 'Academics'), habit('Review notes', 'Academics'), habit('Do homework', 'Academics')]);
+  assert.deepEqual(lopsided.map((item) => [item.name, item.category]), [['Study 1 hour', 'Academics'], ['Review notes', 'Academics'], ['Walk 2,000 steps', 'Health']]);
+  assert.equal(lopsided[2].reason, 'Balances your week with a Health habit.');
+  assert.equal(goalPlanSchema.safeParse(normalizeGoalPlan({ ...rawPlan, habits: lopsided }, { timeline: '7-14 days', now })).success, true);
+  // Not when the student already has that habit this week, and not for a single habit.
+  assert.deepEqual(plan([habit('Jog', 'Health'), habit('Stretch', 'Health')], ['Study for 30 minutes']).map((item) => item.name), ['Jog', 'Stretch']);
+  assert.deepEqual(plan([habit('Jog', 'Health')]).map((item) => item.name), ['Jog']);
+});
+
 test('a plan without usable habits keeps the old habit suggestions', () => {
   const allCurrent = normalizeGoalPlan({ ...rawPlan, habits: [{ name: 'Read 20 pages' }], habitSuggestions: ['Walk 20 minutes'] }, { timeline: '7-14 days', now, currentHabitNames: ['Read 20 pages'] });
   assert.equal('habits' in allCurrent, false);
@@ -354,7 +371,7 @@ test('a plan without usable habits keeps the old habit suggestions', () => {
   assert.equal(goalPlanSchema.safeParse(allCurrent).success, true);
 
   const bare = normalizeGoalPlan({ ...rawPlan, habits: ['Walk 20 minutes', 42, null] }, { timeline: '7-14 days', now });
-  assert.deepEqual(bare.habits, [{ name: 'Walk 20 minutes', category: 'Other', frequency: 'Daily', days: [], time: '07:00 AM', reason: 'A fresh start for this week.' }], 'a bare name gets the defaults');
+  assert.deepEqual(bare.habits, [{ name: 'Walk 20 minutes', category: 'Health', frequency: 'Daily', days: [], time: '07:00 AM', reason: 'A fresh start for this week.' }], 'a bare name gets the defaults');
   assert.equal(goalPlanSchema.safeParse(bare).success, true);
 
   const bad = goalPlanSchema.safeParse({ ...bare, habits: [{ ...bare.habits[0], frequency: 'Weekly', days: [] }] });

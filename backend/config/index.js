@@ -110,6 +110,11 @@ export const config = {
     // toward points, the leaderboard and Habi's growth.
     cappedFrom: dateKeyOr(env.CHECK_IN_CAP_FROM, '2026-10-26'),
   },
+  proofs: {
+    // Photo proofs of check-ins are kept this many days for review in the Admin Panel, then
+    // deleted (the record of the proof stays); the free database is small.
+    photoRetentionDays: intBetween(env.PROOF_PHOTO_RETENTION_DAYS, 1, 365, 14),
+  },
   passwordReset: {
     otpLifetimeMs: 10 * 60 * 1000,
     resendCooldownMs: 60 * 1000,

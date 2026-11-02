@@ -359,14 +359,13 @@ describe('Tokens screen', () => {
     expect(historyMock).toHaveBeenCalledTimes(2);
   });
 
-  it('sends faculty back without asking for a wallet', async () => {
+  it('is for faculty too: their tokens load like a student\'s', async () => {
     mockContext.isFaculty = true;
-    const screen = render(<WalletScreen />);
-    await act(async () => undefined);
-    expect(router.back).toHaveBeenCalled();
-    expect(screen.queryByText('Tokens')).toBeNull();
-    expect(summaryMock).not.toHaveBeenCalled();
-    expect(historyMock).not.toHaveBeenCalled();
+    const screen = await renderWallet();
+    expect(screen.getByText('Tokens')).toBeTruthy();
+    expect(router.back).not.toHaveBeenCalled();
+    expect(summaryMock).toHaveBeenCalledWith(today);
+    expect(historyMock).toHaveBeenCalledTimes(1);
   });
 });
 

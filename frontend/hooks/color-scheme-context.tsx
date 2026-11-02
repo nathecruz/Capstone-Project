@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Appearance, Platform, useColorScheme as useRNColorScheme } from 'react-native';
 import { translate } from '@/constants/i18n';
 import { getCurrentSession, subscribeToAuthChanges, type SessionUser } from '@/authentication/session';
-import { buyStreakFreeze as requestStreakFreeze, getLiveVersions, getRemoteAppState, getRemoteHabitCompletions, saveRemoteAppState, saveRemoteHabitCompletion, syncStreakFreezes, type AppStateSyncBase, type AppStateSyncPayload } from '@/authentication/authService';
+import { buyStreakFreeze as requestStreakFreeze, getLiveVersions, getRemoteAppState, getRemoteHabitCompletions, saveRemoteAppState, saveRemoteHabitCompletion, syncStreakFreezes, type AppStateSyncBase, type AppStateSyncPayload, type CheckInProof } from '@/authentication/authService';
 import { normalizeHabitFields } from '@/utils/habit-data';
 import { CHECK_IN_UNDO_MS, canCompleteHabitForDate } from '@/utils/habit-visibility';
 import type { EditableHabitFields } from '@/utils/habit-edit';
@@ -13,6 +13,7 @@ import { buddyGrowth } from '@/utils/buddy';
 import { checkInChange, checkInCounts, isHabitLockedMissed, levelProgress, POINTS_PER_CHECK_IN, streakMilestone, STREAK_MILESTONE_BONUS, todayAgenda } from '@/utils/engagement';
 import { weeklyQuests } from '@/utils/quests';
 import { computeStreak } from '@/utils/streaks';
+import { takeProofPhoto } from '@/utils/proof-photo';
 import { accountStreak, longestAccountStreak, type KeptDays } from '@/utils/account-streak';
 import { currentHabits as habitsOfThisWeek, habitActiveUntil, hasHabitEnded } from '@/utils/habit-week';
 import { applyRemoteCompletionDates, applyVisibleOrder, getLocalDateKey, withServerActiveUntil } from './app-state/habit-progress';
@@ -97,9 +98,16 @@ type ColorSchemeContextValue = {
   streak: number;
   /** The longest such run. */
   bestStreak: number;
-  addHabit: (habit: Omit<Habit, 'id' | 'goal' | 'progress' | 'total' | 'streak' | 'done' | 'completionDates'> & { goal: number }) => void;
+  /** Adds a habit and returns its id. */
+  addHabit: (habit: Omit<Habit, 'id' | 'goal' | 'progress' | 'total' | 'streak' | 'done' | 'completionDates'> & { goal: number }) => string;
+  /**
+   * Checks a habit in, or undoes it. A habit with a proof (utils/habit-templates.ts) is checked in
+   * with it: its Focus timer or walk screen opens, or the camera for its photo.
+   */
   toggleHabit: (id: string) => void;
   toggleHabitForDate: (id: string, date: Date) => void;
+  /** Checks a habit in with its proof: the Focus timer or walk session it ended, or a photo. */
+  checkInWithProof: (id: string, proof: CheckInProof) => void;
   /** True while today's check-in of this habit can still be undone (right after the tap). */
   canUndoCheckIn: (id: string) => boolean;
   /** A moment worth celebrating after a check-in (streak milestone, level up, challenge, all done). */
@@ -688,8 +696,9 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
 
   const addHabit = (habit: Omit<Habit, 'id' | 'goal' | 'progress' | 'total' | 'streak' | 'done' | 'completionDates'> & { goal: number }) => {
     const goal = Math.max(1, habit.goal || 1);
+    const id = `habit-${Date.now()}-${nextHabitId++}`;
     setHabits((current) => [...current, {
-      id: `habit-${Date.now()}-${nextHabitId++}`,
+      id,
       startDate: habit.startDate,
       label: habit.label,
       meta: habit.meta,
@@ -711,9 +720,11 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       smartReminderEnabled: habit.smartReminderEnabled ?? false,
       isBadHabit: Boolean(habit.isBadHabit),
       badHabitReason: habit.badHabitReason || undefined,
+      ...(habit.proof ? { proof: habit.proof } : {}),
       // Habits last one week: it leaves the lists after the Sunday of the week it starts in.
       activeUntil: habit.activeUntil ?? habitActiveUntil(habit.startDate, getLocalDateKey()),
     }]);
+    return id;
   };
 
   /** Picks the best thing to celebrate about a check-in: streak milestone, level, challenge, all done. */
@@ -783,7 +794,28 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     }));
   };
 
-  const toggleHabitForDate = (id: string, date: Date) => {
+  // The proof flows end after other renders: they check in with the latest toggleHabitForDate.
+  const toggleRef = useRef<(id: string, date: Date, proof?: CheckInProof) => void>(() => undefined);
+  /** Opens what proves a check-in of this habit: its Focus timer, its walk, or the camera. */
+  const startProofFlow = (habit: Habit) => {
+    if (habit.proof?.type === 'timer' || habit.proof?.type === 'steps') {
+      // Loaded when needed rather than imported: the provider also runs where no screens are mounted.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { router } = require('expo-router') as typeof import('expo-router');
+      router.push({ pathname: habit.proof.type === 'timer' ? '/focus' : '/walk', params: { id: habit.id } });
+      return;
+    }
+    void takeProofPhoto().then((photo) => {
+      if (!photo) return;
+      if (!photo.ok) {
+        celebrate({ id: `proof-photo:${Date.now()}`, kind: 'info', icon: 'camera-outline', title: 'Photo needed', message: photo.message });
+        return;
+      }
+      toggleRef.current(habit.id, new Date(), photo.proof);
+    });
+  };
+
+  const toggleHabitForDate = (id: string, date: Date, proof?: CheckInProof) => {
     const dateKey = getLocalDateKey(date);
     const currentHabit = habits.find((habit) => habit.id === id);
     // Today only: once a day is over, a missed habit stays missed and a done one stays done.
@@ -799,6 +831,11 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     if (completed && hasHabitEnded(currentHabit, dateKey)) return;
     // A check-in can be undone only right after the tap; then it is locked for the day.
     if (!completed && !canUndoCheckIn(id)) return;
+    // A habit with a proof is checked in only with it (the server refuses it otherwise).
+    if (completed && currentHabit.proof && !proof) {
+      startProofFlow(currentHabit);
+      return;
+    }
     setUndoUntil((current) => {
       const next = { ...current };
       if (completed) next[id] = Date.now() + CHECK_IN_UNDO_MS;
@@ -825,7 +862,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       if (counted && sets.points === setsAtTap.points) adjustBuddyCheckIns(-counted);
     };
     const email = activeEmailRef.current;
-    void saveRemoteHabitCompletion({ habitId: id, date: dateKey, completed }).then((result) => {
+    void saveRemoteHabitCompletion({ habitId: id, date: dateKey, completed, ...(proof ? { proof } : {}) }).then((result) => {
       // Signed out or into another account meanwhile: this answer is not about what is shown.
       if (activeEmailRef.current !== email) return;
       if (result && 'rejected' in result) {
@@ -834,6 +871,10 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         // instead of silently reverting on sync.
         takeBack(!completed);
         setUndoUntil((current) => { const next = { ...current }; delete next[id]; return next; });
+        // The proof was missing, too early or unreadable: say why (the server's words).
+        if (result.code?.startsWith('PROOF_')) {
+          celebrate({ id: `proof:${id}:${Date.now()}`, kind: 'info', icon: 'shield-checkmark-outline', title: 'Not checked in yet', message: result.message });
+        }
         // The account's day is not the phone's (its time zone changed): say which day it is.
         if (result.code === 'DAY_CLOSED' && result.today && result.today !== dateKey) {
           celebrate({ id: `day-closed:${result.today}`, kind: 'info', icon: 'time-outline', title: 'That day is closed', message: `Your HabitAI day is ${result.today}${result.timeZone ? ` (${result.timeZone})` : ''}. A day that already started cannot be reopened.` });
@@ -844,6 +885,12 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         // The server keeps a check-in it would not undo (locked, or unreachable): show it again,
         // and Habi as it was.
         if (!completed) takeBack(true);
+        // A proven check-in cannot be sent later (a synced state cannot add it): take it back.
+        if (completed && proof) {
+          takeBack(false);
+          setUndoUntil((current) => { const next = { ...current }; delete next[id]; return next; });
+          celebrate({ id: `proof-offline:${id}:${Date.now()}`, kind: 'info', icon: 'cloud-offline-outline', title: 'Not checked in yet', message: 'HabitAI could not be reached, so the proof was not sent. Check your connection and try again.' });
+        }
         return;
       }
       markCapped(dateKey, id, completed && Boolean(result.tokenCapped));
@@ -887,7 +934,11 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
     });
   };
 
+  useEffect(() => {
+    toggleRef.current = toggleHabitForDate;
+  });
   const toggleHabit = (id: string) => toggleHabitForDate(id, new Date());
+  const checkInWithProof = (id: string, proof: CheckInProof) => toggleHabitForDate(id, new Date(), proof);
 
   const deleteHabit = (id: string) => {
     setHabits((current) => current.filter((habit) => habit.id !== id));
@@ -1019,6 +1070,7 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       addHabit,
       toggleHabit,
       toggleHabitForDate,
+      checkInWithProof,
       canUndoCheckIn,
       celebration,
       celebrate,

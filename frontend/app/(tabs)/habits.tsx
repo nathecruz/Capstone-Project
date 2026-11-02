@@ -5,23 +5,27 @@ import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatli
 import { Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EditHabitSheet } from '@/components/edit-habit-sheet';
+import { HabitAddedSheet, type AddedHabit } from '@/components/habit-added-sheet';
+import { HabitBalanceCard } from '@/components/habit-balance-card';
 import { ProgressRing } from '@/components/progress-ring';
 import { openFocus } from '@/components/today-agenda';
 import { isHabitLate, isHabitLockedMissed } from '@/utils/engagement';
-import { CHECK_IN_UNDO_MS } from '@/utils/habit-visibility';
-import { FACULTY_HABIT_IDEAS } from '@/constants/faculty';
+import { CHECK_IN_UNDO_MS, getLocalDateKey } from '@/utils/habit-visibility';
+import { habitTemplatesFor, type HabitTemplate } from '@/constants/habit-templates';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { isHabitMissedYesterday, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useAppTheme } from '@/hooks/dark-mode-context';
 import { historyStats } from '@/utils/achievements';
+import { suggestedTemplate } from '@/utils/habit-balance';
 import { filterHabitsByStatus } from '@/utils/habit-data';
+import { habitFromTemplate, proofIcon, proofShortText, proofText } from '@/utils/habit-templates';
+import { useHabitCategories } from '@/hooks/use-habit-categories';
 import { createThemedStyles, themedColor, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
 const FREQUENCIES = ['All', 'Daily', 'Weekly', 'Monthly', 'Custom'];
 type StatusMode = 'all' | 'active' | 'done';
 type SortMode = 'custom' | 'progress' | 'streak' | 'name';
 const SORT_LABELS: Record<SortMode, string> = { custom: 'My order', progress: 'Progress', streak: 'Longest streak', name: 'A to Z' };
-const HABIT_IDEAS = ['Drink Water', 'Read for 10 Minutes', 'Take a Short Walk', 'Write in a Journal', 'Practice Gratitude', 'Plan Tomorrow', 'Stretch for 5 Minutes', 'Organize One Small Space', 'Learn Something New', 'Sleep 30 Minutes Earlier', 'Take a Screen Break'];
 
 export default function HabitsScreen() {
   const styles = useThemedStyles(themedStyles);
@@ -29,7 +33,8 @@ export default function HabitsScreen() {
   const appTheme = useAppTheme();
   // Habits last one week: the list is this week's habits; those of past weeks stay in the history
   // (`habits`, for this week's rate) and come back in stats, never here.
-  const { isDarkMode, habits, currentHabits: habitList, streak, toggleHabit, reorderHabits, canUndoCheckIn, isFaculty } = useAppColorScheme();
+  const { isDarkMode, habits, currentHabits: habitList, streak, toggleHabit, reorderHabits, canUndoCheckIn, isFaculty, addHabit } = useAppColorScheme();
+  const categories = useHabitCategories();
   const showAlert = useAppDialog();
   const [editingHabit, setEditingHabit] = useState<(typeof habitList)[number] | null>(null);
   const [selectedTab, setSelectedTab] = useState('All');
@@ -39,7 +44,9 @@ export default function HabitsScreen() {
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const [suggestion, setSuggestion] = useState('');
+  // A ready-made habit to add in one tap, of the missing area when the week is lopsided.
+  const [suggestion, setSuggestion] = useState<HabitTemplate | null>(null);
+  const [addedHabit, setAddedHabit] = useState<AddedHabit | null>(null);
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const insets = useSafeAreaInsets();
   // The habit just checked off: a short-lived "+20 XP" confirmation with Undo, like Home's Today.
@@ -67,8 +74,14 @@ export default function HabitsScreen() {
   const pastWeeksOnly = !habitList.length && habits.length > 0;
   const frequencyCount = (tab: string) => (tab === 'All' ? habitList.length : habitList.filter((habit) => habit.frequency === tab).length);
   const getSuggestion = () => {
-    const candidates = isFaculty ? FACULTY_HABIT_IDEAS : HABIT_IDEAS;
-    setSuggestion(candidates[Math.floor(Math.random() * candidates.length)]);
+    const others = habitTemplatesFor(isFaculty).filter((template) => template.id !== suggestion?.id);
+    setSuggestion(suggestedTemplate(others, habitList) ?? suggestedTemplate(habitTemplatesFor(isFaculty), habitList));
+  };
+  const addSuggestion = (template: HabitTemplate) => {
+    const habit = habitFromTemplate(template, categories, getLocalDateKey());
+    const id = addHabit(habit);
+    setSuggestion(null);
+    setAddedHabit({ id, label: habit.label, category: habit.category, schedule: 'Daily', reminder: template.reminderTime, proof: habit.proof });
   };
 
   const filteredHabits = useMemo(() => {
@@ -100,8 +113,9 @@ export default function HabitsScreen() {
     // Past its last reminder time without a check-in: missed for today, so it can no longer be checked in.
     if (!item.done && isHabitLockedMissed(item, new Date())) { showAlert('Missed today', 'This habit passed its reminder time without a check-in, so it is missed for today. It opens again on its next scheduled day.'); return; }
     toggleHabit(item.id);
-    // Checking one on shows the "+20 XP" bar; tapping a done one off clears it.
-    setJustChecked(item.done ? null : item);
+    // Checking one on shows the "+20 XP" bar; tapping a done one off clears it. A habit with a
+    // proof opens its timer, walk or camera first, so it is not checked in yet.
+    setJustChecked(item.done || item.proof ? null : item);
   };
 
   const undoJustChecked = () => {
@@ -149,7 +163,7 @@ export default function HabitsScreen() {
                     style={({ pressed }) => [styles.check, item.done ? styles.checkDone : styles.checkEmpty, pressed && styles.pressed]}
                     onPress={() => pressCheck(item)}
                     accessibilityRole="checkbox"
-                    accessibilityLabel={`${item.label} done today`}
+                    accessibilityLabel={item.proof && !item.done ? `Check in ${item.label} with ${proofText(item.proof)}` : `${item.label} done today`}
                     accessibilityState={{ checked: item.done }}
                     aria-checked={item.done}
                     hitSlop={6}
@@ -190,6 +204,13 @@ export default function HabitsScreen() {
                       <View style={[styles.chip, styles.chipStreak]}>
                         <Ionicons name="flame" size={13} color={themeColor('#E07B1F')} />
                         <Text style={[styles.chipText, styles.chipTextStreak]}>{item.streak}-day streak</Text>
+                      </View>
+                    )}
+                    {/* How it is checked in: its proof (utils/habit-templates.ts). */}
+                    {item.proof && (
+                      <View style={styles.chip} accessibilityLabel={`Checked in with: ${proofText(item.proof)}`}>
+                        <Ionicons name={proofIcon(item.proof)} size={13} color={themeColor('#5B42D8')} />
+                        <Text style={styles.chipText}>{proofShortText(item.proof)}</Text>
                       </View>
                     )}
                   </View>
@@ -287,6 +308,8 @@ export default function HabitsScreen() {
               </View>
             </View>
 
+            <HabitBalanceCard habits={habitList} />
+
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.frequencyRow} accessibilityRole="tablist">
               {FREQUENCIES.filter((tab) => tab === 'All' || tab === selectedTab || frequencyCount(tab) > 0).map((tab) => {
                 const active = selectedTab === tab;
@@ -358,8 +381,11 @@ export default function HabitsScreen() {
               </View>
               {suggestion ? (
                 <View style={styles.ideaResult}>
-                  <Text style={styles.ideaResultTitle} numberOfLines={2}>{suggestion}</Text>
-                  <Pressable style={({ pressed }) => [styles.useButton, pressed && styles.pressed]} onPress={() => router.push({ pathname: '/add', params: { habit: suggestion } })} accessibilityRole="button" accessibilityLabel={`Add the habit ${suggestion}`}>
+                  <View style={styles.ideaResultCopy}>
+                    <Text style={styles.ideaResultTitle} numberOfLines={2}>{suggestion.label}</Text>
+                    <Text style={styles.ideaResultMeta} numberOfLines={1}>{suggestion.category} · {suggestion.reminderTime} · {proofText(suggestion.proof)}</Text>
+                  </View>
+                  <Pressable style={({ pressed }) => [styles.useButton, pressed && styles.pressed]} onPress={() => addSuggestion(suggestion)} accessibilityRole="button" accessibilityLabel={`Add the habit ${suggestion.label}`}>
                     <Ionicons name="add" size={16} color={themeColor('#FFFFFF')} />
                     <Text style={styles.useButtonText}>Add</Text>
                   </Pressable>
@@ -381,6 +407,7 @@ export default function HabitsScreen() {
         </View>
       )}
       <EditHabitSheet habit={editingHabit} onClose={() => setEditingHabit(null)} />
+      <HabitAddedSheet habit={addedHabit} onClose={() => setAddedHabit(null)} onViewHabits={() => setAddedHabit(null)} />
     </SafeAreaView>
   );
 }
@@ -481,7 +508,9 @@ const themedStyles = createThemedStyles({
   ideaButton: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 40, paddingHorizontal: 12, borderRadius: 12, backgroundColor: '#F1EEFF' },
   ideaButtonText: { fontSize: 13, fontWeight: '900', color: '#5B42D8' },
   ideaResult: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 14, backgroundColor: '#F7F4FF' },
-  ideaResultTitle: { flex: 1, fontSize: 15, fontWeight: '900', color: '#302B3B' },
+  ideaResultCopy: { flex: 1, minWidth: 0 },
+  ideaResultTitle: { fontSize: 15, fontWeight: '900', color: '#302B3B' },
+  ideaResultMeta: { fontSize: 12, fontWeight: '700', color: '#6E6887', marginTop: 2 },
   useButton: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 40, paddingHorizontal: 14, borderRadius: 12, backgroundColor: '#5B42D8' },
   useButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
   // A floating "+20 XP" confirmation with Undo, above the tab bar, matching Home's Today.

@@ -21,7 +21,14 @@ export const appStateSchema = stateSchema;
 export const habitPredictionSchema = z.object({ habit_name: z.string().trim().min(1).max(120).optional(), name: z.string().trim().min(1).max(120).optional(), streak: z.coerce.number().int().min(0).max(10000).optional(), completion_rate: z.coerce.number().finite().min(0).max(1).optional(), missed_days: z.coerce.number().int().min(0).max(10000).optional(), last_7_days: z.array(z.coerce.number().int().min(0).max(1)).length(7).optional(), average_session_minutes: z.coerce.number().int().min(0).max(1440).optional(), priority: z.string().trim().min(1).max(30).optional(), goal_type: z.string().trim().min(1).max(50).optional() }).strict();
 export const leaderboardSchema = z.object({ avatar: z.string().trim().max(2).optional() }).strict();
 export const leaderboardSyncSchema = leaderboardSchema;
-export const habitCompletionSchema = z.object({ habitId: z.string().trim().min(1).max(120), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), completed: z.boolean(), timeZone: z.string().trim().min(1).max(80).optional() }).strict();
+// The proof a check-in of a habit with one needs (services/check-in-proof.js): the Focus timer or
+// walk session it ended (with the steps counted), or a photo as base64 (at most 300 KB).
+const checkInProofSchema = z.union([
+  z.object({ sessionId: z.string().trim().min(10).max(80), steps: z.number().int().min(0).max(200000).optional() }).strict(),
+  z.object({ photo: z.string().min(100).max(420000).regex(/^[A-Za-z0-9+/]+={0,2}$/), type: z.enum(['image/jpeg', 'image/png', 'image/webp']) }).strict(),
+]);
+export const habitCompletionSchema = z.object({ habitId: z.string().trim().min(1).max(120), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), completed: z.boolean(), timeZone: z.string().trim().min(1).max(80).optional(), proof: checkInProofSchema.optional() }).strict();
+export const proofSessionSchema = z.object({ habitId: z.string().trim().min(1).max(120), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: z.string().trim().min(1).max(80).optional() }).strict();
 const timeZoneSchema = z.string().trim().min(1).max(80).refine((value) => {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: value });
@@ -48,6 +55,14 @@ export const streakFreezeSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2
 export const webPushDoneSchema = z.object({ token: z.string().min(20).max(1000) }).strict();
 export const assistantSchema = z.object({ question: z.string().trim().max(500).optional(), summary: z.record(z.string(), z.unknown()).optional(), mode: z.enum(['assistant', 'coach', 'support']).default('assistant'), timeZone: timeZoneSchema.optional() }).strict();
 export const habitAnalysisRequestSchema = z.object({ habitId: z.string().trim().min(1).max(120), timeZone: timeZoneSchema.optional() }).strict();
+// A habit just added, for its follow-up questions (services/habit-follow-up.js), and the answers for its tip.
+const followUpProofSchema = z.union([
+  z.object({ type: z.literal('timer'), minutes: z.number().int().min(1).max(600) }).strict(),
+  z.object({ type: z.literal('steps'), steps: z.number().int().min(1).max(100000) }).strict(),
+  z.object({ type: z.literal('photo') }).strict(),
+]);
+export const habitFollowUpSchema = z.object({ label: z.string().trim().min(1).max(60), category: z.string().trim().max(60).optional(), proof: followUpProofSchema.optional() }).strict();
+export const habitInsightSchema = habitFollowUpSchema.extend({ answers: z.array(z.object({ question: z.string().trim().min(1).max(120), answer: z.string().trim().min(1).max(60) }).strict()).min(1).max(3) }).strict();
 export const habitClassificationSchema = z.object({ name: z.string().trim().min(1).max(100), category: z.string().trim().max(60).optional(), categories: z.array(z.string().trim().min(1).max(60)).max(20).optional() }).strict();
 export const goalGenerationSchema = z.object({ goal: z.string().trim().min(1).max(500), focusTarget: z.string().trim().max(30).optional(), timeline: z.string().trim().max(30).optional(), timeZone: timeZoneSchema.optional() }).strict();
 // This week's habits from the goal planner (services/ai-prompts.js plannedHabits): Daily has no days, Weekly and Custom have some.

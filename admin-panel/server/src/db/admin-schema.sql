@@ -64,6 +64,8 @@ CREATE INDEX IF NOT EXISTS admin_sessions_user_idx ON admin_sessions(user_id);
 CREATE INDEX IF NOT EXISTS admin_sessions_expires_idx ON admin_sessions(expires_at);
 
 -- System-wide habit categories (read by the app via GET /api/habit-categories) --
+-- Habits are limited to Health and Academics (routes/categories.js): the others stay, hidden,
+-- for the habits that still use them.
 CREATE TABLE IF NOT EXISTS habit_categories (
   id TEXT PRIMARY KEY,
   label TEXT NOT NULL,

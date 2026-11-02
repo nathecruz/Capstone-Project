@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { Bell, ChartColumn, ExternalLink, HeartPulse, LayoutDashboard, LifeBuoy, LogOut, Menu, Monitor, Moon, ScrollText, Settings, Smartphone, Sun, Tags, Users, X, type LucideIcon } from 'lucide-react';
+import { Bell, ChartColumn, ExternalLink, HeartPulse, LayoutDashboard, LifeBuoy, LogOut, Menu, Monitor, Moon, ScrollText, Settings, ShieldCheck, Smartphone, Sun, Tags, Users, X, type LucideIcon } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { APP_URL } from '../lib/links';
 import { useTheme } from '../lib/theme';
@@ -20,6 +20,7 @@ export const NAV: { to: string; label: string; icon: LucideIcon; group: NavGroup
   { to: '/categories', label: 'Habit categories', icon: Tags, group: 'Manage', permission: 'categories:view' },
   { to: '/notifications', label: 'Notifications', icon: Bell, group: 'Manage', permission: 'notifications:view' },
   { to: '/support', label: 'Support', icon: LifeBuoy, group: 'Manage', permission: 'support:view' },
+  { to: '/proofs', label: 'Check-in proofs', icon: ShieldCheck, group: 'Manage', permission: 'proofs:view' },
   { to: '/audit', label: 'Audit log', icon: ScrollText, group: 'System', permission: 'audit:view' },
   { to: '/settings', label: 'Settings', icon: Settings, group: 'System' },
 ];

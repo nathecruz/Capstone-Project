@@ -86,7 +86,15 @@ export type Habit = {
   smartReminderEnabled?: boolean;
   isBadHabit?: boolean;
   badHabitReason?: string;
+  /** How a check-in of this habit is proven (utils/habit-templates.ts). Habits from before proofs have none. */
+  proof?: HabitProof;
 };
+
+/**
+ * The proof a check-in needs: a Focus timer session of `minutes`, a walk of `steps` counted by the
+ * phone, or a photo taken then. The server keeps the rules (backend/services/habit-rules.js).
+ */
+export type HabitProof = { type: 'timer'; minutes: number } | { type: 'steps'; steps: number } | { type: 'photo' };
 
 export type Profile = {
   /** "First Last", kept in step with firstName and lastName. */

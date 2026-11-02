@@ -22,6 +22,7 @@ export const ROLE_PERMISSIONS = {
     'notifications:manage',
     'support:view',
     'support:manage',
+    'proofs:view',
     'audit:view',
     'settings:manage',
   ],

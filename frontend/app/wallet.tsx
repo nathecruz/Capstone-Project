@@ -1,7 +1,8 @@
 // Tokens: the balance and this week's flow, every way to earn with today's progress, everything to
 // buy with what is affordable now, and the whole token history. Every number is the server's own
 // (GET /api/wallet/summary and /api/wallet/history), so this screen cannot drift from what pays.
-// /wallet?section=history opens on the history. Tokens are the students' own: faculty are sent back.
+// /wallet?section=history opens on the history. Students and faculty both have tokens; the server
+// leaves out what only students can buy (treats for classmates, the Buddy Showcase).
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams, type Href } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -35,15 +36,13 @@ export default function WalletScreen() {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const insets = useSafeAreaInsets();
-  const { tokens, isFaculty, accountReady } = useAppColorScheme();
+  const { tokens, accountReady } = useAppColorScheme();
   const { section } = useLocalSearchParams<{ section?: string }>();
   const wantsHistory = section === 'history';
   const today = getLocalDateKey();
-  // Until the account is loaded its role is not known: nothing is asked for (a faculty account
-  // opened at /wallet would only get 403s), and the screen shows that it is loading.
-  const student = !isFaculty && accountReady;
-  const { summary, status } = useWallet(today, student);
-  const history = useWalletHistory(student);
+  // Until the account is loaded nothing is asked for, and the screen shows that it is loading.
+  const { summary, status } = useWallet(today, accountReady);
+  const history = useWalletHistory(accountReady);
   const [showAll, setShowAll] = useState(wantsHistory);
   const [freezeOpen, setFreezeOpen] = useState(false);
   // Where the history starts, once the rows above it show the summary (for ?section=history).
@@ -52,31 +51,23 @@ export default function WalletScreen() {
   const scrolledRef = useRef(false);
   const focusedRef = useRef(false);
 
-  useEffect(() => {
-    if (!isFaculty) return;
-    if (router.canGoBack()) router.back();
-    else router.replace('/(tabs)');
-  }, [isFaculty]);
-
   // Back from a screen or sheet where tokens were spent or earned: the numbers load again at once,
-  // not at the next live pulse. The first focus once the account is a student's is the opening,
-  // which loads them already (also when the account loads while the screen is open).
+  // not at the next live pulse. The first focus once the account is loaded is the opening, which
+  // loads them already (also when the account loads while the screen is open).
   useFocusEffect(useCallback(() => {
-    if (!student) {
+    if (!accountReady) {
       focusedRef.current = false;
       return;
     }
     if (focusedRef.current) reloadWallet();
     focusedRef.current = true;
-  }, [student]));
+  }, [accountReady]));
 
   useEffect(() => {
     if (!wantsHistory || scrolledRef.current || historyY === null) return;
     scrolledRef.current = true;
     scrollRef.current?.scrollTo({ y: historyY, animated: true });
   }, [wantsHistory, historyY]);
-
-  if (isFaculty) return null;
 
   const goBack = () => (router.canGoBack() ? router.back() : router.replace('/(tabs)'));
   const openSpend = (row: WalletSpendRow) => {

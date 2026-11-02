@@ -159,13 +159,12 @@ export default function BuddyScreen() {
             <Ionicons name="chevron-back" size={21} color={themeColor('#292633')} />
           </Pressable>
           <Text style={styles.headerTitle}>Habit Buddy</Text>
-          {/* How to earn more and what else to spend on: the Tokens screen (students only). */}
+          {/* How to earn more and what else to spend on: the Tokens screen. */}
           <Pressable
             style={({ pressed }) => [styles.tokenPill, pressed && styles.pressed]}
-            disabled={isFaculty}
             onPress={() => router.push('/wallet')}
-            accessibilityRole={isFaculty ? 'text' : 'button'}
-            accessibilityLabel={isFaculty ? `${tokens} tokens` : `${tokens} tokens. Open Tokens`}
+            accessibilityRole="button"
+            accessibilityLabel={`${tokens} tokens. Open Tokens`}
           >
             <Ionicons name="logo-bitcoin" size={14} color="#E7A72F" />
             <Text style={styles.tokenText}>{tokens}</Text>
