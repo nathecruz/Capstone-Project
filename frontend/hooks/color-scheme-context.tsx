@@ -26,6 +26,7 @@ import { reloadWeeklyBonus } from './use-weekly-bonus';
 import { reloadWallet } from './use-wallet';
 import { isAppTheme } from './use-themed-styles';
 import { APP_STATE_KEY_PREFIX, clearSyncMeta, loadSyncMeta, persistSyncBase, persistUnsaved, TOKEN_CAP_SHOWN_KEY_PREFIX } from './app-state/sync-storage';
+import { keepSyncToken } from './app-state/reminder-sync';
 import { useHabitReminders } from './app-state/use-habit-reminders';
 import { useHomeWidget } from '@/widgets/use-home-widget';
 import { initialPreferences, initialProfile, type Goal, type Habit, type PersistedAppState, type Preferences, type Profile, type TokenTransaction } from './app-state/types';
@@ -356,6 +357,8 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
       const remoteState = await getRemoteAppState();
       if (cancelled || version !== sessionLoadVersion) return;
       startedWithoutServerRef.current = !remoteState;
+      // The token the Android background reminder sync asks with (app-state/reminder-sync.ts).
+      if (Platform.OS === 'android' && remoteState) void keepSyncToken(email).catch(() => undefined);
       unsavedRef.current = syncMeta.unsaved;
       // Changes made on this device that never reached the server (a failed save) are kept and merged
       // into the server copy by the next save, instead of being replaced by it.

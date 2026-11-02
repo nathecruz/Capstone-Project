@@ -46,6 +46,7 @@ describe('help FAQ', () => {
       'Can I check in a day I missed?',
       'Do my habits carry over to next week?',
       'Does HabitAI work offline?',
+      'Will I get reminders while HabitAI is closed?',
       'Why does a walk count only while HabitAI is open?',
       'Which features need the Android app?',
       'How accurate are the AI and the predictions?',

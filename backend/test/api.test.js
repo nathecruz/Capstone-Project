@@ -2109,6 +2109,34 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.deepEqual([kept.includes(weekAgo(6)), kept.includes(weekAgo(1))], [false, true]);
   });
 
+  await t.test('the background reminder sync asks with a token whether the state changed, and is not counted as activity', async () => {
+    const { headers, userId } = await student('Sync', 'Phone');
+    assert.equal((await request('/api/app-state/sync-token', { method: 'POST' })).response.status, 401);
+    const issued = await request('/api/app-state/sync-token', { method: 'POST', headers });
+    assert.equal(issued.response.status, 200, JSON.stringify(issued.body));
+    assert.ok(issued.body.expiresAt > Date.now() + 50 * 86_400_000, 'it lasts about two months');
+    const versionWith = (token) => request('/api/app-state/version', { headers: token ? { 'X-Sync-Token': token } : {} });
+    for (const token of [undefined, 'not-a-token', `${issued.body.token}x`, headers.Authorization.replace('Bearer ', '')]) {
+      const refused = await versionWith(token);
+      assert.deepEqual([refused.response.status, refused.body.code], [401, 'SYNC_TOKEN_INVALID'], String(token));
+    }
+    const before = (await versionWith(issued.body.token)).body;
+    assert.deepEqual(before, { ok: true, updatedAt: null }, 'nothing saved yet');
+
+    // A save (here, from another device) moves it; the token never needs the session.
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], id: 'web', label: 'Added on the web' }] }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    assert.deepEqual((await versionWith(issued.body.token)).body, { ok: true, updatedAt: saved.body.updatedAt });
+
+    // The sync's fetch of the newer state is not a day of activity; the student opening HabitAI is.
+    const activityDays = async () => (await db.query('SELECT count(*)::int AS days FROM user_activity_days WHERE user_id=$1', [userId])).rows[0].days;
+    const fetched = await request('/api/app-state?background=1', { headers });
+    assert.equal(fetched.body.state.habits[0].label, 'Added on the web');
+    assert.equal(await activityDays(), 0);
+    await request('/api/app-state', { headers });
+    assert.equal(await activityDays(), 1);
+  });
+
   await t.test('profile, login activity, multi-device merge and account deletion', async () => {
     const profile = await request('/api/auth/profile', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ fullName: 'Updated User', username: 'updated_user', email: 'updated@example.com', dateOfBirth: 'June 1, 1997', gender: 'Female', about: 'Updated profile.', currentPassword: password }) });
     assert.equal(profile.response.status, 200, JSON.stringify(profile.body));

@@ -6,9 +6,10 @@ share one Neon PostgreSQL database:
 | Part | Technology | Hosting | Purpose |
 | --- | --- | --- | --- |
 | Student app (`frontend/`) | Expo, React Native, Expo Router, TypeScript | Vercel / Render static site (web), Android/iOS builds | Habits, streaks, goals, AI coach, rewards, notifications |
-| App API (`backend/`) | Node.js, Express 5, Zod, bcrypt, `pg` | Render web service | Accounts, sync, AI prompts, email, reminders |
-| Reminder clock (`backend/services/web-push-clock.js`) | Node.js, Web Push (VAPID) | Inside the App API, while it is awake | Sends habit reminders and snoozes on their exact minute; picks up changed reminder times within seconds |
-| Reminder scheduler (`backend/scripts/web-push-scheduler.js`) | Node.js, Web Push (VAPID) | GitHub Actions, every 5 minutes (free) | Covers the hours the API sleeps; wakes the database only when something is due |
+| App API (`backend/`) | Node.js, Express 5, Zod, bcrypt, `pg` | Render web service (Starter, always on) | Accounts, sync, AI prompts, email, reminders |
+| Reminder clock (`backend/services/web-push-clock.js`) | Node.js, Web Push (VAPID) | Inside the App API | Sends habit reminders and snoozes on their exact minute; picks up changed reminder times within seconds |
+| Reminder scheduler (`backend/scripts/web-push-scheduler.js`) | Node.js, Web Push (VAPID) | GitHub Actions, every 5 minutes (free) | Only for an API on the free plan: covers the hours it sleeps (GitHub can start runs hours apart); wakes the database only when something is due |
+| Background reminder sync (`frontend/hooks/app-state/reminder-sync.ts`) | `expo-background-task`, `expo-notifications` | The Android app, about every hour while it is not open, with internet | Schedules the reminders of habits changed on another device and sets their alarms again; asks `GET /api/app-state/version`, answered from memory (`backend/services/state-versions.js`) |
 | ML service (`ml-service/`) | Python, FastAPI, scikit-learn, XGBoost | Render (Docker) | Habit completion / drop-out predictions |
 | Admin Panel (`admin-panel/`) | React + Vite, Express, `pg` | Render web service (Docker) | User, category and notification management; anonymized analytics |
 

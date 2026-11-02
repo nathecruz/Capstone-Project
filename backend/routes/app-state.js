@@ -21,8 +21,10 @@ import { setCheckIn } from '../services/check-ins.js';
 import { isPastHabitDeadline } from '../services/completion-date.js';
 import { habitProof, withHabitRules } from '../services/habit-rules.js';
 import { hasHabitEnded } from '../services/habit-week.js';
+import { stateVersionOf } from '../services/state-versions.js';
 import { getKeptDays } from '../services/streak-freeze.js';
 import { keepStreakDays } from '../services/streak-history.js';
+import { makeSyncToken, readSyncToken, syncTokenSecret } from '../services/sync-token.js';
 import { applyWallet, getWallet, PAID_CHECK_INS_PER_DAY } from '../services/wallet.js';
 import { notifyReminderChange } from '../services/web-push-clock.js';
 import { recordDueMarks } from '../services/weekly-bonus.js';
@@ -34,11 +36,13 @@ const isBlankStartupState = (state, storedState) =>
 
 export default function registerAppStateRoutes(app) {
   // `?since=<updatedAt>` lets clients poll cheaply: when nothing is newer the
-  // response is just { unchanged: true } instead of the whole state.
+  // response is just { unchanged: true } instead of the whole state. `?background=1` is the Android
+  // app's background reminder sync, which is not the student using HabitAI: it is not recorded as
+  // a day of activity (the Admin Panel's engagement figures).
   app.get('/api/app-state', async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
-    void recordActivity(session.userId);
+    if (request.query.background !== '1') void recordActivity(session.userId);
     const since = Number(request.query.since);
     if (Number.isFinite(since) && since > 0) {
       const latest = await getLatestUpdatedAt(session.userId);
@@ -54,6 +58,24 @@ export default function registerAppStateRoutes(app) {
       if (canonicalHabits.length) state = applyWallet({ habits: canonicalHabits }, await getWallet({ query }, session.userId));
     }
     response.json({ ok: true, state, updatedAt: saved?.updatedAt ?? null, completions });
+  });
+
+  // The Android app's background reminder sync (frontend/hooks/app-state/reminder-sync.ts): a token
+  // to ask whether the saved state changed without a session (services/sync-token.js).
+  app.post('/api/app-state/sync-token', async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const secret = syncTokenSecret();
+    if (!secret) return response.status(503).json({ ok: false, message: 'Background sync is not available.' });
+    response.json({ ok: true, ...makeSyncToken(session.userId, secret) });
+  });
+
+  // When the token's account last saved its state, answered from memory (services/state-versions.js):
+  // phones ask this every hour or so, so it never looks anything up in the database itself.
+  app.get('/api/app-state/version', async (request, response) => {
+    const userId = readSyncToken(request.get('x-sync-token'), syncTokenSecret());
+    if (!userId) return response.status(401).json({ ok: false, code: 'SYNC_TOKEN_INVALID', message: 'Open HabitAI to keep your reminders in sync.' });
+    response.json({ ok: true, updatedAt: await stateVersionOf({ query }, userId) });
   });
 
   app.put('/api/app-state', async (request, response) => {

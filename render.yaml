@@ -2,7 +2,10 @@ services:
   - type: web
     name: habitai-backend
     runtime: node
-    plan: free
+    # Starter (paid, always on): a free instance sleeps after 15 idle minutes, and while it sleeps
+    # Web Push reminders are not sent on time (DEPLOYMENT.md). The Render workspace needs a payment
+    # method for it; without one, every Blueprint sync fails with "need_payment_info".
+    plan: starter
     rootDir: backend
     buildCommand: npm install
     startCommand: NODE_ENV=production node server.js

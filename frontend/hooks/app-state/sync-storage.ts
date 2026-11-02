@@ -5,7 +5,7 @@
 //     merged instead of being replaced by the server copy on the next launch.
 // Also the day the daily token limit was last shown, which signing out removes with the rest.
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { AppStateSyncBase } from '@/authentication/authService';
+import type { AppStateSyncBase, StateSyncToken } from '@/authentication/authService';
 
 /** The account's saved copy of its habits and settings, for a quick start and while the server wakes. */
 export const APP_STATE_KEY_PREFIX = 'habitai_app_state:';
@@ -13,6 +13,29 @@ const BASE_KEY_PREFIX = 'habitai_sync_base:';
 const UNSAVED_KEY_PREFIX = 'habitai_unsaved:';
 /** The day the daily token limit was last shown to the account here: once a day, not once per visit. */
 export const TOKEN_CAP_SHOWN_KEY_PREFIX = 'habitai_token_cap_shown:';
+/**
+ * The Android background reminder sync's token (hooks/app-state/reminder-sync.ts) and the last
+ * state time the server told it, so a time it was told already is not fetched again.
+ */
+const SYNC_TOKEN_KEY_PREFIX = 'habitai_state_sync:';
+
+export type StoredSyncToken = StateSyncToken & { seenVersion?: number | null };
+
+export async function loadSyncToken(email: string): Promise<StoredSyncToken | null> {
+  try {
+    const raw = await AsyncStorage.getItem(`${SYNC_TOKEN_KEY_PREFIX}${email}`);
+    const stored = raw ? JSON.parse(raw) as StoredSyncToken : null;
+    return stored && typeof stored.token === 'string' && typeof stored.expiresAt === 'number' ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveSyncToken(email: string, stored: StoredSyncToken | null) {
+  if (!email) return;
+  const key = `${SYNC_TOKEN_KEY_PREFIX}${email}`;
+  await (stored ? AsyncStorage.setItem(key, JSON.stringify(stored)) : AsyncStorage.removeItem(key)).catch(() => undefined);
+}
 
 export async function loadSyncMeta(email: string): Promise<{ base: AppStateSyncBase | null; unsaved: boolean }> {
   try {
@@ -47,6 +70,8 @@ export function persistUnsaved(email: string, unsaved: boolean) {
 export async function forgetAccountOnDevice(email: string) {
   if (!email) return;
   try {
+    // Signed out, this device no longer asks for the account's state in the background.
+    await AsyncStorage.removeItem(`${SYNC_TOKEN_KEY_PREFIX}${email}`);
     if ((await AsyncStorage.getItem(`${UNSAVED_KEY_PREFIX}${email}`)) === '1') return;
     await Promise.all([APP_STATE_KEY_PREFIX, BASE_KEY_PREFIX, TOKEN_CAP_SHOWN_KEY_PREFIX].map((prefix) => AsyncStorage.removeItem(`${prefix}${email}`)));
   } catch {
