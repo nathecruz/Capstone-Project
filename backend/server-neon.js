@@ -14,6 +14,7 @@ import { createApp } from './http/app.js';
 import { verifyAi } from './services/groq.js';
 import { verifyMailer } from './services/mailer.js';
 import { scheduleMaintenance } from './services/maintenance.js';
+import { loadStateVersions } from './services/state-versions.js';
 import { startReminderClock, stopReminderClock } from './services/web-push-clock.js';
 
 assertProductionConfig();
@@ -21,6 +22,9 @@ await ensureNeonSchema({ log: console.log });
 void verifyMailer();
 void verifyAi();
 const maintenance = scheduleMaintenance();
+// When each account last saved its state, for the phones' background reminder sync (read again
+// every few hours when they ask; services/state-versions.js).
+void loadStateVersions({ query }).catch(() => {});
 
 const server = createApp().listen(config.port, '0.0.0.0', () => console.log(`Neon Insights API listening on http://0.0.0.0:${config.port}`));
 // Keep idle connections open longer than the hosting proxy does (Node closes them after 5 s), or the

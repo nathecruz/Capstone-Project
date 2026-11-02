@@ -1,15 +1,17 @@
 // Schedules habit reminders (native notifications, the next two weeks of them so they keep coming
 // while the app is not opened; on web, reminders shown by an open HabitAI tab alongside Web Push)
-// and handles the Snooze action. Planned again at midnight and whenever the app returns to the foreground.
+// and handles the Snooze action. Planned again at midnight and whenever the app returns to the
+// foreground; on Android, also by the background reminder sync while the app is not open
+// (reminder-sync.ts).
 import type { NotificationResponse } from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import { isHabitActiveOn } from '@/utils/habit-week';
 import { getLocalDateKey } from './habit-progress';
-import { planReminders, type PlannedReminder } from './native-reminders';
 import { canRemindAt, enableWebReminders, getBrowserNotificationRegistration, getHabitReminderTimes, getNotificationsModule, isHabitReminderDay, playReminderSound, requestWebNotificationPermission, type NotificationsModule } from './reminders';
-import { computeSmartReminderTimes, getSmartReminderMessage, requestHabitPrediction } from './smart-reminders';
-import { keepsSnooze, loadSnoozeSettings, SNOOZE_CATEGORY, snoozeReminder } from './snooze';
+import { runReminderScheduling, scheduleNativeReminders } from './schedule-native-reminders';
+import { computeSmartReminderTimes, getSmartReminderMessage } from './smart-reminders';
+import { loadSnoozeSettings, SNOOZE_CATEGORY, snoozeReminder } from './snooze';
 import type { Habit, Preferences } from './types';
 
 /**
@@ -27,7 +29,6 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
 }) {
   const [reminderScheduleRevision, setReminderScheduleRevision] = useState(0);
   const sentBrowserRemindersRef = useRef(new Set<string>());
-  const schedulingRef = useRef(Promise.resolve());
   // The schedule revision whose run scheduled every planned reminder again (Android, see below).
   const alarmsSetRevisionRef = useRef(-1);
 
@@ -160,78 +161,24 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
       if (!ready) return;
       const Notifications = await getNotificationsModule();
       if (!Notifications) return;
-      await Notifications.setNotificationCategoryAsync(SNOOZE_CATEGORY, [{
-        identifier: 'SNOOZE',
-        buttonTitle: 'Snooze',
-        options: { opensAppToForeground: false },
-      }]);
-      const reminders = preferences.notificationsEnabled
-        ? habits.filter((habit) => habit.reminderEnabled && getHabitReminderTimes(habit).length > 0)
-        : [];
-      let plan: PlannedReminder[] = [];
-      if (reminders.length) {
-        if (Platform.OS === 'android') {
-          await Notifications.setNotificationChannelAsync('habit-reminders-sound-v2', {
-            name: 'Habit reminders', importance: Notifications.AndroidImportance.HIGH, sound: 'reminder_sound.mp3',
-          });
-          await Notifications.setNotificationChannelAsync('habit-reminders-silent-v2', {
-            name: 'Silent habit reminders', importance: Notifications.AndroidImportance.HIGH, sound: null,
-          });
-        }
-        const permission = await Notifications.getPermissionsAsync();
-        if (permission.status === 'granted' || (await Notifications.requestPermissionsAsync()).status === 'granted') {
-          const predictions = Object.fromEntries(await Promise.all(reminders
-            .filter((habit) => habit.smartReminderEnabled)
-            .map(async (habit) => [habit.id, await requestHabitPrediction(habit)] as const)));
-          if (cancelled) return;
-          // iOS keeps 64 scheduled notifications: a place is left for a snooze of each habit.
-          // Android allows 500 alarms per app.
-          plan = planReminders(reminders, new Date(), { ringInterval, predictions, limit: Platform.OS === 'ios' ? 64 - reminders.length : 200 });
-        }
-      }
-      // A reminder already scheduled as planned stays; the others are cancelled, except a snooze the
-      // student asked for that can still be acted on (opening the app used to cancel it).
-      const scheduledNow = new Date();
-      const scheduled = await Notifications.getAllScheduledNotificationsAsync();
-      if (cancelled) return;
-      const planned = new Map(plan.map((reminder) => [reminder.identifier, reminder]));
-      await Promise.all(scheduled
-        .filter((request) => !planned.has(request.identifier) && !(preferences.notificationsEnabled && keepsSnooze(request, habits, scheduledNow)))
-        .map((request) => Notifications.cancelScheduledNotificationAsync(request.identifier)));
-      // Android removes an app's alarms when it is force stopped (some phones do it when the app is
-      // swiped away) while expo-notifications still lists them as scheduled, and an alarm set before
-      // exact alarms were allowed stays inexact. So once each launch, each return to the app and at
-      // midnight (a new schedule revision), every reminder is scheduled again, which sets its alarm.
+      // Once each launch, each return to the app and at midnight (a new schedule revision), every
+      // Android reminder is scheduled again, which sets its alarm (see scheduleNativeReminders).
       const rearm = Platform.OS === 'android' && alarmsSetRevisionRef.current !== reminderScheduleRevision;
-      const current = new Set(rearm ? [] : scheduled
-        .filter((request) => planned.has(request.identifier) && request.content.data?.plan === planned.get(request.identifier)?.data.plan)
-        .map((request) => request.identifier));
-      for (const reminder of plan) {
-        if (cancelled) return;
-        if (current.has(reminder.identifier)) continue;
-        // Scheduling it again under its identifier replaces an outdated one. One that cannot be
-        // scheduled (its time passed meanwhile) does not stop the rest.
-        await Notifications.scheduleNotificationAsync({
-          identifier: reminder.identifier,
-          content: {
-            title: reminder.title,
-            body: reminder.body,
-            sound: reminder.soundEnabled ? 'reminder_sound.mp3' : false,
-            data: reminder.data,
-            ...(reminder.snooze ? { categoryIdentifier: SNOOZE_CATEGORY } : {}),
-          },
-          trigger: {
-            type: Notifications.SchedulableTriggerInputTypes.DATE,
-            date: reminder.date,
-            ...(Platform.OS === 'android' ? { channelId: reminder.soundEnabled ? 'habit-reminders-sound-v2' : 'habit-reminders-silent-v2' } : {}),
-          },
-        }).catch(() => undefined);
-      }
-      alarmsSetRevisionRef.current = reminderScheduleRevision;
+      const done = await scheduleNativeReminders(Notifications, {
+        habits,
+        notificationsEnabled: preferences.notificationsEnabled,
+        ringInterval,
+        rearm,
+        predictions: 'ask',
+        askPermission: true,
+        isCancelled: () => cancelled,
+      });
+      if (done) alarmsSetRevisionRef.current = reminderScheduleRevision;
     };
-    // One at a time: a schedule still running when the habits change finishes before the next one
-    // reads what is scheduled, so it cannot leave behind a reminder the next plan no longer has.
-    schedulingRef.current = schedulingRef.current.then(() => scheduleReminders()).catch(() => undefined);
+    // One at a time (with the background sync too): a schedule still running when the habits change
+    // finishes before the next one reads what is scheduled, so it cannot leave behind a reminder the
+    // next plan no longer has.
+    void runReminderScheduling(scheduleReminders).catch(() => undefined);
     return () => {
       cancelled = true;
       if (browserReminderTimer) clearInterval(browserReminderTimer);

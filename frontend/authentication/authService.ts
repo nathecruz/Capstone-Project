@@ -926,16 +926,54 @@ export type RemoteAppState = {
  * Fetches the synced state. Pass the last known `updatedAt` as `since` to poll cheaply:
  * the server answers `{ unchanged: true }` unless another device saved something newer.
  */
-export async function getRemoteAppState(since?: number | null) {
+/**
+ * The account's saved state (only `unchanged` when nothing is newer than `since`). `background`: the
+ * Android app's background reminder sync, which the server does not count as the student using HabitAI.
+ */
+export async function getRemoteAppState(since?: number | null, { background = false }: { background?: boolean } = {}) {
   const token = await getSessionToken();
   if (!token) return null;
 
   try {
-    const query = since ? `?since=${encodeURIComponent(String(since))}` : '';
-    return await apiRequest<RemoteAppState>(`/api/app-state${query}`, {
+    const params = [since ? `since=${encodeURIComponent(String(since))}` : '', background ? 'background=1' : ''].filter(Boolean);
+    return await apiRequest<RemoteAppState>(`/api/app-state${params.length ? `?${params.join('&')}` : ''}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
   } catch {
+    return null;
+  }
+}
+
+export type StateSyncToken = { token: string; expiresAt: number };
+
+/**
+ * For the Android app's background reminder sync (hooks/app-state/reminder-sync.ts): a token that
+ * asks whether the saved state changed without the session (backend/services/sync-token.js).
+ */
+export async function getStateSyncToken(): Promise<StateSyncToken | null> {
+  const token = await getSessionToken();
+  if (!token) return null;
+  try {
+    const payload = await apiRequest<{ ok: boolean; token?: string; expiresAt?: number }>('/api/app-state/sync-token', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return payload.ok && typeof payload.token === 'string' && typeof payload.expiresAt === 'number' ? { token: payload.token, expiresAt: payload.expiresAt } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * When the account last saved its state (null: never), asked with a sync token; `invalid` when the
+ * server no longer takes the token; null when the server could not be reached.
+ */
+export async function getRemoteStateVersion(syncToken: string): Promise<{ ok: true; updatedAt: number | null } | { ok: false; invalid: boolean } | null> {
+  try {
+    const payload = await apiRequest<{ ok: boolean; updatedAt?: number | null }>('/api/app-state/version', { headers: { 'X-Sync-Token': syncToken } });
+    return payload.ok ? { ok: true, updatedAt: typeof payload.updatedAt === 'number' ? payload.updatedAt : null } : { ok: false, invalid: false };
+  } catch (error) {
+    if (error instanceof ApiRequestError) return { ok: false, invalid: error.status === 401 };
     return null;
   }
 }

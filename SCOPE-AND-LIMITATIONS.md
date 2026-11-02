@@ -12,7 +12,13 @@ This document states what HabitAI covers and where it stops, for the capstone pa
 - a web app that opens on phones and computers, and on iPhone can be added to the Home Screen;
 - a web-based Admin Panel.
 
-All three share one backend, a Node.js API with a PostgreSQL database. A separate machine-learning service gives habit forecasts.
+All three share one backend, a Node.js API with a PostgreSQL database, which runs on an always-on instance. A separate machine-learning service gives habit forecasts.
+
+**Reminders.** Reminders arrive at the times the user sets, also while HabitAI is closed:
+
+- The Android app schedules the next two weeks of reminders on the phone, so they come even without internet [frontend/hooks/app-state/native-reminders.ts].
+- About every hour, while the Android app is not open and the phone has internet, a background sync schedules the reminders of habits changed on another device (for example a habit added on the web) and sets every reminder's alarm again [frontend/hooks/app-state/reminder-sync.ts].
+- On the web, including iPhone with HabitAI added to the Home Screen, the server sends each reminder as a web notification on its minute [backend/services/web-push-clock.js].
 
 **Habit areas.** Habits are limited to two areas, **Health** and **Academics**, as the panel recommended.
 
@@ -62,6 +68,7 @@ The panel asked that data cannot be faked. HabitAI does not trust numbers sent b
 4. **Photos are checked** for type and size, and are kept for review.
 5. **Saving the app's data cannot get around a proof.** A habit that needs proof is checked in only through the check-in endpoint and its checks. Saving the app's state cannot check that habit in or remove its proof requirement [backend/services/app-state-store.js].
 6. **Administrator actions are logged**, including each time a proof photo is viewed.
+7. **Activity counts the student, not the phone.** The Android app's background reminder sync is not recorded as a day of activity, so the engagement figures in the Admin Panel come from students opening HabitAI [backend/routes/app-state.js].
 
 ## Limitations
 
@@ -73,9 +80,9 @@ The panel asked that data cannot be faked. HabitAI does not trust numbers sent b
 2. **Steps are counted only in the Android app**, and only while the Walk screen is open. The phone's step counter does not count for HabitAI in the background, so the screen is kept on during a walk.
    - The web app, phones without a step counter, and phones where the user denied physical-activity access cannot count steps.
    - On those, a walk is proven with a photo instead, which is a weaker proof.
-3. **An internet connection is required.** There is no offline mode: check-ins, proofs, tokens and the AI are all checked on the server. The deployment uses free tiers:
-   - The backend sleeps after 15 idle minutes and takes up to a minute to wake.
-   - The database has a 0.5 GB limit.
+3. **An internet connection is required.** There is no offline mode: check-ins, proofs, tokens and the AI are all checked on the server. Only the Android app's reminders still come without internet, because they are set on the phone. The backend runs on a paid always-on instance; the rest of the deployment uses free tiers:
+   - The machine-learning service and the Admin Panel sleep after 15 idle minutes and take up to a minute to wake. Meanwhile, forecasts come from the rules-based formula.
+   - The database has a 0.5 GB limit and a monthly compute quota.
    - Email is limited to 300 messages a day.
 
    These limits affect speed, not correctness. See DEPLOYMENT.md.
@@ -87,8 +94,10 @@ The panel asked that data cannot be faked. HabitAI does not trust numbers sent b
    - Exporting training data needs at least 10 students with a week of history.
    - Until then, forecasts come from the rules-based formula, and the app labels them as estimates.
 8. **Some features are Android only.** These are the step counter, the home-screen widget, and reminders scheduled on the phone itself. HabitAI is distributed as an Android app; iPhone users use the web app.
-   - On the web and on iPhone, reminders come as web notifications. They need notification permission and HTTPS, and on iPhone the app must be added to the Home Screen.
+   - On the web and on iPhone, reminders come as web notifications. They need internet, notification permission and HTTPS, and on iPhone the app must be added to the Home Screen. A computer gets them only while its browser is running.
    - Web notifications can be delayed by the browser or the phone's operating system.
+   - The Android background sync runs only with internet, about every hour, and Android may run it later to save battery. Until it runs, or until the user opens HabitAI, a habit changed on another device keeps its old reminders on the phone.
+   - Battery savers of some phone makers can remove an app's reminders when it is swiped away. Turning off battery optimization for HabitAI avoids this.
 9. **Faculty cannot see individual students.**
    - Class Pulse shows only group numbers, so faculty cannot review a particular student's habits or proofs.
    - Proof photos can be opened only by administrators.

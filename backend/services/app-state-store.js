@@ -23,6 +23,7 @@ import { syncDailyChallenges } from './daily-challenges.js';
 import { habitProof } from './habit-rules.js';
 import { hasHabitEnded, isDateKey } from './habit-week.js';
 import { syncWeeklyQuests } from './quests.js';
+import { noteStateVersion } from './state-versions.js';
 import { computeStreak } from './streaks.js';
 import { getFrozenDays, getKeptDays } from './streak-freeze.js';
 import { applyWallet, awardAccountStreakMilestones, awardCheckIn, countedCheckIns, getWallet, POINTS_PER_CHECK_IN } from './wallet.js';
@@ -134,9 +135,11 @@ export const sameClientState = (left, right) => sameState(clientOwnedPart(left),
 /**
  * Appends a state snapshot and prunes older ones. Only the newest snapshot is read;
  * a few recent ones are kept for recovery. (Previously every sync added a row forever.)
+ * Its time is noted for the phones' background reminder sync (services/state-versions.js).
  */
 export async function saveUserAppState(userId, state, updatedAt, connection) {
   await connection.query('INSERT INTO user_app_state(id,user_id,state_json,updated_at) VALUES($1,$2,$3,$4)', [crypto.randomUUID(), userId, state, updatedAt]);
+  noteStateVersion(userId, updatedAt);
   await connection.query(
     `DELETE FROM user_app_state WHERE user_id=$1 AND id NOT IN (
        SELECT id FROM user_app_state WHERE user_id=$1 ORDER BY updated_at DESC LIMIT $2)`,
