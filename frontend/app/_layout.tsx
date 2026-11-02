@@ -181,6 +181,7 @@ function RootNavigator() {
         />
         <Stack.Screen name="notifications" options={{ headerShown: false }} />
         <Stack.Screen name="focus" options={{ headerShown: false }} />
+        <Stack.Screen name="walk" options={{ headerShown: false }} />
         <Stack.Screen name="buddy" options={{ headerShown: false }} />
         <Stack.Screen name="wallet" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />

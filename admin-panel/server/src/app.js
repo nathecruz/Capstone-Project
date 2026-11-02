@@ -12,6 +12,7 @@ import { loadAdmin, requireAuth, requireCsrfHeader } from './middleware/auth.js'
 import accessRequestRoutes from './routes/access-requests.js';
 import analyticsRoutes from './routes/analytics.js';
 import auditRoutes from './routes/audit.js';
+import proofRoutes from './routes/proofs.js';
 import authRoutes from './routes/auth.js';
 import categoryRoutes from './routes/categories.js';
 import notificationRoutes from './routes/notifications.js';
@@ -71,6 +72,7 @@ export function createApp() {
   api.use('/notifications', notificationRoutes);
   api.use('/analytics', analyticsRoutes);
   api.use('/support', supportRoutes);
+  api.use('/proofs', proofRoutes);
   api.use('/audit', auditRoutes);
   api.use('/settings', settingsRoutes);
   api.use((_request, _response, next) => next(new HttpError(404, 'API route not found.')));

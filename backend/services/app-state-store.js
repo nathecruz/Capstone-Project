@@ -20,6 +20,7 @@ import { accountStreakRun, longestAccountStreak } from './account-streak.js';
 import { sameState } from './app-state-sync.js';
 import { getDateKeyInTimeZone, isPastHabitDeadline } from './completion-date.js';
 import { syncDailyChallenges } from './daily-challenges.js';
+import { habitProof } from './habit-rules.js';
 import { hasHabitEnded, isDateKey } from './habit-week.js';
 import { syncWeeklyQuests } from './quests.js';
 import { computeStreak } from './streaks.js';
@@ -214,7 +215,8 @@ export function earnedAchievements(habits, { today = todayFor(habits.find((habit
   if (habits.length > 0) earned.add('first-habit');
   if (habits.length >= 3) earned.add('habit-builder');
   if (habits.some((habit) => habit.reminderEnabled && /AM/i.test(habit.reminderTime || ''))) earned.add('early-bird');
-  if (habits.some((habit) => habit.category === 'Mind' && habit.done)) earned.add('focus-master');
+  // Focus habits: Academics (and Mind, of the habits from before Health and Academics).
+  if (habits.some((habit) => (habit.category === 'Academics' || habit.category === 'Mind') && habit.done)) earned.add('focus-master');
   if (habits.some((habit) => Number(habit.streak) >= 7) || longestAccountStreak(habits, today, frozenDays, keptDays) >= 7) earned.add('streak-week');
   return [...earned];
 }
@@ -226,7 +228,8 @@ export function earnedAchievements(habits, { today = todayFor(habits.find((habit
  * /api/habit-completions. A missed day cannot be filled in later, even offline.
  */
 function syncedCompletionDates(habit, { today, floor, timeZone }, now = new Date()) {
-  if (hasHabitEnded(habit, today) || (floor && today < floor) || isPastHabitDeadline(habit, today, timeZone, now)) return [];
+  // A habit with a proof is checked in only through PUT /api/habit-completions, with the proof.
+  if (habitProof(habit) || hasHabitEnded(habit, today) || (floor && today < floor) || isPastHabitDeadline(habit, today, timeZone, now)) return [];
   return (Array.isArray(habit.completionDates) ? habit.completionDates : []).map(String).includes(today) ? [today] : [];
 }
 

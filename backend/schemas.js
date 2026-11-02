@@ -21,7 +21,14 @@ export const appStateSchema = stateSchema;
 export const habitPredictionSchema = z.object({ habit_name: z.string().trim().min(1).max(120).optional(), name: z.string().trim().min(1).max(120).optional(), streak: z.coerce.number().int().min(0).max(10000).optional(), completion_rate: z.coerce.number().finite().min(0).max(1).optional(), missed_days: z.coerce.number().int().min(0).max(10000).optional(), last_7_days: z.array(z.coerce.number().int().min(0).max(1)).length(7).optional(), average_session_minutes: z.coerce.number().int().min(0).max(1440).optional(), priority: z.string().trim().min(1).max(30).optional(), goal_type: z.string().trim().min(1).max(50).optional() }).strict();
 export const leaderboardSchema = z.object({ avatar: z.string().trim().max(2).optional() }).strict();
 export const leaderboardSyncSchema = leaderboardSchema;
-export const habitCompletionSchema = z.object({ habitId: z.string().trim().min(1).max(120), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), completed: z.boolean(), timeZone: z.string().trim().min(1).max(80).optional() }).strict();
+// The proof a check-in of a habit with one needs (services/check-in-proof.js): the Focus timer or
+// walk session it ended (with the steps counted), or a photo as base64 (at most 300 KB).
+const checkInProofSchema = z.union([
+  z.object({ sessionId: z.string().trim().min(10).max(80), steps: z.number().int().min(0).max(200000).optional() }).strict(),
+  z.object({ photo: z.string().min(100).max(420000).regex(/^[A-Za-z0-9+/]+={0,2}$/), type: z.enum(['image/jpeg', 'image/png', 'image/webp']) }).strict(),
+]);
+export const habitCompletionSchema = z.object({ habitId: z.string().trim().min(1).max(120), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), completed: z.boolean(), timeZone: z.string().trim().min(1).max(80).optional(), proof: checkInProofSchema.optional() }).strict();
+export const proofSessionSchema = z.object({ habitId: z.string().trim().min(1).max(120), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: z.string().trim().min(1).max(80).optional() }).strict();
 const timeZoneSchema = z.string().trim().min(1).max(80).refine((value) => {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: value });

@@ -11,6 +11,7 @@ export type Permission =
   | 'notifications:manage'
   | 'support:view'
   | 'support:manage'
+  | 'proofs:view'
   | 'audit:view'
   | 'settings:manage';
 

@@ -29,3 +29,15 @@ export async function pruneDueMarks(runner, now = Date.now()) {
   const result = await runner.query('DELETE FROM weekly_due_marks WHERE week_start < $1::date', [new Date(now - DUE_MARK_RETENTION_DAYS * DAY_MS).toISOString().slice(0, 10)]);
   return result.rowCount || 0;
 }
+
+/** Photo proofs of check-ins (services/check-in-proof.js) are reviewed soon after; the record of the proof stays. */
+export async function prunePhotoProofs(runner, retentionDays, now = Date.now()) {
+  const result = await runner.query('UPDATE check_in_proofs SET photo = NULL, photo_type = NULL WHERE photo IS NOT NULL AND created_at < $1', [now - retentionDays * DAY_MS]);
+  return result.rowCount || 0;
+}
+
+/** A Focus timer or walk session is for its day: the ones never finished are dropped after two days. */
+export async function pruneProofSessions(runner, now = Date.now()) {
+  const result = await runner.query('DELETE FROM proof_sessions WHERE started_at < $1', [now - 2 * DAY_MS]);
+  return result.rowCount || 0;
+}

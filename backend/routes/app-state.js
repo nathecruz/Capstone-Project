@@ -1,7 +1,7 @@
 import { query, withTransaction } from '../db/client.js';
 import { checkInLimiter } from '../http/rate-limits.js';
 import { parse } from '../lib/http.js';
-import { habitCompletionSchema, stateSchema } from '../schemas.js';
+import { habitCompletionSchema, proofSessionSchema, stateSchema } from '../schemas.js';
 import { dayClosedBody, getAccountDay, resolveAccountDay } from '../services/account-day.js';
 import { requireAuth } from '../services/accounts.js';
 import { recordActivity } from '../services/activity.js';
@@ -16,8 +16,11 @@ import {
   saveUserAppState,
   syncNormalizedState,
 } from '../services/app-state-store.js';
+import { proofRefusal, startProofSession } from '../services/check-in-proof.js';
 import { setCheckIn } from '../services/check-ins.js';
-import { withHabitRules } from '../services/habit-rules.js';
+import { isPastHabitDeadline } from '../services/completion-date.js';
+import { habitProof, withHabitRules } from '../services/habit-rules.js';
+import { hasHabitEnded } from '../services/habit-week.js';
 import { getKeptDays } from '../services/streak-freeze.js';
 import { keepStreakDays } from '../services/streak-history.js';
 import { applyWallet, getWallet, PAID_CHECK_INS_PER_DAY } from '../services/wallet.js';
@@ -114,6 +117,36 @@ export default function registerAppStateRoutes(app) {
     response.json({ ok: true, completions: await getServerCompletions(session.userId) });
   });
 
+  // Starts the Focus timer or the walk that proves a check-in of the habit (services/check-in-proof.js):
+  // the check-in counts once its time has passed on the server's clock.
+  app.post('/api/proof-sessions', checkInLimiter, async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const input = parse(proofSessionSchema, request, response);
+    if (!input) return;
+    const day = await resolveAccountDay({ query }, session.userId, input);
+    if (!day.ok) return response.status(409).json(dayClosedBody(day, 'Only today can be checked in. A missed day stays missed.'));
+
+    const result = await withTransaction(async (connection) => {
+      await connection.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);
+      const habit = (await getLatestAppState(session.userId, connection))?.state?.habits?.find((entry) => entry.id === input.habitId);
+      if (!habit) return null;
+      const proof = habitProof(habit);
+      if (!proof || proof.type === 'photo') return { noSession: true };
+      if (hasHabitEnded(habit, input.date)) return { ended: true };
+      if (isPastHabitDeadline(habit, input.date, day.timeZone)) return { pastDeadline: true };
+      const done = await connection.query('SELECT 1 FROM habit_completions WHERE user_id=$1 AND habit_id=$2 AND completed_date=$3', [session.userId, input.habitId, input.date]);
+      if (done.rowCount) return { done: true };
+      return startProofSession(connection, { userId: session.userId, habitId: input.habitId, proof, date: input.date });
+    });
+    if (!result) return response.status(404).json({ ok: false, message: 'Habit not found.' });
+    if (result.noSession) return response.status(409).json({ ok: false, code: 'NO_SESSION_PROOF', message: 'This habit is not proven with the Focus timer or steps.' });
+    if (result.ended) return response.status(409).json({ ok: false, code: 'HABIT_ENDED', message: "This habit's week has ended. It stays in your history; add a new habit for this week." });
+    if (result.pastDeadline) return response.status(409).json({ ok: false, code: 'PAST_DEADLINE', message: 'This habit passed its reminder time for today, so it is missed. It opens again on its next scheduled day.' });
+    if (result.done) return response.status(409).json({ ok: false, code: 'ALREADY_DONE', message: 'This habit is already done today.' });
+    response.json({ ok: true, ...result });
+  });
+
   // The authoritative way to check in or undo: updates check-ins, tokens, streak and the snapshot together.
   app.put('/api/habit-completions', checkInLimiter, async (request, response) => {
     const session = await requireAuth(request, response);
@@ -124,9 +157,13 @@ export default function registerAppStateRoutes(app) {
     if (!day.ok) return response.status(409).json(dayClosedBody(day, 'Only today can be checked in. A missed day stays missed.'));
 
     const result = await withTransaction((connection) => setCheckIn(connection, {
-      userId: session.userId, habitId: input.habitId, date: input.date, timeZone: day.timeZone, completed: input.completed,
+      userId: session.userId, habitId: input.habitId, date: input.date, timeZone: day.timeZone, completed: input.completed, proof: input.proof ?? null,
     }));
     if (!result) return response.status(404).json({ ok: false, message: 'Habit not found.' });
+    if (result.proofRefused) {
+      const { status, body } = proofRefusal(result.proofRefused);
+      return response.status(status).json(body);
+    }
     if (result.pastDeadline) return response.status(409).json({ ok: false, code: 'PAST_DEADLINE', message: 'This habit passed its reminder time for today, so it is missed. It opens again on its next scheduled day.' });
     if (result.locked) return response.status(409).json({ ok: false, code: 'CHECK_IN_LOCKED', message: 'This check-in is locked. A check-in can only be undone right after it is made.' });
     if (result.ended) return response.status(409).json({ ok: false, code: 'HABIT_ENDED', message: "This habit's week has ended. It stays in your history; add a new habit for this week." });

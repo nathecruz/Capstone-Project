@@ -16,6 +16,7 @@ import { weekEndKey } from '../services/habit-week.js';
 import { BUDDY_DROPS, dropForWeek, weeksUntilDrop } from '../services/buddy.js';
 import { weekStartOf, weeklyQuests } from '../services/quests.js';
 import { retireRewards } from '../services/rewards.js';
+import { prunePhotoProofs, pruneProofSessions } from '../services/retention.js';
 import { doneActionSecret, makeDoneToken } from '../services/web-push-actions.js';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL?.trim();
@@ -108,7 +109,26 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
 
   /** Tokens from the rotating daily challenges (not "Finish N habits") in an answer's history. */
   const extraDailyTokens = (body) => body.tokenHistory.filter((item) => item.label.startsWith('Daily challenge: ')).reduce((sum, item) => sum + item.amount, 0);
-  async function request(pathname, options = {}) {
+  // The test habits are proven with a photo (appState below), so a check-in carries this one unless
+  // the test sends its own `proof`, or `proof: null` to send none (services/check-in-proof.js).
+  const PHOTO_PROOF = { photo: Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(2048, 7)]).toString('base64'), type: 'image/jpeg' };
+  const withProof = (pathname, options) => {
+    if (pathname !== '/api/habit-completions' || options.method !== 'PUT' || typeof options.body !== 'string') return options;
+    const body = JSON.parse(options.body);
+    if (body.completed !== true || body.proof) return options;
+    if (body.proof === null) delete body.proof;
+    else body.proof = PHOTO_PROOF;
+    return { ...options, body: JSON.stringify(body) };
+  };
+  /** The account's stored habits as they were before proofs (no `proof`), as they are for up to a week after the update. */
+  const withoutProofs = (accountId) => db.query(
+    `UPDATE user_app_state SET state_json = jsonb_set(state_json, '{habits}', COALESCE((SELECT jsonb_agg(habit - 'proof' ORDER BY position) FROM jsonb_array_elements(state_json->'habits') WITH ORDINALITY AS item(habit, position)), '[]'::jsonb)) WHERE user_id=$1`,
+    [accountId],
+  );
+  /** A habit as an app from before proofs sends it. */
+  const legacy = ({ proof: _proof, ...habit }) => habit;
+  async function request(pathname, rawOptions = {}) {
+    const options = withProof(pathname, rawOptions);
     const response = await fetch(`${baseUrl}${pathname}`, { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) } });
     const text = await response.text();
     let body;
@@ -289,7 +309,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     avatarImage: null,
     profile: { fullName: 'Test User' },
     preferences: { language: 'English' },
-    habits: [{ id: 'habit-1', label: 'Read', frequency: 'Daily', startDate: '2026-01-01', completionDates: [] }],
+    habits: [{ id: 'habit-1', label: 'Read', frequency: 'Daily', startDate: '2026-01-01', completionDates: [], proof: { type: 'photo' } }],
     points: 42,
     tokens: 999,
     tokenHistory: [{ id: 'fake', amount: 999, label: 'Free tokens', date: today }],
@@ -337,14 +357,17 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(undo.body.points, 0);
     assert.equal(undo.body.habit.streak, 0);
 
+    // habit-1 needs a photo (services/check-in-proof.js): a synced state cannot check it in.
     const offline = await request('/api/app-state', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], completionDates: [today] }] }) });
-    assert.deepEqual(habitOne(offline.body.state).completionDates, [today], 'offline check-ins from a synced state are kept');
-    // And paid as one sent directly: 5 and each of today's challenges it completed.
+    assert.deepEqual(habitOne(offline.body.state).completionDates, [], 'a check-in that needs proof comes only with it');
+    const proven = await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'habit-1', date: today, completed: true, timeZone: 'UTC' }) });
+    assert.equal(proven.response.status, 200, JSON.stringify(proven.body));
+    // Paid again: 5 and each of today's challenges it completed.
     const challenges = (await request(`/api/daily-challenges?date=${today}&timeZone=UTC`, { headers: authHeaders })).body.challenges;
-    const paidChallenges = offline.body.state.tokenHistory.filter((item) => item.label.startsWith('Daily challenge'));
+    const paidChallenges = proven.body.tokenHistory.filter((item) => item.label.startsWith('Daily challenge'));
     assert.deepEqual(paidChallenges.map((item) => item.amount).sort(), challenges.filter((challenge) => challenge.complete).map((challenge) => challenge.reward).sort(), JSON.stringify(challenges));
-    assert.equal(offline.body.state.tokens, 5 + paidChallenges.reduce((sum, item) => sum + item.amount, 0));
-    stateUpdatedAt = offline.body.updatedAt;
+    assert.equal(proven.body.tokens, 5 + paidChallenges.reduce((sum, item) => sum + item.amount, 0));
+    stateUpdatedAt = proven.body.updatedAt;
 
     const unchanged = await request(`/api/app-state?since=${stateUpdatedAt}`, { headers: authHeaders });
     assert.equal(unchanged.body.unchanged, true);
@@ -357,7 +380,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(late.response.status, 409);
     assert.deepEqual([late.body.code, late.body.today, late.body.timeZone], ['DAY_CLOSED', today, 'UTC'], 'with the account\'s day, for the app to show');
 
-    // habit-1 was checked in by the offline sync above; once the window has passed it is locked.
+    // habit-1 was checked in again above; once the window has passed it is locked.
     await new Promise((resolve) => setTimeout(resolve, 4500));
     const locked = await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'habit-1', date: today, completed: false, timeZone: 'UTC' }) });
     assert.equal(locked.response.status, 409);
@@ -688,7 +711,9 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(apple2.body.buddy.treatsFed, 2, 'feeding again bumps the count');
 
     // Done on a reminder notification checks the habit in, with no session; a forged token cannot.
+    // (A habit with a proof has no Done; read is one from before proofs here.)
     await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'read', date: today, completed: false, timeZone: 'UTC' }) });
+    await withoutProofs(userId);
     const secret = doneActionSecret({ WEB_PUSH_VAPID_PUBLIC_KEY: 'test-vapid-public-key', WEB_PUSH_VAPID_PRIVATE_KEY: 'test-vapid-private-key', WEB_PUSH_VAPID_SUBJECT: 'mailto:test@example.com' });
     const doneToken = makeDoneToken({ userId, habitId: 'read', date: today, timeZone: 'UTC' }, secret);
     assert.equal((await request('/api/web-push/done', { method: 'POST', body: JSON.stringify({ token: `${doneToken.split('.')[0]}.forged-signature-forged-signature` }) })).response.status, 410);
@@ -1275,16 +1300,20 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
       assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
       return saved.body;
     };
-    const walk = { ...appState.habits[0], id: 'walk', label: 'Walk' };
-    // The app could not reach the server when walk was checked in, so its next save carries it.
+    // Habits from before proofs (a habit with one is checked in only with it, never by a synced state).
+    const walk = legacy({ ...appState.habits[0], id: 'walk', label: 'Walk' });
+    const pills = legacy({ ...appState.habits[0], id: 'pills', label: 'Pills', reminderEnabled: true, reminderTime: '12:00 AM', reminderTimes: ['12:00 AM'] });
     const first = await save(null, [walk]);
+    await withoutProofs(userId);
+    // The app could not reach the server when walk was checked in, so its next save carries it.
     const second = await save(first, [{ ...walk, completionDates: [day] }]);
     assert.ok((await ledgerIds()).includes(`check-in:walk:${day}`));
     assert.ok((await ledgerIds()).includes(`challenge:${day}`), `"Finish 1 habit today" is paid as for a direct check-in: ${JSON.stringify(await ledgerIds())}`);
 
     // Pills passed its reminder time today: a synced state cannot check it in late.
-    const pills = { ...appState.habits[0], id: 'pills', label: 'Pills', reminderEnabled: true, reminderTime: '12:00 AM', reminderTimes: ['12:00 AM'], completionDates: [day] };
-    await save(second, [...second.state.habits, pills]);
+    const third = await save(second, [{ ...walk, completionDates: [day] }, pills]);
+    await withoutProofs(userId);
+    await save(third, [{ ...walk, completionDates: [day] }, { ...pills, completionDates: [day] }]);
     const done = (await db.query('SELECT habit_id AS "habitId" FROM habit_completions WHERE user_id=$1', [userId])).rows.map((row) => row.habitId);
     assert.deepEqual(done, ['walk']);
     assert.ok(!(await ledgerIds()).includes(`check-in:pills:${day}`));
@@ -1294,9 +1323,10 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const { headers, userId } = await student('Clock', 'Ahead');
     await db.query('UPDATE users SET time_zone=$2 WHERE id=$1', [userId, middayZone]);
     const day = dateIn(middayZone);
-    const walk = { ...appState.habits[0], id: 'walk', label: 'Walk' };
+    const walk = legacy({ ...appState.habits[0], id: 'walk', label: 'Walk' });
     const first = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [walk] }) });
     assert.equal(first.response.status, 200, JSON.stringify(first.body));
+    await withoutProofs(userId);
     // It is about noon in middayZone; a phone clock 20 hours ahead reads 8 or 9 AM tomorrow.
     const sentAt = Date.now();
     const body = { ...first.body.state, habits: [{ ...walk, completionDates: [day] }], clientUpdatedAt: sentAt + 20 * 60 * 60 * 1000, baseUpdatedAt: first.body.updatedAt, baseState: first.body.state };
@@ -1355,6 +1385,84 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const edited = { ...saved.body.state, habits: saved.body.state.habits.map((item) => (item.id === 'walk' ? { ...item, category: 'Lifestyle' } : item)), baseUpdatedAt: saved.body.updatedAt, baseState: saved.body.state };
     const again = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify(edited) });
     assert.equal(again.body.state.habits.find((item) => item.id === 'walk').category, 'Lifestyle');
+  });
+
+  await t.test('a check-in needs its proof: a photo, a Focus timer that ran its time, or a walk of its steps', async () => {
+    const { headers, userId } = await student('Proof', 'Needed');
+    await db.query("UPDATE users SET time_zone='UTC' WHERE id=$1", [userId]);
+    const habit = (id, label, proof) => ({ ...appState.habits[0], id, label, startDate: today, proof });
+    const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [
+      habit('water', 'Drink water', { type: 'photo' }), habit('study', 'Study', { type: 'timer', minutes: 20 }), habit('walk', 'Walk', { type: 'steps', steps: 2000 }),
+    ] }) });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
+    const checkIn = (habitId, proof) => request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId, date: today, completed: true, timeZone: 'UTC', proof }) });
+    const startSession = (habitId) => request('/api/proof-sessions', { method: 'POST', headers, body: JSON.stringify({ habitId, date: today, timeZone: 'UTC' }) });
+    const proofRow = async (habitId) => (await db.query('SELECT kind, minutes, steps, length(photo) AS bytes, photo_type AS "photoType" FROM check_in_proofs WHERE user_id=$1 AND habit_id=$2', [userId, habitId])).rows[0];
+    const backdate = (sessionId, minutes) => db.query('UPDATE proof_sessions SET started_at = started_at - $2 WHERE id=$1', [sessionId, minutes * 60_000]);
+
+    // Photo: none, then one that is not an image, are refused; a photo checks it in and is kept.
+    const none = await checkIn('water', null);
+    assert.deepEqual([none.response.status, none.body.code, none.body.kind], [409, 'PROOF_REQUIRED', 'photo']);
+    const notImage = await checkIn('water', { photo: Buffer.alloc(4096, 1).toString('base64'), type: 'image/jpeg' });
+    assert.deepEqual([notImage.response.status, notImage.body.code], [400, 'PROOF_INVALID']);
+    const photo = await checkIn('water', PHOTO_PROOF);
+    assert.equal(photo.response.status, 200, JSON.stringify(photo.body));
+    assert.deepEqual(await proofRow('water'), { kind: 'photo', minutes: null, steps: null, bytes: 2052, photoType: 'image/jpeg' });
+    assert.equal((await startSession('water')).body.code, 'NO_SESSION_PROOF', 'a photo needs no session');
+
+    // Timer: it counts once the habit's minutes have passed since the session started, on the server's clock.
+    assert.equal((await checkIn('study', { sessionId: crypto.randomUUID() })).body.code, 'PROOF_REQUIRED', 'an unknown session proves nothing');
+    const timer = await startSession('study');
+    assert.equal(timer.response.status, 200, JSON.stringify(timer.body));
+    assert.deepEqual([timer.body.kind, timer.body.target], ['timer', 20]);
+    assert.equal((await checkIn('walk', { sessionId: timer.body.sessionId, steps: 5000 })).body.code, 'PROOF_REQUIRED', 'another habit\'s session proves nothing');
+    const early = await checkIn('study', { sessionId: timer.body.sessionId });
+    assert.deepEqual([early.response.status, early.body.code], [409, 'PROOF_TOO_SOON']);
+    assert.ok(early.body.waitSeconds > 1180 && early.body.waitSeconds <= 1200, String(early.body.waitSeconds));
+    await backdate(timer.body.sessionId, 20);
+    const timed = await checkIn('study', { sessionId: timer.body.sessionId });
+    assert.equal(timed.response.status, 200, JSON.stringify(timed.body));
+    assert.deepEqual(await proofRow('study'), { kind: 'timer', minutes: 20, steps: null, bytes: null, photoType: null });
+    assert.equal((await db.query('SELECT 1 FROM proof_sessions WHERE id=$1', [timer.body.sessionId])).rowCount, 0, 'a session proves one check-in');
+    assert.equal((await startSession('study')).body.code, 'ALREADY_DONE');
+
+    // Steps: the target, walked in at least the time that many steps take (200 a minute at most).
+    const walk = await startSession('walk');
+    assert.deepEqual([walk.body.kind, walk.body.target], ['steps', 2000]);
+    assert.equal((await checkIn('walk', { sessionId: walk.body.sessionId, steps: 1500 })).body.code, 'PROOF_INVALID', 'short of the target');
+    await backdate(walk.body.sessionId, 5);
+    const fast = await checkIn('walk', { sessionId: walk.body.sessionId, steps: 2000 });
+    assert.deepEqual([fast.body.code, fast.body.kind], ['PROOF_TOO_SOON', 'steps'], '2,000 steps take 10 minutes');
+    await backdate(walk.body.sessionId, 6);
+    assert.equal((await checkIn('walk', { sessionId: walk.body.sessionId, steps: 2400 })).body.code, 'PROOF_TOO_SOON', '2,400 steps take 12 minutes');
+    const walked = await checkIn('walk', { sessionId: walk.body.sessionId, steps: 2200 });
+    assert.equal(walked.response.status, 200, JSON.stringify(walked.body));
+    assert.deepEqual(await proofRow('walk'), { kind: 'steps', minutes: 11, steps: 2200, bytes: null, photoType: null });
+
+    // An undo takes the proof with it; a save cannot take a habit's proof away or check it in.
+    const undone = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'water', date: today, completed: false, timeZone: 'UTC' }) });
+    assert.equal(undone.response.status, 200, JSON.stringify(undone.body));
+    assert.equal(await proofRow('water'), undefined);
+    const current = await request('/api/app-state', { headers });
+    const stripped = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...current.body.state, habits: current.body.state.habits.map((item) => (item.id === 'water' ? { ...legacy(item), completionDates: [today] } : item)), baseUpdatedAt: current.body.updatedAt, baseState: current.body.state }) });
+    const water = stripped.body.state.habits.find((item) => item.id === 'water');
+    assert.deepEqual([water.proof, water.completionDates], [{ type: 'photo' }, []]);
+
+    // The data export lists the proofs, with a photo while it is kept.
+    const exported = await request('/api/auth/export', { headers });
+    assert.deepEqual(exported.body.checkInProofs.map((row) => [row.habitId, row.kind]), [['study', 'timer'], ['walk', 'steps']]);
+
+    // A reminder's Done cannot check in a habit with a proof.
+    await db.query('INSERT INTO proof_sessions(id,user_id,habit_id,session_date,kind,target,started_at) VALUES($1,$2,$3,$4,$5,$6,$7)', [crypto.randomUUID(), userId, 'water', '2000-01-01', 'timer', 5, 0]);
+    const secret = doneActionSecret({ WEB_PUSH_VAPID_PUBLIC_KEY: 'test-vapid-public-key', WEB_PUSH_VAPID_PRIVATE_KEY: 'test-vapid-private-key', WEB_PUSH_VAPID_SUBJECT: 'mailto:test@example.com' });
+    const done = await request('/api/web-push/done', { method: 'POST', body: JSON.stringify({ token: makeDoneToken({ userId, habitId: 'water', date: today, timeZone: 'UTC' }, secret) }) });
+    assert.deepEqual([done.response.status, done.body.code], [409, 'PROOF_REQUIRED']);
+    // Old sessions and old photos go (services/retention.js).
+    assert.equal(await pruneProofSessions(db), 1);
+    await checkIn('water', PHOTO_PROOF);
+    // (Every photo of these tests is that old 15 days from now.)
+    assert.ok(await prunePhotoProofs(db, 14, Date.now() + 15 * 86_400_000) >= 1);
+    assert.deepEqual(await proofRow('water'), { kind: 'photo', minutes: null, steps: null, bytes: null, photoType: null });
   });
 
   await t.test('a streak milestone is not paid again when deleting a habit moves the first day of the run', async () => {

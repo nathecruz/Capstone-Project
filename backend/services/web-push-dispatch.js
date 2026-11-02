@@ -4,6 +4,7 @@
 // (scripts/send-web-push-reminders.js). `db` is anything with pg's `query(text, values)`.
 import crypto from 'node:crypto';
 import { canStillCheckIn, secondsUntilCheckInCloses } from './completion-date.js';
+import { habitProof } from './habit-rules.js';
 import { getSmartReminderText } from './smart-reminders.js';
 import { doneActionSecret, getWebPushDoneUrl, localDateIn, makeDoneToken } from './web-push-actions.js';
 import { getDueHabitReminders, getReminderText, getSnoozeLimit, getWebPushSnoozeSettings, hashWebPushSnoozeToken } from './web-push-reminders.js';
@@ -65,11 +66,14 @@ function reminderPushOptions(habit, date, timeZone) {
   return { TTL: secondsUntilCheckInCloses(habit, date, timeZone, new Date()), urgency: 'high' };
 }
 
-/** Done (check in from the notification) and Snooze buttons, and the data the service worker needs for them. */
-function reminderActions({ userId, habitId, label, type, date, timeZone, snooze, snoozeCount }) {
+/**
+ * Done (check in from the notification) and Snooze buttons, and the data the service worker needs
+ * for them. A habit with a proof has no Done: it is checked in from the app, with the proof.
+ */
+function reminderActions({ userId, habitId, label, type, date, timeZone, snooze, snoozeCount, needsProof = false }) {
   const secret = doneActionSecret();
   const doneUrl = getWebPushDoneUrl();
-  const done = secret && doneUrl ? makeDoneToken({ userId, habitId, date, timeZone }, secret) : null;
+  const done = secret && doneUrl && !needsProof ? makeDoneToken({ userId, habitId, date, timeZone }, secret) : null;
   return {
     actions: [...(done ? [{ action: 'DONE', title: '✓ Done' }] : []), ...(snooze ? [{ action: snooze.action, title: snooze.title }] : [])],
     data: {
@@ -146,7 +150,7 @@ export async function dispatchDueSnoozes(db, { webpush, template = null, snoozeU
         ...getReminderText(habit, template),
         tag: `snooze-${row.id}`,
         soundEnabled: habit.reminderSoundEnabled !== false,
-        ...reminderActions({ userId: row.userId, habitId: row.habitId, label: habit.label, type: 'habit-reminder', date, timeZone: subscription.timeZone, snooze: action, snoozeCount: Number(row.snoozeCount) }),
+        ...reminderActions({ userId: row.userId, habitId: row.habitId, label: habit.label, type: 'habit-reminder', date, timeZone: subscription.timeZone, snooze: action, snoozeCount: Number(row.snoozeCount), needsProof: Boolean(habitProof(habit)) }),
       }), reminderPushOptions(habit, date, subscription.timeZone));
       await db.query('UPDATE web_push_snooze_queue SET sent_at=$2,attempted_at=0 WHERE id=$1', [row.id, Date.now()]);
       result.sent += 1;
@@ -203,7 +207,7 @@ export async function dispatchDueReminders(db, { webpush, template = null, snooz
             body,
             tag: `${habit.id}-${due.date}-${due.time}`,
             soundEnabled: habit.reminderSoundEnabled !== false,
-            ...reminderActions({ userId: row.userId, habitId: String(habit.id), label: habit.label, type, date: due.date, timeZone: row.timeZone, snooze: action, snoozeCount: 0 }),
+            ...reminderActions({ userId: row.userId, habitId: String(habit.id), label: habit.label, type, date: due.date, timeZone: row.timeZone, snooze: action, snoozeCount: 0, needsProof: Boolean(habitProof(habit)) }),
           }), reminderPushOptions(habit, due.date, row.timeZone));
           const sentAt = Date.now();
           await db.query(`UPDATE web_push_deliveries

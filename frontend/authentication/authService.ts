@@ -708,6 +708,13 @@ async function authedRequest<T>(path: string, init: RequestInit = {}): Promise<R
 }
 
 const deviceTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+export type ProofSession = { sessionId: string; kind: 'timer' | 'steps'; target: number; startedAt: number };
+/**
+ * Starts the Focus timer or walk that proves today's check-in of a habit: its time is counted on
+ * the server's clock from now (backend POST /api/proof-sessions).
+ */
+export const startProofSession = (habitId: string, date: string) => authedRequest<ProofSession>('/api/proof-sessions', { method: 'POST', body: JSON.stringify({ habitId, date, timeZone: deviceTimeZone() }) });
 /** The device's today and time zone, which the server checks against the account's day. */
 const todayQuery = (date: string, timeZone = deviceTimeZone()) => `date=${date}&timeZone=${encodeURIComponent(timeZone)}`;
 
@@ -982,9 +989,14 @@ export async function getRemoteHabitCompletions() {
  * Why the server refused a check-in: its code (DAY_CLOSED, PAST_DEADLINE, CHECK_IN_LOCKED,
  * HABIT_ENDED; none for a rate limit) and, for DAY_CLOSED, the account's own today and time zone.
  */
-export type CheckInRejection = { rejected: true; code?: string; message: string; today?: string; timeZone?: string };
+export type CheckInRejection = { rejected: true; code?: string; message: string; today?: string; timeZone?: string; waitSeconds?: number };
+/**
+ * What proves a check-in of a habit with a proof (backend/services/check-in-proof.js): the Focus
+ * timer or walk session it ended (with the steps counted), or a photo (base64 JPEG).
+ */
+export type CheckInProof = { sessionId: string; steps?: number } | { photo: string; type: 'image/jpeg' };
 
-export async function saveRemoteHabitCompletion(completion: HabitCompletion & { completed: boolean }) {
+export async function saveRemoteHabitCompletion(completion: HabitCompletion & { completed: boolean; proof?: CheckInProof }) {
   const token = await getSessionToken();
   if (!token) return null;
   try {
@@ -999,7 +1011,8 @@ export async function saveRemoteHabitCompletion(completion: HabitCompletion & { 
     // A definitive client rejection (the day is closed, the habit is missed, an undo is locked, or
     // too many check-ins) must undo the optimistic change; a network error keeps it so it can sync later.
     if (error instanceof ApiRequestError && error.status >= 400 && error.status < 500) {
-      const rejection: CheckInRejection = { rejected: true, code: textField(error.payload, 'code'), message: error.message, today: textField(error.payload, 'today'), timeZone: textField(error.payload, 'timeZone') };
+      const waitSeconds = Number(error.payload.waitSeconds);
+      const rejection: CheckInRejection = { rejected: true, code: textField(error.payload, 'code'), message: error.message, today: textField(error.payload, 'today'), timeZone: textField(error.payload, 'timeZone'), ...(Number.isFinite(waitSeconds) ? { waitSeconds } : {}) };
       return rejection;
     }
     return null;
