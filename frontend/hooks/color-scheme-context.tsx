@@ -3,7 +3,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Appearance, Platform, useColorScheme as useRNColorScheme } from 'react-native';
 import { translate } from '@/constants/i18n';
 import { getCurrentSession, subscribeToAuthChanges, type SessionUser } from '@/authentication/session';
-import { router } from 'expo-router';
 import { buyStreakFreeze as requestStreakFreeze, getLiveVersions, getRemoteAppState, getRemoteHabitCompletions, saveRemoteAppState, saveRemoteHabitCompletion, syncStreakFreezes, type AppStateSyncBase, type AppStateSyncPayload, type CheckInProof } from '@/authentication/authService';
 import { normalizeHabitFields } from '@/utils/habit-data';
 import { CHECK_IN_UNDO_MS, canCompleteHabitForDate } from '@/utils/habit-visibility';
@@ -799,12 +798,11 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
   const toggleRef = useRef<(id: string, date: Date, proof?: CheckInProof) => void>(() => undefined);
   /** Opens what proves a check-in of this habit: its Focus timer, its walk, or the camera. */
   const startProofFlow = (habit: Habit) => {
-    if (habit.proof?.type === 'timer') {
-      router.push({ pathname: '/focus', params: { id: habit.id } });
-      return;
-    }
-    if (habit.proof?.type === 'steps') {
-      router.push({ pathname: '/walk', params: { id: habit.id } });
+    if (habit.proof?.type === 'timer' || habit.proof?.type === 'steps') {
+      // Loaded when needed rather than imported: the provider also runs where no screens are mounted.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { router } = require('expo-router') as typeof import('expo-router');
+      router.push({ pathname: habit.proof.type === 'timer' ? '/focus' : '/walk', params: { id: habit.id } });
       return;
     }
     void takeProofPhoto().then((photo) => {

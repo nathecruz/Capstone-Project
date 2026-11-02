@@ -51,6 +51,14 @@ export function proofText(proof: HabitProof | undefined) {
   return 'Photo';
 }
 
+/** "20-min timer", "2,000 steps" or "Photo", for a habit's row. */
+export function proofShortText(proof: HabitProof | undefined) {
+  if (!proof) return '';
+  if (proof.type === 'timer') return `${proof.minutes}-min timer`;
+  if (proof.type === 'steps') return `${proof.steps.toLocaleString('en-US')} steps`;
+  return 'Photo';
+}
+
 export function proofIcon(proof: HabitProof | undefined): keyof typeof Ionicons.glyphMap {
   if (proof?.type === 'timer') return 'timer-outline';
   if (proof?.type === 'steps') return 'footsteps-outline';

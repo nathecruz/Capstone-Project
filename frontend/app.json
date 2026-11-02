@@ -53,6 +53,7 @@
       "expo-localization",
       "./plugins/with-exact-alarms",
       "expo-secure-store",
+      ["expo-sensors", { "motionPermission": "Allow HabitAI to count your steps, so your walks prove the check-ins of your walking habits." }],
       "@bacons/apple-targets",
       [
         "react-native-android-widget",

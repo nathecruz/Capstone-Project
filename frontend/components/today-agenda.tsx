@@ -11,6 +11,7 @@ import type { Habit } from '@/hooks/app-state/types';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 import { TIME_OF_DAY, isHabitLate, plannedMinutes, timeOfDayFor, todayAgenda } from '@/utils/engagement';
 import { CHECK_IN_UNDO_MS } from '@/utils/habit-visibility';
+import { proofShortText, proofText } from '@/utils/habit-templates';
 
 type HoverState = PressableStateCallbackType & { hovered?: boolean };
 
@@ -70,6 +71,11 @@ function HabitRow({ habit, late, onCheck }: { habit: Habit; late: boolean; onChe
   const [pop] = useState(() => new Animated.Value(0));
   const check = () => {
     if (checking) return;
+    // A habit with a proof opens its timer, walk or camera: it is not checked in by the tap.
+    if (habit.proof) {
+      onCheck();
+      return;
+    }
     setChecking(true);
     Animated.spring(pop, { toValue: 1, friction: 4, tension: 180, useNativeDriver: Platform.OS !== 'web' }).start();
     setTimeout(onCheck, CHECK_ANIMATION_MS);
@@ -82,7 +88,7 @@ function HabitRow({ habit, late, onCheck }: { habit: Habit; late: boolean; onChe
         accessibilityRole="checkbox"
         accessibilityState={{ checked: checking }}
         aria-checked={checking}
-        accessibilityLabel={`${habit.label} done today`}
+        accessibilityLabel={habit.proof ? `Check in ${habit.label} with ${proofText(habit.proof)}` : `${habit.label} done today`}
       >
         {({ hovered, pressed }: HoverState) => (
           <>
@@ -91,11 +97,13 @@ function HabitRow({ habit, late, onCheck }: { habit: Habit; late: boolean; onChe
             </View>
             <View style={styles.rowCopy}>
               <Text style={[styles.rowLabel, checking && styles.rowLabelDone]} numberOfLines={1}>{habit.label}</Text>
-              {(planned !== null || habit.streak > 0) && (
+              {(planned !== null || habit.streak > 0 || habit.proof) && (
                 <Text style={styles.rowMeta} numberOfLines={1}>
                   {planned !== null && <Text style={late && styles.lateText}>{late ? `Late · ${formatMinutes(planned)}` : formatMinutes(planned)}</Text>}
                   {planned !== null && habit.streak > 0 ? '  ·  ' : ''}
                   {habit.streak > 0 ? `🔥 ${habit.streak}-day streak` : ''}
+                  {(planned !== null || habit.streak > 0) && habit.proof ? '  ·  ' : ''}
+                  {habit.proof ? proofShortText(habit.proof) : ''}
                 </Text>
               )}
             </View>
@@ -189,7 +197,8 @@ export function TodayAgenda({ habits, now, onCheck, middle, style }: { habits: H
   }, [justChecked]);
   const check = (habit: Habit) => {
     onCheck(habit);
-    setJustChecked(habit);
+    // A habit with a proof is checked in once its proof is in (its timer, walk or photo).
+    if (!habit.proof) setJustChecked(habit);
   };
   const undo = () => {
     if (justChecked) onCheck(justChecked);

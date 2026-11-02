@@ -18,7 +18,7 @@ import { useAppTheme } from '@/hooks/dark-mode-context';
 import { historyStats } from '@/utils/achievements';
 import { suggestedTemplate } from '@/utils/habit-balance';
 import { filterHabitsByStatus } from '@/utils/habit-data';
-import { habitFromTemplate, proofText } from '@/utils/habit-templates';
+import { habitFromTemplate, proofIcon, proofShortText, proofText } from '@/utils/habit-templates';
 import { useHabitCategories } from '@/hooks/use-habit-categories';
 import { createThemedStyles, themedColor, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
@@ -113,8 +113,9 @@ export default function HabitsScreen() {
     // Past its last reminder time without a check-in: missed for today, so it can no longer be checked in.
     if (!item.done && isHabitLockedMissed(item, new Date())) { showAlert('Missed today', 'This habit passed its reminder time without a check-in, so it is missed for today. It opens again on its next scheduled day.'); return; }
     toggleHabit(item.id);
-    // Checking one on shows the "+20 XP" bar; tapping a done one off clears it.
-    setJustChecked(item.done ? null : item);
+    // Checking one on shows the "+20 XP" bar; tapping a done one off clears it. A habit with a
+    // proof opens its timer, walk or camera first, so it is not checked in yet.
+    setJustChecked(item.done || item.proof ? null : item);
   };
 
   const undoJustChecked = () => {
@@ -162,7 +163,7 @@ export default function HabitsScreen() {
                     style={({ pressed }) => [styles.check, item.done ? styles.checkDone : styles.checkEmpty, pressed && styles.pressed]}
                     onPress={() => pressCheck(item)}
                     accessibilityRole="checkbox"
-                    accessibilityLabel={`${item.label} done today`}
+                    accessibilityLabel={item.proof && !item.done ? `Check in ${item.label} with ${proofText(item.proof)}` : `${item.label} done today`}
                     accessibilityState={{ checked: item.done }}
                     aria-checked={item.done}
                     hitSlop={6}
@@ -203,6 +204,13 @@ export default function HabitsScreen() {
                       <View style={[styles.chip, styles.chipStreak]}>
                         <Ionicons name="flame" size={13} color={themeColor('#E07B1F')} />
                         <Text style={[styles.chipText, styles.chipTextStreak]}>{item.streak}-day streak</Text>
+                      </View>
+                    )}
+                    {/* How it is checked in: its proof (utils/habit-templates.ts). */}
+                    {item.proof && (
+                      <View style={styles.chip} accessibilityLabel={`Checked in with: ${proofText(item.proof)}`}>
+                        <Ionicons name={proofIcon(item.proof)} size={13} color={themeColor('#5B42D8')} />
+                        <Text style={styles.chipText}>{proofShortText(item.proof)}</Text>
                       </View>
                     )}
                   </View>
