@@ -710,6 +710,19 @@ async function authedRequest<T>(path: string, init: RequestInit = {}): Promise<R
 const deviceTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
 export type ProofSession = { sessionId: string; kind: 'timer' | 'steps'; target: number; startedAt: number };
+
+/**
+ * A follow-up question for a habit just added (backend services/habit-follow-up.js): an option may
+ * set the habit's reminder time or the minutes or steps of its proof.
+ */
+export type FollowUpOption = { id: string; label: string; reminderTime?: string; proof?: HabitProofInput };
+export type FollowUpQuestion = { id: string; text: string; options: FollowUpOption[] };
+type HabitProofInput = { type: 'timer'; minutes: number } | { type: 'steps'; steps: number } | { type: 'photo' };
+type FollowUpHabit = { label: string; category: string; proof?: HabitProofInput };
+/** The follow-up questions for a habit just added: the app's own and the AI's (or the rules', without it). */
+export const getHabitFollowUp = (habit: FollowUpHabit) => authedRequest<{ source: 'ai' | 'rules'; questions: FollowUpQuestion[] }>('/api/habit/follow-up', { method: 'POST', body: JSON.stringify(habit) });
+/** The tip for a habit from the answers to its follow-up questions. */
+export const getHabitInsight = (habit: FollowUpHabit, answers: { question: string; answer: string }[]) => authedRequest<{ source: 'ai' | 'rules'; insight: string }>('/api/habit/follow-up/insight', { method: 'POST', body: JSON.stringify({ ...habit, answers }) });
 /**
  * Starts the Focus timer or walk that proves today's check-in of a habit: its time is counted on
  * the server's clock from now (backend POST /api/proof-sessions).

@@ -57,8 +57,8 @@ export default function AllHabitsScreen() {
   const chooseHabit = (template: HabitTemplate) => {
     if (isAdded(template)) return;
     const habit = habitFromTemplate(template, managedCategories, todayKey);
-    addHabit(habit);
-    setAddedHabit({ label: habit.label, category: habit.category, schedule: 'Daily', reminder: template.reminderTime, proof: habit.proof });
+    const id = addHabit(habit);
+    setAddedHabit({ id, label: habit.label, category: habit.category, schedule: 'Daily', reminder: template.reminderTime, proof: habit.proof });
   };
 
   return <SafeAreaView style={[styles.screen, isDarkMode && styles.darkScreen]}><ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}><View style={styles.container}>

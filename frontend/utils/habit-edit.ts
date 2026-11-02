@@ -13,7 +13,7 @@ export type HabitEdit = {
   reminders?: string[] | null;
 };
 export type EditableHabitFields = Pick<Habit, 'label' | 'category' | 'icon' | 'color' | 'frequency' | 'meta' | 'startDate'>
-  & Partial<Pick<Habit, 'reminderEnabled' | 'reminderTime' | 'reminderTimes' | 'activeUntil'>>;
+  & Partial<Pick<Habit, 'reminderEnabled' | 'reminderTime' | 'reminderTimes' | 'activeUntil' | 'proof'>>;
 
 export const HABIT_NAME_MAX_LENGTH = 60;
 /** Schedules a habit can switch to when edited; a custom schedule needs its days, so it is set when adding. */

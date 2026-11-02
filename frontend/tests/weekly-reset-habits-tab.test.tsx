@@ -29,6 +29,7 @@ jest.mock('react-native-draggable-flatlist', () => {
   };
 });
 jest.mock('@/components/edit-habit-sheet', () => ({ EditHabitSheet: () => null }));
+jest.mock('@/authentication/authService', () => ({ getHabitFollowUp: jest.fn(async () => ({ ok: false })), getHabitInsight: jest.fn() }));
 jest.mock('@/hooks/use-habit-categories', () => ({ useHabitCategories: () => jest.requireActual('@/constants/habit-categories').DEFAULT_HABIT_CATEGORIES }));
 jest.mock('@/components/ui/app-dialog', () => ({ useAppDialog: () => jest.fn() }));
 

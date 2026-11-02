@@ -105,8 +105,8 @@ export default function AddScreen() {
       return;
     }
     const habit = habitFromTemplate(template, categories, formatDate(new Date()));
-    createHabit(habit);
-    setAddedHabit({ label: habit.label, category: habit.category, schedule: 'Daily', reminder: template.reminderTime, proof: habit.proof });
+    const id = createHabit(habit);
+    setAddedHabit({ id, label: habit.label, category: habit.category, schedule: 'Daily', reminder: template.reminderTime, proof: habit.proof });
   };
 
   const chooseProof = (type: HabitProof['type']) => {
@@ -183,7 +183,7 @@ export default function AddScreen() {
     if (detected.isBadHabit) {
       showMessage('Bad habit detected', detected.reason || 'This habit can harm your daily routine or productivity. We marked it as a bad habit so you can work on it.');
     }
-    createHabit({
+    const id = createHabit({
       startDate,
       label: name.trim(),
       meta: `${frequency === 'Custom' ? customFrequency : frequency} • ${reminder ? reminderTimes.join(', ') : 'Anytime'}${frequency === 'Custom' ? ` • ${repeatDays.join(', ')}` : ''}`,
@@ -203,6 +203,7 @@ export default function AddScreen() {
       proof: normalizedProof(proof),
     });
     setAddedHabit({
+      id,
       label: name.trim(),
       category: resolvedCategory,
       schedule: frequency === 'Custom' ? `${customFrequency} • ${repeatDays.join(', ')}` : frequency,

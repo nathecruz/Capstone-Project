@@ -1,8 +1,8 @@
 import { config } from '../config/index.js';
 import { query, withTransaction } from '../db/client.js';
-import { aiLimiter, habitAdviceLimiter, predictionLimiter } from '../http/rate-limits.js';
+import { aiLimiter, habitAdviceLimiter, habitFollowUpLimiter, predictionLimiter } from '../http/rate-limits.js';
 import { parse } from '../lib/http.js';
-import { assistantSchema, goalGenerationSchema, goalPlanSchema, habitAnalysisRequestSchema, habitClassificationSchema } from '../schemas.js';
+import { assistantSchema, goalGenerationSchema, goalPlanSchema, habitAnalysisRequestSchema, habitClassificationSchema, habitFollowUpSchema, habitInsightSchema } from '../schemas.js';
 import { accountStreak } from '../services/account-streak.js';
 import { requireAuth } from '../services/accounts.js';
 import { buildHabitContext, dateKeyInZone, shiftDay } from '../services/ai-context.js';
@@ -27,7 +27,8 @@ import { refreshSnapshot } from '../services/app-state-store.js';
 import { forecastFor } from '../services/forecast-rules.js';
 import { HABIT_ANALYSIS_SYSTEM, habitAnalysisJsonSchema, habitAnalysisPrompt, habitAnalysisSchema, habitStats, mlSignal, mlSummary } from '../services/habit-analysis.js';
 import { generateAiText, isAiConfigured } from '../services/groq.js';
-import { focusCategories, focusCategory } from '../services/habit-rules.js';
+import { FOLLOW_UP_SYSTEM, followUpJsonSchema, followUpPrompt, followUpQuestions, INSIGHT_SYSTEM, insightJsonSchema, insightPrompt, readAiQuestion, readInsight, rulesInsight } from '../services/habit-follow-up.js';
+import { focusCategories, focusCategory, focusCategoryFor, habitProof } from '../services/habit-rules.js';
 import { loadPlannerCategories, loadPlannerHistory } from '../services/planner-history.js';
 import { computeStreak, habitFromRow } from '../services/streaks.js';
 import { getFrozenDays, getKeptDays } from '../services/streak-freeze.js';
@@ -288,6 +289,43 @@ export default function registerAiRoutes(app) {
       logAiError('goals', error);
       response.status(502).json({ ok: false, error: 'The AI goal planner is temporarily unavailable.' });
     }
+  });
+
+  // Follow-up questions for a habit just added (services/habit-follow-up.js): the app's own two and
+  // the AI's one about this habit, or the rules' one without the AI. Never refused for the AI.
+  app.post('/api/habit/follow-up', habitFollowUpLimiter, async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const input = parse(habitFollowUpSchema, request, response);
+    if (!input) return;
+    const habit = { label: input.label, category: focusCategoryFor({ label: input.label, category: input.category }) };
+    let aiQuestion = null;
+    if (isAiConfigured() && !request.aiLimited) {
+      try {
+        aiQuestion = readAiQuestion(await generateAiText(followUpPrompt(habit), { system: forAudience(FOLLOW_UP_SYSTEM, session.role), schema: followUpJsonSchema, maxOutputTokens: 200, temperature: 0.4, timeoutMs: 10_000 }));
+      } catch (error) {
+        logAiError('habit follow-up', error);
+      }
+    }
+    response.json({ ok: true, source: aiQuestion ? 'ai' : 'rules', questions: followUpQuestions(habitProof(input), aiQuestion) });
+  });
+
+  // The tip after the follow-up answers: the AI's, or the rules' without it.
+  app.post('/api/habit/follow-up/insight', habitFollowUpLimiter, async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const input = parse(habitInsightSchema, request, response);
+    if (!input) return;
+    const habit = { label: input.label, category: focusCategoryFor({ label: input.label, category: input.category }), proof: habitProof(input), answers: input.answers };
+    let insight = null;
+    if (isAiConfigured() && !request.aiLimited) {
+      try {
+        insight = readInsight(await generateAiText(insightPrompt(habit), { system: forAudience(INSIGHT_SYSTEM, session.role), schema: insightJsonSchema, maxOutputTokens: 200, temperature: 0.5, timeoutMs: 10_000 }));
+      } catch (error) {
+        logAiError('habit insight', error);
+      }
+    }
+    response.json({ ok: true, source: insight ? 'ai' : 'rules', insight: insight ?? rulesInsight(habit) });
   });
 
   // Classifies a habit the student is about to add as healthy or a bad habit (harmful to daily

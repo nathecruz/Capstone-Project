@@ -1465,6 +1465,21 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.deepEqual(await proofRow('water'), { kind: 'photo', minutes: null, steps: null, bytes: null, photoType: null });
   });
 
+  await t.test('a new habit gets follow-up questions and a tip, from the rules without the AI', async () => {
+    const { headers } = await student('Follow', 'Up');
+    assert.equal((await request('/api/habit/follow-up', { method: 'POST', body: JSON.stringify({ label: 'Study' }) })).response.status, 401);
+    const asked = await request('/api/habit/follow-up', { method: 'POST', headers, body: JSON.stringify({ label: 'Study for 30 minutes', category: 'Academics', proof: { type: 'timer', minutes: 30 } }) });
+    assert.equal(asked.response.status, 200, JSON.stringify(asked.body));
+    assert.equal(asked.body.source, 'rules', 'no AI key in the tests');
+    assert.deepEqual(asked.body.questions.map((question) => question.id), ['time', 'amount', 'obstacle']);
+    assert.deepEqual(asked.body.questions[1].options.map((option) => option.proof.minutes), [10, 20, 30]);
+    assert.equal((await request('/api/habit/follow-up', { method: 'POST', headers, body: JSON.stringify({ label: 'x'.repeat(61) }) })).response.status, 400);
+    const tip = await request('/api/habit/follow-up/insight', { method: 'POST', headers, body: JSON.stringify({ label: 'Study for 30 minutes', category: 'Academics', proof: { type: 'timer', minutes: 30 }, answers: [{ question: 'When will you usually do it?', answer: 'Evening' }, { question: 'What usually gets in the way?', answer: 'I forget' }] }) });
+    assert.equal(tip.response.status, 200, JSON.stringify(tip.body));
+    assert.equal(tip.body.source, 'rules');
+    assert.match(tip.body.insight, /reminder/);
+  });
+
   await t.test('a streak milestone is not paid again when deleting a habit moves the first day of the run', async () => {
     const { headers, userId } = await student('Run', 'Start');
     await db.query("UPDATE users SET time_zone='UTC' WHERE id=$1", [userId]);

@@ -55,6 +55,14 @@ export const streakFreezeSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2
 export const webPushDoneSchema = z.object({ token: z.string().min(20).max(1000) }).strict();
 export const assistantSchema = z.object({ question: z.string().trim().max(500).optional(), summary: z.record(z.string(), z.unknown()).optional(), mode: z.enum(['assistant', 'coach', 'support']).default('assistant'), timeZone: timeZoneSchema.optional() }).strict();
 export const habitAnalysisRequestSchema = z.object({ habitId: z.string().trim().min(1).max(120), timeZone: timeZoneSchema.optional() }).strict();
+// A habit just added, for its follow-up questions (services/habit-follow-up.js), and the answers for its tip.
+const followUpProofSchema = z.union([
+  z.object({ type: z.literal('timer'), minutes: z.number().int().min(1).max(600) }).strict(),
+  z.object({ type: z.literal('steps'), steps: z.number().int().min(1).max(100000) }).strict(),
+  z.object({ type: z.literal('photo') }).strict(),
+]);
+export const habitFollowUpSchema = z.object({ label: z.string().trim().min(1).max(60), category: z.string().trim().max(60).optional(), proof: followUpProofSchema.optional() }).strict();
+export const habitInsightSchema = habitFollowUpSchema.extend({ answers: z.array(z.object({ question: z.string().trim().min(1).max(120), answer: z.string().trim().min(1).max(60) }).strict()).min(1).max(3) }).strict();
 export const habitClassificationSchema = z.object({ name: z.string().trim().min(1).max(100), category: z.string().trim().max(60).optional(), categories: z.array(z.string().trim().min(1).max(60)).max(20).optional() }).strict();
 export const goalGenerationSchema = z.object({ goal: z.string().trim().min(1).max(500), focusTarget: z.string().trim().max(30).optional(), timeline: z.string().trim().max(30).optional(), timeZone: timeZoneSchema.optional() }).strict();
 // This week's habits from the goal planner (services/ai-prompts.js plannedHabits): Daily has no days, Weekly and Custom have some.

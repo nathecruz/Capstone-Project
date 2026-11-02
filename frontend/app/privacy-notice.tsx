@@ -33,6 +33,7 @@ const SECTIONS: { title: string; items: string[] }[] = [
       'To run the app: sign you in, sync your data across devices, send reminders and verification codes, and show progress, rewards and leaderboards.',
       'To give AI guidance: when you ask the AI Coach or assistants, your question and a summary of your habits and check-ins (without your name or email) are sent to Groq, our AI provider, to generate the answer.',
       'To plan your goals: when you use the AI goal planner, your text and your recent habit history are sent to Groq, without your name or email. The history covers the habits of your last 4 weeks (names, categories, schedules and reminder times), how often you checked in and at what time of day, their forecasts from our prediction model, and your streak. It is used only to make your plan and this week\'s habits.',
+      'To help you start a new habit: when you add one, its name, category and proof and your answers to its follow-up questions are sent to Groq, without your name or email, to ask one more question about it and give you a tip.',
       'To keep accounts secure and to answer support requests.',
       'For research on the app\'s effect on student habits: PSAU faculty only see aggregated, anonymized statistics. Groups too small to hide individuals are combined or withheld.',
     ],

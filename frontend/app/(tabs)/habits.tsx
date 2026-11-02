@@ -79,9 +79,9 @@ export default function HabitsScreen() {
   };
   const addSuggestion = (template: HabitTemplate) => {
     const habit = habitFromTemplate(template, categories, getLocalDateKey());
-    addHabit(habit);
+    const id = addHabit(habit);
     setSuggestion(null);
-    setAddedHabit({ label: habit.label, category: habit.category, schedule: 'Daily', reminder: template.reminderTime, proof: habit.proof });
+    setAddedHabit({ id, label: habit.label, category: habit.category, schedule: 'Daily', reminder: template.reminderTime, proof: habit.proof });
   };
 
   const filteredHabits = useMemo(() => {
