@@ -1,7 +1,7 @@
 // Token rewards that do something: Premium Themes (app colour themes), a Custom Title shown on the
 // profile and the leaderboard, Profile Frames, and the Buddy Showcase (the student's Habi next to
-// their name on the leaderboard). Rewards that only took tokens (or doubled other features) were
-// retired and what students paid for them was refunded.
+// their name on the leaderboard; students only, as faculty are not on it). Rewards that only took
+// tokens (or doubled other features) were retired and what students paid for them was refunded.
 
 export const RETIRED_REWARDS = ['plant-buddy', 'kindness-boost', 'habit-swap', 'mystery-box', 'xp-booster', 'grace-day'];
 
@@ -18,6 +18,12 @@ export const PROFILE_FRAMES = ['gold', 'neon', 'leaf', 'fire', 'aqua', 'galaxy',
 
 /** Rewards bought once and kept. */
 export const PERMANENT_REWARDS = new Set(Object.keys(REAL_REWARDS));
+
+/** Rewards only students can use: the Buddy Showcase shows on the student leaderboard, which has no faculty. */
+export const STUDENT_REWARDS = new Set(['buddy-showcase']);
+
+/** What a reward does for faculty, where it differs: they are not on the leaderboard. */
+const FACULTY_DESCRIPTIONS = { 'custom-title': 'Your own title under your name on your profile' };
 
 /** Retires the rewards that did nothing and refunds their redemptions (once per redemption). */
 export async function retireRewards(db, now = Date.now()) {
@@ -40,15 +46,23 @@ export async function retireRewards(db, now = Date.now()) {
   return redemptions.rowCount;
 }
 
-/** The rewards on sale, the permanent ones this student owns, their title and their frame. */
-export async function getRewards(db, userId) {
+/**
+ * The rewards on sale to this account (for `faculty`, without the students' own), the permanent ones
+ * it owns, its title and its frame.
+ */
+export async function getRewards(db, userId, { faculty = false } = {}) {
   const [rewards, owned, user] = await Promise.all([
     db.query('SELECT id, name, token_cost AS "cost", description FROM rewards WHERE active ORDER BY token_cost, id'),
     db.query('SELECT DISTINCT reward_id AS "rewardId" FROM reward_redemptions WHERE user_id=$1', [userId]),
     db.query('SELECT custom_title AS "title", profile_frame AS "frame" FROM users WHERE id=$1', [userId]),
   ]);
   return {
-    rewards: rewards.rows.map((row) => ({ ...row, cost: Number(row.cost), permanent: PERMANENT_REWARDS.has(row.id) })),
+    rewards: rewards.rows.filter((row) => !(faculty && STUDENT_REWARDS.has(row.id))).map((row) => ({
+      ...row,
+      ...(faculty && FACULTY_DESCRIPTIONS[row.id] ? { description: FACULTY_DESCRIPTIONS[row.id] } : {}),
+      cost: Number(row.cost),
+      permanent: PERMANENT_REWARDS.has(row.id),
+    })),
     owned: owned.rows.map((row) => row.rewardId).filter((id) => PERMANENT_REWARDS.has(id)),
     title: user.rows[0]?.title ?? '',
     frame: user.rows[0]?.frame ?? '',

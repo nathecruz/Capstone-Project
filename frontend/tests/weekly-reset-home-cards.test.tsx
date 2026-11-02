@@ -24,9 +24,9 @@ const now = new Date(2026, 9, 21, 19, 0);
 const walk = habit({ id: 'walk', label: 'Walk', completionDates: ['2026-10-19', '2026-10-20'] });
 const read = habit({ id: 'read', label: 'Read', completionDates: ['2026-10-21'] });
 const lastWeek = habit({ id: 'old', label: 'Stretch', startDate: '2026-10-12', activeUntil: '2026-10-18', streak: 7, completionDates: ['2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18'] });
-// Faculty mode: the third tile counts check-ins instead of tokens.
+// Faculty mode: the same tiles as a student's, Tokens included (faculty earn and spend tokens too).
 const mockContext = {
-  points: 0, tokens: 0, isFaculty: true, streakFreeze: { frozenDays: [] as string[], available: 1 },
+  points: 0, tokens: 40, isFaculty: true, accountReady: false, streakFreeze: { frozenDays: [] as string[], available: 1 },
   currentHabits: [walk], streak: 9, bestStreak: 11,
 };
 jest.mock('@/hooks/color-scheme-context', () => ({ useAppColorScheme: () => mockContext }));
@@ -35,10 +35,12 @@ beforeEach(() => jest.useFakeTimers({ now }));
 afterEach(() => jest.useRealTimers());
 
 describe('BentoTiles', () => {
-  it("shows the account streak and its best, and counts every week's check-ins", () => {
-    const screen = render(<BentoTiles habits={[lastWeek, walk]} onFreeze={jest.fn()} />);
+  it("shows the account streak and its best, grows Habi from every week's check-ins, and shows faculty their tokens", () => {
+    const screen = render(<BentoTiles habits={[lastWeek, walk, read]} onFreeze={jest.fn()} />);
     expect(screen.getByLabelText('9-day streak, best 11, 1 streak freezes. Open Streak Freeze')).toBeTruthy();
-    expect(screen.getByLabelText('9 check-ins. Open progress')).toBeTruthy();
+    // 7 check-ins last week and 3 this week: Habi is a Kid from 10.
+    expect(screen.getByText('Buddy · Kid')).toBeTruthy();
+    expect(screen.getByLabelText('40 tokens. Open Tokens')).toBeTruthy();
   });
 });
 

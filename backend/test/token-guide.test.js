@@ -74,6 +74,11 @@ test('the spend rows are the prices the server sells at, each with where it open
   assert.deepEqual([rows[0].held, rows[0].max, rows[0].cost, rows.at(-1).cost, DROP_COST], [0, 2, 30, 10, 150]);
 });
 
+test('faculty have no treats for classmates to buy (only students send them)', () => {
+  const faculty = spendRows({ balance: 0, rewards: REWARDS, owned: [], freezes: freezesHeld(0), buddy: buddyAt(), giftsSentToday: 0, faculty: true });
+  assert.deepEqual(faculty.map((row) => row.id), rowsFor({ balance: 0 }).map((row) => row.id).filter((id) => id !== 'treat-gift'));
+});
+
 test('a spend row is owned, ready, short by what is missing, locked or full', () => {
   // Token Rewards: owned once bought, else ready or short against the raw balance.
   const rewards = rowsFor({ balance: 200, owned: ['premium-theme'] }).filter((row) => row.target.startsWith('reward:'));

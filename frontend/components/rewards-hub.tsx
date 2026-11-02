@@ -9,7 +9,6 @@ import { Pressable, Text, View } from 'react-native';
 import { DailyChallengesCard, DailyClaimCard } from '@/components/daily-cards';
 import { WeeklyQuestsCard } from '@/components/engagement-cards';
 import type { Habit } from '@/hooks/app-state/types';
-import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useDailyChallenges } from '@/hooks/use-daily-challenges';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 import { useWeeklyBonus } from '@/hooks/use-weekly-bonus';
@@ -22,8 +21,6 @@ type Tab = 'daily' | 'challenges' | 'quests';
 export function RewardsHub({ habits, now }: { habits: Habit[]; now: Date }) {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
-  // Tokens are the students' own: faculty have no Tokens screen.
-  const { isFaculty } = useAppColorScheme();
   // Read only: the challenges card below loads them.
   const challenges = useDailyChallenges(habits.length, false);
   const quests = weeklyQuests(habits, now);
@@ -54,12 +51,8 @@ export function RewardsHub({ habits, now }: { habits: Habit[]; now: Date }) {
         <Text style={styles.title}>Rewards</Text>
         <Text style={styles.subtitle}>
           Earn tokens every day
-          {isFaculty ? null : (
-            <>
-              {' · '}
-              <Text style={styles.link} onPress={() => router.push('/wallet')} accessibilityRole="link">See all ways</Text>
-            </>
-          )}
+          {' · '}
+          <Text style={styles.link} onPress={() => router.push('/wallet')} accessibilityRole="link">See all ways</Text>
         </Text>
       </View>
       <View style={styles.tabs} accessibilityRole="tablist">

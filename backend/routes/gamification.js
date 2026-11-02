@@ -9,7 +9,7 @@ import { requireAuth } from '../services/accounts.js';
 import { refreshSnapshot, serverCompletionPoints } from '../services/app-state-store.js';
 import { showcaseBuddies } from '../services/buddy.js';
 import { recentGiftRecipients } from '../services/buddy-gifts.js';
-import { cleanTitle, getRewards, PERMANENT_REWARDS, PROFILE_FRAMES } from '../services/rewards.js';
+import { cleanTitle, getRewards, PERMANENT_REWARDS, PROFILE_FRAMES, STUDENT_REWARDS } from '../services/rewards.js';
 import { countedDaySql, getWallet, POINTS_PER_CHECK_IN, spendTokens } from '../services/wallet.js';
 
 /**
@@ -70,11 +70,12 @@ function leaderRow(row, index, session, buddies, gifted) {
 }
 
 export default function registerGamificationRoutes(app) {
-  // What is on sale, what this student owns (Premium Themes, Custom Title) and their title.
+  // What is on sale, what this account owns (Premium Themes, Custom Title...) and its title. Faculty
+  // are not on the leaderboard, so the Buddy Showcase is not on sale to them.
   app.get('/api/rewards', async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
-    response.json({ ok: true, ...await getRewards({ query }, session.userId) });
+    response.json({ ok: true, ...await getRewards({ query }, session.userId, { faculty: session.role === 'faculty' }) });
   });
 
   // Sets (or clears, with '') the title shown under the student's name; needs the Custom Title reward.
@@ -111,6 +112,7 @@ export default function registerGamificationRoutes(app) {
     if (!input) return;
     const reward = (await query('SELECT id,name,token_cost AS "tokenCost" FROM rewards WHERE id=$1 AND active', [input.rewardId])).rows[0];
     if (!reward || reward.name !== input.rewardName || Number(reward.tokenCost) !== input.tokenCost) return response.status(400).json({ ok: false, message: 'This reward is not available.' });
+    if (session.role === 'faculty' && STUDENT_REWARDS.has(reward.id)) return response.status(403).json({ ok: false, message: 'This reward shows on the student leaderboard, so it is for students.' });
 
     const result = await withTransaction(async (db) => {
       await db.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [session.userId]);

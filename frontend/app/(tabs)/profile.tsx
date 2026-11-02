@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Image, Modal, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,8 +21,10 @@ import { CONTENT_MAX_WIDTH } from '@/hooks/use-responsive-layout';
 import { useRewards } from '@/hooks/use-rewards';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
+type MenuItem = { key: TranslationKey; icon: keyof typeof Ionicons.glyphMap; route: Href; group: 'progress' | 'account'; color: string; tint: string };
+
 /** The menu, in two groups: what you have done, and your account. */
-const settings = [
+const settings: readonly MenuItem[] = [
   { key: 'statsProgress', icon: 'stats-chart-outline', route: '/stats-progress', group: 'progress', color: '#3564D8', tint: '#E8EEFF' },
   { key: 'leaderboards', icon: 'trophy-outline', route: '/leaderboards', group: 'progress', color: '#C98A0E', tint: '#FFF4D9' },
   { key: 'activityHistory', icon: 'time-outline', route: '/activity-history', group: 'progress', color: '#5B42D8', tint: '#EEE9FF' },
@@ -30,7 +32,9 @@ const settings = [
   { key: 'personalInformation', icon: 'person-outline', route: '/personal-information', group: 'account', color: '#5B42D8', tint: '#EEE9FF' },
   { key: 'settingsPreferences', icon: 'settings-outline', route: '/settings-preferences', group: 'account', color: '#4A4458', tint: '#F0EEF5' },
   { key: 'helpSupport', icon: 'help-circle-outline', route: '/help-support', group: 'account', color: '#2E9D5C', tint: '#E3F6EC' },
-] as const;
+];
+/** Faculty's Rewards (their tokens and the shop): the leaderboard screen, without the board. */
+const FACULTY_REWARDS: MenuItem = { key: 'rewards', icon: 'gift-outline', route: '/leaderboards', group: 'progress', color: '#C98A0E', tint: '#FFF4D9' };
 
 export default function ProfileScreen() {
   const styles = useThemedStyles(themedStyles);
@@ -42,8 +46,8 @@ export default function ProfileScreen() {
   const [frameOpen, setFrameOpen] = useState(false);
   // `streak` is the account streak (days in a row with a check-in, across weeks), `bestStreak` its longest run.
   const { isDarkMode, avatarImage, setAvatarImage, habits, goals, profile, points, tokens, applyWallet, t, isFaculty, streakFreeze, streak, bestStreak } = useAppColorScheme();
-  // Faculty mode: no student leaderboards; a shortcut to their class's Class Pulse instead.
-  const menuItems = isFaculty ? settings.filter((item) => item.key !== 'leaderboards') : settings;
+  // Faculty mode: no student leaderboards. The same screen is their Rewards (tokens and the shop).
+  const menuItems = isFaculty ? settings.map((item) => (item.key === 'leaderboards' ? FACULTY_REWARDS : item)) : settings;
   // The student's real place on the All Time leaderboard (it used to be a fixed "#24, Top 8%").
   const [rankInfo, setRankInfo] = useState<{ rank: number; total: number } | null>(null);
   useEffect(() => {
@@ -134,18 +138,18 @@ export default function ProfileScreen() {
     { text: 'Cancel', style: 'cancel' },
     { text: 'Log Out', style: 'destructive', onPress: () => router.replace('/logout') },
   ]);
-  const renderMenu = (items: readonly (typeof settings)[number][]) => items.map((item, index) => (
+  const renderMenu = (items: readonly MenuItem[]) => items.map((item, index) => (
     <Pressable
       key={item.key}
       style={({ pressed }) => [styles.menuRow, index < items.length - 1 && styles.menuBorder, pressed && styles.pressed]}
       onPress={() => router.push(item.route)}
       accessibilityRole="button"
-      accessibilityLabel={t(item.key as TranslationKey)}
+      accessibilityLabel={t(item.key)}
     >
       <View style={[styles.menuIcon, { backgroundColor: themeColor(item.tint, 'backgroundColor') }]}>
-        <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={18} color={themeColor(item.color)} />
+        <Ionicons name={item.icon} size={18} color={themeColor(item.color)} />
       </View>
-      <Text style={styles.menuLabel}>{t(item.key as TranslationKey)}</Text>
+      <Text style={styles.menuLabel}>{t(item.key)}</Text>
       <Ionicons name="chevron-forward" size={16} color={themeColor('#A19CAA')} />
     </Pressable>
   ));

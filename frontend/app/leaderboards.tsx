@@ -41,6 +41,17 @@ type RewardSheet = 'theme' | 'title' | 'frame' | 'showcase';
 const REWARD_SHEET: Record<string, RewardSheet> = { 'premium-theme': 'theme', 'custom-title': 'title', 'profile-frames': 'frame', 'buddy-showcase': 'showcase' };
 const BUDDY_SHOP_FROM = 40;
 const SHOWCASE_ID = 'buddy-showcase';
+/**
+ * The screen is the students' Leaderboards and faculty's Rewards: the same tokens and shop, but
+ * faculty are not on the board, so they get no rankings and none of what only shows there (the
+ * Buddy Showcase; treats for classmates are sent from the board).
+ */
+const HEADERS = {
+  student: { eyebrow: 'COMMUNITY', title: 'Leaderboards', subtitle: 'A little friendly competition goes a long way.', icon: 'trophy', info: 'Complete habits to earn points and tokens. Redeem tokens for rewards.' },
+  faculty: { eyebrow: 'YOUR REWARDS', title: 'Rewards', subtitle: 'Spend the tokens your check-ins earn.', icon: 'gift', info: 'Check in your habits to earn tokens, then spend them here. Leaderboards are for students, so faculty are not ranked.' },
+} as const;
+/** What a reward does for faculty, where it differs (they are not on the leaderboard). */
+const FACULTY_DETAILS: Record<string, string> = { 'custom-title': 'Your title on your profile' };
 /** How far apart the reward cards are along their row (a card's width and the gap). */
 const REWARD_CARD_STEP = 160;
 
@@ -108,7 +119,7 @@ export default function LeaderboardsScreen() {
 
   const apiUrl = getApiBaseUrl();
   useEffect(() => {
-    if (!profile.fullName.trim()) {
+    if (isFaculty || !profile.fullName.trim()) {
       return;
     }
     // A slower answer for the period picked before must not replace this one.
@@ -148,7 +159,7 @@ export default function LeaderboardsScreen() {
     return () => {
       active = false;
     };
-  }, [apiUrl, period, points, profile.fullName, refreshKey]);
+  }, [apiUrl, isFaculty, period, points, profile.fullName, refreshKey]);
 
   // The student's own row shows their Habi as this device has it: the "Show my Habi" switch and
   // what Habi wears apply right away, not only once the change is saved and the board loads again.
@@ -198,20 +209,21 @@ export default function LeaderboardsScreen() {
   const freezesHeld = streakFreeze?.available ?? 0;
   const freezeMax = streakFreeze?.max ?? 2;
   const rewards = useMemo<Reward[]>(() => {
-    const permanent = catalog.rewards.filter((reward) => reward.permanent && REWARD_LOOKS[reward.id]).map((reward) => ({
+    const permanent = catalog.rewards.filter((reward) => reward.permanent && REWARD_LOOKS[reward.id] && !(isFaculty && reward.id === SHOWCASE_ID)).map((reward) => ({
       id: reward.id,
       title: reward.name,
       description: reward.description,
       cost: reward.cost,
       kind: 'permanent' as const,
       ...REWARD_LOOKS[reward.id],
+      ...(isFaculty && FACULTY_DETAILS[reward.id] ? { detail: FACULTY_DETAILS[reward.id] } : {}),
     }));
     return [
       { id: 'streak-freeze', title: 'Streak Freeze', detail: 'Saves your streaks on a day you miss', cost: freezeCost, icon: 'snow-outline', color: '#DDF0FF', kind: 'freeze' },
       { id: 'buddy-shop', title: 'Buddy Outfits', detail: 'Hats and items for your Habit Buddy', cost: BUDDY_SHOP_FROM, icon: 'shirt-outline', color: '#FFF0C9', kind: 'shop' },
       ...permanent,
     ];
-  }, [catalog.rewards, freezeCost]);
+  }, [catalog.rewards, freezeCost, isFaculty]);
   const isOwned = (reward: Reward) => reward.kind === 'permanent' && catalog.owns(reward.id);
   const nextGoal = rewards.find((reward) => reward.kind === 'permanent' && !isOwned(reward) && tokens < reward.cost);
 
@@ -270,21 +282,7 @@ export default function LeaderboardsScreen() {
     }
   };
 
-  // Faculty mode: leaderboards and rewards are the students' own competition.
-  if (isFaculty) {
-    return (
-      <SafeAreaView style={styles.screen}>
-        <View style={styles.facultyNotice}>
-          <Ionicons name="trophy-outline" size={28} color={themeColor('#5B42D8')} />
-          <Text style={styles.facultyNoticeTitle}>Leaderboards are for students</Text>
-          <Text style={styles.facultyNoticeText}>Your habits stay private to you. See how your students are doing in Class Pulse.</Text>
-          <Pressable style={styles.facultyNoticeButton} onPress={() => router.back()} accessibilityRole="button">
-            <Text style={styles.facultyNoticeButtonText}>Go back</Text>
-          </Pressable>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  const header = HEADERS[isFaculty ? 'faculty' : 'student'];
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -293,8 +291,8 @@ export default function LeaderboardsScreen() {
         <View style={[styles.container, compact && styles.compactContainer]}>
           <View style={styles.headerRow}>
             <Pressable onPress={() => router.back()} style={styles.backButton} accessibilityLabel="Go back"><Ionicons name="chevron-back" size={24} color={themeColor('#352B88')} /></Pressable>
-            <View style={styles.headerCopy}><Text style={styles.eyebrow}>COMMUNITY</Text><Text style={styles.headerTitle}>Leaderboards</Text><Text style={styles.headerSubtitle}>A little friendly competition goes a long way.</Text></View>
-            <View style={styles.headerActions}><View style={styles.trophyBadge}><Ionicons name="trophy" size={22} color={themeColor('#F2B632')} /></View><Pressable style={styles.infoButton} accessibilityLabel="Leaderboard information" onPress={() => showAlert('Leaderboards', 'Complete habits to earn points and tokens. Redeem tokens for rewards.') }><Ionicons name="information-circle-outline" size={23} color={themeColor('#4C43A2')} /></Pressable></View>
+            <View style={styles.headerCopy}><Text style={styles.eyebrow}>{header.eyebrow}</Text><Text style={styles.headerTitle}>{header.title}</Text><Text style={styles.headerSubtitle}>{header.subtitle}</Text></View>
+            <View style={styles.headerActions}><View style={styles.trophyBadge}><Ionicons name={header.icon} size={22} color={themeColor('#F2B632')} /></View><Pressable style={styles.infoButton} accessibilityLabel={`${header.title} information`} onPress={() => showAlert(header.title, header.info) }><Ionicons name="information-circle-outline" size={23} color={themeColor('#4C43A2')} /></Pressable></View>
           </View>
 
           <View style={[styles.tokenBanner, compact && styles.compactTokenBanner]}>
@@ -396,6 +394,13 @@ export default function LeaderboardsScreen() {
             )}
           </View>
 
+          {isFaculty ? (
+            <View style={styles.noCommunityCard}>
+              <Ionicons name="people-outline" size={25} color={themeColor('#5B42D8')} />
+              <Text style={styles.noCommunityTitle}>Leaderboards are for students</Text>
+              <Text style={styles.noCommunityText}>Your habits stay private to you, so you are not ranked. See how your students are doing in Class Pulse on Home.</Text>
+            </View>
+          ) : <>
           <View style={styles.podiumHeader}><View style={styles.podiumHeaderCopy}><Text style={styles.sectionKicker}>LEADERBOARD SPOTLIGHT</Text><Text style={styles.sectionTitle}>Top 3 {period}</Text><Text style={styles.sectionSubtitle}>Consistency gets rewarded. Keep climbing!</Text></View><Pressable style={styles.datePill} onPress={() => setDateDropdownOpen((open) => !open)} accessibilityRole="button" accessibilityLabel="Choose leaderboard date" accessibilityState={{ expanded: dateDropdownOpen }}><Ionicons name="calendar-outline" size={12} color={themeColor('#5B42D8')} /><Text style={styles.datePillText}>{liveDate}</Text><Ionicons name={dateDropdownOpen ? 'chevron-up' : 'chevron-down'} size={12} color={themeColor('#5B42D8')} /></Pressable></View>
           {dateDropdownOpen && <View style={styles.dateDropdown}>{(['This Week', 'This Month', 'All Time'] as LeaderboardPeriod[]).map((option) => <Pressable key={option} style={[styles.dateOption, period === option && styles.dateOptionActive]} onPress={() => { setPeriod(option); setDateDropdownOpen(false); }} accessibilityRole="button" accessibilityState={{ selected: period === option }}><View><Text style={[styles.dateOptionTitle, period === option && styles.dateOptionTextActive]}>{option}</Text><Text style={[styles.dateOptionSubtitle, period === option && styles.dateOptionTextActive]}>{getDateLabel(option)}</Text></View>{period === option && <Ionicons name="checkmark-circle" size={16} color={themeColor('#FFFFFF')} />}</Pressable>)}</View>}
           {resetText ? <View style={styles.resetRow}><Ionicons name="time-outline" size={12} color={themeColor('#8A7BD5')} /><Text style={styles.resetText}>{resetText}</Text></View> : null}
@@ -408,6 +413,7 @@ export default function LeaderboardsScreen() {
           {sortDropdownOpen && <View style={styles.dateDropdown}>{([{ value: 'points-desc', label: 'Points: high to low' }, { value: 'points-asc', label: 'Points: low to high' }, { value: 'rank', label: 'Sort by rank' }] as const).map((option) => <Pressable key={option.value} style={[styles.dateOption, sortMode === option.value && styles.dateOptionActive]} onPress={() => { setSortMode(option.value); setSortDropdownOpen(false); }} accessibilityRole="button" accessibilityState={{ selected: sortMode === option.value }}><Text style={[styles.dateOptionTitle, sortMode === option.value && styles.dateOptionTextActive]}>{option.label}</Text>{sortMode === option.value && <Ionicons name="checkmark-circle" size={16} color={themeColor('#FFFFFF')} />}</Pressable>)}</View>}
           <View style={styles.rankingMetaRow}><View style={styles.rankingCount}><Ionicons name="people-outline" size={14} color={themeColor('#5B42D8')} /><Text style={styles.rankingMetaText}>{visibleRankingCount} of {sortedLeaders.length} members</Text></View><Text style={styles.rankingMetaHint}>{showAllRankings ? 'Complete leaderboard' : 'Top results'}</Text></View>
           <View style={styles.rankingTable}><View style={styles.rankingColumns}><Text style={styles.columnRank}>RANK</Text><Text style={styles.columnMember}>MEMBER</Text><Text style={styles.columnPoints}>POINTS{pointsSortIndicator}</Text></View><View style={styles.rankingList}>{sortedLeaders.slice(0, visibleRankingCount).map((leader, index) => <Pressable key={leaderKey(leader)} style={({ pressed }) => [styles.rankingRow, index % 2 === 1 && styles.alternateRow, isMe(leader) && styles.currentRow, pressed && styles.pressedCard]} onPress={() => setClassmate(leader)} accessibilityRole="button" accessibilityLabel={`${leader.name}, rank ${leader.rank}, ${leader.points} points. Open card`}><Text style={[styles.rankCircle, isMe(leader) && styles.currentRank]}>{leader.rank}</Text><View style={styles.memberCell}><View style={styles.listAvatarSlot}><FramedAvatar frame={leader.frame} size={38}><View style={[styles.listAvatarWrap, leader.frame ? styles.listAvatarFramed : null, isMe(leader) && styles.currentAvatarWrap]}><Text style={styles.listAvatar}>{leader.avatar}</Text></View></FramedAvatar></View>{leader.buddy ? <View style={styles.listBuddy}>{leaderBuddy(leader, 28)}</View> : null}<View style={styles.memberCopy}><Text style={[styles.playerName, isMe(leader) && styles.currentPlayerName]}>{leader.name}</Text>{leader.title ? <Text style={styles.playerTitle} numberOfLines={1}>{leader.title}</Text> : null}{isMe(leader) && <View style={styles.risingSmall}><Ionicons name="star" size={10} color={themeColor('#6248D7')} /><Text style={styles.risingSmallText}>You</Text></View>}</View></View><View style={styles.pointsCell}><Text style={styles.playerPoints}>{leader.points}</Text><Ionicons name="chevron-forward" size={16} color={themeColor('#5B42D8')} /></View></Pressable>)}</View></View></>}
+          </>}
         </View>
       </ScrollView>
 
@@ -463,11 +469,7 @@ export default function LeaderboardsScreen() {
 
 const themedStyles = createThemedStyles({
   screen: { flex: 1, backgroundColor: '#F7F8FF' },
-  facultyNotice: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 32 },
-  facultyNoticeTitle: { fontSize: 18, fontWeight: '800', color: '#1F1C26', textAlign: 'center' },
-  facultyNoticeText: { fontSize: 13, lineHeight: 19, color: '#6A6573', textAlign: 'center', maxWidth: 320 },
-  facultyNoticeButton: { marginTop: 8, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 14, backgroundColor: '#5B42D8' },
-  facultyNoticeButtonText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13 }, content: { paddingTop: 8 }, container: { width: '100%', maxWidth: 920, alignSelf: 'center', paddingHorizontal: 14 }, compactContainer: { paddingHorizontal: 10 },
+  content: { paddingTop: 8 }, container: { width: '100%', maxWidth: 920, alignSelf: 'center', paddingHorizontal: 14 }, compactContainer: { paddingHorizontal: 10 },
   headerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 8 }, backButton: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', elevation: 3 }, headerCopy: { flex: 1 }, eyebrow: { color: '#5B42D8', fontSize: 9, fontWeight: '900', letterSpacing: 1.2, marginBottom: 2 }, headerTitle: { fontSize: 24, color: '#1F1C26', fontWeight: '900' }, headerSubtitle: { fontSize: 11, color: '#6A6573', marginTop: 2 }, headerActions: { alignItems: 'center', gap: 8 }, trophyBadge: { width: 42, height: 42, borderRadius: 14, backgroundColor: '#FFF4CF', alignItems: 'center', justifyContent: 'center' }, infoButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   // elevation lowered from 5 -> 2 so the banner stops drawing over the rewards card on Android
   tokenBanner: { minHeight: 158, flexDirection: 'row', alignItems: 'center', backgroundColor: '#5B42D8', borderRadius: 20, padding: 14, overflow: 'hidden', elevation: 2, zIndex: 1, shadowColor: '#4C37B8', shadowOpacity: 0.2, shadowRadius: 10, shadowOffset: { width: 0, height: 5 } }, compactTokenBanner: { minHeight: 145 }, tokenGlow: { position: 'absolute', width: 160, height: 160, borderRadius: 80, backgroundColor: '#8069F0', opacity: 0.38, right: 82, top: -56 }, tokenCoin: { width: 62, height: 62, borderRadius: 31, backgroundColor: '#F5A91B', alignItems: 'center', justifyContent: 'center', borderWidth: 4, borderColor: '#FFD95B', shadowColor: '#F5A91B', shadowOpacity: 0.35, shadowRadius: 9, shadowOffset: { width: 0, height: 3 } }, tokenCopy: { marginLeft: 10, flex: 1, minWidth: 0 }, tokenTopline: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 7, rowGap: 4 }, tokenLabel: { color: '#DCD5FF', fontSize: 9, fontWeight: '900', letterSpacing: 1.1 }, activeBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(255,255,255,0.13)', borderRadius: 8, paddingHorizontal: 5, paddingVertical: 3 }, activeDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#7FF0B0' }, activeText: { color: '#D9FFE7', fontSize: 7, fontWeight: '900', letterSpacing: 0.5 }, tokenValue: { color: '#FFFFFF', fontSize: 34, lineHeight: 38, fontWeight: '900' }, tokenHint: { color: '#CFC7FF', fontSize: 10, marginTop: 1 }, historyButton: { flexDirection: 'row', alignItems: 'center', minHeight: 36, borderWidth: 1, borderColor: '#CFC4FF', borderRadius: 18, paddingHorizontal: 12 }, historyText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' }, giftWrap: { width: 62, height: 62, borderRadius: 31, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center', marginRight: 8 }, giftGlow: { position: 'absolute', width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFD75A', opacity: 0.16 }, tokenActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 7 }, earnPill: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 36, borderRadius: 18, paddingHorizontal: 12, backgroundColor: 'rgba(255,255,255,0.2)' }, earnPillText: { color: '#FFFFFF', fontSize: 11, fontWeight: '900' },

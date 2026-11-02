@@ -1872,18 +1872,31 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
   const ledgerOf = async (userId) => (await db.query('SELECT id, amount FROM token_transactions WHERE user_id=$1', [userId])).rows.map((row) => ({ id: row.id, amount: Number(row.amount) }));
   const sumOf = (rows) => rows.reduce((sum, row) => sum + row.amount, 0);
 
-  await t.test('the Tokens screen is for students, on their today, from the ledger, and it never writes', async () => {
+  await t.test('the Tokens screen is for students and faculty, on their today, from the ledger, and it never writes', async () => {
     const { headers, userId } = await student('Tia', 'Tokens');
     await db.query("UPDATE users SET time_zone='UTC' WHERE id=$1", [userId]);
     const summaryFor = (query, asHeaders = headers) => request(`/api/wallet/summary?${query}`, { headers: asHeaders });
     const day = `date=${today}&timeZone=UTC`;
 
-    // Faculty have no Tokens screen (system admins cannot use the app at all).
+    // Faculty have it too, without what only students buy: treats for classmates and the Buddy
+    // Showcase, as they are not on the leaderboard (system admins cannot use the app at all).
     const faculty = await student('Fay', 'Culty');
     await db.query("UPDATE users SET role='faculty' WHERE id=$1", [faculty.userId]);
-    for (const answer of [await summaryFor(day, faculty.headers), await request('/api/wallet/history', { headers: faculty.headers })]) {
-      assert.deepEqual([answer.response.status, answer.body], [403, { ok: false, message: 'Tokens are for students.' }]);
-    }
+    const facultySummary = await summaryFor(day, faculty.headers);
+    assert.equal(facultySummary.response.status, 200, JSON.stringify(facultySummary.body));
+    const facultyTargets = facultySummary.body.spend.map((row) => row.target);
+    assert.deepEqual(facultyTargets.filter((target) => target !== 'buddy'), ['freeze', 'reward:profile-frames', 'reward:premium-theme', 'reward:custom-title', 'coach']);
+    assert.equal(facultySummary.body.spend.find((row) => row.id === 'custom-title').detail, 'Your own title under your name on your profile', 'not on the leaderboard');
+    assert.deepEqual((await request('/api/wallet/history', { headers: faculty.headers })).body, { ok: true, items: [], nextCursor: null, totals: { earned: 0, spent: 0, balance: 0 } });
+    const facultyRewards = (await request('/api/rewards', { headers: faculty.headers })).body;
+    assert.deepEqual(facultyRewards.rewards.map((reward) => reward.id), ['profile-frames', 'premium-theme', 'custom-title']);
+    await grant(faculty.userId, 600, 'faculty-grant');
+    const redeemAs = (asHeaders, rewardId, rewardName, tokenCost) => request('/api/rewards/redeem', { method: 'POST', headers: asHeaders, body: JSON.stringify({ rewardId, rewardName, tokenCost }) });
+    const showcase = await redeemAs(faculty.headers, 'buddy-showcase', 'Buddy Showcase', 300);
+    assert.deepEqual([showcase.response.status, showcase.body.message], [403, 'This reward shows on the student leaderboard, so it is for students.']);
+    const theme = await redeemAs(faculty.headers, 'premium-theme', 'Premium Themes', 200);
+    assert.deepEqual([theme.response.status, theme.body.tokens], [200, 400], JSON.stringify(theme.body));
+    assert.deepEqual((await request('/api/rewards', { headers: faculty.headers })).body.owned, ['premium-theme']);
     assert.equal((await request(`/api/wallet/summary?${day}`)).response.status, 401);
     for (const query of ['', 'timeZone=UTC', `date=${today}&timeZone=Not%2FA_Zone`, `date=${today}&date=${today}&timeZone=UTC`]) {
       const refused = await summaryFor(query);

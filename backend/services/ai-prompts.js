@@ -53,7 +53,7 @@ ${APP_GUIDE}`,
  * their own habits: the advice must fit a teacher's day, not a student's.
  */
 export const FACULTY_CONTEXT = `This user is a PSAU faculty member (a teacher who may also do research, advising and administrative work), not a student.
-Tailor everything to a faculty member's day: lesson preparation, grading and feedback, consultations with students, research and writing, meetings, and their own rest, health and family time. Do not talk about studying for exams, attending classes as a student, or student leaderboards. Faculty accounts have no tokens, rewards or Tokens screen, so do not suggest them.`;
+Tailor everything to a faculty member's day: lesson preparation, grading and feedback, consultations with students, research and writing, meetings, and their own rest, health and family time. Do not talk about studying for exams, attending classes as a student, or student leaderboards. Faculty earn tokens like students and can spend them on Premium Themes, Profile Frames, a Custom Title, Habi's shop, Streak Freeze and AI Coach answers (on the Rewards and Tokens screens), but they are not on the leaderboard, so never suggest treats for classmates or the Buddy Showcase.`;
 
 /** The instruction for an AI feature, adjusted for faculty accounts. */
 export function forAudience(system, role) {

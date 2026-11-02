@@ -52,10 +52,10 @@ export function BentoTile({ tone, label, value, unit, detail, icon, onPress, acc
 export function BentoTiles({ habits, onFreeze, style }: { habits: Habit[]; onFreeze: () => void; style?: object | false }) {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
-  const { points, tokens, streakFreeze, isFaculty, accountReady, currentHabits, streak, bestStreak } = useAppColorScheme();
+  const { points, tokens, streakFreeze, accountReady, currentHabits, streak, bestStreak } = useAppColorScheme();
   const { buddy } = useBuddy();
-  // What the Tokens screen counts as affordable now (faculty have no tokens; asked once the role is known).
-  const affordable = useWallet(getLocalDateKey(), !isFaculty && accountReady).summary?.affordable ?? 0;
+  // What the Tokens screen counts as affordable now (asked once the account is loaded).
+  const affordable = useWallet(getLocalDateKey(), accountReady).summary?.affordable ?? 0;
   const frozenDays = streakFreeze?.frozenDays;
   const totalCheckIns = useMemo(() => habits.reduce((sum, habit) => sum + habit.completionDates.length, 0), [habits]);
   const freezes = streakFreeze?.available ?? 0;
@@ -93,27 +93,15 @@ export function BentoTiles({ habits, onFreeze, style }: { habits: Habit[]; onFre
       >
         <View style={styles.track}><View style={[styles.fill, { width: `${Math.round(share * 100)}%` }]} /></View>
       </BentoTile>
-      {isFaculty ? (
-        <BentoTile
-          tone="tokens"
-          label="Check-ins"
-          value={String(totalCheckIns)}
-          detail="All the days you showed up"
-          icon={iconBubble('checkmark-done', '#2E9D5C')}
-          onPress={go('/progress')}
-          accessibilityLabel={`${totalCheckIns} check-ins. Open progress`}
-        />
-      ) : (
-        <BentoTile
-          tone="tokens"
-          label="Tokens"
-          value={String(tokens)}
-          detail={affordable > 0 ? `You can afford ${affordable} ${affordable === 1 ? 'thing' : 'things'}` : 'See how to earn and spend'}
-          icon={iconBubble('wallet', '#2E9D5C')}
-          onPress={go('/wallet')}
-          accessibilityLabel={`${tokens} tokens. Open Tokens`}
-        />
-      )}
+      <BentoTile
+        tone="tokens"
+        label="Tokens"
+        value={String(tokens)}
+        detail={affordable > 0 ? `You can afford ${affordable} ${affordable === 1 ? 'thing' : 'things'}` : 'See how to earn and spend'}
+        icon={iconBubble('wallet', '#2E9D5C')}
+        onPress={go('/wallet')}
+        accessibilityLabel={`${tokens} tokens. Open Tokens`}
+      />
       <BentoTile
         tone="buddy"
         label={`Buddy · ${growth.stage.name}`}

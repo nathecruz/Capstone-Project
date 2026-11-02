@@ -2,8 +2,10 @@
 // (Asia/Manila), not from the device clock: the dates under the period picker, the countdown to the
 // reset and the reload when it passes. Rows are keyed by their public id, as names are not unique.
 // A showcased Habi sits beside its student's name, a tap opens the classmate's card, and
-// /leaderboards?reward=<id> opens that reward.
+// /leaderboards?reward=<id> opens that reward. For faculty the screen is their Rewards: the tokens
+// and the shop, without the board.
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { router } from 'expo-router';
 import React from 'react';
 import LeaderboardsScreen from '@/app/leaderboards';
 import { leaderboardDateLabel, leaderKey, periodRange, rangeLabel, resetCountdownText, type LeaderboardRange } from '@/utils/leaderboard-range';
@@ -118,6 +120,7 @@ describe('the Leaderboards screen', () => {
     mockCatalog.owned = [];
     mockOwnBuddy.buddy = null;
     mockContext.preferences = {};
+    mockContext.isFaculty = false;
     fetchMock.mockClear();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
   });
@@ -234,5 +237,27 @@ describe('the Leaderboards screen', () => {
     expect(owned.getByText('Showcase settings open')).toBeTruthy();
     expect(owned.getByText('Showcase settings')).toBeTruthy();
     owned.unmount();
+  });
+
+  it("is faculty's Rewards: their tokens and the shop, without the board or what only shows on it", async () => {
+    mockContext.isFaculty = true;
+    mockCatalog.rewards = [
+      { id: 'premium-theme', name: 'Premium Themes', cost: 200, description: 'Seven app colour themes', permanent: true },
+      { id: 'custom-title', name: 'Custom Title', cost: 250, description: 'Your own title under your name on your profile', permanent: true },
+      // A catalog loaded before the server left it out for faculty.
+      { id: 'buddy-showcase', name: 'Buddy Showcase', cost: 300, description: 'Show your Habi', permanent: true },
+    ];
+    const screen = render(React.createElement(LeaderboardsScreen));
+    await act(async () => undefined);
+    expect(screen.getByText('Rewards')).toBeTruthy();
+    expect(screen.getByText('Token Rewards')).toBeTruthy();
+    expect(screen.getByText('Premium Themes')).toBeTruthy();
+    expect(screen.getByText('Your title on your profile')).toBeTruthy();
+    expect(screen.queryByText('Buddy Showcase')).toBeNull();
+    expect(screen.getByText('Leaderboards are for students')).toBeTruthy();
+    expect(screen.queryByText('Rankings')).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.press(screen.getByLabelText('How to earn tokens'));
+    expect(router.push).toHaveBeenCalledWith('/wallet');
   });
 });
