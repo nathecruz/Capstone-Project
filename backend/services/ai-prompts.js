@@ -16,9 +16,9 @@ Rules:
 
 const APP_GUIDE = `
 HabitAI app guide (the only features that exist):
-- Add a habit: open the Add tab, enter a name, pick a category, frequency (Daily, Weekly, Monthly or Custom days), target count, start date, and up to 2 reminder times, then save.
+- Add a habit: on the Add tab, tap a ready-made habit to add it in one tap, or enter a name, pick Health or Academics (the only two areas), frequency (Daily, Weekly, Monthly or Custom days), target count, start date, up to 2 reminder times and how its check-in is proven (Focus timer, steps or photo), then save. A few follow-up questions come next: their answers set the habit's reminder time and amount, and a short tip follows. The Habits tab shows the balance between Health and Academics habits and suggests one for a missing area.
 - Weekly habits: a habit lasts one week (Monday to Sunday), from its start date to that Sunday. After Sunday it leaves Home and the habit lists and gets no more reminders, but its check-ins stay in stats, history and the streak. Each week, add new habits on the Add tab or plan them with the AI on the Goals tab.
-- Complete a habit: tap the check control on the Home or Habits tab any time during the day. Undo is offered for a few seconds right after; then the check-in is locked. Only today can be checked in: once a scheduled day ends without a check-in, it counts as missed and cannot be filled in later.
+- Complete a habit: tap the check control on the Home or Habits tab during the day. A habit is checked in with its proof: a timer habit opens its Focus timer and counts once the full time has run, a steps habit opens the Walk screen (HabitAI must stay open on it while the phone counts; on the web, or a phone without a step counter, a photo of the walk proves it), and a photo habit opens the camera. Undo is offered for a few seconds right after; then the check-in is locked. Only today can be checked in, until the habit's last reminder time: once a scheduled day ends without a check-in, it counts as missed and cannot be filled in later.
 - Edit a habit: tap the pencil on a habit card in the Habits tab to rename it or change its category or schedule (check-ins are kept), or to delete it.
 - Habit analysis: Insights > Predictions shows each habit's chance of success from the machine-learning model and AI advice on the best way and time to do it.
 - Streaks: the main streak counts the days in a row with at least one check-in, across all habits and weeks. It stops on a day when habits were due and none was checked in; a Streak Freeze (bought with tokens from the streak tile on Home) covers a missed day. Each habit also shows its own streak; history is kept.
@@ -33,7 +33,8 @@ ${economyGuide()}
 - Profile > Personal Information: edit name, username, email, birthday and bio.
 - Help & Support: FAQ, Report an Issue (screenshots or video up to 10 MB) and Suggest a Feature.
 - Data syncs to the student's account automatically when signed in.
-- Faculty accounts use the same app in Faculty mode for their own habits. They are not shown on student leaderboards, and their class's progress is in Class Pulse in the HabitAI Admin Panel.`.trim();
+- Faculty accounts use the same app in Faculty mode for their own habits. They earn tokens like students and spend them on their Rewards screen (Profile > Rewards), but they are not shown on student leaderboards, so the Buddy Showcase and treats for classmates are not for them. Their class's progress is in Class Pulse in the HabitAI Admin Panel.
+- What HabitAI cannot do (Help & Support > What HabitAI can and cannot do): it needs an internet connection (no offline mode; after a quiet while the server takes up to a minute to wake); proof makes fake check-ins harder, not impossible (a timer can run while the student does something else, a phone can be shaken, a photo can be staged); only Health and Academics habits; habits last one week; steps are counted only in the Android app with the Walk screen open; AI answers can be wrong and predictions are estimates from simple rules until a trained model is approved; proof photos are deleted after 14 days.`.trim();
 
 const SYSTEM_PROMPTS = {
   coach: `You are HabitAI Coach, the personal habit coach inside HabitAI, a habit tracker used by PSAU students.

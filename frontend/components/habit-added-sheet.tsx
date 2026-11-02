@@ -5,7 +5,7 @@
 // with a tip (backend services/habit-follow-up.js; the rules answer without the AI).
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { getHabitFollowUp, getHabitInsight, type FollowUpOption, type FollowUpQuestion } from '@/authentication/authService';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import type { HabitProof } from '@/hooks/app-state/types';
@@ -19,6 +19,7 @@ export type AddedHabit = { id: string; label: string; category: string; schedule
 /** How the student checks this habit in. */
 export function proofHowTo(proof: HabitProof | undefined) {
   if (proof?.type === 'timer') return `Check in by finishing the ${proof.minutes}-minute Focus timer.`;
+  if (proof?.type === 'steps' && Platform.OS === 'web') return `Walk ${proof.steps.toLocaleString('en-US')} steps, then check in with a photo: the web app cannot count steps (the Android app can).`;
   if (proof?.type === 'steps') return `Check in by walking ${proof.steps.toLocaleString('en-US')} steps with HabitAI open on your phone.`;
   if (proof?.type === 'photo') return 'Check in by taking a photo of it when you are done.';
   return '';

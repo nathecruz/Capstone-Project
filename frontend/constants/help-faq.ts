@@ -4,13 +4,16 @@ export type FaqItem = { question: string; answer: string };
 export type FaqSection = { title: string; icon: string; color: string; items: FaqItem[] };
 export type FaqMatch = FaqItem & { section: string; icon: string; color: string };
 
+/** The topic of what HabitAI can and cannot do (the capstone panel asked for the system's limits). */
+export const LIMITS_TOPIC = 'Limitations';
+
 export const faqSections: FaqSection[] = [
   {
     title: 'Getting Started',
     icon: 'rocket-outline',
     color: '#5B42D8',
     items: [
-      { question: 'How do I create my first habit?', answer: 'Open the Add tab, enter a name, pick a category and how often (daily, weekly, monthly or custom days), set a target, then save your habit.' },
+      { question: 'How do I create my first habit?', answer: 'Open the Add tab and tap a ready-made habit to add it in one tap. Or enter a name, pick Health or Academics and how often (daily, weekly, monthly or custom days), choose how its check-in is proven, then save it.' },
       { question: 'Can I customize reminder times?', answer: 'Yes. When you add a habit, turn on Reminders and choose up to two times. How long and how often a reminder snoozes is set in Snooze Settings.' },
       { question: 'What happens when I miss a day?', answer: 'Your check-in history is kept, but the streak goes back to zero after a scheduled day is missed. Days a habit is not scheduled (for example Tuesday for a Mon/Wed/Fri habit) never break it.' },
     ],
@@ -20,7 +23,7 @@ export const faqSections: FaqSection[] = [
     icon: 'checkbox-outline',
     color: '#2F9E6E',
     items: [
-      { question: 'How do I mark a habit as complete?', answer: 'Tap the check control on the Habits tab. Tap it again to undo today\'s completion.' },
+      { question: 'How do I mark a habit as complete?', answer: 'Tap the check control on the Habits tab. A habit is checked in with its proof: a study habit opens its Focus timer, a walking habit its walk, and the others the camera for a photo.' },
       { question: 'Can I edit an existing habit?', answer: 'Open the habit from the Habits tab to update its reminder and target.' },
       { question: 'How do streaks work?', answer: 'A streak counts the scheduled days in a row you completed the habit. Today counts once you check in, and an unfinished today does not break it yet.' },
     ],
@@ -43,9 +46,25 @@ export const faqSections: FaqSection[] = [
       { question: 'How do I earn points and badges?', answer: 'Every check-in gives 20 points and 5 tokens (points and tokens count up to 6 check-ins a day); undoing it takes them back. Achievements unlock as you build habits and streaks.' },
       // Prices stay on the Tokens screen, which has them from the server.
       { question: 'How do I earn tokens?', answer: "Check-ins, the daily reward, daily challenges, the mystery box, weekly quests, the Monday consistency bonus and streak milestones. Tap Tokens on Home to see each one with today's progress." },
-      { question: 'What can I spend tokens on?', answer: "Token Rewards (themes, frames, a custom title, Buddy Showcase), Habi's shop and weekly drop, treats for classmates, Streak Freezes and AI Coach answers. Prices are on the Tokens screen." },
+      { question: 'What can I spend tokens on?', answer: "Token Rewards (themes, frames, a custom title, Buddy Showcase), Habi's shop and weekly drop, treats for classmates, Streak Freezes and AI Coach answers. Faculty spend theirs on the same things except the Buddy Showcase and treats, which show on the student leaderboard. Prices are on the Tokens screen." },
       { question: 'Can I set multiple goals?', answer: 'Yes. Use Set New Goal as often as needed.' },
       { question: 'How are levels calculated?', answer: 'Every 100 points is one level.' },
+    ],
+  },
+  {
+    title: LIMITS_TOPIC,
+    icon: 'information-circle-outline',
+    color: '#6B5BD2',
+    items: [
+      { question: 'How does HabitAI know I really did a habit?', answer: 'Each new habit is checked in with proof: a study habit by finishing its Focus timer, a walking habit by walking its steps with HabitAI open, and the rest with a photo taken at the check-in. The server times the timer and the walk, so neither can be cut short. Proof makes a fake check-in harder, not impossible: a timer can run while you do something else, a phone can be shaken, and a photo can be staged.' },
+      { question: 'Why are there only Health and Academics habits?', answer: 'HabitAI is made for PSAU students and faculty, so it focuses on the two areas that matter most at school: your health and your academics. The Habits tab shows how your habits split between them and suggests one when an area is missing.' },
+      { question: 'Can I check in a day I missed?', answer: "No. Only today can be checked in, until the habit's last reminder time. A day that ends without a check-in stays missed; a Streak Freeze can keep your streak going, but it does not check the habit in." },
+      { question: 'Do my habits carry over to next week?', answer: 'No. A habit lasts one week, from its start day to Sunday. Its check-ins stay in your stats, history and streak. Each week you start fresh ones, or plan them with the AI on the Goals tab.' },
+      { question: 'Does HabitAI work offline?', answer: 'No. Check-ins, proofs, tokens and the AI are all checked on the server, so HabitAI needs an internet connection. The server sleeps after a quiet while, so the first request can take up to a minute while it wakes.' },
+      { question: 'Why does a walk count only while HabitAI is open?', answer: 'Your phone counts steps for HabitAI only while the Walk screen is open, so the screen stays on during the walk. The web app and phones without a step counter cannot count steps: there you take the walk, then check in with a photo.' },
+      { question: 'Which features need the Android app?', answer: 'The step counter and the home-screen widget are in the Android app, and its reminders are scheduled on the phone itself. On the web and on iPhone (added to the Home Screen), reminders come as web notifications, and walks are checked in with a photo.' },
+      { question: 'How accurate are the AI and the predictions?', answer: 'The AI Coach, the planner, the follow-up questions and the tips are written by an AI model and can be wrong, so use your own judgment, especially about your health. Predictions are estimates: until a model trained on real HabitAI data is approved, they come from simple rules based on your check-ins.' },
+      { question: 'How long are proof photos kept, and who sees them?', answer: 'Proof photos are deleted after 14 days; the record that the check-in was proven stays. Only HabitAI administrators can open a photo, and every time one does it is logged. Faculty never see your photos.' },
     ],
   },
   {

@@ -4,7 +4,8 @@
 //   and the check-in is accepted once that much server time has passed since.
 // - steps: a walk counted by the phone's step counter, in a session that also starts here; the
 //   steps it reports must reach the habit's target and fit the time the session took (at most
-//   MAX_STEPS_PER_MINUTE).
+//   MAX_STEPS_PER_MINUTE). Where steps cannot be counted (the web app, a phone without a step
+//   counter, or motion access turned off), a photo proves the walk instead.
 // - photo: a photo taken at the check-in (JPEG, PNG or WebP, at most MAX_PHOTO_BYTES). It is kept
 //   for review in the Admin Panel for config.proofs.photoRetentionDays (services/retention.js).
 // The app cannot see a session's start or change it, so a timer cannot be cut short; what it cannot
@@ -38,18 +39,22 @@ export async function startProofSession(db, { userId, habitId, proof, date, now 
   return { sessionId: id, kind: proof.type, target, startedAt: now };
 }
 
+/** A photo sent as proof: { ok: true, record } or a refusal. */
+function verifyPhoto(proof) {
+  if (!proof || typeof proof.photo !== 'string' || !PHOTO_TYPES.includes(proof.type)) return { ok: false, code: 'PROOF_REQUIRED', kind: 'photo' };
+  const bytes = Buffer.from(proof.photo, 'base64');
+  if (bytes.length < MIN_PHOTO_BYTES || bytes.length > MAX_PHOTO_BYTES || !looksLike(bytes, proof.type)) return { ok: false, code: 'PROOF_INVALID', kind: 'photo' };
+  return { ok: true, record: { kind: 'photo', photo: bytes, photoType: proof.type } };
+}
+
 /**
  * Checks the proof sent with a check-in against the habit's `required` proof. Returns
  * { ok: true, record } (record: what saveProof keeps) or { ok: false, code, ... }: PROOF_REQUIRED
  * (none, or not this habit's kind or session), PROOF_TOO_SOON (with waitSeconds) or PROOF_INVALID.
+ * A walk can also be proven with a photo, for where steps cannot be counted.
  */
 export async function verifyProof(db, { userId, habitId, date, required, proof, now = Date.now() }) {
-  if (required.type === 'photo') {
-    if (!proof || typeof proof.photo !== 'string' || !PHOTO_TYPES.includes(proof.type)) return { ok: false, code: 'PROOF_REQUIRED', kind: 'photo' };
-    const bytes = Buffer.from(proof.photo, 'base64');
-    if (bytes.length < MIN_PHOTO_BYTES || bytes.length > MAX_PHOTO_BYTES || !looksLike(bytes, proof.type)) return { ok: false, code: 'PROOF_INVALID', kind: 'photo' };
-    return { ok: true, record: { kind: 'photo', photo: bytes, photoType: proof.type } };
-  }
+  if (required.type === 'photo' || (required.type === 'steps' && typeof proof?.photo === 'string')) return verifyPhoto(proof);
   if (!proof || typeof proof.sessionId !== 'string') return { ok: false, code: 'PROOF_REQUIRED', kind: required.type };
   const session = (await db.query(
     'SELECT kind, target, started_at AS "startedAt" FROM proof_sessions WHERE id=$1 AND user_id=$2 AND habit_id=$3 AND session_date=$4',

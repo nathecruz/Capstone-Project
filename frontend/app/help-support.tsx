@@ -8,7 +8,7 @@ import { AskAiCard } from '@/components/ai-chat';
 import { FaqQuestion } from '@/components/faq-question';
 import { SupportChatSheet, useSupportChat } from '@/components/support-chat';
 import { useAppDialog } from '@/components/ui/app-dialog';
-import { faqCount, findFaq, popularQuestions, searchFaq, supportQuestions, type FaqMatch } from '@/constants/help-faq';
+import { faqCount, faqSections, findFaq, LIMITS_TOPIC, popularQuestions, searchFaq, supportQuestions, type FaqMatch } from '@/constants/help-faq';
 import { openExternalLink } from '@/utils/platform';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 
@@ -34,6 +34,7 @@ export default function HelpSupportScreen() {
   const query = search.trim();
   const results = searchFaq(query);
   const popular = popularQuestions.map(findFaq).filter((item): item is FaqMatch => Boolean(item));
+  const limits = faqSections.find((section) => section.title === LIMITS_TOPIC)?.items.length ?? 0;
   const toggle = (question: string) => setOpenQuestion((current) => (current === question ? null : question));
   const canSend = suggestion.trim().length >= 3 && !sending;
   const contactOptions = [
@@ -149,6 +150,17 @@ export default function HelpSupportScreen() {
                 </Pressable>
               </View>
 
+              <Pressable style={({ pressed }) => [styles.card, styles.limitsCard, pressed && styles.pressed]} onPress={() => router.push({ pathname: '/help-support-faq', params: { topic: LIMITS_TOPIC } })} accessibilityRole="button" accessibilityLabel="What HabitAI can and cannot do" accessibilityHint={`${limits} answers about proof, offline use, the AI and the Android app`}>
+                <View style={[styles.optionIcon, styles.limitsIcon]}>
+                  <Ionicons name="information-circle-outline" size={21} color={themeColor('#6B5BD2')} />
+                </View>
+                <View style={styles.optionCopy}>
+                  <Text style={styles.optionTitle}>What HabitAI can and cannot do</Text>
+                  <Text style={styles.optionSubtitle}>How proof works, why it needs internet, how far to trust the AI, and what needs the Android app.</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={themeColor('#A19CAA')} />
+              </Pressable>
+
               <View style={styles.sectionHead}>
                 <Text style={styles.sectionTitle}>Contact the team</Text>
                 <Text style={styles.sectionHint}>The team reads every message and can reply in your notifications.</Text>
@@ -263,6 +275,8 @@ const themedStyles = createThemedStyles({
   optionRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
   optionIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   optionCopy: { flex: 1 },
+  limitsCard: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, marginTop: 14 },
+  limitsIcon: { backgroundColor: '#EEEAFE' },
   optionTitle: { fontSize: 15, fontWeight: '800', color: '#2D2A3D' },
   optionSubtitle: { fontSize: 12, lineHeight: 17, fontWeight: '600', color: '#736D7D', marginTop: 2 },
   about: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 22, padding: 14, borderRadius: 18, borderWidth: 1, borderColor: '#E8E4F0' },
@@ -292,6 +306,7 @@ const themedStyles = createThemedStyles({
   screen: { backgroundColor: '#111018' },
   backButton: { backgroundColor: '#221E2B' },
   card: { backgroundColor: '#1D1A24' },
+  limitsIcon: { backgroundColor: '#2B2540' },
   divider: { backgroundColor: '#2A2633' },
   browseAll: { borderTopColor: '#2A2633' },
   askSearch: { backgroundColor: '#211C33', borderColor: '#352C52' },

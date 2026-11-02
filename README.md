@@ -38,7 +38,9 @@ creating the first administrator account.
 
 See **[ARCHITECTURE.md](ARCHITECTURE.md)** for the system diagram, API modules, data model
 and the data flows for sign-in, sync, password reset (OTP), AI features, reminders and the
-Admin Panel.
+Admin Panel. **[SCOPE-AND-LIMITATIONS.md](SCOPE-AND-LIMITATIONS.md)** states what HabitAI covers,
+how it keeps check-ins honest (proof and server-owned numbers) and what it cannot do, for the
+capstone paper; the app shows the same limits in Help & Support.
 
 - The `frontend` app handles UI, local-first state and sync; all API calls go through
   `frontend/authentication/authService.ts`, and AI calls through `frontend/utils/ai-client.ts`.

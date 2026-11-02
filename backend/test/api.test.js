@@ -1387,12 +1387,13 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(again.body.state.habits.find((item) => item.id === 'walk').category, 'Lifestyle');
   });
 
-  await t.test('a check-in needs its proof: a photo, a Focus timer that ran its time, or a walk of its steps', async () => {
+  await t.test('a check-in needs its proof: a photo, a Focus timer that ran its time, or a walk of its steps (or its photo)', async () => {
     const { headers, userId } = await student('Proof', 'Needed');
     await db.query("UPDATE users SET time_zone='UTC' WHERE id=$1", [userId]);
     const habit = (id, label, proof) => ({ ...appState.habits[0], id, label, startDate: today, proof });
     const saved = await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [
       habit('water', 'Drink water', { type: 'photo' }), habit('study', 'Study', { type: 'timer', minutes: 20 }), habit('walk', 'Walk', { type: 'steps', steps: 2000 }),
+      habit('stroll', 'Evening walk', { type: 'steps', steps: 3000 }),
     ] }) });
     assert.equal(saved.response.status, 200, JSON.stringify(saved.body));
     const checkIn = (habitId, proof) => request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId, date: today, completed: true, timeZone: 'UTC', proof }) });
@@ -1438,6 +1439,11 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const walked = await checkIn('walk', { sessionId: walk.body.sessionId, steps: 2200 });
     assert.equal(walked.response.status, 200, JSON.stringify(walked.body));
     assert.deepEqual(await proofRow('walk'), { kind: 'steps', minutes: 11, steps: 2200, bytes: null, photoType: null });
+    // Where steps cannot be counted (the web app, a phone without a step counter), a photo proves a walk.
+    assert.equal((await checkIn('stroll', { photo: Buffer.alloc(4096, 1).toString('base64'), type: 'image/jpeg' })).body.code, 'PROOF_INVALID');
+    const strolled = await checkIn('stroll', PHOTO_PROOF);
+    assert.equal(strolled.response.status, 200, JSON.stringify(strolled.body));
+    assert.deepEqual(await proofRow('stroll'), { kind: 'photo', minutes: null, steps: null, bytes: 2052, photoType: 'image/jpeg' });
 
     // An undo takes the proof with it; a save cannot take a habit's proof away or check it in.
     const undone = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'water', date: today, completed: false, timeZone: 'UTC' }) });
@@ -1450,7 +1456,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
 
     // The data export lists the proofs, with a photo while it is kept.
     const exported = await request('/api/auth/export', { headers });
-    assert.deepEqual(exported.body.checkInProofs.map((row) => [row.habitId, row.kind]), [['study', 'timer'], ['walk', 'steps']]);
+    assert.deepEqual(exported.body.checkInProofs.map((row) => [row.habitId, row.kind]), [['stroll', 'photo'], ['study', 'timer'], ['walk', 'steps']]);
 
     // A reminder's Done cannot check in a habit with a proof.
     await db.query('INSERT INTO proof_sessions(id,user_id,habit_id,session_date,kind,target,started_at) VALUES($1,$2,$3,$4,$5,$6,$7)', [crypto.randomUUID(), userId, 'water', '2000-01-01', 'timer', 5, 0]);

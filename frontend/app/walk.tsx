@@ -1,7 +1,9 @@
 // Walk: proves the check-in of a habit with steps (utils/habit-templates.ts). The phone's step
 // counter (expo-sensors Pedometer) counts while this screen is open; it does not count in the
 // background, so the screen stays awake meanwhile. The walk is a session that starts on the
-// server, and the steps must also fit the time it took (backend/services/check-in-proof.js).
+// server, and the steps must also fit the time it took (backend/services/check-in-proof.js). Where
+// steps cannot be counted (the web app, a phone without a step counter, or physical activity access
+// turned off), a photo of the walk proves the check-in instead.
 import { Ionicons } from '@expo/vector-icons';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -16,6 +18,7 @@ import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { createThemedStyles, useThemedStyles } from '@/hooks/use-themed-styles';
 import { isHabitLockedMissed } from '@/utils/engagement';
 import { getLocalDateKey } from '@/utils/habit-visibility';
+import { takeProofPhoto } from '@/utils/proof-photo';
 
 type Phase = 'idle' | 'starting' | 'walking' | 'done';
 const KEEP_AWAKE_TAG = 'habitai-walk';
@@ -33,6 +36,11 @@ export default function WalkScreen() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [steps, setSteps] = useState(0);
   const [message, setMessage] = useState('');
+  // Steps cannot be counted here, so a photo proves the walk: always on the web, and on a phone
+  // once it turns out to have no step counter or no permission to use it.
+  const [noCounter, setNoCounter] = useState(Platform.OS === 'web');
+  const [provenWith, setProvenWith] = useState<'steps' | 'photo'>('steps');
+  const [photoBusy, setPhotoBusy] = useState(false);
   const subscription = useRef<{ remove: () => void } | null>(null);
   const sessionRef = useRef('');
   const finishedRef = useRef(false);
@@ -49,8 +57,27 @@ export default function WalkScreen() {
     if (finishedRef.current || !habit) return;
     finishedRef.current = true;
     stop();
+    setProvenWith('steps');
     setPhase('done');
     checkInWithProof(habit.id, { sessionId: sessionRef.current, steps: count });
+  };
+
+  // No step counter to use: the walk is proven with a photo taken now.
+  const checkInWithPhoto = async () => {
+    if (!habit || photoBusy || finishedRef.current) return;
+    setMessage('');
+    setPhotoBusy(true);
+    const photo = await takeProofPhoto();
+    setPhotoBusy(false);
+    if (!photo) return;
+    if (!photo.ok) {
+      setMessage(photo.message);
+      return;
+    }
+    finishedRef.current = true;
+    setProvenWith('photo');
+    setPhase('done');
+    checkInWithProof(habit.id, photo.proof);
   };
 
   const startWalk = async () => {
@@ -60,13 +87,15 @@ export default function WalkScreen() {
     const available = Platform.OS !== 'web' && await Pedometer.isAvailableAsync().catch(() => false);
     if (!available) {
       setPhase('idle');
-      setMessage('This phone has no step counter HabitAI can use. Walking habits need the HabitAI app on an Android phone.');
+      setNoCounter(true);
+      setMessage('This phone has no step counter HabitAI can use. Take your walk, then check in with a photo instead.');
       return;
     }
     const permission = await Pedometer.requestPermissionsAsync().catch(() => null);
     if (!permission?.granted) {
       setPhase('idle');
-      setMessage('Allow HabitAI to use physical activity, so it can count your steps.');
+      setNoCounter(true);
+      setMessage('Allow HabitAI to use physical activity so it can count your steps, or check in with a photo instead.');
       return;
     }
     const session = await startProofSession(habit.id, today);
@@ -133,7 +162,7 @@ export default function WalkScreen() {
         {phase === 'done' ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>{habit?.label} is checked off!</Text>
-            <Text style={styles.cardText}>Your steps were counted as proof of today&apos;s check-in.</Text>
+            <Text style={styles.cardText}>{provenWith === 'photo' ? 'Your photo was sent as proof of today\'s check-in.' : 'Your steps were counted as proof of today\'s check-in.'}</Text>
             <Pressable style={({ pressed }) => [styles.primary, pressed && styles.pressed]} onPress={leave} accessibilityRole="button">
               <Text style={styles.primaryText}>Back to today</Text>
             </Pressable>
@@ -155,15 +184,27 @@ export default function WalkScreen() {
                   <Text style={styles.secondaryText}>Stop</Text>
                 </Pressable>
               )}
-              {phase !== 'walking' && (
-                <Pressable style={({ pressed }) => [styles.primary, (pressed || phase === 'starting') && styles.pressed]} onPress={() => void startWalk()} disabled={phase === 'starting'} accessibilityRole="button" accessibilityState={{ busy: phase === 'starting' }}>
-                  <Ionicons name="walk" size={18} color="#3B2699" />
-                  <Text style={styles.primaryText}>{phase === 'starting' ? 'Starting…' : 'Start walking'}</Text>
+              {phase !== 'walking' && Platform.OS !== 'web' && (
+                <Pressable style={({ pressed }) => [noCounter ? styles.secondary : styles.primary, (pressed || phase === 'starting') && styles.pressed]} onPress={() => void startWalk()} disabled={phase === 'starting'} accessibilityRole="button" accessibilityState={{ busy: phase === 'starting' }}>
+                  {!noCounter && <Ionicons name="walk" size={18} color="#3B2699" />}
+                  <Text style={noCounter ? styles.secondaryText : styles.primaryText}>{phase === 'starting' ? 'Starting…' : noCounter ? 'Try again' : 'Start walking'}</Text>
+                </Pressable>
+              )}
+              {phase !== 'walking' && noCounter && (
+                <Pressable style={({ pressed }) => [styles.primary, (pressed || photoBusy) && styles.pressed]} onPress={() => void checkInWithPhoto()} disabled={photoBusy} accessibilityRole="button" accessibilityState={{ busy: photoBusy }}>
+                  <Ionicons name="camera" size={18} color="#3B2699" />
+                  <Text style={styles.primaryText}>Check in with a photo</Text>
                 </Pressable>
               )}
             </View>
             {message ? <Text style={styles.note} accessibilityLiveRegion="polite">{message}</Text> : null}
-            <Text style={styles.note}>Keep HabitAI open on this screen while you walk: your phone counts the steps only while it is on. {habit.label} is checked off when you reach {target.toLocaleString('en-US')} steps.</Text>
+            <Text style={styles.note}>
+              {Platform.OS === 'web'
+                ? `The web app cannot count steps. Walk ${target.toLocaleString('en-US')} steps, then take a photo of your walk to check off ${habit.label}. On an Android phone, the HabitAI app counts your steps instead.`
+                : noCounter
+                  ? `Walk ${target.toLocaleString('en-US')} steps, then take a photo of your walk to check off ${habit.label}.`
+                  : `Keep HabitAI open on this screen while you walk: your phone counts the steps only while it is on. ${habit.label} is checked off when you reach ${target.toLocaleString('en-US')} steps.`}
+            </Text>
           </>
         )}
       </ScrollView>

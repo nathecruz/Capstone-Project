@@ -1,4 +1,4 @@
-import { closestFaq, faqCount, faqSections, findFaq, popularQuestions, searchFaq, supportQuestions } from '@/constants/help-faq';
+import { closestFaq, faqCount, faqSections, findFaq, LIMITS_TOPIC, popularQuestions, searchFaq, supportQuestions } from '@/constants/help-faq';
 
 describe('help FAQ', () => {
   it('counts every answer and finds the popular questions', () => {
@@ -8,7 +8,10 @@ describe('help FAQ', () => {
 
   it('searches topics, questions and answers, ignoring case', () => {
     expect(searchFaq('   ')).toEqual([]);
-    expect(searchFaq('STREAK').map((item) => item.question)).toEqual(['What happens when I miss a day?', 'How do streaks work?', 'How do I earn points and badges?', 'How do I earn tokens?', 'What can I spend tokens on?']);
+    expect(searchFaq('STREAK').map((item) => item.question)).toEqual([
+      'What happens when I miss a day?', 'How do streaks work?', 'How do I earn points and badges?', 'How do I earn tokens?', 'What can I spend tokens on?',
+      'Can I check in a day I missed?', 'Do my habits carry over to next week?',
+    ]);
     expect(searchFaq('privacy & data').map((item) => item.section)).toEqual(['Privacy & Data', 'Privacy & Data', 'Privacy & Data']);
     expect(searchFaq('zzzz')).toEqual([]);
   });
@@ -33,6 +36,25 @@ describe('help FAQ', () => {
     expect(findFaq('How do I earn points and badges?')?.answer).toContain('count up to 6 check-ins a day');
     expect(closestFaq('Where do I spend tokens?')?.question).toBe('What can I spend tokens on?');
     expect(closestFaq('How do I get more tokens?')?.question).toBe('How do I earn tokens?');
+  });
+
+  it('says what HabitAI can and cannot do, in one topic', () => {
+    const limits = faqSections.find((section) => section.title === LIMITS_TOPIC);
+    expect(limits?.items.map((item) => item.question)).toEqual([
+      'How does HabitAI know I really did a habit?',
+      'Why are there only Health and Academics habits?',
+      'Can I check in a day I missed?',
+      'Do my habits carry over to next week?',
+      'Does HabitAI work offline?',
+      'Why does a walk count only while HabitAI is open?',
+      'Which features need the Android app?',
+      'How accurate are the AI and the predictions?',
+      'How long are proof photos kept, and who sees them?',
+    ]);
+    // Proof makes a fake check-in harder, and the answer says it is not impossible.
+    expect(findFaq('How does HabitAI know I really did a habit?')?.answer).toContain('not impossible');
+    expect(closestFaq('Does it work without internet?')?.question).toBe('Does HabitAI work offline?');
+    expect(closestFaq('How accurate is the AI?')?.question).toBe('How accurate are the AI and the predictions?');
   });
 
   it('has an answer ready for every suggested question', () => {
