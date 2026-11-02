@@ -169,6 +169,13 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 CREATE INDEX IF NOT EXISTS notifications_user_created_idx ON notifications(user_id, created_at DESC);
 
+-- Keys the API makes itself when the deployment sets none (the Web Push VAPID pair, services/vapid-keys.js).
+CREATE TABLE IF NOT EXISTS server_keys (
+  name TEXT PRIMARY KEY,
+  value_json JSONB NOT NULL,
+  created_at BIGINT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS web_push_subscriptions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

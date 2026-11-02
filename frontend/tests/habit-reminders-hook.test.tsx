@@ -102,7 +102,7 @@ describe('reminders scheduled by the Android and iOS app', () => {
     expect(requests[0]).toMatchObject({ identifier: 'habitai-reminder:gym:2026-10-19:11:30', trigger: { date: new Date(2026, 9, 19, 11, 30) } });
     expect(requests[1].trigger.date).toEqual(new Date(2026, 9, 20, 11, 0));
     expect(requests[26].trigger.date).toEqual(new Date(2026, 10, 1, 11, 30));
-    expect(requests.every((request) => request.content.title === 'Gym reminder')).toBe(true);
+    expect(requests.every((request) => /^Gym · 11:(00|30) AM$/.test(String(request.content.title)))).toBe(true);
   });
 
   it('schedules no "still open" nudge after the last reminder, and no Snooze where it cannot come back in time', async () => {
@@ -325,7 +325,7 @@ describe('reminders shown by an open HabitAI tab', () => {
   };
 
   it('shows the last reminder on its minute, but not a minute later when the habit is missed', async () => {
-    expect(await shownAt(11, 30)).toEqual(['Gym reminder']);
+    expect(await shownAt(11, 30)).toEqual(['Gym · 11:30 AM']);
     jest.clearAllMocks();
     // A background tab can run its timer late; by 11:31 the habit is missed and cannot be checked in.
     expect(await shownAt(11, 31)).toEqual([]);
@@ -382,6 +382,6 @@ describe('habits whose week has ended (habits last one week)', () => {
     const { unmount } = renderHook(() => useHabitReminders({ habits: [lastWeek, { ...thisWeek, label: 'This week' }], preferences, ringInterval: 20, snoozeFrequency: 'Once', ready: true }));
     await settle();
     unmount();
-    expect(mockRegistration.showNotification.mock.calls.map(([title]) => title)).toEqual(['This week reminder']);
+    expect(mockRegistration.showNotification.mock.calls.map(([title]) => title)).toEqual(['This week · 11:30 AM']);
   });
 });

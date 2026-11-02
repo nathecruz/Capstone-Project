@@ -15,10 +15,17 @@ import { verifyAi } from './services/groq.js';
 import { verifyMailer } from './services/mailer.js';
 import { scheduleMaintenance } from './services/maintenance.js';
 import { loadStateVersions } from './services/state-versions.js';
+import { ensureVapidKeys } from './services/vapid-keys.js';
 import { startReminderClock, stopReminderClock } from './services/web-push-clock.js';
 
 assertProductionConfig();
 await ensureNeonSchema({ log: console.log });
+// Web Push needs a VAPID key pair: the deployment's, else one the API keeps in the database.
+const vapidSource = await ensureVapidKeys({ query }).catch((error) => {
+  console.warn(`[reminders] no Web Push keys: ${error?.message || error}`);
+  return null;
+});
+if (vapidSource === 'created') console.log('Web Push keys created and saved in the database (WEB_PUSH_VAPID_* are not set).');
 void verifyMailer();
 void verifyAi();
 const maintenance = scheduleMaintenance();

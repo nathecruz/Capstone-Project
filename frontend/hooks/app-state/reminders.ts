@@ -172,12 +172,60 @@ export async function getWebReminderStatus(): Promise<WebReminderStatus> {
   return (await registration?.pushManager.getSubscription()) ? 'on' : 'off';
 }
 
-/** Sends a test reminder to this browser right away. */
-export async function sendTestReminder() {
+/** Sends a test reminder to this browser: right away, or after `delaySeconds` (HabitAI closed meanwhile). */
+export async function sendTestReminder({ delaySeconds = 0 }: { delaySeconds?: number } = {}) {
   const registration = await getBrowserNotificationRegistration();
   const subscription = await registration?.pushManager.getSubscription();
   if (!subscription) return { ok: false, message: 'Turn on reminders on this device first.' };
-  return sendTestWebPush(subscription.endpoint);
+  return sendTestWebPush(subscription.endpoint, delaySeconds);
+}
+
+/** Whether HabitAI's server can send Web Push reminders (it has its key pair). */
+export async function isWebPushReadyOnServer() {
+  return Boolean(await getWebPushVapidPublicKey());
+}
+
+/** Android/iOS: a test reminder `seconds` from now, set on the phone like a habit's reminder. */
+export async function scheduleTestReminder(Notifications: NotificationsModule, seconds: number) {
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('habit-reminders-sound-v2', {
+      name: 'Habit reminders', importance: Notifications.AndroidImportance.HIGH, sound: 'reminder_sound.mp3',
+    });
+  }
+  return Notifications.scheduleNotificationAsync({
+    identifier: 'habitai-test-reminder',
+    content: {
+      title: 'HabitAI test reminder',
+      body: 'It came while HabitAI was closed: your habit reminders will come like this at their times.',
+      sound: 'reminder_sound.mp3',
+      data: { type: 'test' },
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+      seconds,
+      ...(Platform.OS === 'android' ? { channelId: 'habit-reminders-sound-v2' } : {}),
+    },
+  });
+}
+
+/** Android/iOS: the next habit reminders set on the phone, soonest first: { title, at }. */
+export async function nextPhoneReminders(Notifications: NotificationsModule, limit = 3, now = Date.now()) {
+  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+  const reminders = scheduled.flatMap((request) => {
+    if (!request.identifier.startsWith('habitai-reminder:') && !request.identifier.startsWith('habitai-snooze:')) return [];
+    // A planned reminder's `plan` starts with its time (native-reminders.ts); a snooze has `snoozeAt`.
+    const data = request.content.data ?? {};
+    let at = Number(data.snoozeAt) || 0;
+    if (!at && typeof data.plan === 'string') {
+      try {
+        at = Number((JSON.parse(data.plan) as unknown[])[0]) || 0;
+      } catch {
+        at = 0;
+      }
+    }
+    return at > now ? [{ title: request.content.title || 'Habit reminder', at }] : [];
+  });
+  return reminders.sort((a, b) => a.at - b.at).slice(0, limit);
 }
 
 /** The HabitAI reminder sound, for reminders that arrive while the app is open. */

@@ -9,6 +9,7 @@ import { AppState, Platform } from 'react-native';
 import { isHabitActiveOn } from '@/utils/habit-week';
 import { getLocalDateKey } from './habit-progress';
 import { canRemindAt, enableWebReminders, getBrowserNotificationRegistration, getHabitReminderTimes, getNotificationsModule, isHabitReminderDay, playReminderSound, requestWebNotificationPermission, type NotificationsModule } from './reminders';
+import { reminderTitle } from './native-reminders';
 import { runReminderScheduling, scheduleNativeReminders } from './schedule-native-reminders';
 import { computeSmartReminderTimes, getSmartReminderMessage } from './smart-reminders';
 import { loadSnoozeSettings, SNOOZE_CATEGORY, snoozeReminder } from './snooze';
@@ -141,7 +142,7 @@ export function useHabitReminders({ habits, preferences, ringInterval, snoozeFre
               const shown = await registration.getNotifications({ tag: key }).catch(() => []);
               if (shown.length) continue;
               const soundEnabled = habit.reminderSoundEnabled !== false;
-              void registration.showNotification(smart ? `Smart reminder: ${habit.label}` : `${habit.label} reminder`, {
+              void registration.showNotification(reminderTitle(habit.label, time, Boolean(smart)), {
                 body: smart ? getSmartReminderMessage(habit, smart.riskLevel) : 'A small step today keeps your streak moving.',
                 tag: key,
                 icon: '/icons/icon-192.png',

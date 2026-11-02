@@ -83,8 +83,9 @@ export default function registerNotificationRoutes(app) {
     response.json({ ok: true });
   });
 
-  // Sends a test reminder right away (to this device, or to all of the account's devices), so
-  // people can check that notifications and their sound work without waiting for a reminder.
+  // Sends a test reminder (to this device, or to all of the account's devices), so people can
+  // check that notifications and their sound work without waiting for a reminder: right away, or
+  // after `delaySeconds`, so they can close HabitAI first and see it arrive as a reminder would.
   app.post('/api/web-push/test', async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
@@ -103,26 +104,38 @@ export default function registerNotificationRoutes(app) {
     if (!rows.length) return response.status(404).json({ ok: false, message: 'Turn on reminders on this device first.' });
     lastTestPush.set(session.userId, now);
 
-    const payload = JSON.stringify({
-      title: 'HabitAI test reminder',
-      body: 'Notifications work on this device. Your habit reminders will look and sound like this.',
-      tag: `habitai-test-${now}`,
-      soundEnabled: true,
-      data: { type: 'test', url: '/' },
-    });
-    let sent = 0;
-    let expired = 0;
-    for (const row of rows) {
-      try {
-        await webpush.sendNotification(row.subscriptionJson, payload, { TTL: 300, vapidDetails });
-        sent += 1;
-      } catch (error) {
-        if (error?.statusCode === 404 || error?.statusCode === 410) {
-          await query('DELETE FROM web_push_subscriptions WHERE id=$1', [row.id]);
-          expired += 1;
+    const delaySeconds = input.delaySeconds ?? 0;
+    const send = async () => {
+      const payload = JSON.stringify({
+        title: 'HabitAI test reminder',
+        body: delaySeconds
+          ? 'It arrived while HabitAI was closed: your habit reminders will come like this at their times.'
+          : 'Notifications work on this device. Your habit reminders will look and sound like this.',
+        tag: `habitai-test-${Date.now()}`,
+        soundEnabled: true,
+        data: { type: 'test', url: '/' },
+      });
+      let sent = 0;
+      let expired = 0;
+      for (const row of rows) {
+        try {
+          await webpush.sendNotification(row.subscriptionJson, payload, { TTL: 300, urgency: 'high', vapidDetails });
+          sent += 1;
+        } catch (error) {
+          if (error?.statusCode === 404 || error?.statusCode === 410) {
+            await query('DELETE FROM web_push_subscriptions WHERE id=$1', [row.id]);
+            expired += 1;
+          }
         }
       }
+      return { sent, expired };
+    };
+    if (delaySeconds) {
+      // Kept in this process only: a restart in that minute drops the test, never a reminder.
+      setTimeout(() => void send().catch(() => undefined), delaySeconds * 1000).unref();
+      return response.json({ ok: true, scheduled: true, at: now + delaySeconds * 1000 });
     }
+    const { sent, expired } = await send();
     if (sent) return response.json({ ok: true, sent, expired });
     if (expired) return response.status(410).json({ ok: false, message: 'This device stopped accepting notifications. Turn reminders on again.' });
     response.status(502).json({ ok: false, message: 'Could not reach the notification service. Please try again.' });

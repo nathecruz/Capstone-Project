@@ -1,13 +1,15 @@
 // Notifications from the server (badges earned, reminders, treats from classmates, system news),
 // by type and by day.
 // It opens on a tab with something new; the settings choose which types show (saved with the
-// student's preferences).
+// student's preferences) and check that reminders come while HabitAI is closed (?settings=1 opens
+// on them).
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getPersistedNotifications, markPersistedNotification } from '@/authentication';
+import { ReminderCheck } from '@/components/reminder-check';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 import { onLive } from '@/utils/live-events';
@@ -52,7 +54,8 @@ export default function NotificationsScreen() {
   // Treats come from classmates on the leaderboard, so faculty have no Treats tab.
   const tabs = isFaculty ? TABS.filter((tab) => tab !== 'Treats') : TABS;
   const [chosenTab, setChosenTab] = useState<NotificationCategory | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
+  const { settings: openSettings } = useLocalSearchParams<{ settings?: string }>();
+  const [showSettings, setShowSettings] = useState(openSettings === '1');
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [readIds, setReadIds] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -144,6 +147,7 @@ export default function NotificationsScreen() {
 
       {showSettings ? (
         <ScrollView contentContainerStyle={styles.content}>
+          <ReminderCheck />
           <View style={styles.settingsCard}>
             <View style={styles.settingRow}>
               <View style={styles.settingCopy}>

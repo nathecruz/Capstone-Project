@@ -271,6 +271,13 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const noDevice = await request('/api/web-push/test', { method: 'POST', headers: authHeaders, body: JSON.stringify({ endpoint: pushSubscription.endpoint }) });
     assert.equal(noDevice.response.status, 404);
     assert.match(noDevice.body.message, /Turn on reminders/);
+    // A test a minute later, to see it arrive with HabitAI closed (two minutes at most).
+    assert.equal((await request('/api/web-push/test', { method: 'POST', headers: authHeaders, body: JSON.stringify({ delaySeconds: 600 }) })).response.status, 400);
+    assert.equal((await request('/api/web-push/subscriptions', { method: 'POST', headers: authHeaders, body: JSON.stringify({ subscription: pushSubscription, timeZone: 'UTC' }) })).response.status, 200);
+    const later = await request('/api/web-push/test', { method: 'POST', headers: authHeaders, body: JSON.stringify({ endpoint: pushSubscription.endpoint, delaySeconds: 60 }) });
+    assert.deepEqual([later.response.status, later.body.ok, later.body.scheduled], [200, true, true], JSON.stringify(later.body));
+    assert.ok(later.body.at >= Date.now() + 55_000, 'about a minute from now');
+    assert.equal((await request('/api/web-push/subscriptions', { method: 'DELETE', headers: authHeaders, body: JSON.stringify({ endpoint: pushSubscription.endpoint }) })).response.status, 200);
   });
 
   await t.test('ML proxy, AI without keys, and password reset protections', async () => {
