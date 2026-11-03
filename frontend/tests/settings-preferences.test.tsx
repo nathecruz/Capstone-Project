@@ -88,6 +88,18 @@ jest.mock('@/components/ui/app-dialog', () => ({
   useAppDialog: () => mockShowAlert,
 }));
 
+// Installing HabitAI from the web (utils/install-app.ts), as the browser reports it.
+let mockInstall = { platform: 'android', installed: false, canPrompt: true, inAppBrowser: false };
+const mockPromptInstall = jest.fn(async () => 'accepted');
+jest.mock('@/utils/install-app', () => ({
+  useInstallApp: () => mockInstall,
+  promptInstall: () => mockPromptInstall(),
+}));
+jest.mock('@/components/install-app', () => {
+  const React = jest.requireActual('react');
+  return { InstallStepsSheet: ({ visible }: { visible: boolean }) => (visible ? React.createElement('Text', null, 'Install steps open') : null) };
+});
+
 // The reward sheets also hold the Buddy Showcase sheet, which this screen does not show.
 jest.mock('@/components/buddy', () => ({ BuddyAvatar: () => null }));
 jest.mock('@/hooks/use-buddy', () => ({ useBuddy: () => ({ buddy: null }) }));
@@ -138,6 +150,33 @@ jest.mock('@/authentication', () => ({
 describe('SettingsPreferencesScreen', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  describe('on the web', () => {
+    const platform = jest.requireMock<{ Platform: { OS: string } }>('react-native').Platform;
+    beforeEach(() => {
+      platform.OS = 'web';
+    });
+    afterEach(() => {
+      platform.OS = 'ios';
+    });
+
+    it('offers installing HabitAI with the browser\'s Install prompt', async () => {
+      mockInstall = { platform: 'android', installed: false, canPrompt: true, inAppBrowser: false };
+      const screen = await render(<SettingsPreferencesScreen />);
+      expect(screen.getByText('Install the HabitAI app')).toBeTruthy();
+      await act(async () => { fireEvent.press(screen.getByLabelText('Install HabitAI')); });
+      expect(mockPromptInstall).toHaveBeenCalled();
+    });
+
+    it('keeps the install row once HabitAI is installed: it says so, and How shows the steps', async () => {
+      mockInstall = { platform: 'android', installed: true, canPrompt: false, inAppBrowser: false };
+      const screen = await render(<SettingsPreferencesScreen />);
+      expect(screen.getByText('HabitAI app installed')).toBeTruthy();
+      await act(async () => { fireEvent.press(screen.getByLabelText('How to install HabitAI')); });
+      expect(mockPromptInstall).not.toHaveBeenCalled();
+      expect(screen.getByText('Install steps open')).toBeTruthy();
+    });
   });
 
   it('clears password fields when the modal closes so the placeholder remains visible', async () => {
