@@ -45,9 +45,9 @@ jobs:
       - run: npm run test:unit
       - name: API integration test (PostgreSQL)
         run: node --test test/api.test.js
-      - name: Environment checker tests
+      - name: Environment checker and Vercel config tests
         working-directory: .
-        run: node --test scripts/check-env.test.js
+        run: node --test scripts/check-env.test.js scripts/vercel-config.test.js
 
   frontend:
     runs-on: ubuntu-latest
