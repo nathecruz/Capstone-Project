@@ -2116,6 +2116,22 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.deepEqual([kept.includes(weekAgo(6)), kept.includes(weekAgo(1))], [false, true]);
   });
 
+  await t.test('consent to an earlier Privacy Notice is asked again, once', async () => {
+    // The helper's accounts consented long ago (privacy_consent_at = 1), before the current notice.
+    const { headers, userId } = await student('Old', 'Consent');
+    const me = async () => (await request('/api/auth/me', { headers })).body.user;
+    assert.equal((await me()).privacyConsentAt, null, 'every app version then shows the notice to accept');
+    const accepted = await request('/api/auth/consent', { method: 'POST', headers, body: JSON.stringify({ accepted: true }) });
+    assert.equal(accepted.response.status, 200, JSON.stringify(accepted.body));
+    const consentAt = accepted.body.user.privacyConsentAt;
+    assert.ok(consentAt >= Date.now() - 60_000, 'recorded now');
+    assert.equal((await me()).privacyConsentAt, consentAt);
+    // Accepting the current notice again keeps the first time; the export shows it.
+    const again = await request('/api/auth/consent', { method: 'POST', headers, body: JSON.stringify({ accepted: true }) });
+    assert.equal(again.body.user.privacyConsentAt, consentAt);
+    assert.equal(Number((await db.query('SELECT privacy_consent_at AS "at" FROM users WHERE id=$1', [userId])).rows[0].at), consentAt);
+  });
+
   await t.test('the background reminder sync asks with a token whether the state changed, and is not counted as activity', async () => {
     const { headers, userId } = await student('Sync', 'Phone');
     assert.equal((await request('/api/app-state/sync-token', { method: 'POST' })).response.status, 401);

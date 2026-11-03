@@ -113,7 +113,7 @@ export default function PrivacyNoticeScreen() {
         {mustAccept && (
           <View style={styles.banner}>
             <Ionicons name="shield-checkmark-outline" size={20} color={themeColor('#5B42D8')} />
-            <Text style={styles.bannerText}>We updated how HabitAI explains the data it uses. Please review and accept this notice to continue.</Text>
+            <Text style={styles.bannerText}>We updated this notice on November 2, 2026: it now covers the proof of your check-ins (Focus timer and walk sessions, and photos) and the AI&apos;s follow-up questions about new habits. Please review and accept it to continue.</Text>
           </View>
         )}
         <Text style={styles.updated}>Effective November 2, 2026</Text>

@@ -12,6 +12,14 @@ const USER_COLUMNS = `u.full_name AS "fullName", u.first_name AS "firstName", u.
 // the server does not require (they were stuck there after signing in).
 const verificationRequired = () => process.env.REQUIRE_EMAIL_VERIFICATION !== 'false';
 
+/**
+ * When the current Privacy Notice took effect: it added the proofs of check-ins (Focus timer and
+ * walk sessions, photos) and the AI's follow-up questions (frontend/app/privacy-notice.tsx,
+ * "Effective November 2, 2026", in use from 11 AM Manila time). Consent given before it was to an
+ * earlier notice, so the app asks again (Data Privacy Act, RA 10173).
+ */
+export const PRIVACY_NOTICE_UPDATED_AT = Date.parse('2026-11-02T03:00:00Z');
+
 export function userFromRow(row) {
   return {
     id: row.id ?? row.userId,
@@ -23,7 +31,9 @@ export function userFromRow(row) {
     region: row.region || '',
     about: row.about || '',
     emailVerified: Boolean(row.emailVerifiedAt) || !verificationRequired(),
-    privacyConsentAt: row.privacyConsentAt ? Number(row.privacyConsentAt) : null,
+    // When the account accepted the current Privacy Notice; null when it has not (or accepted only
+    // an earlier one), which makes every app version show the notice to accept.
+    privacyConsentAt: Number(row.privacyConsentAt) >= PRIVACY_NOTICE_UPDATED_AT ? Number(row.privacyConsentAt) : null,
     // 'faculty' turns on the app's Faculty mode (their own habits, faculty AI advice, no student leaderboards).
     role: row.role || 'user',
   };
