@@ -16,7 +16,7 @@ export const defaultTemplates = [
     type: 'reminder',
     title: '{{habit}} reminder',
     body: 'A small step today keeps your streak moving.',
-    description: 'Sent automatically by the reminder dispatcher when a habit reminder is due. Supports {{habit}}.',
+    description: 'Sent automatically by the reminder dispatcher when a habit reminder is due. Supports {{habit}} and {{time}} (the reminder time is added to the title when the template does not place it).',
     isSystem: true,
   },
   {

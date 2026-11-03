@@ -11,7 +11,10 @@ jest.useFakeTimers();
 
 jest.mock('expo-router', () => ({
   router: { back: jest.fn(), push: jest.fn() },
+  useLocalSearchParams: () => ({}),
 }));
+// The device reminder check (tests/reminder-check.test.tsx) is not this test's subject.
+jest.mock('@/components/reminder-check', () => ({ ReminderCheck: () => null }));
 
 jest.mock('@/authentication', () => ({
   getPersistedNotifications: (...args: any[]) => mockGetPersistedNotifications(...args),

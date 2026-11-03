@@ -20,7 +20,8 @@ describe('reminders planned on the phone', () => {
     const reminders = plan([habit()], at(19, 6));
     expect(reminders.map((reminder) => reminder.date)).toEqual(Array.from({ length: 14 }, (_, day) => at(19 + day, 8)));
     expect(reminders[0]).toMatchObject({
-      identifier: 'habitai-reminder:gym:2026-10-19:08:00', title: 'Gym reminder', body: 'A small step today keeps your streak moving.',
+      // The habit and its time, so they show on the phone.
+      identifier: 'habitai-reminder:gym:2026-10-19:08:00', title: 'Gym · 8:00 AM', body: 'A small step today keeps your streak moving.',
       soundEnabled: true, data: { habitId: 'gym', snoozeCount: 0 },
     });
   });
@@ -70,7 +71,8 @@ describe('reminders planned on the phone', () => {
     const reminders = plan([smart], at(19, 6));
     expect(reminders).toHaveLength(28);
     expect(reminders.slice(0, 2).map((reminder) => reminder.date)).toEqual([at(19, 7, 30), at(19, 8)]);
-    expect(reminders.every((reminder) => reminder.title === 'Smart reminder: Gym' && reminder.body === reminders[0].body)).toBe(true);
+    expect(reminders.slice(0, 2).map((reminder) => reminder.title)).toEqual(['Smart reminder: Gym · 7:30 AM', 'Smart reminder: Gym · 8:00 AM']);
+    expect(reminders.every((reminder) => reminder.title.startsWith('Smart reminder: Gym · ') && reminder.body === reminders[0].body)).toBe(true);
     expect(reminders[0].data).toMatchObject({ habitId: 'gym', type: 'smart-reminder', riskLevel: 'high', snoozeCount: 0 });
 
     // The ML model's estimate, when there is one: its risk and suggestion.

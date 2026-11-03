@@ -271,6 +271,13 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const noDevice = await request('/api/web-push/test', { method: 'POST', headers: authHeaders, body: JSON.stringify({ endpoint: pushSubscription.endpoint }) });
     assert.equal(noDevice.response.status, 404);
     assert.match(noDevice.body.message, /Turn on reminders/);
+    // A test a minute later, to see it arrive with HabitAI closed (two minutes at most).
+    assert.equal((await request('/api/web-push/test', { method: 'POST', headers: authHeaders, body: JSON.stringify({ delaySeconds: 600 }) })).response.status, 400);
+    assert.equal((await request('/api/web-push/subscriptions', { method: 'POST', headers: authHeaders, body: JSON.stringify({ subscription: pushSubscription, timeZone: 'UTC' }) })).response.status, 200);
+    const later = await request('/api/web-push/test', { method: 'POST', headers: authHeaders, body: JSON.stringify({ endpoint: pushSubscription.endpoint, delaySeconds: 60 }) });
+    assert.deepEqual([later.response.status, later.body.ok, later.body.scheduled], [200, true, true], JSON.stringify(later.body));
+    assert.ok(later.body.at >= Date.now() + 55_000, 'about a minute from now');
+    assert.equal((await request('/api/web-push/subscriptions', { method: 'DELETE', headers: authHeaders, body: JSON.stringify({ endpoint: pushSubscription.endpoint }) })).response.status, 200);
   });
 
   await t.test('ML proxy, AI without keys, and password reset protections', async () => {
@@ -2107,6 +2114,22 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(await pruneDueMarks(db), 1);
     const kept = (await db.query('SELECT week_start::text AS "weekStart" FROM weekly_due_marks WHERE user_id=$1', [marked])).rows.map((row) => row.weekStart);
     assert.deepEqual([kept.includes(weekAgo(6)), kept.includes(weekAgo(1))], [false, true]);
+  });
+
+  await t.test('consent to an earlier Privacy Notice is asked again, once', async () => {
+    // The helper's accounts consented long ago (privacy_consent_at = 1), before the current notice.
+    const { headers, userId } = await student('Old', 'Consent');
+    const me = async () => (await request('/api/auth/me', { headers })).body.user;
+    assert.equal((await me()).privacyConsentAt, null, 'every app version then shows the notice to accept');
+    const accepted = await request('/api/auth/consent', { method: 'POST', headers, body: JSON.stringify({ accepted: true }) });
+    assert.equal(accepted.response.status, 200, JSON.stringify(accepted.body));
+    const consentAt = accepted.body.user.privacyConsentAt;
+    assert.ok(consentAt >= Date.now() - 60_000, 'recorded now');
+    assert.equal((await me()).privacyConsentAt, consentAt);
+    // Accepting the current notice again keeps the first time; the export shows it.
+    const again = await request('/api/auth/consent', { method: 'POST', headers, body: JSON.stringify({ accepted: true }) });
+    assert.equal(again.body.user.privacyConsentAt, consentAt);
+    assert.equal(Number((await db.query('SELECT privacy_consent_at AS "at" FROM users WHERE id=$1', [userId])).rows[0].at), consentAt);
   });
 
   await t.test('the background reminder sync asks with a token whether the state changed, and is not counted as activity', async () => {

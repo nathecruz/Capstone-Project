@@ -6,7 +6,7 @@ import { leaderboardNameOf } from '../lib/display.js';
 import { authToken, hashToken, normalizeEmail, parse } from '../lib/http.js';
 import { namesFromInput } from '../lib/names.js';
 import { loginSchema, passwordSchema, profileSchema, registerSchema } from '../schemas.js';
-import { ADMIN_APP_MESSAGE, createSession, findUser, requireAuth, userFromRow } from '../services/accounts.js';
+import { ADMIN_APP_MESSAGE, createSession, findUser, PRIVACY_NOTICE_UPDATED_AT, requireAuth, userFromRow } from '../services/accounts.js';
 import { GIFT_MESSAGES } from '../services/buddy-gifts.js';
 import { emailChangedEmail, passwordChangedEmail } from '../services/email-templates.js';
 import { sendVerificationCode, verificationEnabled, verifyCode } from '../services/email-verification.js';
@@ -147,15 +147,17 @@ export default function registerAuthRoutes(app) {
     response.json({ ok: true, message: 'Email confirmed. Welcome to HabitAI!', user: userFromRow({ ...session, emailVerifiedAt: Date.now() }) });
   });
 
-  // Privacy consent for accounts created before the Privacy Notice was added.
+  // Consent to the current Privacy Notice, for accounts that accepted none or only an earlier one
+  // (services/accounts.js PRIVACY_NOTICE_UPDATED_AT). A consent to the current notice is kept.
   app.post('/api/auth/consent', async (request, response) => {
     const session = await requireAuth(request, response, { allowUnverified: true });
     if (!session) return;
     const input = parse(z.object({ accepted: z.literal(true) }).strict(), request, response);
     if (!input) return;
     const now = Date.now();
-    await query('UPDATE users SET privacy_consent_at = COALESCE(privacy_consent_at, $1) WHERE id = $2', [now, session.userId]);
-    response.json({ ok: true, user: userFromRow({ ...session, privacyConsentAt: session.privacyConsentAt ?? now }) });
+    const current = Number(session.privacyConsentAt) >= PRIVACY_NOTICE_UPDATED_AT;
+    if (!current) await query('UPDATE users SET privacy_consent_at = $1 WHERE id = $2 AND (privacy_consent_at IS NULL OR privacy_consent_at < $3)', [now, session.userId, PRIVACY_NOTICE_UPDATED_AT]);
+    response.json({ ok: true, user: userFromRow({ ...session, privacyConsentAt: current ? session.privacyConsentAt : now }) });
   });
 
   app.get('/api/auth/login-activity', async (request, response) => {

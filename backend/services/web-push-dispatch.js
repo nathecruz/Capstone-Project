@@ -197,7 +197,7 @@ export async function dispatchDueReminders(db, { webpush, template = null, snooz
         `, [row.subscriptionId, String(habit.id), due.date, due.time, Date.now()]);
         if (!claim.rowCount) continue;
 
-        const { title, body } = due.smart ? getSmartReminderText(habit, due.smart.riskLevel) : getReminderText(habit, template);
+        const { title, body } = due.smart ? getSmartReminderText(habit, due.smart.riskLevel, due.time) : getReminderText(habit, template, due.time);
         const type = due.smart ? 'smart-reminder' : 'habit-reminder';
         const notificationId = makeNotificationId(row.userId, String(habit.id), due.date, due.time);
         try {

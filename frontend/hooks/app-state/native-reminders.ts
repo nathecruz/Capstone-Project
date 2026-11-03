@@ -23,6 +23,16 @@ export type PlannedReminder = {
   data: Record<string, unknown>;
 };
 
+/** '7:00 PM' for a reminder time, as the reminder shows it (the server's Web Push reminders say the same). */
+export function reminderClock({ hour, minute }: { hour: number; minute: number }) {
+  return `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`;
+}
+
+/** A reminder's title: the habit and its time ('Read · 7:00 PM'), so it shows on the phone. */
+export function reminderTitle(label: string, time: { hour: number; minute: number }, smart: boolean) {
+  return `${smart ? 'Smart reminder: ' : ''}${label} · ${reminderClock(time)}`;
+}
+
 function modelRisk(prediction: HabitPrediction | null | undefined) {
   return prediction && typeof prediction.dropout_risk === 'number' && typeof prediction.completion_probability === 'number'
     ? { dropoutRisk: prediction.dropout_risk, completionProbability: prediction.completion_probability }
@@ -48,16 +58,16 @@ export function planReminders(habits: Habit[], now: Date, { ringInterval, limit,
     if (!habit.reminderEnabled || !getHabitReminderTimes(habit).length || hasHabitEnded(habit, today)) continue;
     const prediction = predictions[habit.id];
     const smart = habit.smartReminderEnabled ? computeSmartReminderTimes(habit, now, modelRisk(prediction)) : null;
-    const content = smart
+    const message = smart
       ? {
-        title: `Smart reminder: ${habit.label}`,
         body: prediction?.recommended_action || getSmartReminderMessage(habit, smart.riskLevel),
         data: { habitId: habit.id, type: 'smart-reminder', riskLevel: smart.riskLevel, snoozeCount: 0 },
       }
-      : { title: `${habit.label} reminder`, body: 'A small step today keeps your streak moving.', data: { habitId: habit.id, snoozeCount: 0 } };
+      : { body: 'A small step today keeps your streak moving.', data: { habitId: habit.id, snoozeCount: 0 } };
     const soundEnabled = habit.reminderSoundEnabled !== false;
     const doneToday = habit.completionDates.includes(today);
     for (const time of smart ? smart.times : getHabitReminderTimes(habit)) {
+      const content = { title: reminderTitle(habit.label, time, Boolean(smart)), ...message };
       const snooze = canSnoozeAt(habit, time.hour * 60 + time.minute, ringInterval);
       const clock = `${String(time.hour).padStart(2, '0')}:${String(time.minute).padStart(2, '0')}`;
       let next = true;

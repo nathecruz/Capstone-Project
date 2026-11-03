@@ -898,16 +898,20 @@ export function getWalletHistory({ filter = 'all', before, limit }: { filter?: W
 }
 
 /** Asks the server to send a test reminder to this device (or all of the account's devices) now. */
-export async function sendTestWebPush(endpoint?: string): Promise<{ ok: boolean; message: string }> {
+/**
+ * Sends a test reminder to this browser: right away, or after `delaySeconds` (up to 120), so
+ * HabitAI can be closed first and the test seen arriving as a reminder would.
+ */
+export async function sendTestWebPush(endpoint?: string, delaySeconds = 0): Promise<{ ok: boolean; message: string }> {
   const token = await getSessionToken();
   if (!token) return { ok: false, message: 'Please sign in again.' };
   try {
     await apiRequest('/api/web-push/test', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
-      body: JSON.stringify(endpoint ? { endpoint } : {}),
+      body: JSON.stringify({ ...(endpoint ? { endpoint } : {}), ...(delaySeconds ? { delaySeconds } : {}) }),
     });
-    return { ok: true, message: 'A test reminder is on its way. It should appear within a few seconds.' };
+    return { ok: true, message: delaySeconds ? 'Close HabitAI now: the test reminder comes in about a minute.' : 'A test reminder is on its way. It should appear within a few seconds.' };
   } catch (error) {
     return { ok: false, message: error instanceof ApiRequestError ? error.message : 'Could not send a test reminder. Check your connection.' };
   }

@@ -5,7 +5,7 @@
 // risk", was reminded 30 minutes early, often before it even existed, and never at its time.)
 // The record is the 7 days before today, which no longer change during the day.
 import { computeStreak, habitSchedule, isScheduledDay } from './streaks.js';
-import { getHabitReminderTimes } from './web-push-reminders.js';
+import { clockLabel, getHabitReminderTimes } from './web-push-reminders.js';
 
 const DEFAULT_TIME = { hour: 9, minute: 0 };
 const EARLY_NUDGE_MINUTES = 30;
@@ -49,12 +49,14 @@ export function getSmartReminderTimes(habit, date) {
   return result;
 }
 
-export function getSmartReminderText(habit, riskLevel) {
+/** A smart reminder's title and body; `time` ('19:00') is shown in the title. */
+export function getSmartReminderText(habit, riskLevel, time = null) {
   const name = String(habit?.label || 'Habit').slice(0, 120);
+  const clock = clockLabel(time);
   const body = {
     low: `You have a good rhythm with ${name}. Keep the momentum going with one small win today.`,
     medium: `A quick ${name} check-in now could help you stay on track before the day gets busy.`,
     high: `${name} is at risk of being skipped today. A short action now will protect your streak.`,
   }[riskLevel] ?? `A small step on ${name} today keeps your streak moving.`;
-  return { title: `Smart reminder: ${name}`, body };
+  return { title: `Smart reminder: ${name}${clock ? ` · ${clock}` : ''}`, body };
 }

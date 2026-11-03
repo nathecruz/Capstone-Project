@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { webPushSubscriptionRequestSchema } from '../schemas.js';
-import { getConfiguredVapidPublicKey, getDueHabitReminders, getHabitReminderDays, getReminderText, getHabitReminderTimes, getSnoozeLimit, getWebPushSnoozeSettings, getWebPushSnoozeUrl, hashWebPushSnoozeToken, isAllowedWebPushEndpoint, parseReminderTime } from '../services/web-push-reminders.js';
+import { clockLabel, getConfiguredVapidPublicKey, getDueHabitReminders, getHabitReminderDays, getReminderText, getHabitReminderTimes, getSnoozeLimit, getWebPushSnoozeSettings, getWebPushSnoozeUrl, hashWebPushSnoozeToken, isAllowedWebPushEndpoint, parseReminderTime } from '../services/web-push-reminders.js';
 
 test('parses 12-hour and legacy reminder times', () => {
   assert.deepEqual(parseReminderTime('08:30 PM'), { hour: 20, minute: 30 });
@@ -127,6 +127,17 @@ test('uses the Admin Panel reminder template when one is active', () => {
   assert.equal(getReminderText({}, { title: '', body: '' }).title, 'Habit reminder');
 });
 
+test('a reminder shows the habit\'s time, where the template puts it or else in the title', () => {
+  assert.deepEqual(getReminderText({ label: 'Read' }, null, '19:05'), { title: 'Read · 7:05 PM', body: 'A small step today keeps your streak moving.' });
+  // The Admin Panel's default template has no {{time}}: it goes after the title.
+  assert.equal(getReminderText({ label: 'Read' }, { title: '{{habit}} reminder', body: 'A small step.' }, '07:00').title, 'Read reminder · 7:00 AM');
+  assert.deepEqual(
+    getReminderText({ label: 'Read' }, { title: 'Time for {{habit}}', body: 'It is {{ time }}: {{habit}} now.' }, '12:30'),
+    { title: 'Time for Read', body: 'It is 12:30 PM: Read now.' },
+  );
+  assert.deepEqual(['00:15', '12:00', '23:59', '24:00', 'noon', null].map(clockLabel), ['12:15 AM', '12:00 PM', '11:59 PM', '', '', '']);
+});
+
 test('the scheduler plans reminder minutes ahead and a longer lookback catches late runs', async () => {
   const { getReminderWakeTimes } = await import('../services/web-push-reminders.js');
   const habit = { id: 'h1', label: 'Walk', reminderEnabled: true, frequency: 'Daily', reminderTimes: ['08:30 AM', '09:00 AM'], completionDates: [] };
@@ -213,6 +224,7 @@ test('smart reminders keep the set times and add an early nudge when the habit i
   assert.ok(getWebPushSnoozeSettings({ habits: [{ ...habit, id: 'read' }] }, 'read', 0), 'smart reminders can be snoozed');
 
   assert.equal(getSmartReminderText(habit, 'high').title, 'Smart reminder: Read');
+  assert.equal(getSmartReminderText(habit, 'high', '18:30').title, 'Smart reminder: Read · 6:30 PM');
   assert.match(getSmartReminderText(habit, 'high').body, /at risk of being skipped/);
 });
 
@@ -253,10 +265,10 @@ test('a reminder sent late is dropped once the habit is missed (past its last re
   });
 
   // Gym's only (last) reminder was 11:30: missed by now, so neither pushed nor listed in Notifications.
-  assert.deepEqual(webpush.sent.map((push) => push.title), ['Read reminder', 'Stretch reminder']);
+  assert.deepEqual(webpush.sent.map((push) => push.title), ['Read · 11:30 AM', 'Stretch · 11:55 AM'], 'with the habit\'s time');
   assert.equal(result.sent, 2);
   const listed = db.queries.filter((entry) => entry.text.includes('INSERT INTO notifications')).map((entry) => entry.values[3]);
-  assert.deepEqual(listed, ['Read reminder', 'Stretch reminder']);
+  assert.deepEqual(listed, ['Read · 11:30 AM', 'Stretch · 11:55 AM'], 'listed in Notifications as sent');
   // Read can still be done until 8:00 PM, so its late 11:30 reminder offers Snooze; Stretch's
   // reminder is its last one, so a snooze would come back after it is missed.
   assert.deepEqual(webpush.sent.map((push) => push.actions.some((action) => action.action === 'SNOOZE')), [true, false]);

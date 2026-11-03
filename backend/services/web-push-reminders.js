@@ -180,17 +180,31 @@ export function getReminderWakeTimes(rows, now = new Date(), horizonMinutes = 70
   return [...wakeTimes].sort((a, b) => a - b);
 }
 
+/** '7:00 PM' for a reminder time of '19:00' (24-hour, as reminders are keyed); '' for anything else. */
+export function clockLabel(time) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(time ?? ''));
+  if (!match) return '';
+  const hour = Number(match[1]);
+  return hour > 23 ? '' : `${hour % 12 || 12}:${match[2]} ${hour < 12 ? 'AM' : 'PM'}`;
+}
+
 /**
  * Reminder title/body. `template` is the Admin Panel's "habit-reminder" notification
- * template ({ title, body } with a {{habit}} placeholder) or null for the built-in text.
+ * template ({ title, body } with {{habit}} and {{time}} placeholders) or null for the built-in text.
+ * `time` ('19:00') is the habit's reminder time: it is shown in the reminder, in the title when the
+ * template does not place it.
  */
-export function getReminderText(habit, template = null) {
+export function getReminderText(habit, template = null, time = null) {
   const name = String(habit?.label || 'Habit').slice(0, 120);
+  const clock = clockLabel(time);
+  const timed = (title) => (clock ? `${title} · ${clock}` : title);
   if (!template?.title || !template?.body) {
-    return { title: `${name} reminder`, body: 'A small step today keeps your streak moving.' };
+    return { title: clock ? `${name} · ${clock}` : `${name} reminder`, body: 'A small step today keeps your streak moving.' };
   }
-  const fill = (text) => String(text).replace(/\{\{\s*habit\s*\}\}/gi, name).replace(/\{\{\s*app_name\s*\}\}/gi, 'HabitAI');
-  return { title: fill(template.title).slice(0, 160), body: fill(template.body).slice(0, 600) };
+  const placesTime = /\{\{\s*time\s*\}\}/i.test(`${template.title} ${template.body}`);
+  const fill = (text) => String(text).replace(/\{\{\s*habit\s*\}\}/gi, name).replace(/\{\{\s*time\s*\}\}/gi, clock).replace(/\{\{\s*app_name\s*\}\}/gi, 'HabitAI');
+  const title = fill(template.title).slice(0, 160);
+  return { title: placesTime ? title : timed(title), body: fill(template.body).slice(0, 600) };
 }
 
 export function getSnoozeLimit(frequency) {
