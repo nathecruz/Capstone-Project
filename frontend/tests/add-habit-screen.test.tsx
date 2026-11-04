@@ -1,10 +1,12 @@
 // The Add screen: a ready-made Health or Academics habit is added with one tap, a habit already this
 // week is not added twice, and a habit of one's own carries the proof its name suggests (or the one
-// picked). After adding, the follow-up questions set the habit as they are answered and end with a tip.
+// picked). A description in the student's own words fills in the form to check before adding. After
+// adding, the follow-up questions set the habit as they are answered and end with a tip.
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import AddScreen from '@/app/(tabs)/add';
 import { getHabitFollowUp, getHabitInsight } from '@/authentication/authService';
+import { parseHabit } from '@/utils/ai-client';
 import type { Habit } from '@/hooks/app-state/types';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
@@ -18,7 +20,7 @@ jest.mock('@react-native-community/datetimepicker', () => () => null);
 jest.mock('@/authentication', () => ({ getHabitCategories: jest.fn(async () => null) }));
 jest.mock('@/components/reminder-time-sheet', () => ({ ReminderTimesEditor: () => null }));
 jest.mock('@/components/ui/app-dialog', () => ({ useAppDialog: () => jest.fn() }));
-jest.mock('@/utils/ai-client', () => ({ classifyHabit: jest.fn(async () => ({ ok: false })) }));
+jest.mock('@/utils/ai-client', () => ({ classifyHabit: jest.fn(async () => ({ ok: false })), parseHabit: jest.fn() }));
 jest.mock('@/authentication/authService', () => ({ getHabitFollowUp: jest.fn(async () => ({ ok: false })), getHabitInsight: jest.fn() }));
 let mockContext: Record<string, unknown> & { habits: Partial<Habit>[] };
 // Added habits are in the context's habits from then on, as in the app.
@@ -73,6 +75,55 @@ describe('the Add screen', () => {
     fireEvent.press(screen.getByLabelText('Steps: Counted by your phone'));
     await act(async () => { fireEvent.press(screen.getByText('Add habit')); });
     expect(mockAddHabit).toHaveBeenLastCalledWith(expect.objectContaining({ label: 'Eat vegetables', category: 'Health', proof: { type: 'steps', steps: 2000 } }));
+  });
+
+  it('fills in the form from a description, and adds it only once checked', async () => {
+    jest.mocked(parseHabit).mockResolvedValueOnce({ ok: true, source: 'ai', habit: { label: 'Mag-aral ng 30 minuto', category: 'Academics', frequency: 'Custom', days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], reminderTimes: ['08:00 PM'], proof: { type: 'timer', minutes: 30 }, start: 'tomorrow' } });
+    render(<AddScreen />);
+    await act(async () => undefined);
+    expect(screen.getByLabelText('Fill in the form from your description').props.accessibilityState).toMatchObject({ disabled: true });
+    fireEvent.changeText(screen.getByLabelText('Describe your habit'), 'Mag-aral ng 30 minuto tuwing weekdays, alas-8 ng gabi, simula bukas');
+    await act(async () => { fireEvent.press(screen.getByLabelText('Fill in the form from your description')); });
+    expect(parseHabit).toHaveBeenCalledWith('Mag-aral ng 30 minuto tuwing weekdays, alas-8 ng gabi, simula bukas');
+    expect(screen.getByText(/HabitAI filled in the form from your description. Check each part below/)).toBeTruthy();
+    expect(screen.getByLabelText('Habit name').props.value).toBe('Mag-aral ng 30 minuto');
+    expect(screen.getByText('Repeats every week on Mon, Tue, Wed, Thu, Fri')).toBeTruthy();
+    expect(screen.getAllByText('30-minute Focus timer').length).toBeGreaterThan(0);
+    expect(mockAddHabit).not.toHaveBeenCalled();
+
+    await act(async () => { fireEvent.press(screen.getByText('Add habit')); });
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    expect(mockAddHabit).toHaveBeenCalledWith(expect.objectContaining({
+      label: 'Mag-aral ng 30 minuto',
+      category: 'Academics',
+      frequency: 'Custom',
+      meta: 'Weekdays only • 08:00 PM • Mon, Tue, Wed, Thu, Fri',
+      reminderEnabled: true,
+      reminderTimes: ['08:00 PM'],
+      reminderDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+      proof: { type: 'timer', minutes: 30 },
+      startDate: `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`,
+    }));
+    // The form starts over, the description too.
+    expect(screen.getByLabelText('Describe your habit').props.value).toBe('');
+    expect(screen.queryByText(/filled in the form/)).toBeNull();
+  });
+
+  it('says why a description could not fill in the form, and leaves the form as it was', async () => {
+    jest.mocked(parseHabit)
+      .mockResolvedValueOnce({ ok: false, status: 422, message: 'That does not look like a habit. Try something like "Walk 3,000 steps every morning".' })
+      .mockResolvedValueOnce({ ok: false, status: 0, message: 'Could not reach the AI service. Check your connection and try again.' });
+    render(<AddScreen />);
+    await act(async () => undefined);
+    fireEvent.changeText(screen.getByLabelText('Habit name'), 'Walk');
+    fireEvent.changeText(screen.getByLabelText('Describe your habit'), 'asdf qwer');
+    await act(async () => { fireEvent.press(screen.getByLabelText('Fill in the form from your description')); });
+    expect(screen.getByText('That does not look like a habit. Try something like "Walk 3,000 steps every morning".')).toBeTruthy();
+    expect(screen.getByLabelText('Habit name').props.value).toBe('Walk');
+    await act(async () => { fireEvent.press(screen.getByLabelText('Fill in the form from your description')); });
+    expect(screen.getByText('Could not reach the AI service. Check your connection and try again. You can fill in the form below instead.')).toBeTruthy();
+    expect(mockAddHabit).not.toHaveBeenCalled();
   });
 
   it('asks the follow-up questions after adding: the answers set the reminder and the proof, then a tip', async () => {

@@ -1,6 +1,7 @@
-// The AI chat used by the AI Assistant (Insights) and the AI Coach (Profile): a conversation of
-// bubbles, a typing indicator while the server answers, suggested questions and a composer.
-// The server reads the student's habits itself, so each question is sent on its own.
+// The AI chat used by the AI Assistant (Insights), the AI Coach (Profile) and HabitAI Help: a
+// conversation of bubbles, a typing indicator while the server answers, suggested questions and a
+// composer. The server reads the student's habits itself, so a question goes only with the chat's
+// last questions and answers (chatHistory), for follow-ups like "what about tomorrow?".
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
@@ -11,10 +12,31 @@ const WEB_NO_RING = Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object)
 
 /** What a screen's ask function gives back: an answer, or a message to show instead. */
 export type ChatAnswer = { ok: true; answer: string; note?: string } | { ok: false; message: string; tone?: 'warning' | 'error' };
-type ChatMessage = { id: number; role: 'user' | 'ai' | 'note'; text: string; note?: string; tone?: 'warning' | 'error' };
+export type ChatMessage = { id: number; role: 'user' | 'ai' | 'note'; text: string; note?: string; tone?: 'warning' | 'error' };
+/** A question or answer of the chat so far, sent with the next question. */
+export type ChatTurn = { role: 'user' | 'ai'; text: string };
 
-/** The conversation; kept by the screen so it survives closing and reopening the sheet. */
-export function useAiChat(ask: (question: string) => Promise<ChatAnswer>) {
+/** How many earlier questions and answers go with a question (the server takes up to 6). */
+const HISTORY_TURNS = 6;
+
+/**
+ * The chat so far as the server reads it: each question that got an answer, with that answer,
+ * oldest first, the last HISTORY_TURNS of them. A question that failed (a note) is left out.
+ */
+export function chatHistory(messages: ChatMessage[]): ChatTurn[] {
+  const turns: ChatTurn[] = [];
+  messages.forEach((message, index) => {
+    const answer = messages[index + 1];
+    if (message.role === 'user' && answer?.role === 'ai') turns.push({ role: 'user', text: message.text }, { role: 'ai', text: answer.text.slice(0, 1400) });
+  });
+  return turns.slice(-HISTORY_TURNS);
+}
+
+/**
+ * The conversation; kept by the screen so it survives closing and reopening the sheet. `ask` gets
+ * the question and the chat so far (chatHistory); "Start a new chat" clears both.
+ */
+export function useAiChat(ask: (question: string, history: ChatTurn[]) => Promise<ChatAnswer>) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const lastId = useRef(0);
@@ -26,10 +48,11 @@ export function useAiChat(ask: (question: string) => Promise<ChatAnswer>) {
   const send = async (text: string) => {
     const question = text.trim().slice(0, 500);
     if (!question || loading) return;
+    const history = chatHistory(messages);
     add({ role: 'user', text: question });
     setLoading(true);
     try {
-      const result = await ask(question);
+      const result = await ask(question, history);
       if (result.ok) add({ role: 'ai', text: result.answer, note: result.note });
       else add({ role: 'note', text: result.message, tone: result.tone ?? 'error' });
     } finally {

@@ -61,6 +61,19 @@ export const habitFollowUpLimiter = rateLimit({
     next();
   },
 });
+// "Describe your habit": over the limit the request is marked (request.aiLimited) and the rules
+// read the description instead of the AI.
+export const habitParseLimiter = rateLimit({
+  windowMs: WINDOW,
+  limit: 30,
+  keyGenerator: clientKey,
+  standardHeaders: false,
+  legacyHeaders: false,
+  handler: (request, _response, next) => {
+    request.aiLimited = true;
+    next();
+  },
+});
 export const predictionLimiter = limiter({ limit: 120, message: 'Too many prediction requests. Please try again shortly.' });
 // Check-ins and token actions (buying, claiming, opening): far above what a student taps, but a
 // script cannot hammer the ledger. One budget is shared by all the token actions of a session.

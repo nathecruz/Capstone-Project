@@ -31,9 +31,9 @@ const SECTIONS: { title: string; items: string[] }[] = [
     title: 'Why we use it',
     items: [
       'To run the app: sign you in, sync your data across devices, send reminders and verification codes, and show progress, rewards and leaderboards.',
-      'To give AI guidance: when you ask the AI Coach or assistants, your question and a summary of your habits and check-ins (without your name or email) are sent to Groq, our AI provider, to generate the answer.',
+      'To give AI guidance: when you ask the AI Coach or assistants, your question, the chat\'s last few questions and answers (so a follow-up question makes sense) and a summary of your habits and check-ins (without your name or email) are sent to Groq, our AI provider, to generate the answer. The help assistant gets only the chat, not your habits.',
       'To plan your goals: when you use the AI goal planner, your text and your recent habit history are sent to Groq, without your name or email. The history covers the habits of your last 4 weeks (names, categories, schedules and reminder times), how often you checked in and at what time of day, their forecasts from our prediction model, and your streak. It is used only to make your plan and this week\'s habits.',
-      'To help you start a new habit: when you add one, its name, category and proof and your answers to its follow-up questions are sent to Groq, without your name or email, to ask one more question about it and give you a tip.',
+      'To help you start a new habit: when you describe one for HabitAI to fill in the form, your description is sent to Groq, without your name or email, to read the habit from it. When you add one, its name, category and proof and your answers to its follow-up questions are sent to Groq the same way, to ask one more question about it and give you a tip.',
       'To keep accounts secure and to answer support requests.',
       'For research on the app\'s effect on student habits: PSAU faculty only see aggregated, anonymized statistics. Groups too small to hide individuals are combined or withheld.',
     ],
@@ -116,7 +116,7 @@ export default function PrivacyNoticeScreen() {
             <Text style={styles.bannerText}>We updated this notice on November 2, 2026: it now covers the proof of your check-ins (Focus timer and walk sessions, and photos) and the AI&apos;s follow-up questions about new habits. Please review and accept it to continue.</Text>
           </View>
         )}
-        <Text style={styles.updated}>Effective November 2, 2026</Text>
+        <Text style={styles.updated}>Effective November 2, 2026 · Clarified November 4, 2026</Text>
         {SECTIONS.map((section) => (
           <View key={section.title} style={styles.section}>
             <Text style={styles.sectionTitle}>{section.title}</Text>

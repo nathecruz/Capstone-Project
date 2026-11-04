@@ -53,7 +53,10 @@ export const walletHistorySchema = z.object({ filter: z.enum(['all', 'earned', '
 export const mysteryBoxSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: timeZoneSchema.optional() }).strict();
 export const streakFreezeSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: timeZoneSchema.optional() }).strict();
 export const webPushDoneSchema = z.object({ token: z.string().min(20).max(1000) }).strict();
-export const assistantSchema = z.object({ question: z.string().trim().max(500).optional(), summary: z.record(z.string(), z.unknown()).optional(), mode: z.enum(['assistant', 'coach', 'support']).default('assistant'), timeZone: timeZoneSchema.optional() }).strict();
+// The chat so far (frontend/components/ai-chat.tsx): its last questions and answers, oldest first,
+// so a follow-up question makes sense (services/ai-prompts.js CHAT_HISTORY_TURNS).
+const chatTurnSchema = z.object({ role: z.enum(['user', 'ai']), text: z.string().trim().min(1).max(1500) }).strict();
+export const assistantSchema = z.object({ question: z.string().trim().max(500).optional(), history: z.array(chatTurnSchema).max(6).optional(), summary: z.record(z.string(), z.unknown()).optional(), mode: z.enum(['assistant', 'coach', 'support']).default('assistant'), timeZone: timeZoneSchema.optional() }).strict();
 export const habitAnalysisRequestSchema = z.object({ habitId: z.string().trim().min(1).max(120), timeZone: timeZoneSchema.optional() }).strict();
 // A habit just added, for its follow-up questions (services/habit-follow-up.js), and the answers for its tip.
 const followUpProofSchema = z.union([
@@ -63,6 +66,8 @@ const followUpProofSchema = z.union([
 ]);
 export const habitFollowUpSchema = z.object({ label: z.string().trim().min(1).max(60), category: z.string().trim().max(60).optional(), proof: followUpProofSchema.optional() }).strict();
 export const habitInsightSchema = habitFollowUpSchema.extend({ answers: z.array(z.object({ question: z.string().trim().min(1).max(120), answer: z.string().trim().min(1).max(60) }).strict()).min(1).max(3) }).strict();
+// "Describe your habit" on the Add tab (services/habit-parse.js): one sentence about the habit.
+export const habitParseSchema = z.object({ text: z.string().trim().min(2).max(200) }).strict();
 export const habitClassificationSchema = z.object({ name: z.string().trim().min(1).max(100), category: z.string().trim().max(60).optional(), categories: z.array(z.string().trim().min(1).max(60)).max(20).optional() }).strict();
 export const goalGenerationSchema = z.object({ goal: z.string().trim().min(1).max(500), focusTarget: z.string().trim().max(30).optional(), timeline: z.string().trim().max(30).optional(), timeZone: timeZoneSchema.optional() }).strict();
 // This week's habits from the goal planner (services/ai-prompts.js plannedHabits): Daily has no days, Weekly and Custom have some.

@@ -97,7 +97,7 @@ flowchart TB
 | Notifications | `GET /api/notifications`, `PATCH /api/notifications/:id`, `/api/web-push/*` |
 | Gamification | `POST /api/rewards/redeem`, `GET /api/leaderboard`, `POST /api/leaderboard/sync` |
 | Tokens | `GET /api/wallet/summary`, `GET /api/wallet/history`, `GET /api/weekly-bonus`, `POST /api/weekly-bonus/claim`, `POST /api/buddy/items` (shop and weekly drop), `POST /api/buddy/gifts` |
-| AI | `POST /api/insights/assistant` (modes `assistant`, `coach`, `support`), `POST /api/goals/generate` |
+| AI | `POST /api/insights/assistant` (modes `assistant`, `coach`, `support`; with the chat's last turns as `history`), `POST /api/goals/generate`, `POST /api/habit/parse` (Describe your habit), `POST /api/habit/follow-up` |
 | Support | `POST /api/support/reports`, `POST /api/support/suggestions` |
 | Health | `GET /healthz` (liveness), `GET /health` (dependencies) |
 
@@ -294,12 +294,12 @@ sequenceDiagram
   participant API as App API
   participant DB as Neon
   participant G as Groq
-  A->>API: POST /api/insights/assistant {mode, question, timeZone}
+  A->>API: POST /api/insights/assistant {mode, question, history, timeZone}
   API->>API: auth + per-student AI rate limit (30 per 15 min)
   API->>DB: habits, 28 days of check-ins, goals
   API->>API: build compact context (streaks, last 7 days, habit needing attention)
   API->>DB: Coach only: charge 10 tokens in the ledger (users row locked) before asking
-  API->>G: system message (role + rules) + USER DATA + fenced question
+  API->>G: system message (role + rules) + USER DATA + fenced earlier turns + fenced question
   G-->>API: text
   API->>API: strip markdown, trim length
   API->>DB: Coach only: refund the 10 tokens when the AI fails or answers nothing
@@ -310,6 +310,13 @@ sequenceDiagram
   are grounded in real check-ins and cannot be manipulated from the client.
 - Instructions live in the **system message**; the student's text is fenced as data,
   which resists prompt injection ("ignore previous instructions...").
+- A chat sends its **last 3 questions and answers** (`history`, at most 6 turns) with a
+  follow-up question. They are fenced as data too (EARLIER IN THIS CONVERSATION), and the
+  rules say the USER DATA wins when they disagree, since the app could send any text there.
+- **Describe your habit** (`POST /api/habit/parse`, `habit-parse.js`) reads one sentence into
+  the Add form's fields with JSON mode and a schema; the server keeps the result within the
+  form's limits, and fixed English and Filipino rules read the sentence when the AI is
+  unavailable or over its soft limit (30 per 15 minutes).
 - Replies follow the student's language (English, Filipino or Taglish), avoid medical
   advice and point to the NCMH hotline (1553) if a crisis is mentioned.
 - The **goal planner** uses Groq JSON mode and gives the model the JSON Schema; the server then

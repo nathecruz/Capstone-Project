@@ -29,6 +29,7 @@ All three share one backend, a Node.js API with a PostgreSQL database, which run
 **Input.** Users enter habits by tapping, not by typing everything:
 
 - **Ready-made habits.** A user can add a habit in one tap. The habit comes with its reminder time and its proof already set. Students and faculty get different sets [frontend/constants/habit-templates.ts].
+- **Describe your habit.** A user can describe a habit in one sentence, in English, Filipino or Taglish ("Mag-aral ng 30 minuto tuwing gabi"), and HabitAI fills in the form: the name, Health or Academics, the days, up to 2 reminder times and the proof. The user checks the form before saving. The AI reads the sentence; when it is unavailable, fixed rules read it [backend/services/habit-parse.js].
 - **Follow-up questions.** After a habit is added, HabitAI asks a few questions, each answered with one tap. The answers set the habit's reminder time and amount. One question is written by the AI about that habit (a fixed question when the AI is unavailable), and a short tip follows the answers [backend/services/habit-follow-up.js].
 - **Automatic records.** The Focus timer and the step counter record check-ins on their own. A habit proven by them is checked off when the timer ends or when the walk reaches its target, without another tap.
 
@@ -88,7 +89,7 @@ The panel asked that data cannot be faked. HabitAI does not trust numbers sent b
    These limits affect speed, not correctness. See DEPLOYMENT.md.
 4. **Only Health and Academics habits.** Other kinds of habits are outside the scope.
 5. **Habits last one week**, from their start day to Sunday. Their check-ins stay in the stats, history and streak, but a habit does not carry over to the next week: users add new habits each week or plan them with the AI.
-6. **The AI can be wrong.** Its answers, plans, follow-up questions and tips are generated text. They are not medical, psychological or academic advice. The AI features need the Groq service; when it is unavailable or a usage limit is reached, the features answer from fixed rules instead or report that they are unavailable.
+6. **The AI can be wrong.** Its answers, plans, follow-up questions, tips and the forms it fills in from a description are generated text, so the user checks a filled-in form before saving it. A chat remembers only its last 3 questions and answers, and only until it is closed for a new one. They are not medical, psychological or academic advice. The AI features need the Groq service; when it is unavailable or a usage limit is reached, the features answer from fixed rules instead or report that they are unavailable.
 7. **The predictions are experimental.** The bundled machine-learning model was trained on generated scenarios, not on real HabitAI data.
    - A model is used in production only after it is retrained on approved, anonymized HabitAI outcomes and passes an independent holdout evaluation (ml-service/README.md).
    - Exporting training data needs at least 10 students with a week of history.
@@ -114,7 +115,7 @@ The panel asked that data cannot be faked. HabitAI does not trust numbers sent b
 | --- | --- |
 | Faculty rewards | Faculty earn tokens and spend them on their own Rewards screen. The student-only leaderboard rewards are not offered to them. |
 | Balance of habits | Habits are limited to Health and Academics. The Habits tab shows the balance and suggests a habit for a missing area, and the AI planner covers both. |
-| Automatic input | Ready-made habits are added in one tap. The Focus timer and the step counter check the habit in automatically. |
+| Automatic input | Ready-made habits are added in one tap, and a habit described in one sentence fills in the form. The Focus timer and the step counter check the habit in automatically. |
 | Limitations of the system | This document, and Help & Support > What HabitAI can and cannot do in the app. |
 | Data integrity | The server-owned points, tokens and streaks, the server-timed proof sessions, the photo checks, and the audit log (see *Data integrity*). |
 | Limit to Health and Academics | Only these two areas can be chosen. |

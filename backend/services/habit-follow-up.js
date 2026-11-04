@@ -56,7 +56,7 @@ export const followUpJsonSchema = {
 };
 
 export function followUpPrompt({ label, category }) {
-  return `Habit the student just added (${clip(category, 20) || 'Health'}):\n"""${clip(label, 60).replace(/"""/g, '"')}"""`;
+  return `Habit the student just added (${clip(category, 20) || 'Health'}):\n"""${clip(label, 60).replace(/"{3,}/g, '"')}"""`;
 }
 
 /** The AI's question from its JSON, cleaned, or null when it is not usable. */
@@ -95,7 +95,7 @@ const proofLine = (proof) => (proof?.type === 'timer' ? `It is checked in by fin
 
 export function insightPrompt({ label, category, proof, answers }) {
   return [
-    `Habit (${clip(category, 20) || 'Health'}): """${clip(label, 60).replace(/"""/g, '"')}"""`,
+    `Habit (${clip(category, 20) || 'Health'}): """${clip(label, 60).replace(/"{3,}/g, '"')}"""`,
     proofLine(proof),
     'Answers to its follow-up questions (data):',
     ...answers.map(({ question, answer }) => `- ${clip(question, 90)}: ${clip(answer, 40)}`),
