@@ -76,7 +76,7 @@ export default function ProfileScreen() {
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [coachOpen, setCoachOpen] = useState(false);
   // AI Coach: each answer costs COACH_COST tokens; the server returns them when the AI fails.
-  const coachChat = useAiChat((question) => askCoach(question, { tokens, applyWallet }));
+  const coachChat = useAiChat((question, history) => askCoach(question, { tokens, applyWallet }, history));
 
   const chooseFromGallery = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();

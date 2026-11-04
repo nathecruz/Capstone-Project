@@ -1,8 +1,8 @@
 import { config } from '../config/index.js';
 import { query, withTransaction } from '../db/client.js';
-import { aiLimiter, habitAdviceLimiter, habitFollowUpLimiter, predictionLimiter } from '../http/rate-limits.js';
+import { aiLimiter, habitAdviceLimiter, habitFollowUpLimiter, habitParseLimiter, predictionLimiter } from '../http/rate-limits.js';
 import { parse } from '../lib/http.js';
-import { assistantSchema, goalGenerationSchema, goalPlanSchema, habitAnalysisRequestSchema, habitClassificationSchema, habitFollowUpSchema, habitInsightSchema } from '../schemas.js';
+import { assistantSchema, goalGenerationSchema, goalPlanSchema, habitAnalysisRequestSchema, habitClassificationSchema, habitFollowUpSchema, habitInsightSchema, habitParseSchema } from '../schemas.js';
 import { accountStreak } from '../services/account-streak.js';
 import { requireAuth } from '../services/accounts.js';
 import { buildHabitContext, dateKeyInZone, shiftDay } from '../services/ai-context.js';
@@ -28,6 +28,7 @@ import { forecastFor } from '../services/forecast-rules.js';
 import { HABIT_ANALYSIS_SYSTEM, habitAnalysisJsonSchema, habitAnalysisPrompt, habitAnalysisSchema, habitStats, mlSignal, mlSummary } from '../services/habit-analysis.js';
 import { generateAiText, isAiConfigured } from '../services/groq.js';
 import { FOLLOW_UP_SYSTEM, followUpJsonSchema, followUpPrompt, followUpQuestions, INSIGHT_SYSTEM, insightJsonSchema, insightPrompt, readAiQuestion, readInsight, rulesInsight } from '../services/habit-follow-up.js';
+import { HABIT_PARSE_SYSTEM, NOT_A_HABIT, habitParseJsonSchema, habitParsePrompt, parseHabitText, readAiHabit } from '../services/habit-parse.js';
 import { focusCategories, focusCategory, focusCategoryFor, habitProof } from '../services/habit-rules.js';
 import { loadPlannerCategories, loadPlannerHistory } from '../services/planner-history.js';
 import { computeStreak, habitFromRow } from '../services/streaks.js';
@@ -153,10 +154,11 @@ export default function registerAiRoutes(app) {
     let failed = false;
     try {
       const timeZone = input.timeZone || DEFAULT_TIME_ZONE;
-      const [context, history] = mode === 'support'
+      const [context, plannerHistory] = mode === 'support'
         ? [{ app: 'HabitAI' }, null] // no personal data is needed to explain the app
         : await Promise.all([loadAiContext(session.userId, timeZone), mode === 'coach' ? coachHistory(session.userId, timeZone) : null]);
-      const text = await generateAiText(buildUserPrompt({ question: input.question, context: assistantContext(mode, context, history) }), {
+      // `history`: the chat's last questions and answers, for follow-up questions.
+      const text = await generateAiText(buildUserPrompt({ question: input.question, context: assistantContext(mode, context, plannerHistory), history: input.history }), {
         system: systemPromptFor(mode, session.role),
         maxOutputTokens: 800,
         temperature: 0.6,
@@ -289,6 +291,27 @@ export default function registerAiRoutes(app) {
       logAiError('goals', error);
       response.status(502).json({ ok: false, error: 'The AI goal planner is temporarily unavailable.' });
     }
+  });
+
+  // "Describe your habit" (services/habit-parse.js): one sentence turned into the habit form's
+  // fields, by the AI or, without it, by the rules. The student checks them before saving.
+  app.post('/api/habit/parse', habitParseLimiter, async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const input = parse(habitParseSchema, request, response);
+    if (!input) return;
+    let read = null;
+    if (isAiConfigured() && !request.aiLimited) {
+      try {
+        read = readAiHabit(await generateAiText(habitParsePrompt(input.text), { system: forAudience(HABIT_PARSE_SYSTEM, session.role), schema: habitParseJsonSchema, maxOutputTokens: 300, temperature: 0, timeoutMs: 10_000 }));
+      } catch (error) {
+        logAiError('habit parse', error);
+      }
+    }
+    if (read?.isHabit === false) return response.status(422).json({ ok: false, code: 'NOT_A_HABIT', error: read.reason });
+    const habit = read?.habit ?? parseHabitText(input.text);
+    if (!habit) return response.status(422).json({ ok: false, code: 'NOT_A_HABIT', error: NOT_A_HABIT });
+    response.json({ ok: true, source: read?.habit ? 'ai' : 'rules', habit });
   });
 
   // Follow-up questions for a habit just added (services/habit-follow-up.js): the app's own two and

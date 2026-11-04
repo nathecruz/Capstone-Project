@@ -13,7 +13,7 @@ export const faqSections: FaqSection[] = [
     icon: 'rocket-outline',
     color: '#5B42D8',
     items: [
-      { question: 'How do I create my first habit?', answer: 'Open the Add tab and tap a ready-made habit to add it in one tap. Or enter a name, pick Health or Academics and how often (daily, weekly, monthly or custom days), choose how its check-in is proven, then save it.' },
+      { question: 'How do I create my first habit?', answer: 'Open the Add tab and tap a ready-made habit to add it in one tap. Or describe it in one sentence under Describe your habit (what, when and how often, in English or Filipino) and tap Fill in for me: HabitAI fills in the form for you to check. Or enter a name, pick Health or Academics and how often (daily, weekly, monthly or custom days), choose how its check-in is proven, then save it.' },
       { question: 'Can I customize reminder times?', answer: 'Yes. When you add a habit, turn on Reminders and choose up to two times. How long and how often a reminder snoozes is set in Snooze Settings.' },
       { question: 'What happens when I miss a day?', answer: 'Your check-in history is kept, but the streak goes back to zero after a scheduled day is missed. Days a habit is not scheduled (for example Tuesday for a Mon/Wed/Fri habit) never break it.' },
     ],

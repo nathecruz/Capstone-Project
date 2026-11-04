@@ -1,6 +1,6 @@
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
-import { AiChatSheet, useAiChat, type ChatAnswer } from '@/components/ai-chat';
+import { AiChatSheet, chatHistory, useAiChat, type ChatAnswer, type ChatTurn } from '@/components/ai-chat';
 import { askCoach } from '@/utils/ai-client';
 
 const mockApiRequest = jest.fn();
@@ -21,7 +21,7 @@ jest.mock('@/authentication/authService', () => {
   };
 });
 
-function Chat({ ask }: { ask: (question: string) => Promise<ChatAnswer> }) {
+function Chat({ ask }: { ask: (question: string, history: ChatTurn[]) => Promise<ChatAnswer> }) {
   const chat = useAiChat(ask);
   return (
     <AiChatSheet
@@ -52,7 +52,7 @@ describe('AI chat', () => {
     fireEvent.press(screen.getByLabelText('Send question'));
 
     await waitFor(() => expect(screen.getByText('Walk right after dinner.')).toBeTruthy(), { timeout: 15000 });
-    expect(ask).toHaveBeenCalledWith('How do I keep going?');
+    expect(ask).toHaveBeenCalledWith('How do I keep going?', []);
     expect(screen.getByText('How do I keep going?')).toBeTruthy();
     expect(screen.getByText('10 tokens used')).toBeTruthy();
     expect(screen.getByLabelText('Ask about your habits...').props.value).toBe('');
@@ -65,28 +65,64 @@ describe('AI chat', () => {
     fireEvent.press(screen.getByLabelText('Ask: What should I focus on today?'));
 
     await waitFor(() => expect(screen.getByText('AI features are not available right now. Your tokens were not spent.')).toBeTruthy());
-    expect(ask).toHaveBeenCalledWith('What should I focus on today?');
+    expect(ask).toHaveBeenCalledWith('What should I focus on today?', []);
+  });
+
+  it('sends a follow-up with the questions that got answers, and starts over on a new chat', async () => {
+    const ask = jest.fn()
+      .mockResolvedValueOnce({ ok: true, answer: 'Study at 7 PM tonight.' })
+      .mockResolvedValueOnce({ ok: false, message: 'Too many questions. Try again in a minute.', tone: 'warning' })
+      .mockResolvedValue({ ok: true, answer: 'Tomorrow, study at 7 PM again.' });
+    const screen = render(<Chat ask={ask} />);
+    const type = async (question: string, answer: string) => {
+      fireEvent.changeText(screen.getByLabelText('Ask about your habits...'), question);
+      fireEvent.press(screen.getByLabelText('Send question'));
+      await waitFor(() => expect(screen.getByText(answer)).toBeTruthy());
+    };
+    await type('When should I study?', 'Study at 7 PM tonight.');
+    await type('And the walk?', 'Too many questions. Try again in a minute.');
+    await type('What about tomorrow?', 'Tomorrow, study at 7 PM again.');
+    // The question that failed is not part of the chat the AI reads.
+    expect(ask).toHaveBeenLastCalledWith('What about tomorrow?', [
+      { role: 'user', text: 'When should I study?' },
+      { role: 'ai', text: 'Study at 7 PM tonight.' },
+    ]);
+
+    fireEvent.press(screen.getByLabelText('Start a new chat'));
+    await type('Hi', 'Tomorrow, study at 7 PM again.');
+    expect(ask).toHaveBeenLastCalledWith('Hi', []);
+  });
+
+  it('keeps only the last 3 questions and answers', () => {
+    const messages = Array.from({ length: 8 }, (_, index) => ({ id: index, role: index % 2 ? 'ai' as const : 'user' as const, text: `message ${index}` }));
+    expect(chatHistory(messages).map((turn) => turn.text)).toEqual(['message 2', 'message 3', 'message 4', 'message 5', 'message 6', 'message 7']);
+    expect(chatHistory([{ id: 1, role: 'ai', text: 'x'.repeat(2000) }, { id: 2, role: 'user', text: 'q' }, { id: 3, role: 'ai', text: 'y'.repeat(2000) }])).toEqual([
+      { role: 'user', text: 'q' },
+      { role: 'ai', text: 'y'.repeat(1400) },
+    ]);
   });
 
   it('says the AI Coach returned the tokens when the AI failed after the charge, and takes the server\'s balance', async () => {
     const { ApiRequestError } = jest.requireMock('@/authentication/authService');
     mockApiRequest.mockRejectedValue(new ApiRequestError('The AI service is temporarily unavailable.', 502, { ok: false, refunded: true, tokens: 40 }));
     const applyWallet = jest.fn();
-    const screen = render(<Chat ask={(question) => askCoach(question, { tokens: 40, applyWallet })} />);
+    const screen = render(<Chat ask={(question, history) => askCoach(question, { tokens: 40, applyWallet }, history)} />);
 
     fireEvent.press(screen.getByLabelText('Ask: What should I focus on today?'));
 
     await waitFor(() => expect(screen.getByText('The AI Coach is unavailable right now. Your 10 tokens were returned.')).toBeTruthy());
     expect(applyWallet).toHaveBeenCalledWith({ tokens: 40 });
     expect(mockApiRequest.mock.calls[0][0]).toBe('/api/insights/assistant');
-    expect(JSON.parse(mockApiRequest.mock.calls[0][1].body)).toMatchObject({ mode: 'coach', question: 'What should I focus on today?' });
+    const body = JSON.parse(mockApiRequest.mock.calls[0][1].body);
+    expect(body).toMatchObject({ mode: 'coach', question: 'What should I focus on today?' });
+    expect(body.history).toBeUndefined();
   });
 
   it('shows the server\'s reason when there are not enough tokens, and the Coach\'s answer with its cost', async () => {
     const { ApiRequestError } = jest.requireMock('@/authentication/authService');
     mockApiRequest.mockRejectedValueOnce(new ApiRequestError('You need 10 tokens to ask the AI Coach. Complete habits to earn more.', 402, { ok: false }));
     const applyWallet = jest.fn();
-    const screen = render(<Chat ask={(question) => askCoach(question, { tokens: 10, applyWallet })} />);
+    const screen = render(<Chat ask={(question, history) => askCoach(question, { tokens: 10, applyWallet }, history)} />);
     fireEvent.press(screen.getByLabelText('Ask: What should I focus on today?'));
     await waitFor(() => expect(screen.getByText('You need 10 tokens to ask the AI Coach. Complete habits to earn more.')).toBeTruthy());
     expect(applyWallet).not.toHaveBeenCalled();
@@ -97,12 +133,19 @@ describe('AI chat', () => {
     await waitFor(() => expect(screen.getByText('Walk after dinner today.')).toBeTruthy());
     expect(screen.getByText('10 tokens used')).toBeTruthy();
     expect(applyWallet).toHaveBeenCalledWith({ ok: true, answer: 'Walk after dinner today.', tokens: 0, tokenHistory: [] });
+    // The refused question had no answer, so nothing went with this one; the next goes with it.
+    expect(JSON.parse(mockApiRequest.mock.calls[1][1].body).history).toBeUndefined();
+    mockApiRequest.mockResolvedValueOnce({ answer: 'Then walk before class.', tokens: 0, tokenHistory: [] });
+    fireEvent.changeText(screen.getByLabelText('Ask about your habits...'), 'And tomorrow?');
+    fireEvent.press(screen.getByLabelText('Send question'));
+    await waitFor(() => expect(screen.getByText('Then walk before class.')).toBeTruthy());
+    expect(JSON.parse(mockApiRequest.mock.calls[2][1].body).history).toEqual([{ role: 'user', text: 'And now?' }, { role: 'ai', text: 'Walk after dinner today.' }]);
   });
 
   it('does not promise the tokens back when no answer reached the phone, as the Coach may have been charged', async () => {
     mockApiRequest.mockRejectedValueOnce(new TypeError('Network request failed'));
     const applyWallet = jest.fn();
-    const screen = render(<Chat ask={(question) => askCoach(question, { tokens: 40, applyWallet })} />);
+    const screen = render(<Chat ask={(question, history) => askCoach(question, { tokens: 40, applyWallet }, history)} />);
     fireEvent.press(screen.getByLabelText('Ask: What should I focus on today?'));
     await waitFor(() => expect(screen.getByText('Could not reach the AI service. Check your connection and try again.')).toBeTruthy());
     expect(screen.queryByText(/were not spent/)).toBeNull();

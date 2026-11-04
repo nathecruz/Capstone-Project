@@ -1,6 +1,6 @@
 // The help assistant on Help & Support and the FAQ. The server answers questions about using the
-// app (only the question is sent, no habit data). If it cannot, the closest FAQ answer is shown
-// and labelled as such.
+// app (only the question and the chat so far are sent, no habit data). If it cannot, the closest
+// FAQ answer is shown and labelled as such.
 import React, { useState } from 'react';
 import { AiChatSheet, useAiChat, type ChatAnswer } from '@/components/ai-chat';
 import { closestFaq, supportQuestions } from '@/constants/help-faq';
@@ -9,8 +9,8 @@ import { askAi } from '@/utils/ai-client';
 export function useSupportChat() {
   const [visible, setVisible] = useState(false);
   const [autoFocus, setAutoFocus] = useState(false);
-  const chat = useAiChat(async (question): Promise<ChatAnswer> => {
-    const result = await askAi('support', question);
+  const chat = useAiChat(async (question, history): Promise<ChatAnswer> => {
+    const result = await askAi('support', question, history);
     if (result.ok) return { ok: true, answer: result.answer };
     if (result.status === 401 || result.status === 429) return { ok: false, message: result.message, tone: 'warning' };
     const faq = closestFaq(question);
@@ -38,7 +38,7 @@ export function SupportChatSheet({ support }: { support: ReturnType<typeof useSu
       greeting="Hi! I can explain how HabitAI works: habits, streaks, points, goals, reminders and your account. What do you need help with?"
       suggestions={supportQuestions}
       placeholder="Ask how something works..."
-      footnote="Free to use. Only your question is sent, not your habits. Answers can be wrong."
+      footnote="Free to use. Only this chat is sent, not your habits. Answers can be wrong."
       autoFocus={support.autoFocus}
     />
   );

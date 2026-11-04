@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getHabitCategories, type HabitCategory } from '@/authentication';
 import { HabitAddedSheet, type AddedHabit } from '@/components/habit-added-sheet';
@@ -14,7 +14,7 @@ import { requestNotificationAccess, useAppColorScheme, type HabitProof } from '@
 import { useAppTheme } from '@/hooks/dark-mode-context';
 import { themeSheet, themedColor, withReadableText } from '@/hooks/use-themed-styles';
 import { detectBadHabit } from '@/utils/habit-detection';
-import { classifyHabit } from '@/utils/ai-client';
+import { classifyHabit, parseHabit } from '@/utils/ai-client';
 import { habitFromTemplate, normalizedProof, proofIcon, proofText, STEP_TARGET, suggestedProof, TIMER_MINUTES } from '@/utils/habit-templates';
 
 const frequencies = ['Daily', 'Weekly', 'Monthly', 'Custom'];
@@ -25,6 +25,10 @@ const proofTypes: { type: HabitProof['type']; label: string; hint: string; icon:
 ];
 const repeatOptions = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const customFrequencyPresets = ['Weekdays only', 'Twice a week'];
+// The days of each Custom preset (selectCustomFrequency), to name days read from a description.
+const presetFor = (days: string[]) => (days.join(',') === 'Mon,Tue,Wed,Thu,Fri' ? 'Weekdays only' : days.join(',') === 'Tue,Fri' ? 'Twice a week' : 'Selected days');
+// Web: the inputs show their own focus border instead of the browser's ring.
+const WEB_NO_RING = Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null;
 
 function formatDate(date: Date) {
   const year = date.getFullYear();
@@ -75,6 +79,11 @@ export default function AddScreen() {
   const [messageContent, setMessageContent] = useState({ title: '', body: '' });
   const [cancelVisible, setCancelVisible] = useState(false);
   const [nameFocused, setNameFocused] = useState(false);
+  // "Describe your habit": one sentence that fills in the form, and what filling it in did.
+  const [description, setDescription] = useState('');
+  const [descriptionFocused, setDescriptionFocused] = useState(false);
+  const [describing, setDescribing] = useState(false);
+  const [fillNote, setFillNote] = useState<{ text: string; tone: 'done' | 'warning' } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -159,6 +168,50 @@ export default function AddScreen() {
     return { isHabit: true, isBadHabit: detected.isBadHabit, categoryFits: true, suggestedCategory: category, reason: detected.reason };
   };
 
+  // The server reads the description (with the AI, or its own rules without it) and the form is
+  // filled in with what it found; nothing is added until the student checks it and taps Add habit.
+  const fillFromDescription = async () => {
+    const text = description.trim();
+    if (describing || text.length < 2) return;
+    setDescribing(true);
+    let result: Awaited<ReturnType<typeof parseHabit>>;
+    try {
+      result = await parseHabit(text);
+    } finally {
+      setDescribing(false);
+    }
+    if (!result.ok) {
+      setFillNote({ tone: 'warning', text: result.status === 422 ? result.message : `${result.message} You can fill in the form below instead.` });
+      return;
+    }
+    const habit = result.habit;
+    setName(habit.label);
+    const area = categories.find((item) => item.label === habit.category);
+    if (area) setCategory(area.label);
+    setChosenProof(habit.proof);
+    if (habit.frequency === 'Daily') {
+      setFrequency('Daily');
+    } else {
+      // One day a week or several: the Custom days, which the form shows to check.
+      setFrequency('Custom');
+      setRepeatDays(habit.days);
+      setCustomFrequency(presetFor(habit.days));
+    }
+    if (habit.start === 'tomorrow') {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      setStartDate(formatDate(tomorrow));
+    }
+    let reminderNote = '';
+    if (habit.reminderTimes.length) {
+      setReminderTimes(habit.reminderTimes);
+      // On the web, reminders need the browser's permission, which only the switch asks for.
+      if (Platform.OS !== 'web') setReminder(true);
+      else if (!reminder) reminderNote = ` Turn on Custom Reminders below to be reminded at ${habit.reminderTimes.join(' and ')}.`;
+    }
+    setFillNote({ tone: 'done', text: `${result.source === 'ai' ? 'HabitAI filled in the form from your description.' : 'The form is filled in from your description.'} Check each part below, then tap Add habit.${reminderNote}` });
+  };
+
   const addHabit = async () => {
     if (adding) return;
     if (!name.trim()) { showMessage('Habit name required', 'Give your new habit a name first.'); return; }
@@ -241,6 +294,8 @@ export default function AddScreen() {
 
   const resetForm = () => {
     setName('');
+    setDescription('');
+    setFillNote(null);
     setChosenProof(null);
     setCategory(categories[0]?.label ?? 'Health');
     setFrequency('Daily');
@@ -265,7 +320,7 @@ export default function AddScreen() {
   const categoryIcon = (chosenCategory?.icon || 'ellipse-outline') as keyof typeof Ionicons.glyphMap;
   const scheduleText = frequency === 'Custom' ? `${customFrequency} · ${repeatDays.join(', ') || 'no days'}` : frequency;
   const close = () => {
-    if (name.trim()) {
+    if (name.trim() || description.trim()) {
       showAlert('Discard habit?', 'Your current entries will be cleared.', [{ text: 'Keep editing', style: 'cancel' }, { text: 'Discard', style: 'destructive', onPress: () => router.back() }]);
     } else router.back();
   };
@@ -346,10 +401,50 @@ export default function AddScreen() {
       </Pressable>
     </View>
 
-    {section(2, 'Or make your own', 'Name it, then pick Health or Academics.')}
+    {section(2, 'Or make your own', 'Describe it in your own words, or name it and pick Health or Academics.')}
     <View style={[styles.card, dark.card]}>
+      <View style={[styles.describeBox, dark.describeBox]}>
+        <View style={styles.describeHead}>
+          <Ionicons name="sparkles" size={15} color={accent} />
+          <Text style={[styles.describeTitle, dark.describeTitle]}>Describe your habit</Text>
+        </View>
+        <Text style={[styles.describeHint, dark.describeHint]}>Say what, when and how often, in English or Filipino. HabitAI fills in the form for you to check.</Text>
+        <TextInput
+          value={description}
+          onChangeText={setDescription}
+          placeholder="e.g., Study 30 minutes on weekdays at 8 PM"
+          placeholderTextColor="#A19AAA"
+          style={[styles.input, styles.describeInput, dark.input, descriptionFocused && styles.inputFocused, WEB_NO_RING]}
+          multiline
+          maxLength={200}
+          submitBehavior="blurAndSubmit"
+          returnKeyType="done"
+          onSubmitEditing={() => void fillFromDescription()}
+          onKeyPress={(event) => {
+            // Web: Enter fills in the form, as the keyboard's Done does on a phone.
+            const key = event.nativeEvent as unknown as { key: string; shiftKey?: boolean };
+            if (Platform.OS === 'web' && key.key === 'Enter' && !key.shiftKey) {
+              event.preventDefault();
+              void fillFromDescription();
+            }
+          }}
+          onFocus={() => setDescriptionFocused(true)}
+          onBlur={() => setDescriptionFocused(false)}
+          accessibilityLabel="Describe your habit"
+        />
+        <Pressable style={({ pressed }) => [styles.describeButton, (describing || description.trim().length < 2) && styles.describeButtonDisabled, pressed && styles.pressed]} onPress={() => void fillFromDescription()} disabled={describing || description.trim().length < 2} accessibilityRole="button" accessibilityLabel="Fill in the form from your description" accessibilityState={{ disabled: describing || description.trim().length < 2, busy: describing }}>
+          {describing ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="color-wand-outline" size={17} color="#FFFFFF" />}
+          <Text style={styles.describeButtonText}>{describing ? 'Filling in…' : 'Fill in for me'}</Text>
+        </Pressable>
+        {fillNote ? (
+          <View style={[styles.fillNote, dark.fillNote, fillNote.tone === 'warning' && [styles.fillNoteWarning, dark.fillNoteWarning]]} accessibilityLiveRegion="polite">
+            <Ionicons name={fillNote.tone === 'warning' ? 'information-circle' : 'checkmark-circle'} size={16} color={fillNote.tone === 'warning' ? '#C07A1C' : '#2F9E6E'} />
+            <Text style={[styles.fillNoteText, dark.fillNoteText, fillNote.tone === 'warning' && [styles.fillNoteTextWarning, dark.fillNoteTextWarning]]}>{fillNote.text}</Text>
+          </View>
+        ) : null}
+      </View>
       <Text style={[styles.fieldLabel, dark.fieldLabel]}>Habit name</Text>
-      <TextInput value={name} onChangeText={setName} placeholder="e.g., Study for 30 minutes" placeholderTextColor="#A19AAA" style={[styles.input, dark.input, nameFocused && styles.inputFocused, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null]} maxLength={40} onFocus={() => setNameFocused(true)} onBlur={() => setNameFocused(false)} accessibilityLabel="Habit name" />
+      <TextInput value={name} onChangeText={setName} placeholder="e.g., Study for 30 minutes" placeholderTextColor="#A19AAA" style={[styles.input, dark.input, nameFocused && styles.inputFocused, WEB_NO_RING]} maxLength={40} onFocus={() => setNameFocused(true)} onBlur={() => setNameFocused(false)} accessibilityLabel="Habit name" />
       <Text style={[styles.counter, dark.counter]}>{name.length}/40</Text>
       <Text style={[styles.fieldLabel, dark.fieldLabel]}>Category</Text>
       <View style={styles.categoryGrid}>
@@ -552,6 +647,18 @@ const baseStyles = StyleSheet.create(withReadableText({
   input: { minHeight: 52, backgroundColor: '#FAF9FD', borderRadius: 14, borderWidth: 1.5, borderColor: '#E6E2F0', paddingHorizontal: 14, fontSize: 16, color: '#1F1C26' },
   inputFocused: { borderColor: '#8E7AE8', backgroundColor: '#FFFFFF' },
   counter: { alignSelf: 'flex-end', fontSize: 11, fontWeight: '700', color: '#8A8497', marginTop: 5, marginBottom: 8 },
+  describeBox: { backgroundColor: '#F6F3FF', borderRadius: 16, borderWidth: 1, borderColor: '#E6E0FB', padding: 12, gap: 9, marginBottom: 16 },
+  describeHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  describeTitle: { fontSize: 14, fontWeight: '900', color: '#3B3650' },
+  describeHint: { fontSize: 12, lineHeight: 17, fontWeight: '600', color: '#7A7488' },
+  describeInput: { minHeight: 64, paddingTop: 12, paddingBottom: 12, textAlignVertical: 'top' },
+  describeButton: { minHeight: 44, borderRadius: 12, backgroundColor: '#5B42D8', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 14 },
+  describeButtonDisabled: { opacity: 0.45 },
+  describeButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
+  fillNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, padding: 10, borderRadius: 12, backgroundColor: '#E3F6EC' },
+  fillNoteWarning: { backgroundColor: '#FFF6E5' },
+  fillNoteText: { flex: 1, fontSize: 12, lineHeight: 17, fontWeight: '700', color: '#22704F' },
+  fillNoteTextWarning: { color: '#8A5A12' },
   moreText: { fontSize: 13, fontWeight: '800', color: '#5B42D8' },
   moreLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, minHeight: 40, marginTop: 6 },
   templateList: { gap: 8, marginTop: 12 },
@@ -676,6 +783,13 @@ const darkStyles = StyleSheet.create({
   fieldLabel: { color: '#E6E1F0' },
   input: { ...darkField, color: '#F2EFF8' },
   counter: darkMuted,
+  describeBox: { backgroundColor: '#211C33', borderColor: '#352C52' },
+  describeTitle: darkInk,
+  describeHint: darkMuted,
+  fillNote: { backgroundColor: '#1D3028' },
+  fillNoteWarning: { backgroundColor: '#3A2C1C' },
+  fillNoteText: { color: '#7FD3A2' },
+  fillNoteTextWarning: { color: '#F2C27A' },
   moreText: darkLink,
   templateRow: { backgroundColor: '#25212E', borderColor: '#3B3647' },
   templateTitle: darkInk,

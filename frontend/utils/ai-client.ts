@@ -1,8 +1,9 @@
 // One client for every AI feature. The backend builds the student's habit context
 // from the database, so screens only send the question (and the device time zone).
 import { ApiRequestError, apiRequest, getAuthenticatedHeaders } from '@/authentication/authService';
-import type { ChatAnswer } from '@/components/ai-chat';
-import type { PlannedHabit } from '@/hooks/app-state/types';
+import type { ChatAnswer, ChatTurn } from '@/components/ai-chat';
+import type { HabitProof, PlannedHabit } from '@/hooks/app-state/types';
+import { normalizedProof } from '@/utils/habit-templates';
 import { readPlannedHabits } from '@/utils/planned-habits';
 
 export type AiMode = 'assistant' | 'coach' | 'support';
@@ -35,12 +36,13 @@ function toFailure(error: unknown): AiFailure {
   return { ok: false, status: 0, message: 'Could not reach the AI service. Check your connection and try again.' };
 }
 
-export async function askAi(mode: AiMode, question: string): Promise<AiAnswer> {
+/** An answer from the server's AI; `history` is the chat so far (components/ai-chat.tsx chatHistory), for a follow-up. */
+export async function askAi(mode: AiMode, question: string, history: ChatTurn[] = []): Promise<AiAnswer> {
   try {
     const result = await apiRequest<{ answer?: string; tokens?: number; tokenHistory?: object[] }>('/api/insights/assistant', {
       method: 'POST',
       headers: await getAuthenticatedHeaders(),
-      body: JSON.stringify({ mode, question: question.trim().slice(0, 500) || undefined, timeZone: deviceTimeZone() }),
+      body: JSON.stringify({ mode, question: question.trim().slice(0, 500) || undefined, ...(history.length ? { history } : {}), timeZone: deviceTimeZone() }),
       timeoutMs: AI_TIMEOUT_MS,
     });
     return result.answer ? { ok: true, answer: result.answer, tokens: result.tokens, tokenHistory: result.tokenHistory } : { ok: false, status: 502, message: 'The AI returned an empty answer. Please try again.' };
@@ -56,11 +58,11 @@ export const COACH_COST = 10;
  * One AI Coach answer, as the chat shows it. The server charges the tokens before it asks the AI
  * and returns them when the AI fails, so the balance shown is always the server's.
  */
-export async function askCoach(question: string, wallet: { tokens: number; applyWallet: (wallet: { tokens?: number; tokenHistory?: object[] }) => void }): Promise<ChatAnswer> {
+export async function askCoach(question: string, wallet: { tokens: number; applyWallet: (wallet: { tokens?: number; tokenHistory?: object[] }) => void }, history: ChatTurn[] = []): Promise<ChatAnswer> {
   if (wallet.tokens < COACH_COST) {
     return { ok: false, tone: 'warning', message: `A Coach answer costs ${COACH_COST} tokens and you have ${wallet.tokens}. Check in your habits or claim your daily reward to earn more.` };
   }
-  const result = await askAi('coach', question);
+  const result = await askAi('coach', question, history);
   if (result.ok) {
     wallet.applyWallet(result);
     return { ok: true, answer: result.answer, note: `${COACH_COST} tokens used` };
@@ -73,6 +75,68 @@ export async function askCoach(question: string, wallet: { tokens: number; apply
   // out), and the server may still have charged and answered, so the tokens are not promised back.
   if (result.status === 0 || result.status === 402) return { ok: false, message: result.message };
   return { ok: false, message: `${result.message} Your tokens were not spent.` };
+}
+
+/**
+ * A habit read from the student's own description ("Describe your habit" on the Add tab), for the
+ * form to fill in: Weekly and Custom come with their days, reminder times as "07:00 PM".
+ */
+export type DescribedHabit = { label: string; category: string; frequency: 'Daily' | 'Weekly' | 'Custom'; days: string[]; reminderTimes: string[]; proof: HabitProof; start: 'today' | 'tomorrow' };
+
+const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const REMINDER_TIME = /^(0[1-9]|1[0-2]):[0-5]\d (AM|PM)$/;
+
+function readProof(value: unknown): HabitProof | null {
+  const proof = value && typeof value === 'object' ? value as { type?: unknown; minutes?: unknown; steps?: unknown } : null;
+  if (proof?.type === 'timer' && typeof proof.minutes === 'number' && Number.isFinite(proof.minutes)) return normalizedProof({ type: 'timer', minutes: proof.minutes });
+  if (proof?.type === 'steps' && typeof proof.steps === 'number' && Number.isFinite(proof.steps)) return normalizedProof({ type: 'steps', steps: proof.steps });
+  return proof?.type === 'photo' ? { type: 'photo' } : null;
+}
+
+/** The server's reading, checked: null when it has no name or proof. */
+export function readDescribedHabit(value: unknown): DescribedHabit | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const label = typeof raw.label === 'string' ? raw.label.replace(/\s+/g, ' ').trim().slice(0, 40) : '';
+  const proof = readProof(raw.proof);
+  if (!label || !proof) return null;
+  const listed = Array.isArray(raw.days) ? raw.days : [];
+  const days = WEEK_DAYS.filter((day) => listed.includes(day));
+  const frequency = (raw.frequency === 'Weekly' || raw.frequency === 'Custom') && days.length ? raw.frequency : 'Daily';
+  return {
+    label,
+    category: typeof raw.category === 'string' ? raw.category : '',
+    frequency,
+    days: frequency === 'Daily' ? [] : days,
+    reminderTimes: (Array.isArray(raw.reminderTimes) ? raw.reminderTimes : []).filter((time): time is string => typeof time === 'string' && REMINDER_TIME.test(time)).slice(0, 2),
+    proof,
+    start: raw.start === 'tomorrow' ? 'tomorrow' : 'today',
+  };
+}
+
+/**
+ * "Describe your habit": the server reads one sentence (with the AI, or its own rules without it)
+ * into the habit form's fields. `source` says which one read it. A 422 is the server's reason the
+ * text is not a habit.
+ */
+export async function parseHabit(text: string): Promise<{ ok: true; habit: DescribedHabit; source: 'ai' | 'rules' } | AiFailure> {
+  try {
+    const result = await apiRequest<{ habit?: unknown; source?: string }>('/api/habit/parse', {
+      method: 'POST',
+      headers: await getAuthenticatedHeaders(),
+      body: JSON.stringify({ text: text.trim().slice(0, 200) }),
+      timeoutMs: 25000,
+    });
+    const habit = readDescribedHabit(result.habit);
+    if (!habit) return { ok: false, status: 502, message: 'HabitAI could not read that description.' };
+    return { ok: true, habit, source: result.source === 'ai' ? 'ai' : 'rules' };
+  } catch (error) {
+    if (error instanceof ApiRequestError && error.status === 422) {
+      const payload = error.payload as { error?: unknown } | undefined;
+      return { ok: false, status: 422, message: (typeof payload?.error === 'string' && payload.error) || 'That does not look like a habit. Try something like "Walk 3,000 steps every morning".' };
+    }
+    return toFailure(error);
+  }
 }
 
 export async function classifyHabit(name: string, options: { category?: string; categories?: string[] } = {}): Promise<{ ok: true; isHabit: boolean; isBadHabit: boolean; categoryFits: boolean; suggestedCategory: string; reason: string } | AiFailure> {
