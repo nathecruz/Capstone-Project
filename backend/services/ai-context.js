@@ -3,8 +3,10 @@
 // Habits last one week (services/habit-week.js): this week's habits are listed apart from those of
 // the past 4 weeks, which are only history.
 import { accountStreak } from './account-streak.js';
-import { hasHabitEnded } from './habit-week.js';
+import { habitDeadlineMinutes, isPastHabitDeadline } from './completion-date.js';
+import { hasHabitEnded, isHabitActiveOn } from './habit-week.js';
 import { habitFromRow, habitSchedule, isScheduledDay } from './streaks.js';
+import { getHabitReminderTimes } from './web-push-reminders.js';
 
 const PAST_WEEKS_DAYS = 28;
 
@@ -19,6 +21,37 @@ export function dateKeyInZone(date, timeZone = 'Asia/Manila') {
 export function shiftDay(dateKey, days) {
   const [year, month, day] = dateKey.split('-').map(Number);
   return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+
+/** A minute of the day as the app writes times, e.g. "07:30 PM". */
+function clock(minutes) {
+  const hour = Math.floor(minutes / 60) % 24;
+  return `${String(hour % 12 || 12).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`;
+}
+
+/** The time of day in the zone, as "07:30 PM". */
+export function clockInZone(date, timeZone = 'Asia/Manila') {
+  try {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date).map(({ type, value }) => [type, Number(value)]));
+    return clock((parts.hour % 24) * 60 + parts.minute);
+  } catch {
+    return clock(date.getUTCHours() * 60 + date.getUTCMinutes());
+  }
+}
+
+/**
+ * Where a habit stands today, as a check-in sees it (services/check-ins.js): done; open (due and
+ * still accepted, until `closesAt`); missed (due, but its last reminder time passed without a
+ * check-in, so it can no longer be checked in today); not due today (not on its schedule today);
+ * or not started yet (its start date is later).
+ */
+function todayStatus(habit, fields, dates, today, timeZone, now) {
+  if (dates.has(today)) return { checkInToday: 'done', checkInClosesAt: null };
+  if (!isHabitActiveOn(fields, today)) return { checkInToday: 'not started yet', checkInClosesAt: null };
+  if (!isScheduledDay(habitSchedule(fields), today)) return { checkInToday: 'not due today', checkInClosesAt: null };
+  if (isPastHabitDeadline(habit, today, timeZone, now)) return { checkInToday: 'missed', checkInClosesAt: null };
+  const deadline = habitDeadlineMinutes(habit);
+  return { checkInToday: 'open', checkInClosesAt: deadline === null ? 'end of the day' : clock(deadline) };
 }
 
 function daysBetween(fromKey, toKey) {
@@ -52,8 +85,9 @@ function weekResults(habit, dates, from, lastDay) {
 
 /**
  * @param {object} input
- * @param {{id:string,label:string,category?:string,meta?:string,frequency?:string,start_date?:string,activeUntil?:string,reminder_days?:string[],streak?:number,reminderEnabled?:boolean,reminderTime?:string}[]} input.habits
- *   every habit, also those whose week has ended (`activeUntil`, YYYY-MM-DD)
+ * @param {{id:string,label:string,category?:string,meta?:string,frequency?:string,start_date?:string,activeUntil?:string,reminder_days?:string[],streak?:number,reminderEnabled?:boolean,reminderTime?:string,reminderTimes?:string[]}[]} input.habits
+ *   every habit, also those whose week has ended (`activeUntil`, YYYY-MM-DD); `reminderTimes` (all
+ *   of them, from the saved app state) gives the last one, when a check-in closes
  * @param {{habitId:string,date:string}[]} input.completions  check-ins (YYYY-MM-DD) of the last 4 weeks, any order
  * @param {{title:string,category?:string,progress?:number,status?:string,details?:object}[]} [input.goals]
  * @param {Date} [input.now]
@@ -92,16 +126,18 @@ export function buildHabitContext({ habits = [], completions = [], goals = [], n
     }
   }
 
-  const habitFacts = current.slice(0, 25).map(({ habit, dates }) => {
+  const habitFacts = current.slice(0, 25).map(({ habit, fields, dates }) => {
     const sorted = [...dates].filter((date) => date <= today).sort();
     const lastCheckIn = sorted.at(-1) ?? null;
+    const times = habit.reminderEnabled ? getHabitReminderTimes(habit).map((time) => clock(time.hour * 60 + time.minute)) : [];
     return {
       name: String(habit.label || 'Habit').slice(0, 60),
       category: habit.category || 'Other',
       frequency: habitFrequency(habit.meta),
-      reminder: habit.reminderEnabled ? habit.reminderTime || 'on' : 'off',
+      reminderTimes: times.length ? times : 'off',
       currentStreakDays: Math.max(0, Number(habit.streak) || 0),
       doneToday: dates.has(today),
+      ...todayStatus(habit, fields, dates, today, timeZone, now),
       last7Days: last7.map((day) => (dates.has(day) ? 1 : 0)),
       checkInsLast14Days: sorted.filter((date) => date >= previous7Start).length,
       lastCheckIn,
@@ -118,23 +154,31 @@ export function buildHabitContext({ habits = [], completions = [], goals = [], n
     ...weekResults(fields, dates, pastStart, fields.activeUntil),
   }));
 
-  const daily = habitFacts.filter((habit) => habit.frequency === 'Daily' && !habit.doneToday);
-  const needsAttention = daily.sort((a, b) => (b.daysSinceLastCheckIn ?? 99) - (a.daysSinceLastCheckIn ?? 99))[0];
+  // The habit to do next today: of the open ones, the one whose check-in closes first, then the one
+  // gone longest without a check-in.
+  const closesAt = new Map(current.slice(0, 25).map(({ habit }, index) => [habitFacts[index], habitDeadlineMinutes(habit) ?? 24 * 60]));
+  const open = habitFacts.filter((habit) => habit.checkInToday === 'open');
+  const needsAttention = [...open].sort((a, b) => closesAt.get(a) - closesAt.get(b) || (b.daysSinceLastCheckIn ?? 99) - (a.daysSinceLastCheckIn ?? 99))[0];
+  const count = (status) => habitFacts.filter((habit) => habit.checkInToday === status).length;
 
   return {
     today,
     weekday,
-    note: 'Habits last one week (Monday to Sunday). habits are this week\'s; pastHabits ended with their week and are history only (the student no longer tracks them), counted up to the day they ended. last7Days lists check-ins from 6 days ago to today (1 = checked in). accountStreakDays counts days in a row with any check-in.',
+    localTime: clockInZone(now, timeZone),
+    note: 'Habits last one week (Monday to Sunday). habits are this week\'s; pastHabits ended with their week and are history only (the student no longer tracks them), counted up to the day they ended. localTime is the student\'s time now. checkInToday says where each habit stands today: done; open (due today and it can still be checked in, until checkInClosesAt); missed (due today, but its last reminder time passed without a check-in, so it can no longer be checked in today); not due today (not on its schedule today); not started yet. last7Days lists check-ins from 6 days ago to today (1 = checked in). accountStreakDays counts days in a row with any check-in.',
     summary: {
       habitsTracked: current.length,
+      dueToday: habitFacts.length - count('not due today') - count('not started yet'),
       doneToday: habitFacts.filter((habit) => habit.doneToday).length,
+      stillOpenToday: open.length,
+      missedToday: count('missed'),
       checkInsLast7Days: checkInsLast7,
       checkInsPrevious7Days: checkInsPrevious7,
       bestCurrentStreakDays: Math.max(0, ...habitFacts.map((habit) => habit.currentStreakDays)),
       accountStreakDays: Number.isFinite(accountStreakDays)
         ? accountStreakDays
         : accountStreak(all.map(({ fields, dates }) => ({ ...fields, completionDates: [...dates] })), today, frozenDays, keptDays),
-      dailyHabitNeedingAttention: needsAttention?.name ?? null,
+      habitToDoNext: needsAttention?.name ?? null,
     },
     habits: habitFacts,
     pastHabits,

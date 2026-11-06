@@ -10,11 +10,13 @@ import {
   BAD_HABIT_SYSTEM,
   DEFAULT_HABIT_CATEGORIES,
   GOAL_PLANNER_SYSTEM,
+  appLanguage,
   assistantContext,
   badHabitJsonSchema,
   badHabitPrompt,
   buildUserPrompt,
   forAudience,
+  forLanguage,
   cleanAnswer,
   goalPlanJsonSchemaFor,
   goalPlannerPrompt,
@@ -22,7 +24,7 @@ import {
   plannedHabitCount,
   systemPromptFor,
 } from '../services/ai-prompts.js';
-import { adviceKey, habitAdviceCache } from '../services/advice-cache.js';
+import { adviceKey, createAdviceCache, habitAdviceCache } from '../services/advice-cache.js';
 import { refreshSnapshot } from '../services/app-state-store.js';
 import { forecastFor } from '../services/forecast-rules.js';
 import { HABIT_ANALYSIS_SYSTEM, habitAnalysisJsonSchema, habitAnalysisPrompt, habitAnalysisSchema, habitStats, mlSignal, mlSummary } from '../services/habit-analysis.js';
@@ -38,11 +40,36 @@ import { COACH_TOKEN_COST, getWallet, refundCoachAnswer, spendTokens } from '../
 const DEFAULT_TIME_ZONE = 'Asia/Manila';
 
 /**
- * The student's habits (each with its last active day, `activeUntil`: habits last one week), last
- * 4 weeks of check-ins and goals, read from the database.
+ * What the AI reads from the student's saved app state: every reminder time of each habit (the
+ * habits table keeps only the first, and the last one closes the day's check-in), and the language
+ * the app is set to (services/ai-prompts.js appLanguage).
  */
-export async function loadAiContext(userId, timeZone = DEFAULT_TIME_ZONE) {
+export async function loadSavedState(userId) {
+  const result = await query(`SELECT state_json->'habits' AS habits, state_json->'preferences'->>'language' AS language FROM user_app_state WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 1`, [userId]);
+  const row = result.rows[0];
+  const habits = Array.isArray(row?.habits) ? row.habits : [];
+  return {
+    reminderTimes: new Map(habits.filter((habit) => habit?.id && Array.isArray(habit.reminderTimes)).map((habit) => [String(habit.id), habit.reminderTimes])),
+    language: appLanguage(row?.language),
+  };
+}
+
+/** The saved state, or nothing to add when it cannot be read: the AI still answers without it. */
+function savedStateOrEmpty(userId) {
+  return loadSavedState(userId).catch((error) => {
+    logAiError('saved state', error);
+    return { reminderTimes: new Map(), language: null };
+  });
+}
+
+/**
+ * The student's habits (each with its last active day, `activeUntil`: habits last one week), last
+ * 4 weeks of check-ins and goals, read from the database. `saved` (loadSavedState) gives each
+ * habit's reminder times, so the AI knows which habits can still be checked in today.
+ */
+export async function loadAiContext(userId, timeZone = DEFAULT_TIME_ZONE, saved = null) {
   const today = dateKeyInZone(new Date(), timeZone);
+  const reminderTimes = (saved ?? await savedStateOrEmpty(userId)).reminderTimes;
   const [habits, completions, goals] = await Promise.all([
     query('SELECT id, label, category, meta, frequency, start_date, reminder_days, reminder_enabled AS "reminderEnabled", reminder_time AS "reminderTime", active_until AS "activeUntil" FROM habits WHERE user_id=$1 ORDER BY sort_order, id', [userId]),
     query('SELECT habit_id AS "habitId", completed_date::text AS date FROM habit_completions WHERE user_id=$1', [userId]),
@@ -58,7 +85,7 @@ export async function loadAiContext(userId, timeZone = DEFAULT_TIME_ZONE) {
   const habitRows = habits.rows.map((row) => ({ row, id: String(row.id).replace(`${userId}:habit:`, '') }));
   return buildHabitContext({
     // The stored streak is only as fresh as the last sync; compute it from check-ins instead.
-    habits: habitRows.map(({ row, id }) => ({ ...row, id, streak: computeStreak(habitFromRow(row), datesByHabit.get(id) || [], today, frozenDays) })),
+    habits: habitRows.map(({ row, id }) => ({ ...row, id, reminderTimes: reminderTimes.get(id), streak: computeStreak(habitFromRow(row), datesByHabit.get(id) || [], today, frozenDays) })),
     completions: completions.rows.filter((completion) => completion.date >= recentStart),
     goals: goals.rows,
     timeZone,
@@ -118,10 +145,10 @@ function coachWallet(userId, refundOf = null) {
 }
 
 /** The AI's advice for one habit (two tries for valid JSON), or null when it cannot give any. */
-async function writeHabitAdvice(stats, ml, role) {
+async function writeHabitAdvice(stats, ml, role, language) {
   try {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const text = await generateAiText(habitAnalysisPrompt(stats, ml), { system: forAudience(HABIT_ANALYSIS_SYSTEM, role), schema: habitAnalysisJsonSchema, maxOutputTokens: 700, temperature: 0.5 });
+      const text = await generateAiText(habitAnalysisPrompt(stats, ml), { system: forLanguage(forAudience(HABIT_ANALYSIS_SYSTEM, role), language), schema: habitAnalysisJsonSchema, maxOutputTokens: 700, temperature: 0.5 });
       try {
         const parsed = habitAnalysisSchema.safeParse(JSON.parse(text));
         if (parsed.success) return parsed.data;
@@ -134,6 +161,11 @@ async function writeHabitAdvice(stats, ml, role) {
   }
   return null;
 }
+
+// The help assistant's answers to the first question of a chat. They hold no personal data, so the
+// same question (mostly a suggested one) from many students is asked of the AI once every 6 hours.
+const supportAnswers = createAdviceCache({ ttlMs: 6 * 60 * 60 * 1000, maxEntries: 500 });
+const supportKey = (question, role, language) => `${role === 'faculty' ? 'faculty' : 'student'}:${language ?? 'question'}:${String(question ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()}`;
 
 export default function registerAiRoutes(app) {
   app.post('/api/insights/assistant', aiLimiter, async (request, response) => {
@@ -154,16 +186,22 @@ export default function registerAiRoutes(app) {
     let failed = false;
     try {
       const timeZone = input.timeZone || DEFAULT_TIME_ZONE;
-      const [context, plannerHistory] = mode === 'support'
-        ? [{ app: 'HabitAI' }, null] // no personal data is needed to explain the app
-        : await Promise.all([loadAiContext(session.userId, timeZone), mode === 'coach' ? coachHistory(session.userId, timeZone) : null]);
-      // `history`: the chat's last questions and answers, for follow-up questions.
-      const text = await generateAiText(buildUserPrompt({ question: input.question, context: assistantContext(mode, context, plannerHistory), history: input.history }), {
-        system: systemPromptFor(mode, session.role),
-        maxOutputTokens: 800,
-        temperature: 0.6,
-      });
-      answer = cleanAnswer(text);
+      const saved = await savedStateOrEmpty(session.userId);
+      const cacheKey = mode === 'support' && !input.history?.length && input.question ? supportKey(input.question, session.role, saved.language) : null;
+      answer = (cacheKey && supportAnswers.get(cacheKey)) || '';
+      if (!answer) {
+        const [context, plannerHistory] = mode === 'support'
+          ? [{ app: 'HabitAI' }, null] // no personal data is needed to explain the app
+          : await Promise.all([loadAiContext(session.userId, timeZone, saved), mode === 'coach' ? coachHistory(session.userId, timeZone) : null]);
+        // `history`: the chat's last questions and answers, for follow-up questions.
+        const text = await generateAiText(buildUserPrompt({ question: input.question, context: assistantContext(mode, context, plannerHistory), history: input.history }), {
+          system: systemPromptFor(mode, session.role, saved.language),
+          maxOutputTokens: 800,
+          temperature: 0.6,
+        });
+        answer = cleanAnswer(text);
+        if (cacheKey && answer) supportAnswers.set(cacheKey, answer);
+      }
     } catch (error) {
       logAiError(mode, error);
       failed = true;
@@ -201,7 +239,8 @@ export default function registerAiRoutes(app) {
     const { ml, status: mlStatus } = await mlForecast(mlSignal(stats));
 
     // The same habit, facts and forecast on the same day get the advice already written.
-    const cacheKey = adviceKey(session.userId, input.habitId, { day: dateKeyInZone(new Date(), timeZone), role: session.role, stats, ml });
+    const { language } = await savedStateOrEmpty(session.userId);
+    const cacheKey = adviceKey(session.userId, input.habitId, { day: dateKeyInZone(new Date(), timeZone), role: session.role, language, stats, ml });
     // aiStatus: 'ready', 'limited' (over the AI limit for now), 'unavailable' (the AI failed) or 'off' (not configured).
     let ai = habitAdviceCache.get(cacheKey);
     let aiStatus = ai ? 'ready' : 'off';
@@ -209,7 +248,7 @@ export default function registerAiRoutes(app) {
       if (await overAdviceLimit(request, response)) {
         aiStatus = 'limited';
       } else {
-        ai = await writeHabitAdvice(stats, ml, session.role);
+        ai = await writeHabitAdvice(stats, ml, session.role, language);
         aiStatus = ai ? 'ready' : 'unavailable';
         if (ai) habitAdviceCache.set(cacheKey, ai);
       }
@@ -303,7 +342,7 @@ export default function registerAiRoutes(app) {
     let read = null;
     if (isAiConfigured() && !request.aiLimited) {
       try {
-        read = readAiHabit(await generateAiText(habitParsePrompt(input.text), { system: forAudience(HABIT_PARSE_SYSTEM, session.role), schema: habitParseJsonSchema, maxOutputTokens: 300, temperature: 0, timeoutMs: 10_000 }));
+        read = readAiHabit(await generateAiText(habitParsePrompt(input.text), { system: forAudience(HABIT_PARSE_SYSTEM, session.role), schema: habitParseJsonSchema, maxOutputTokens: 300, temperature: 0, timeoutMs: 10_000, budgetMs: 15_000 }));
       } catch (error) {
         logAiError('habit parse', error);
       }
@@ -325,7 +364,7 @@ export default function registerAiRoutes(app) {
     let aiQuestion = null;
     if (isAiConfigured() && !request.aiLimited) {
       try {
-        aiQuestion = readAiQuestion(await generateAiText(followUpPrompt(habit), { system: forAudience(FOLLOW_UP_SYSTEM, session.role), schema: followUpJsonSchema, maxOutputTokens: 200, temperature: 0.4, timeoutMs: 10_000 }));
+        aiQuestion = readAiQuestion(await generateAiText(followUpPrompt(habit), { system: forAudience(FOLLOW_UP_SYSTEM, session.role), schema: followUpJsonSchema, maxOutputTokens: 200, temperature: 0.4, timeoutMs: 10_000, budgetMs: 15_000 }));
       } catch (error) {
         logAiError('habit follow-up', error);
       }
@@ -343,7 +382,7 @@ export default function registerAiRoutes(app) {
     let insight = null;
     if (isAiConfigured() && !request.aiLimited) {
       try {
-        insight = readInsight(await generateAiText(insightPrompt(habit), { system: forAudience(INSIGHT_SYSTEM, session.role), schema: insightJsonSchema, maxOutputTokens: 200, temperature: 0.5, timeoutMs: 10_000 }));
+        insight = readInsight(await generateAiText(insightPrompt(habit), { system: forAudience(INSIGHT_SYSTEM, session.role), schema: insightJsonSchema, maxOutputTokens: 200, temperature: 0.5, timeoutMs: 10_000, budgetMs: 15_000 }));
       } catch (error) {
         logAiError('habit insight', error);
       }

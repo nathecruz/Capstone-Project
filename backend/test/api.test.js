@@ -1305,6 +1305,31 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
       groqAnswer = 'not json';
       const ruled = await describe('Walk 3,000 steps every morning');
       assert.deepEqual([ruled.status, ruled.body.source, ruled.body.habit.label, ruled.body.habit.proof], [200, 'rules', 'Walk 3,000 steps', { type: 'steps', steps: 3000 }]);
+
+      // The help assistant's answer to a first question holds no personal data: it is kept, and the
+      // same question is not asked of the AI again.
+      const help = async (asker) => (await fetch(`${aiBase}/api/insights/assistant`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...asker }, body: JSON.stringify({ question: 'How do I add a new habit?', mode: 'support' }) })).json();
+      groqAnswer = 'Open the Add tab and tap a ready-made habit.';
+      const helpCalls = asked.length;
+      assert.equal((await help(headers)).answer, 'Open the Add tab and tap a ready-made habit.');
+      groqAnswer = 'Another answer.';
+      const { headers: other } = await student('Hana', 'Help');
+      assert.equal((await help(other)).answer, 'Open the Add tab and tap a ready-made habit.', 'another student gets the kept answer');
+      assert.equal(asked.length, helpCalls + 1, 'the AI was asked once');
+
+      // An app set to Tagalog gets replies in Filipino, and the AI reads every reminder time of a
+      // habit, which says until when it can be checked in today.
+      const { headers: tala } = await student('Tala', 'Tagalog');
+      await request('/api/app-state', { method: 'PUT', headers: tala, body: JSON.stringify({ ...appState, preferences: { language: 'Tagalog' }, habits: [{ ...appState.habits[0], id: 'pray', label: 'Pray', reminderEnabled: true, reminderTime: '06:00 AM', reminderTimes: ['06:00 AM', '11:58 PM'] }] }) });
+      groqAnswer = 'Magdasal bago matulog.';
+      const tagalog = await fetch(`${aiBase}/api/insights/assistant`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...tala }, body: JSON.stringify({ question: 'What should I do tonight?', mode: 'assistant', timeZone: 'UTC' }) });
+      assert.equal(tagalog.status, 200);
+      const [tagalogSystem, tagalogUser] = asked.at(-1).messages;
+      assert.match(tagalogSystem.content, /set the HabitAI app to Tagalog: write the reply in Filipino/);
+      const data = JSON.parse(tagalogUser.content.split('\n')[1]);
+      assert.deepEqual(data.habits.map((habit) => habit.reminderTimes), [['06:00 AM', '11:58 PM']]);
+      assert.ok(['open', 'missed', 'done'].includes(data.habits[0].checkInToday), JSON.stringify(data.habits[0]));
+      assert.match(data.localTime, /^\d{2}:\d{2} (AM|PM)$/);
     } finally {
       aiServer.kill();
       await aiExit;
