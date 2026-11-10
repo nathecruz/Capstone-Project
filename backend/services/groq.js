@@ -38,41 +38,78 @@ async function groqRequest(apiKey, path, { body, timeoutMs }) {
   });
   if (!response.ok) {
     const detail = await response.json().catch(() => null);
-    throw Object.assign(new Error(detail?.error?.message || `Groq request failed with HTTP ${response.status}.`), { status: response.status, code: detail?.error?.code });
+    // How long a rate limit lasts, in seconds.
+    const retryAfter = Number(response.headers.get('retry-after'));
+    throw Object.assign(new Error(detail?.error?.message || `Groq request failed with HTTP ${response.status}.`), {
+      status: response.status,
+      code: detail?.error?.code,
+      ...(Number.isFinite(retryAfter) && retryAfter > 0 ? { retryAfterSeconds: retryAfter } : {}),
+    });
   }
   return response.json();
 }
 
-/** Picks GROQ_MODEL when the key may use it, otherwise the first available fallback. */
+/**
+ * Picks GROQ_MODEL when the key may use it, otherwise the first available fallback. `candidates`
+ * are the models to try in turn: the chosen one, then the other FALLBACK_MODELS the key may use.
+ */
 async function chooseModel(apiKey) {
   const configured = getAiModel();
   const list = await groqRequest(apiKey, '/models', { timeoutMs: 15000 });
   const available = (list?.data ?? []).filter((model) => model?.active !== false).map((model) => model.id).filter(isChatModel);
   const model = [configured, ...FALLBACK_MODELS].find((id) => available.includes(id)) ?? available[0] ?? null;
-  return { configured, model, available };
+  const candidates = model ? [model, ...FALLBACK_MODELS.filter((id) => id !== model && available.includes(id))] : [];
+  return { configured, model, available, candidates };
 }
 
 let cachedChoice = null;
 
-/** The model to call. Looked up once per key; a failed lookup falls back to GROQ_MODEL and is retried later. */
-async function resolveModel(apiKey) {
+/** The models to try, best first. Looked up once per key; a failed lookup tries GROQ_MODEL alone and is retried later. */
+async function resolveCandidates(apiKey) {
   const configured = getAiModel();
   if (cachedChoice?.apiKey !== apiKey || cachedChoice?.configured !== configured) {
-    const promise = chooseModel(apiKey).then((choice) => choice.model ?? configured).catch(() => {
+    const promise = chooseModel(apiKey).then((choice) => (choice.candidates.length ? choice.candidates : [configured])).catch(() => {
       if (cachedChoice?.promise === promise) cachedChoice = null;
-      return configured;
+      return [configured];
     });
     cachedChoice = { apiKey, configured, promise };
   }
   return cachedChoice.promise;
 }
 
+// Groq limits each model on its own: requests and tokens a minute and a day. A model that answers
+// 429 rests until its Retry-After (a minute without one, 15 minutes at most) while the next
+// candidate answers, so a busy day (a class taking the survey) spreads over the models instead of
+// failing. Rests are kept per key, in memory.
+const RATE_LIMIT_REST_MS = 60_000;
+const MAX_REST_MS = 15 * 60_000;
+// A request tries at most this many models, and starts no new try after its time budget.
+const MAX_MODELS_PER_REQUEST = 3;
+const restingUntil = new Map();
+const restKey = (apiKey, model) => `${apiKey.slice(-12)}:${model}`;
+
+function restModel(apiKey, model, error, now = Date.now()) {
+  const seconds = Number(error?.retryAfterSeconds);
+  const until = now + Math.min(MAX_REST_MS, Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : RATE_LIMIT_REST_MS);
+  if ((restingUntil.get(restKey(apiKey, model)) ?? 0) <= now) {
+    console.warn(`[ai] ${model} is rate-limited by Groq for about ${Math.round((until - now) / 1000)} s; the next model answers meanwhile.`);
+  }
+  restingUntil.set(restKey(apiKey, model), until);
+}
+
+/** The candidates in the order to try: those not resting, then the resting ones, the soonest free first. */
+function inTurn(apiKey, candidates, now = Date.now()) {
+  const rest = (model) => restingUntil.get(restKey(apiKey, model)) ?? 0;
+  return [...candidates.filter((model) => rest(model) <= now), ...candidates.filter((model) => rest(model) > now).sort((left, right) => rest(left) - rest(right))];
+}
+
 /**
  * Calls Groq and returns the response text, or null when no API key is configured.
  * `system` goes into the system message so user-supplied text can never replace it;
  * `schema` (JSON Schema) turns on JSON mode and is given to the model as the required shape
- * (callers still validate the result). Transient failures are retried once, and a model that
- * disappeared (404) is swapped for an available one.
+ * (callers still validate the result). A server error or timeout gets one more try; a rate limit
+ * (429) moves on to the next available model; a model that disappeared (404) is swapped for an
+ * available one. No new try starts after `budgetMs`, so the app's wait (70 s) is never reached.
  */
 export async function generateAiText(prompt, {
   json = false,
@@ -81,6 +118,7 @@ export async function generateAiText(prompt, {
   maxOutputTokens = 700,
   temperature,
   timeoutMs = Math.max(5000, Number(process.env.EXTERNAL_REQUEST_TIMEOUT_MS) || 20000),
+  budgetMs = 40_000,
 } = {}) {
   const apiKey = getGroqApiKey();
   if (!apiKey) return null;
@@ -100,24 +138,42 @@ export async function generateAiText(prompt, {
     ...(wantsJson ? { response_format: { type: 'json_object' } } : {}),
   });
 
-  const model = await resolveModel(apiKey);
-  let result;
-  try {
-    result = await groqRequest(apiKey, '/chat/completions', { body: bodyFor(model), timeoutMs });
-  } catch (error) {
-    if (error?.status === 404) {
-      cachedChoice = null;
-      const replacement = await resolveModel(apiKey);
-      if (replacement === model) throw error;
-      result = await groqRequest(apiKey, '/chat/completions', { body: bodyFor(replacement), timeoutMs });
-    } else {
+  const deadline = Date.now() + budgetMs;
+  const remaining = () => deadline - Date.now();
+  let models = inTurn(apiKey, await resolveCandidates(apiKey));
+  let refreshed = false;
+  let triedAgain = false;
+  let lastError = null;
+  for (let index = 0; index < Math.min(models.length, MAX_MODELS_PER_REQUEST) && remaining() > 1000;) {
+    const model = models[index];
+    try {
+      const result = await groqRequest(apiKey, '/chat/completions', { body: bodyFor(model), timeoutMs: Math.min(timeoutMs, remaining()) });
+      const content = result?.choices?.[0]?.message?.content;
+      return typeof content === 'string' ? content.replace(/<think>[\s\S]*?<\/think>/g, '').trim() : '';
+    } catch (error) {
+      lastError = error;
+      if (error?.status === 404 && !refreshed) {
+        // The model is gone: read the list again and go on with the others.
+        refreshed = true;
+        cachedChoice = null;
+        models = inTurn(apiKey, (await resolveCandidates(apiKey)).filter((id) => id !== model));
+        index = 0;
+        continue;
+      }
       if (!isTransient(error)) throw error;
-      await wait(800);
-      result = await groqRequest(apiKey, '/chat/completions', { body: bodyFor(model), timeoutMs });
+      if (error?.status === 429) restModel(apiKey, model, error);
+      const lastModel = index + 1 >= Math.min(models.length, MAX_MODELS_PER_REQUEST);
+      // One more try on the same model: after a server error or a timeout, or a rate limit with no other model left.
+      if (!triedAgain && (error?.status !== 429 || lastModel)) {
+        triedAgain = true;
+        await wait(800);
+        continue;
+      }
+      triedAgain = false;
+      index += 1;
     }
   }
-  const content = result?.choices?.[0]?.message?.content;
-  return typeof content === 'string' ? content.replace(/<think>[\s\S]*?<\/think>/g, '').trim() : '';
+  throw lastError ?? Object.assign(new Error('The AI service did not answer in time.'), { name: 'TimeoutError' });
 }
 
 /** Logs whether the Groq key works and which model will answer, without generating anything. */
@@ -128,8 +184,8 @@ export async function verifyAi(log = console) {
     return false;
   }
   try {
-    const { configured, model, available } = await chooseModel(apiKey);
-    cachedChoice = { apiKey, configured, promise: Promise.resolve(model ?? configured) };
+    const { configured, model, available, candidates } = await chooseModel(apiKey);
+    cachedChoice = { apiKey, configured, promise: Promise.resolve(candidates.length ? candidates : [configured]) };
     if (!model) {
       log.error('[ai] The Groq API key works, but no chat model is available to it. Check the model permissions of the Groq project.');
       return false;

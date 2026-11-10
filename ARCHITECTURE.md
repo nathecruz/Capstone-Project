@@ -317,8 +317,18 @@ sequenceDiagram
   the Add form's fields with JSON mode and a schema; the server keeps the result within the
   form's limits, and fixed English and Filipino rules read the sentence when the AI is
   unavailable or over its soft limit (30 per 15 minutes).
-- Replies follow the student's language (English, Filipino or Taglish), avoid medical
-  advice and point to the NCMH hotline (1553) if a crisis is mentioned.
+- Replies follow the student's language (English, Filipino or Taglish), or Filipino when the
+  app is set to Tagalog (preferences.language in the saved app state), avoid medical advice and
+  point to the NCMH hotline (1553) if a crisis is mentioned.
+- The USER DATA says what is possible **today**: the student's `localTime`, and for each habit
+  `checkInToday` (done, open until `checkInClosesAt`, missed, not due today, not started yet),
+  from every reminder time in the saved app state. The rules forbid suggesting a habit that can
+  no longer be checked in today.
+- **Rate limits.** Groq limits each model on its own. A model that answers 429 rests for its
+  Retry-After (a minute without one, 15 minutes at most) while the next available model answers
+  (`groq.js`, at most 3 models and 40 seconds a request; 15 seconds for the features that fall
+  back to rules). The help assistant's answer to a first question holds no personal data, so it
+  is kept for 6 hours and the same question from other students does not reach the AI again.
 - The **goal planner** uses Groq JSON mode and gives the model the JSON Schema; the server then
   normalises the plan (lengths, allowed values) and computes due dates from the chosen
   timeline, retrying once if the output is unusable.

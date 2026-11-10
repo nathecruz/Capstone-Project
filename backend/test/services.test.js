@@ -5,7 +5,7 @@ import { dateKeyOr, isTimeZone, originMatcher } from '../config/index.js';
 import { getPeriodRange, periodLabel, periodResetsAt } from '../lib/http.js';
 import { goalPlanSchema } from '../schemas.js';
 import { buildHabitContext, habitFrequency } from '../services/ai-context.js';
-import { CHAT_HISTORY_TURNS, FACULTY_CONTEXT, buildUserPrompt, cleanAnswer, fenced, forAudience, normalizeGoalPlan, systemPromptFor } from '../services/ai-prompts.js';
+import { CHAT_HISTORY_TURNS, FACULTY_CONTEXT, TAGALOG_CONTEXT, appLanguage, buildUserPrompt, cleanAnswer, fenced, forAudience, forLanguage, normalizeGoalPlan, systemPromptFor } from '../services/ai-prompts.js';
 import { keepCompletedGoalSteps, sameState, stableStringify } from '../services/app-state-sync.js';
 import { isValidCompletionDate } from '../services/completion-date.js';
 import { escapeHtml, passwordChangedEmail, passwordResetCodeEmail } from '../services/email-templates.js';
@@ -179,6 +179,47 @@ test('AI context is built from check-ins, not client-reported progress', () => {
   assert.equal(context.habits[1].daysSinceLastCheckIn, 10);
   assert.equal(context.goals[0].nextStep, 'Solve 10 problems');
   assert.equal(habitFrequency('Weekly • Anytime'), 'Weekly');
+});
+
+test('the AI knows the time and where each habit stands today, so it never asks for a missed one', () => {
+  // Wednesday 9:30 PM in Manila.
+  const context = buildHabitContext({
+    now: new Date('2026-09-30T13:30:00Z'),
+    timeZone: 'Asia/Manila',
+    habits: [
+      { id: 'water', label: 'Drink Water', category: 'Health', meta: 'Daily • 07:00 AM, 08:00 PM', reminderEnabled: true, reminderTime: '07:00 AM', reminderTimes: ['07:00 AM', '08:00 PM'] },
+      { id: 'read', label: 'Read', category: 'Academics', meta: 'Selected days • Anytime • Mon, Wed', frequency: 'Custom', reminder_days: ['Mon', 'Wed'] },
+      { id: 'journal', label: 'Journal', category: 'Health', meta: 'Daily • 10:00 PM', reminderEnabled: true, reminderTime: '10:00 PM' },
+      { id: 'gym', label: 'Gym', category: 'Health', meta: 'Selected days • 07:00 AM • Fri', frequency: 'Custom', reminder_days: ['Fri'], reminderEnabled: true, reminderTime: '07:00 AM' },
+      { id: 'walk', label: 'Walk', category: 'Health', meta: 'Daily • 06:00 PM', reminderEnabled: true, reminderTime: '06:00 PM' },
+      { id: 'later', label: 'Stretch', category: 'Health', meta: 'Daily • Anytime', start_date: '2026-10-02' },
+    ],
+    completions: [{ habitId: 'walk', date: '2026-09-30' }, { habitId: 'read', date: '2026-09-21' }],
+  });
+  assert.equal(context.localTime, '09:30 PM');
+  assert.deepEqual(context.habits.map((habit) => [habit.name, habit.checkInToday, habit.checkInClosesAt]), [
+    ['Drink Water', 'missed', null],
+    ['Read', 'open', 'end of the day'],
+    ['Journal', 'open', '10:00 PM'],
+    ['Gym', 'not due today', null],
+    ['Walk', 'done', null],
+    ['Stretch', 'not started yet', null],
+  ]);
+  assert.deepEqual(context.habits[0].reminderTimes, ['07:00 AM', '08:00 PM']);
+  assert.equal(context.habits[1].reminderTimes, 'off');
+  assert.deepEqual([context.summary.dueToday, context.summary.doneToday, context.summary.stillOpenToday, context.summary.missedToday], [4, 1, 2, 1]);
+  assert.equal(context.summary.habitToDoNext, 'Journal', 'the open habit that closes first');
+  assert.match(context.note, /missed \(due today, but its last reminder time passed/);
+  for (const mode of ['assistant', 'coach']) assert.match(systemPromptFor(mode), /Never ask the student to do a habit today that is missed/);
+  assert.doesNotMatch(systemPromptFor('support'), /checkInToday/);
+});
+
+test('replies follow the language the student set the app to', () => {
+  assert.deepEqual(['Tagalog', 'filipino', 'English', '', null, 'Klingon'].map(appLanguage), ['Tagalog', 'Tagalog', null, null, null, null]);
+  assert.ok(systemPromptFor('coach', 'user', 'Tagalog').endsWith(TAGALOG_CONTEXT));
+  assert.ok(systemPromptFor('coach', 'faculty', 'Tagalog').endsWith(`${FACULTY_CONTEXT}\n${TAGALOG_CONTEXT}`));
+  assert.equal(systemPromptFor('support', 'user', null), systemPromptFor('support'));
+  assert.equal(forLanguage('Answer.', 'English'), 'Answer.');
 });
 
 test('prompts keep instructions in the system prompt and fence the question', () => {

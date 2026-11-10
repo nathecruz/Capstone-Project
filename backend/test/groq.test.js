@@ -23,7 +23,7 @@ function mockGroq({ models = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant',
     const reply = url.endsWith('/models')
       ? (Array.isArray(models) ? { body: { object: 'list', data: models.map((id) => ({ id, object: 'model', active: true })) } } : models)
       : chat.shift();
-    return new Response(JSON.stringify(reply.body), { status: reply.status ?? 200, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify(reply.body), { status: reply.status ?? 200, headers: { 'Content-Type': 'application/json', ...(reply.headers ?? {}) } });
   };
 }
 
@@ -115,6 +115,41 @@ test('retries a rate-limited request once, but not a rejected key', async () => 
   mockGroq({ chat: [{ status: 401, body: { error: { message: 'Invalid API Key', code: 'invalid_api_key' } } }] });
   await assert.rejects(generateAiText('Hi'), (error) => error.status === 401 && error.code === 'invalid_api_key');
   assert.equal(chatCalls().length, 1);
+});
+
+/** Runs `work` with console.warn collected instead of printed. */
+async function quietly(work) {
+  const warn = console.warn;
+  const warnings = [];
+  console.warn = (line) => warnings.push(String(line));
+  try {
+    await work();
+  } finally {
+    console.warn = warn;
+  }
+  return warnings;
+}
+
+test('a rate-limited model rests for its Retry-After while the next model answers', async () => {
+  mockGroq({ chat: [{ status: 429, headers: { 'retry-after': '30' }, body: { error: { message: 'Rate limit reached for model llama-3.3-70b-versatile' } } }, answer('From the next model.'), answer('Still the next model.')] });
+  const warnings = await quietly(async () => {
+    assert.equal(await generateAiText('Hi'), 'From the next model.');
+    assert.equal(await generateAiText('Again'), 'Still the next model.');
+  });
+  assert.deepEqual(chatCalls().map((call) => call.body.model), ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'llama-3.1-8b-instant'], 'the resting model is not asked again');
+  assert.deepEqual(warnings, ['[ai] llama-3.3-70b-versatile is rate-limited by Groq for about 30 s; the next model answers meanwhile.']);
+});
+
+test('tries at most three models, and starts nothing once its time budget is spent', async () => {
+  const limited = { status: 429, body: { error: { message: 'Rate limit reached' } } };
+  mockGroq({ models: ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.1-8b-instant'], chat: [limited, limited, limited, limited, limited] });
+  await quietly(() => assert.rejects(generateAiText('Hi'), (error) => error.status === 429));
+  assert.deepEqual(chatCalls().map((call) => call.body.model), ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'openai/gpt-oss-20b'], 'the last model gets one more try');
+
+  process.env.GROQ_API_KEY = nextKey();
+  mockGroq({ chat: [answer('Too late.')] });
+  await assert.rejects(generateAiText('Hi', { budgetMs: 500 }), (error) => error.name === 'TimeoutError');
+  assert.equal(chatCalls().length, 0);
 });
 
 test('switches model when the chosen one disappears', async () => {
