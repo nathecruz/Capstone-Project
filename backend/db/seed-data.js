@@ -17,6 +17,12 @@ export const rewardSeeds = [
   ['custom-title', 'Custom Title', 250, 'Your own title under your name on your profile and the leaderboard'],
   ['profile-frames', 'Profile Frames', 180, 'Eight frames for your photo: Gold, Neon, Leaf, Fire, Aqua, Galaxy, Blossom and Royal'],
   ['buddy-showcase', 'Buddy Showcase', 300, 'Show your Habi, with what it wears, next to your name on the leaderboard'],
+  // Rewards that help with school, work and health (services/rewards.js keeps their names and prices).
+  ['study-planner', 'AI Study & Work Planner', 30, 'Turn an exam, a project or any big task into a day-by-day plan you can follow'],
+  ['practice-quiz', 'AI Practice Quiz', 15, 'Five questions on a topic you are studying, with the answers explained'],
+  ['weekly-report', 'AI Weekly Report', 25, 'A review of your last 7 days: what went well, what slipped, and a plan for the week ahead'],
+  ['certificate', 'Certificate of Achievement', 100, 'A certificate of your check-ins and streak, with a link anyone can open to check it'],
+  ['wellness-pack', 'Wellness Pack', 120, 'Four guided breaks to use any time: box breathing, a desk stretch, an eye break and a mindful minute'],
 ];
 
 export async function seedCatalog(connection) {

@@ -208,6 +208,18 @@ export async function refundCoachAnswer(db, userId, spendId, now = Date.now()) {
   );
 }
 
+/**
+ * Gives back a spend that bought nothing, once (`spendId` from spendTokens): a reward the AI could
+ * not make, say. The refund names the charge it gives back.
+ */
+export async function refundSpend(db, userId, spendId, amount, label, now = Date.now()) {
+  const [kind, uuid] = String(spendId).split(SPEND_MARK).at(-1).split(':');
+  await db.query(
+    'INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING',
+    [`${userId}:token:refund:${kind}:${uuid}`, userId, amount, label, new Date(now).toISOString(), now],
+  );
+}
+
 /** Points, token balance and recent token history exactly as the server records them. */
 export async function getWallet(db, userId) {
   const [balance, history, points] = await runAll(db, [

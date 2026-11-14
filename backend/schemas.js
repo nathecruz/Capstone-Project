@@ -66,6 +66,14 @@ const followUpProofSchema = z.union([
 ]);
 export const habitFollowUpSchema = z.object({ label: z.string().trim().min(1).max(60), category: z.string().trim().max(60).optional(), proof: followUpProofSchema.optional() }).strict();
 export const habitInsightSchema = habitFollowUpSchema.extend({ answers: z.array(z.object({ question: z.string().trim().min(1).max(120), answer: z.string().trim().min(1).max(60) }).strict()).min(1).max(3) }).strict();
+// A made reward from the Rewards Shop (services/reward-tools.js) and what it is made from.
+const dateKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+export const rewardUseSchema = z.discriminatedUnion('rewardId', [
+  z.object({ rewardId: z.literal('study-planner'), task: z.string().trim().min(3).max(120), dueDate: dateKeySchema, minutesPerDay: z.number().int().min(15).max(240), timeZone: timeZoneSchema.optional() }).strict(),
+  z.object({ rewardId: z.literal('practice-quiz'), topic: z.string().trim().min(3).max(120), timeZone: timeZoneSchema.optional() }).strict(),
+  z.object({ rewardId: z.literal('weekly-report'), timeZone: timeZoneSchema.optional() }).strict(),
+  z.object({ rewardId: z.literal('certificate'), timeZone: timeZoneSchema.optional() }).strict(),
+]);
 // "Describe your habit" on the Add tab (services/habit-parse.js): one sentence about the habit.
 export const habitParseSchema = z.object({ text: z.string().trim().min(2).max(200) }).strict();
 export const habitClassificationSchema = z.object({ name: z.string().trim().min(1).max(100), category: z.string().trim().max(60).optional(), categories: z.array(z.string().trim().min(1).max(60)).max(20).optional() }).strict();

@@ -191,13 +191,14 @@ export function tokenFlow(rows, since) {
 }
 
 /**
- * What to save for next: the cheapest Token Reward not owned and not yet affordable, else this
+ * What to save for next: the cheapest Token Reward kept for good, not owned and not yet affordable, else this
  * week's drop, else the cheapest Habi item unlocked and not bought (each only while the balance is
  * short of it), with how many tokens are missing and about how many days that is at `perDay`.
  */
 export function nextGoal({ balance, rewards, owned, buddy, perDay }) {
   const short = (entry) => entry.cost > balance;
-  const reward = rewards.filter((entry) => !owned.includes(entry.id) && short(entry)).sort(byCost)[0];
+  // Saved for: what is kept once bought. A plan, quiz, report or certificate is redeemed when needed.
+  const reward = rewards.filter((entry) => entry.permanent !== false && !owned.includes(entry.id) && short(entry)).sort(byCost)[0];
   const drop = buddy.drop && !buddy.drop.owned && short(buddy.drop.item) ? buddy.drop.item : null;
   const stage = buddyStageIndex(buddy.checkIns);
   const item = buddy.items.filter((entry) => !buddy.owned.includes(entry.id) && stageIndexOf(entry.stage) <= stage && short(entry)).sort(byCost)[0];
