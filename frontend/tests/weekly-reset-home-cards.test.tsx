@@ -2,7 +2,8 @@
 // streak, and the evening streak alert only promises a freeze when a freeze can still help (it
 // covers a day with no check-in at all).
 import React from 'react';
-import { render } from '@testing-library/react-native';
+import { fireEvent, render } from '@testing-library/react-native';
+import { router } from 'expo-router';
 import { BentoTiles } from '@/components/bento-tiles';
 import { StreakRiskBanner } from '@/components/engagement-cards';
 import type { Habit } from '@/hooks/app-state/types';
@@ -55,5 +56,21 @@ describe('StreakRiskBanner', () => {
     const screen = render(<StreakRiskBanner habits={[walk, read]} now={now} onFreeze={jest.fn()} />);
     expect(screen.getByText('Keep your streak alive tonight')).toBeTruthy();
     expect(screen.queryByText(/streak freeze/)).toBeNull();
+  });
+
+  it("says when the habit's check-in closes (its last reminder), and starts a focus session for it", () => {
+    const screen = render(<StreakRiskBanner habits={[walk]} now={now} />);
+    expect(screen.getByText('Check in Walk by 10:00 PM to keep its 2-day streak.')).toBeTruthy();
+    fireEvent.press(screen.getByLabelText('Start a focus session for Walk'));
+    expect(router.push).toHaveBeenCalledWith({ pathname: '/focus', params: { id: 'walk' } });
+  });
+
+  it('starts the proof of a habit checked in with one, and says when it has no closing time', () => {
+    const onCheck = jest.fn();
+    const lunch = habit({ id: 'lunch', label: 'Healthy lunch', reminderEnabled: false, proof: { type: 'photo' }, completionDates: ['2026-10-19', '2026-10-20'] });
+    const screen = render(<StreakRiskBanner habits={[lunch, { ...walk, completionDates: ['2026-10-20'] }]} now={now} onCheck={onCheck} />);
+    expect(screen.getByText('Check in Healthy lunch before midnight to keep its 2-day streak. 1 more streak is at risk tonight.')).toBeTruthy();
+    fireEvent.press(screen.getByLabelText('Take photo: Healthy lunch'));
+    expect(onCheck).toHaveBeenCalledWith(lunch);
   });
 });

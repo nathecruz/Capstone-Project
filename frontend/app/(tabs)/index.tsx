@@ -1,5 +1,5 @@
-// Home, as a bento dashboard: a greeting, today's progress and next habit (the hero), tiles for
-// streak, level, tokens and Habi, today's habits, then the rewards (as tabs) and progress. On laptops the
+// Home, as a bento dashboard: a greeting, today's progress and next habit (the hero), today's other
+// habits, tiles for streak, level, tokens and Habi, then the rewards (as tabs) and progress. On laptops the
 // hero, habits and progress sit on the left and the tiles and challenges on the right.
 // Habits last one week: today's cards get this week's habits (`currentHabits`); the progress cards
 // get every habit, as their history includes past weeks.
@@ -105,8 +105,10 @@ export default function HomeScreen() {
           <View style={[styles.column, isDesktop && styles.mainColumn]}>
             <InstallAppCard variant="home" />
             <DeviceRemindersBanner habits={currentHabits} notificationsEnabled={preferences.notificationsEnabled} />
-            <StreakRiskBanner habits={currentHabits} now={now} onFreeze={openFreeze} />
-            <TodayAgenda habits={currentHabits} now={now} onCheck={(habit) => toggleHabit(habit.id)} middle={isDesktop ? undefined : tiles} />
+            <StreakRiskBanner habits={currentHabits} now={now} onFreeze={openFreeze} onCheck={(habit) => toggleHabit(habit.id)} />
+            <TodayAgenda habits={currentHabits} now={now} onCheck={(habit) => toggleHabit(habit.id)} />
+            {/* What to do today comes first; the streak, level, tokens and Habi tiles follow it. */}
+            {!isDesktop && tiles}
             {isDesktop && progress}
           </View>
 

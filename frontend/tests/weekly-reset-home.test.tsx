@@ -6,11 +6,14 @@ import HomeScreen from '@/app/(tabs)/index';
 import type { Habit } from '@/hooks/app-state/types';
 
 // What each Home card was given, by card.
-const mockProps: Record<string, { habits?: Habit[]; middle?: React.ReactElement<{ habits: Habit[] }> }> = {};
+const mockProps: Record<string, { habits?: Habit[] }> = {};
+// The order the cards were drawn in, top to bottom.
+const mockOrder: string[] = [];
 // A function declaration, so the module factories below (run before this file's constants) can use it.
 function mockCard(name: string) {
   return (props: object) => {
     mockProps[name] = props;
+    mockOrder.push(name);
     return null;
   };
 }
@@ -64,7 +67,9 @@ describe('HomeScreen', () => {
     for (const card of ['WeekStrip', 'NextBadgeCard', 'WeeklyRecapCard']) {
       expect([card, mockProps[card]?.habits]).toEqual([card, [lastWeek, thisWeek]]);
     }
-    // On phones the tiles sit inside Today; they count every check-in (their streak is the account's).
-    expect(mockProps.TodayAgenda.middle?.props.habits).toEqual([lastWeek, thisWeek]);
+    // On phones the tiles come right after Today (what to do first); they count every check-in
+    // (their streak is the account's).
+    expect(mockProps.BentoTiles?.habits).toEqual([lastWeek, thisWeek]);
+    expect(mockOrder.indexOf('TodayAgenda')).toBeLessThan(mockOrder.indexOf('BentoTiles'));
   });
 });

@@ -73,7 +73,8 @@ const minutesNow = (now: Date) => now.getHours() * 60 + now.getMinutes();
 
 /**
  * Late: due today, not done, and its planned time has passed (no grace period). It can still be
- * checked off until midnight and keeps the streak; only then does it count as missed.
+ * checked off, and keeps the streak, until its last reminder time (midnight without one); only then
+ * does it count as missed.
  */
 export function isHabitLate(habit: Habit, now = new Date()) {
   const planned = plannedMinutes(habit);
@@ -92,6 +93,12 @@ export function isHabitLockedMissed(habit: Habit, now = new Date()) {
   if (deadline === null) return false;
   const today = getLocalDateKey(now);
   return scheduledOn(habit, today) && !habit.completionDates.includes(today) && minutesNow(now) > deadline;
+}
+
+/** Still to do today: scheduled for today, not checked in, and not past its last reminder time. */
+export function isHabitOpenToday(habit: Habit, now = new Date()) {
+  const today = getLocalDateKey(now);
+  return scheduledOn(habit, today) && !habit.completionDates.includes(today) && !isHabitLockedMissed(habit, now);
 }
 
 export const LATE_SECTION = { label: 'Late', icon: 'alarm-outline' };

@@ -8,7 +8,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Animated, Pressable, Text, View } from 'react-native';
 import { openMysteryBox } from '@/authentication/authService';
 import { Confetti } from '@/components/confetti';
-import { openFocus } from '@/components/today-agenda';
+import { checkInAction, formatMinutes, openFocus } from '@/components/today-agenda';
 import type { Goal, Habit, TokenTransaction } from '@/hooks/app-state/types';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useBuddy } from '@/hooks/use-buddy';
@@ -18,7 +18,7 @@ import { badgeProgress, badgeRemaining, nextBadge } from '@/utils/achievements';
 import { askAi } from '@/utils/ai-client';
 import { dropQuestsFooter } from '@/utils/buddy';
 import { computeStreak } from '@/utils/streaks';
-import { dailyChallenge, habitsAtRisk, levelProgress, POINTS_PER_LEVEL, weeklyRecap } from '@/utils/engagement';
+import { dailyChallenge, deadlineMinutes, habitsAtRisk, levelProgress, POINTS_PER_LEVEL, weeklyRecap } from '@/utils/engagement';
 import { getLocalDateKey } from '@/utils/habit-visibility';
 import { daysLeftInWeek, weeklyQuests } from '@/utils/quests';
 
@@ -254,8 +254,12 @@ export function MysteryBoxCard({ habits, tokenHistory, onWallet, style }: { habi
   );
 }
 
-/** In the evening: this week's habits still open today whose streak breaks at midnight. */
-export function StreakRiskBanner({ habits, now, onFreeze, style }: { habits: Habit[]; now: Date; onFreeze?: () => void; style?: object | false }) {
+/**
+ * In the evening: this week's habits still open today whose streak breaks when their check-in
+ * closes (at the habit's last reminder, or midnight without one). "Do it now" starts the habit's
+ * proof through `onCheck` (its timer, walk or photo), or else a focus session that checks it off.
+ */
+export function StreakRiskBanner({ habits, now, onFreeze, onCheck, style }: { habits: Habit[]; now: Date; onFreeze?: () => void; onCheck?: (habit: Habit) => void; style?: object | false }) {
   const styles = useThemedStyles(themedStyles);
   const { streakFreeze } = useAppColorScheme();
   const frozenDays = streakFreeze?.frozenDays ?? [];
@@ -270,13 +274,16 @@ export function StreakRiskBanner({ habits, now, onFreeze, style }: { habits: Hab
   const held = streakFreeze?.available ?? 0;
   const freezeHelps = !habits.some((habit) => habit.completionDates.includes(today));
   const others = atRisk.length - 1;
+  const closesAt = deadlineMinutes(first);
+  const proofAction = first.proof && onCheck ? checkInAction(first) : null;
   return (
     <View style={[styles.risk, style]} accessibilityRole="alert">
       <View style={styles.riskIcon}><Ionicons name="flame" size={20} color="#FFFFFF" /></View>
       <View style={styles.riskCopy}>
         <Text style={styles.riskTitle}>Keep your streak alive tonight</Text>
         <Text style={styles.riskText}>
-          {first.label} ({days} day{days === 1 ? '' : 's'}){others > 0 ? ` and ${others} more` : ''} will reset at midnight if not done.
+          {`Check in ${first.label} ${closesAt === null ? 'before midnight' : `by ${formatMinutes(closesAt)}`} to keep its ${days}-day streak.`}
+          {others > 0 ? ` ${others} more ${others === 1 ? 'streak is' : 'streaks are'} at risk tonight.` : ''}
         </Text>
         {!freezeHelps ? null : held > 0 ? (
           <Text style={styles.riskFreeze}>🧊 Your streak freeze covers you if you miss tonight.</Text>
@@ -286,7 +293,12 @@ export function StreakRiskBanner({ habits, now, onFreeze, style }: { habits: Hab
           </Pressable>
         ) : null}
       </View>
-      <Pressable style={({ pressed }) => [styles.riskButton, pressed && styles.pressed]} onPress={() => openFocus(first.id)} accessibilityRole="button" accessibilityLabel={`Start a focus session for ${first.label}`}>
+      <Pressable
+        style={({ pressed }) => [styles.riskButton, pressed && styles.pressed]}
+        onPress={() => (proofAction && onCheck ? onCheck(first) : openFocus(first.id))}
+        accessibilityRole="button"
+        accessibilityLabel={proofAction ? `${proofAction.label}: ${first.label}` : `Start a focus session for ${first.label}`}
+      >
         <Text style={styles.riskButtonText}>Do it now</Text>
       </Pressable>
     </View>

@@ -166,6 +166,13 @@ describe('Tokens screen', () => {
     expect(screen.getByText('Next goal: Profile Frames · 60 tokens · about 3 days at your pace')).toBeTruthy();
   });
 
+  it('says 0 for a week with nothing spent, never "-0"', async () => {
+    const base = summaryWith();
+    summaryMock.mockImplementation(async () => summaryWith({ week: { ...base.week, earned: 0, spent: 0 } }));
+    const screen = await renderWallet();
+    expect(screen.getByText('This week: 0 earned · 0 spent')).toBeTruthy();
+  });
+
   it('shows each thing to buy with its cost and status', async () => {
     const screen = await renderWallet();
     expect(screen.getByLabelText('Streak Freeze, 30 tokens: Ready')).toBeTruthy();

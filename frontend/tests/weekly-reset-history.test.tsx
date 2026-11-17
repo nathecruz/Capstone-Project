@@ -94,7 +94,8 @@ describe('TodayAgenda', () => {
   it('shows the usual hero and list once the week has habits', () => {
     const screen = render(<TodayAgenda habits={[thisWeek]} now={now} onCheck={jest.fn()} />);
     expect(screen.queryByText('New week, fresh start.')).toBeNull();
-    expect(screen.getByText('Your habits today')).toBeTruthy();
+    // The habit up next is in the hero; the list under it holds the others.
+    expect(screen.getByText('Also today')).toBeTruthy();
   });
 });
 
