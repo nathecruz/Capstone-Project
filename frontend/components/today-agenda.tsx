@@ -1,6 +1,7 @@
 // Home's Today: a hero card with today's progress and what to do next, then the rest of today's
-// habits by time of day and what is already done. A tap checks a habit off (with a short Undo);
-// the timer button starts a focus session. Home can put its tiles between the two (`middle`).
+// habits by time of day and what is already done. A tap checks a habit off (with a short Undo), or
+// starts its proof (its timer, walk or photo); a habit without a proof also has a focus timer
+// button.
 // It gets this week's habits only (habits last one week); with none, the hero invites the student
 // to plan the new week.
 import { Ionicons } from '@expo/vector-icons';
@@ -17,7 +18,16 @@ type HoverState = PressableStateCallbackType & { hovered?: boolean };
 
 const RING_DOTS = 36;
 
-function formatMinutes(minutes: number) {
+/** What checking a habit in starts, as its button says it: its proof, or just marking it done. */
+export function checkInAction(habit: Pick<Habit, 'proof'>): { label: string; icon: keyof typeof Ionicons.glyphMap } {
+  if (habit.proof?.type === 'timer') return { label: `Start ${habit.proof.minutes}-min timer`, icon: 'timer-outline' };
+  if (habit.proof?.type === 'steps') return { label: 'Start walk', icon: 'footsteps-outline' };
+  if (habit.proof?.type === 'photo') return { label: 'Take photo', icon: 'camera-outline' };
+  return { label: 'Mark done', icon: 'checkmark' };
+}
+
+/** Minutes of the day as a clock time, e.g. "5:30 PM". */
+export function formatMinutes(minutes: number) {
   const hour = Math.floor(minutes / 60);
   const minute = String(minutes % 60).padStart(2, '0');
   return `${hour % 12 || 12}:${minute} ${hour < 12 ? 'AM' : 'PM'}`;
@@ -113,15 +123,18 @@ function HabitRow({ habit, late, onCheck }: { habit: Habit; late: boolean; onChe
           </>
         )}
       </Pressable>
-      <Pressable
-        style={({ hovered, pressed }: HoverState) => [styles.focusButton, (hovered || pressed) && styles.focusButtonActive]}
-        onPress={() => openFocus(habit.id)}
-        accessibilityRole="button"
-        accessibilityLabel={`Start a focus session for ${habit.label}`}
-        hitSlop={4}
-      >
-        <Ionicons name="timer-outline" size={18} color={themeColor('#5b42d8')} />
-      </Pressable>
+      {/* A habit with a proof starts it from its check circle; a focus timer is for the others. */}
+      {!habit.proof && (
+        <Pressable
+          style={({ hovered, pressed }: HoverState) => [styles.focusButton, (hovered || pressed) && styles.focusButtonActive]}
+          onPress={() => openFocus(habit.id)}
+          accessibilityRole="button"
+          accessibilityLabel={`Start a focus session for ${habit.label}`}
+          hitSlop={4}
+        >
+          <Ionicons name="timer-outline" size={18} color={themeColor('#5b42d8')} />
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -177,7 +190,7 @@ function FreshStartHero({ dateLabel }: { dateLabel: string }) {
 }
 
 /** `habits` are this week's habits. */
-export function TodayAgenda({ habits, now, onCheck, middle, style }: { habits: Habit[]; now: Date; onCheck: (habit: Habit) => void; middle?: React.ReactNode; style?: object | false }) {
+export function TodayAgenda({ habits, now, onCheck, style }: { habits: Habit[]; now: Date; onCheck: (habit: Habit) => void; style?: object | false }) {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const agenda = todayAgenda(habits, now);
@@ -186,6 +199,7 @@ export function TodayAgenda({ habits, now, onCheck, middle, style }: { habits: H
   const { nextUp } = agenda;
   const nextPlanned = nextUp ? plannedMinutes(nextUp) : null;
   const nextLate = Boolean(nextUp && isHabitLate(nextUp, now));
+  const nextAction = checkInAction(nextUp ?? {});
   const dateLabel = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
 
   // The habit just checked off: its row leaves the list, so offer a short-lived Undo.
@@ -206,6 +220,8 @@ export function TodayAgenda({ habits, now, onCheck, middle, style }: { habits: H
   };
 
   const percent = Math.round(share * 100);
+  // Still to do: open and not missed (a missed habit can no longer be checked in today).
+  const toGo = agenda.open.length - agenda.missed.length;
   const listSections = agenda.sections
     .map((section) => ({ ...section, rows: section.habits.filter((habit) => habit.id !== nextUp?.id) }))
     .filter((section) => section.rows.length > 0);
@@ -215,7 +231,6 @@ export function TodayAgenda({ habits, now, onCheck, middle, style }: { habits: H
     return (
       <View style={[styles.stack, style]}>
         <FreshStartHero dateLabel={dateLabel} />
-        {middle}
       </View>
     );
   }
@@ -231,7 +246,7 @@ export function TodayAgenda({ habits, now, onCheck, middle, style }: { habits: H
               <>
                 <Text style={styles.heroPercent}>{percent}%</Text>
                 <Text style={styles.heroHint}>
-                  {agenda.open.length ? `${agenda.done.length} of ${total} done · ${agenda.open.length} to go` : `All ${total} done`}
+                  {toGo ? `${agenda.done.length} of ${total} done · ${toGo} to go` : agenda.missed.length ? `${agenda.done.length} of ${total} done · ${agenda.missed.length} missed` : `All ${total} done`}
                   {agenda.late.length > 0 && <Text style={styles.heroLate}>{` · ${agenda.late.length} late`}</Text>}
                 </Text>
               </>
@@ -249,6 +264,13 @@ export function TodayAgenda({ habits, now, onCheck, middle, style }: { habits: H
           </View>
         )}
 
+        {total > 0 && toGo === 0 && agenda.missed.length > 0 && (
+          <View style={styles.heroPanel} accessible accessibilityLabel="Today's check-ins are closed">
+            <Text style={styles.heroPanelTitle}>Today&apos;s check-ins are closed</Text>
+            <Text style={styles.heroPanelText}>A check-in closes at the habit&apos;s last reminder. Missed habits open again on their next day.</Text>
+          </View>
+        )}
+
         {nextUp && (
           <View style={styles.heroPanel}>
             <View style={styles.nextTop}>
@@ -263,24 +285,25 @@ export function TodayAgenda({ habits, now, onCheck, middle, style }: { habits: H
               </View>
             </View>
             <View style={styles.nextActions}>
-              <Pressable style={({ pressed }) => [styles.nextDone, pressed && styles.pressed]} onPress={() => check(nextUp)} accessibilityRole="button" accessibilityLabel={`Mark ${nextUp.label} done`}>
-                <Ionicons name="checkmark" size={17} color={themeColor('#5B42D8')} />
-                <Text style={styles.nextDoneText}>Mark done</Text>
+              <Pressable style={({ pressed }) => [styles.nextDone, pressed && styles.pressed]} onPress={() => check(nextUp)} accessibilityRole="button" accessibilityLabel={`${nextAction.label}: ${nextUp.label}`}>
+                <Ionicons name={nextAction.icon} size={17} color={themeColor('#5B42D8')} />
+                <Text style={styles.nextDoneText}>{nextAction.label}</Text>
               </Pressable>
-              <Pressable style={({ pressed }) => [styles.nextFocus, pressed && styles.pressed]} onPress={() => openFocus(nextUp.id)} accessibilityRole="button" accessibilityLabel={`Start a focus session for ${nextUp.label}`}>
-                <Ionicons name="timer-outline" size={17} color="#FFFFFF" />
-                <Text style={styles.nextFocusText}>Focus</Text>
-              </Pressable>
+              {!nextUp.proof && (
+                <Pressable style={({ pressed }) => [styles.nextFocus, pressed && styles.pressed]} onPress={() => openFocus(nextUp.id)} accessibilityRole="button" accessibilityLabel={`Start a focus session for ${nextUp.label}`}>
+                  <Ionicons name="timer-outline" size={17} color="#FFFFFF" />
+                  <Text style={styles.nextFocusText}>Focus</Text>
+                </Pressable>
+              )}
             </View>
           </View>
         )}
       </View>
 
-      {middle}
-
       <View style={styles.card}>
         <View style={styles.listHeader}>
-          <Text style={styles.listTitle}>Your habits today</Text>
+          {/* The habit up next is in the card above; this lists the others. */}
+          <Text style={styles.listTitle}>{nextUp ? 'Also today' : 'Your habits today'}</Text>
           <Pressable style={({ pressed }) => [styles.addChip, pressed && styles.pressed]} onPress={() => router.push('/add')} accessibilityRole="button" accessibilityLabel="Add a habit">
             <Ionicons name="add" size={16} color={themeColor('#5B42D8')} />
             <Text style={styles.addChipText}>Add</Text>
@@ -395,7 +418,7 @@ const themedStyles = createThemedStyles({
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#F7F4FF', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 9 },
   rowMainActive: { backgroundColor: '#EFE9FF' },
-  // Late: its time has passed; it can still be done until midnight.
+  // Late: its time has passed; it can still be done until its last reminder (midnight without one).
   rowMainLate: { backgroundColor: '#FFF3EA' },
   lateText: { color: '#D9662B', fontWeight: '800' },
   nextBadgeLate: { backgroundColor: '#F08A3C' },

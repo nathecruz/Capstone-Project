@@ -5,7 +5,8 @@ import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { periodShare, recentDayCompletion } from '@/components/week-strip';
-import { getHabitProgressSummary, getRecentCompletionHistory, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { getRecentCompletionHistory, useAppColorScheme } from '@/hooks/color-scheme-context';
+import { todayAgenda } from '@/utils/engagement';
 import { historyStats } from '@/utils/achievements';
 import { getChartGeometry } from '@/utils/line-chart';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
@@ -19,7 +20,8 @@ export default function StatsProgressScreen() {
   const { isDarkMode, habits, currentHabits, streak, bestStreak, preferences, streakFreeze } = useAppColorScheme();
   const { width } = useWindowDimensions();
   const compactLayout = width < 360;
-  const { completed } = getHabitProgressSummary(currentHabits);
+  // Today as Home counts it: of the habits due today (not every habit of the week), how many are done.
+  const today = todayAgenda(currentHabits);
   const frozenDays = streakFreeze?.frozenDays;
   const keptDays = streakFreeze?.keptDays;
   const history = useMemo(() => historyStats(habits, new Date(), frozenDays, keptDays), [frozenDays, habits, keptDays]);
@@ -72,7 +74,7 @@ export default function StatsProgressScreen() {
                   <Text style={[styles.cardTitle, isDarkMode && styles.darkText]}>Completion, last 7 days</Text>
                   <View style={styles.metricRow}>
                     <Text style={styles.metric}>{weekRate}%</Text>
-                    <Text style={styles.positive}>{completed} of {currentHabits.length} done today</Text>
+                    <Text style={styles.positive}>{today.scheduled.length ? `${today.done.length} of ${today.scheduled.length} done today` : 'Nothing due today'}</Text>
                   </View>
                 </View>
                 <Ionicons name="trending-up" size={22} color={themeColor('#49A866')} />

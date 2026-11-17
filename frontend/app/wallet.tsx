@@ -30,7 +30,8 @@ const EMPTY_HISTORY: Record<WalletHistoryFilter, string> = {
  * (router.navigate would push a second copy of the tabs above this screen).
  */
 const open = (href: Href) => (String(href).startsWith('/(tabs)') ? router.dismissTo(href) : router.push(href));
-const signed = (amount: number) => (amount > 0 ? `+${amount}` : String(amount));
+// A change in tokens: +5, -30, and 0 (never "+0" or "-0") when nothing changed.
+const signed = (amount: number) => (amount > 0 ? `+${amount}` : amount < 0 ? String(amount) : '0');
 
 export default function WalletScreen() {
   const styles = useThemedStyles(themedStyles);
@@ -109,7 +110,7 @@ export default function WalletScreen() {
             </View>
             {summary ? (
               <View style={styles.balanceLines}>
-                <Text style={styles.balanceLine}>{`This week: +${summary.week.earned} earned · -${Math.abs(summary.week.spent)} spent`}</Text>
+                <Text style={styles.balanceLine}>{`This week: ${signed(summary.week.earned)} earned · ${signed(-Math.abs(summary.week.spent))} spent`}</Text>
                 <Text style={styles.balanceLine}>{`You can still earn up to ${summary.today.canStillEarn} today`}</Text>
               </View>
             ) : null}
@@ -225,7 +226,7 @@ export default function WalletScreen() {
               </View>
             ) : null}
             {showAll && history.totals ? (
-              <Text style={styles.totals}>{`In all: +${history.totals.earned} earned · -${Math.abs(history.totals.spent)} spent`}</Text>
+              <Text style={styles.totals}>{`In all: ${signed(history.totals.earned)} earned · ${signed(-Math.abs(history.totals.spent))} spent`}</Text>
             ) : null}
             <View style={styles.card}>
               {history.status === 'loading' || history.status === 'idle' ? (

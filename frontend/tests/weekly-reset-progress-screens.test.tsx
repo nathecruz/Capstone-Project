@@ -88,6 +88,9 @@ describe('InsightsScreen', () => {
   it("uses this week's habits for today and the account streak, and each day's own habits for the week", () => {
     const screen = render(<InsightsScreen />);
     expect(screen.getByText('You did 71% of your habits over the last 7 days. Today: 0 of 1 done.')).toBeTruthy();
+    // The ring measures the last 7 days, and says so (not "this week", which starts on Monday).
+    expect(screen.getByText('last 7 days')).toBeTruthy();
+    expect(screen.queryByText('this week')).toBeNull();
     expect(screen.getByText('0/1')).toBeTruthy();
     expect(screen.getByText('9')).toBeTruthy();
     expect(screen.getByText('11')).toBeTruthy();

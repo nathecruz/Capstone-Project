@@ -8,14 +8,14 @@ import { EditHabitSheet } from '@/components/edit-habit-sheet';
 import { HabitAddedSheet, type AddedHabit } from '@/components/habit-added-sheet';
 import { HabitBalanceCard } from '@/components/habit-balance-card';
 import { ProgressRing } from '@/components/progress-ring';
-import { openFocus } from '@/components/today-agenda';
-import { isHabitLate, isHabitLockedMissed } from '@/utils/engagement';
+import { formatMinutes, openFocus } from '@/components/today-agenda';
+import { periodShare, recentDayCompletion } from '@/components/week-strip';
+import { deadlineMinutes, isHabitLate, isHabitLockedMissed, isHabitOpenToday, todayAgenda } from '@/utils/engagement';
 import { CHECK_IN_UNDO_MS, getLocalDateKey } from '@/utils/habit-visibility';
 import { habitTemplatesFor, type HabitTemplate } from '@/constants/habit-templates';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { isHabitMissedYesterday, useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useAppTheme } from '@/hooks/dark-mode-context';
-import { historyStats } from '@/utils/achievements';
 import { suggestedTemplate } from '@/utils/habit-balance';
 import { filterHabitsByStatus } from '@/utils/habit-data';
 import { habitFromTemplate, proofIcon, proofShortText, proofText } from '@/utils/habit-templates';
@@ -64,14 +64,40 @@ export default function HabitsScreen() {
   // The hero is purple in both modes; its ring needs the same colour in the middle.
   const heroBackground = themedColor(isDarkMode ? '#30215A' : '#5B42D8', appTheme);
 
-  // Habits stay on the list and can be checked in all day; one only counts as missed once its day is over.
+  // Habits stay on the list all week; one due today counts as missed once its last reminder passes.
   const completedCount = habitList.filter((habit) => habit.done).length;
-  const openCount = habitList.length - completedCount;
-  const donePercent = habitList.length ? Math.round((completedCount / habitList.length) * 100) : 0;
-  // This week's real rate (check-ins done of those due so far), not today's progress.
-  const weekRate = useMemo(() => historyStats(habits).thisWeekRate, [habits]);
+  // Today, as Home counts it: the habits due today (a Mon/Wed/Fri habit is not due on a Tuesday),
+  // those done, those still open, and the open one whose check-in closes first.
+  const agenda = todayAgenda(habitList, currentTime);
+  const dueToday = agenda.scheduled.length;
+  const doneToday = agenda.done.length;
+  const stillOpen = habitList.filter((habit) => isHabitOpenToday(habit, currentTime));
+  const closing = stillOpen
+    .map((habit) => ({ habit, minutes: deadlineMinutes(habit) }))
+    .filter((entry): entry is { habit: (typeof stillOpen)[number]; minutes: number } => entry.minutes !== null)
+    .sort((left, right) => left.minutes - right.minutes)[0];
+  const dueIds = new Set(agenda.scheduled.map((habit) => habit.id));
+  const donePercent = dueToday ? Math.round((doneToday / dueToday) * 100) : 0;
+  const missedToday = agenda.missed.length;
+  // This week so far, Monday to today, counted like the weekly bonus on the Tokens screen (and the
+  // Insights chart): today's habits are due whether done yet or not, so the two say the same.
+  const weekRate = useMemo(() => {
+    const daysThisWeek = ((currentTime.getDay() + 6) % 7) + 1;
+    return Math.floor(periodShare(recentDayCompletion(habits, daysThisWeek, currentTime)) * 100);
+  }, [habits, currentTime]);
   // Last week's habits ended: the empty list says it is a new week rather than "no habits yet".
   const pastWeeksOnly = !habitList.length && habits.length > 0;
+  const heroTitle = !habitList.length
+    ? (pastWeeksOnly ? "Add this week's habits" : 'Add your first habit')
+    : dueToday === 0 ? 'Nothing due today'
+      : stillOpen.length ? `${stillOpen.length} habit${stillOpen.length === 1 ? '' : 's'} still open today`
+        : missedToday ? 'Check-ins closed for today' : 'Everything is done!';
+  // A check-in closes at the habit's last reminder (or at midnight without one), so say which closes next.
+  const heroSubtitle = !habitList.length
+    ? 'Tap + to start small.'
+    : dueToday === 0 ? 'Your habits come back on their days.'
+      : stillOpen.length ? (closing ? `Check-ins close at each habit's last reminder. Next: ${closing.habit.label} at ${formatMinutes(closing.minutes)}.` : 'Open until the end of the day.')
+        : missedToday ? `${missedToday} missed today. Each opens again on its next day.` : 'Great work. See you tomorrow.';
   const frequencyCount = (tab: string) => (tab === 'All' ? habitList.length : habitList.filter((habit) => habit.frequency === tab).length);
   const getSuggestion = () => {
     const others = habitTemplatesFor(isFaculty).filter((template) => template.id !== suggestion?.id);
@@ -97,14 +123,16 @@ export default function HabitsScreen() {
       });
     }
 
-    next = filterHabitsByStatus(next, filterMode);
+    // "To do" is what can still be checked in today, as the hero counts it: not a habit that is not
+    // due today, nor one past its last reminder.
+    next = filterMode === 'active' ? next.filter((habit) => isHabitOpenToday(habit, currentTime)) : filterHabitsByStatus(next, filterMode);
     if (sortMode === 'progress') next.sort((a, b) => b.progress - a.progress);
     if (sortMode === 'streak') next.sort((a, b) => b.streak - a.streak);
     if (sortMode === 'name') next.sort((a, b) => a.label.localeCompare(b.label));
     // Habits still to do come before the ones done today; "My order" keeps the dragged order.
     if (sortMode !== 'custom') next = [...next.filter((habit) => !habit.done), ...next.filter((habit) => habit.done)];
     return next;
-  }, [habitList, selectedTab, filterMode, sortMode, search]);
+  }, [habitList, selectedTab, filterMode, sortMode, search, currentTime]);
   const filtersActive = selectedTab !== 'All' || filterMode !== 'all';
 
   const pressCheck = (item: (typeof habitList)[number]) => {
@@ -194,6 +222,11 @@ export default function HabitsScreen() {
                         <Ionicons name="alert-circle" size={13} color={themeColor('#A0661A')} />
                         <Text style={[styles.chipText, styles.chipTextMissed]}>Missed yesterday</Text>
                       </View>
+                    ) : !dueIds.has(item.id) ? (
+                      <View style={styles.chip}>
+                        <Ionicons name="calendar-outline" size={12} color={themeColor('#6E6887')} />
+                        <Text style={styles.chipText}>Not due today</Text>
+                      </View>
                     ) : (
                       <View style={styles.chip}>
                         <Ionicons name="ellipse-outline" size={12} color={themeColor('#6E6887')} />
@@ -215,8 +248,9 @@ export default function HabitsScreen() {
                     )}
                   </View>
                   {/* Not done and still open: start a focus session that checks it off at the end.
-                      A missed habit can no longer be checked in, so it has no focus button. */}
-                  {!item.done && !lockedMissed && (
+                      A missed habit can no longer be checked in, so it has no focus button, and a
+                      habit with a proof starts its own (timer, walk or photo) from its check circle. */}
+                  {!item.done && !lockedMissed && !item.proof && (
                     <Pressable style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]} onPress={() => openFocus(item.id)} accessibilityRole="button" accessibilityLabel={`Start a focus session for ${item.label}`}>
                       <Ionicons name="timer-outline" size={18} color={themeColor('#5B42D8')} />
                     </Pressable>
@@ -238,7 +272,7 @@ export default function HabitsScreen() {
               {search.trim()
                 ? `Nothing matched "${search.trim()}". Try another name, schedule or reminder time.`
                 : habitList.length
-                  ? filterMode === 'done' ? 'No habit is done yet today. Check one off to see it here.' : 'No habit matches these filters.'
+                  ? filterMode === 'done' ? 'No habit is done yet today. Check one off to see it here.' : filterMode === 'active' ? 'Nothing left to check in today. Habits due on other days, and missed ones, are under All.' : 'No habit matches these filters.'
                   : pastWeeksOnly
                     ? "Last week's habits ended; they stay in your history. Add this week's habits to keep going."
                     : 'Start with one small habit and build your rhythm from there.'}
@@ -282,13 +316,13 @@ export default function HabitsScreen() {
             <View style={[styles.hero, isDarkMode && styles.heroDark]}>
               <View style={styles.heroTop}>
                 <ProgressRing value={donePercent} size={92} thickness={9} color="#FFFFFF" trackColor="rgba(255,255,255,0.2)" innerColor={heroBackground}>
-                  <Text style={styles.heroRingValue}>{completedCount}/{habitList.length}</Text>
-                  <Text style={styles.heroRingLabel}>done</Text>
+                  <Text style={styles.heroRingValue}>{doneToday}/{dueToday}</Text>
+                  <Text style={styles.heroRingLabel}>done today</Text>
                 </ProgressRing>
                 <View style={styles.heroCopy}>
                   <Text style={styles.heroLabel}>TODAY</Text>
-                  <Text style={styles.heroTitle}>{!habitList.length ? (pastWeeksOnly ? "Add this week's habits" : 'Add your first habit') : openCount === 0 ? 'Everything is done!' : `${openCount} habit${openCount === 1 ? '' : 's'} still open`}</Text>
-                  <Text style={styles.heroSubtitle}>{!habitList.length ? 'Tap + to start small.' : openCount === 0 ? 'Great work. See you tomorrow.' : 'You can check in any time before midnight.'}</Text>
+                  <Text style={styles.heroTitle}>{heroTitle}</Text>
+                  <Text style={styles.heroSubtitle}>{heroSubtitle}</Text>
                 </View>
               </View>
               <View style={styles.heroStats}>
@@ -297,7 +331,7 @@ export default function HabitsScreen() {
                   { icon: 'stats-chart' as const, value: `${weekRate}%`, label: 'this week' },
                   { icon: 'layers' as const, value: `${habitList.length}`, label: 'habits' },
                 ].map((stat) => (
-                  <View key={stat.label} style={styles.heroStat}>
+                  <View key={stat.label} style={styles.heroStat} accessible accessibilityLabel={`${stat.value} ${stat.label}`}>
                     <View style={styles.heroStatTop}>
                       <Ionicons name={stat.icon} size={14} color="#D8D0FF" />
                       <Text style={styles.heroStatValue}>{stat.value}</Text>
@@ -324,7 +358,7 @@ export default function HabitsScreen() {
 
             <View style={styles.controls}>
               <View style={styles.statusControl} accessibilityRole="radiogroup" accessibilityLabel="Show">
-                {([['all', 'All'], ['active', `To do ${openCount}`], ['done', `Done ${completedCount}`]] as const).map(([mode, label]) => {
+                {([['all', 'All'], ['active', `To do ${stillOpen.length}`], ['done', `Done ${completedCount}`]] as const).map(([mode, label]) => {
                   const active = filterMode === mode;
                   return (
                     <Pressable key={mode} style={[styles.statusOption, active && styles.statusOptionActive]} onPress={() => setFilterMode(mode)} accessibilityRole="radio" accessibilityState={{ checked: active }}>
