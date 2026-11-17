@@ -4,6 +4,7 @@
 // randomly named schema, runs the real server against it and drops it afterwards, so
 // no existing table is touched. Without TEST_DATABASE_URL the test is skipped.
 import assert from 'node:assert/strict';
+import { strToU8, zipSync } from 'fflate';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -1203,11 +1204,18 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     let groqStatus = 200;
     let groqAnswer = 'Do Trip journal at 9 PM tonight, before Sunday.';
     const asked = [];
+    let transcript = '';
+    const transcribed = [];
     const groq = createServer(async (incoming, outgoing) => {
       let body = '';
       for await (const chunk of incoming) body += chunk;
       outgoing.setHeader('Content-Type', 'application/json');
       if (incoming.url.endsWith('/models')) return outgoing.end(JSON.stringify({ object: 'list', data: [{ id: 'llama-3.3-70b-versatile', object: 'model', active: true }] }));
+      // A recording comes as a multipart upload (not JSON): the stub hears the transcript set below.
+      if (incoming.url.endsWith('/audio/transcriptions')) {
+        transcribed.push({ type: incoming.headers['content-type'], model: body.match(/name="model"\r\n\r\n([^\r]+)/)?.[1], filename: body.match(/filename="([^"]+)"/)?.[1] });
+        return outgoing.end(JSON.stringify({ text: transcript }));
+      }
       asked.push(JSON.parse(body));
       // Slow enough for a second question to arrive while the first is answered.
       await new Promise((resolve) => setTimeout(resolve, 300));
@@ -1341,12 +1349,13 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
       };
       await grant(userId, 40, 'quiz-grant');
       const quizBefore = await balance();
+      // The app before the quiz maker asks with a topic alone: five multiple-choice questions.
       const questions = Array.from({ length: 5 }, (_, index) => ({ question: `Question ${index + 1}?`, choices: ['A', 'B', 'C', 'D'], answerIndex: index % 4, explanation: 'Because.' }));
       groqAnswer = JSON.stringify({ valid: true, reason: '', title: 'Photosynthesis', questions });
       const quiz = await shop({ rewardId: 'practice-quiz', topic: 'Photosynthesis' });
       assert.equal(quiz.status, 200, JSON.stringify(quiz.body));
       assert.deepEqual([quiz.body.item.rewardId, quiz.body.item.title, quiz.body.item.output.questions.length], ['practice-quiz', 'Photosynthesis', 5]);
-      assert.match(asked.at(-1).messages[1].content, /^Topic of the quiz:\n"""Photosynthesis"""$/);
+      assert.equal(asked.at(-1).messages[1].content, 'Questions to write, 5 in all:\n- multiple-choice: 5\n\nTopic of the quiz:\n"""Photosynthesis"""');
       assert.equal(await balance(), quizBefore - 15);
       groqAnswer = JSON.stringify({ valid: false, reason: 'Try a subject you are studying.' });
       const refused = await shop({ rewardId: 'practice-quiz', topic: 'asdf qwer' });
@@ -1355,8 +1364,67 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
       const unmade = await shop({ rewardId: 'practice-quiz', topic: 'Fractions' });
       assert.deepEqual([unmade.status, unmade.body.message], [502, 'AI Practice Quiz is unavailable right now. Your 15 tokens were returned.']);
       assert.equal(await balance(), quizBefore - 15, 'what could not be made was given back');
+      assert.equal((await shop({ rewardId: 'practice-quiz', types: ['essay'] })).status, 400, 'nothing to make a quiz from: refused before any charge');
+
+      // The quiz maker reads a file: a DOCX's text comes back to check, and nothing is charged.
+      const source = async (form) => {
+        const response = await fetch(`${aiBase}/api/rewards/quiz-source`, { method: 'POST', headers, body: form });
+        return { status: response.status, body: await response.json() };
+      };
+      const fileForm = (name, bytes, type = 'application/octet-stream') => {
+        const form = new FormData();
+        form.append('file', new Blob([bytes], { type }), name);
+        return form;
+      };
+      const notes = Array.from({ length: 30 }, (_, index) => `Cells divide by mitosis, fact ${index}.`).join(' ');
+      const docx = zipSync({ 'word/document.xml': strToU8(`<w:document><w:body><w:p><w:r><w:t>${notes}</w:t></w:r></w:p></w:body></w:document>`) });
+      const docxRead = await source(fileForm('Biology reviewer.docx', docx));
+      assert.equal(docxRead.status, 200, JSON.stringify(docxRead.body));
+      assert.deepEqual([docxRead.body.source.kind, docxRead.body.source.name, docxRead.body.source.words, docxRead.body.source.truncated], ['file', 'Biology reviewer.docx', 180, false]);
+      assert.equal((await source(fileForm('Renamed.pdf', docx))).status, 400, 'a file that is not what its name says');
+      assert.equal((await source(fileForm('Empty.docx', zipSync({ 'word/document.xml': strToU8('<w:document><w:body><w:p><w:r><w:t>Too short</w:t></w:r></w:p></w:body></w:document>') })))).status, 422);
+      // A recording is turned into text by the AI service.
+      transcript = `Today we talk about cells. ${notes}`;
+      const heard = await source(fileForm('Lecture.mp3', Buffer.concat([Buffer.from('ID3\u0004\u0000\u0000\u0000\u0000\u0000\u0000', 'latin1'), Buffer.alloc(2048)]), 'audio/mpeg'));
+      assert.equal(heard.status, 200, JSON.stringify(heard.body));
+      assert.deepEqual([heard.body.source.kind, transcribed.at(-1).model, transcribed.at(-1).filename], ['recording', 'whisper-large-v3-turbo', 'Lecture.mp3']);
+      assert.match(transcribed.at(-1).type, /^multipart\/form-data; boundary=/);
+      // A link may only reach the public internet: this server's own address is refused, before anything is opened.
+      const link = await fetch(`${aiBase}/api/rewards/quiz-source`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify({ url: `http://127.0.0.1:${aiPort}/api/health` }) });
+      assert.equal(link.status, 400);
+      assert.match((await link.json()).message, /cannot be opened from HabitAI/);
+      assert.equal(await balance(), quizBefore - 15, 'reading a file, a recording or a link is free');
+
+      // The quiz from that material: the kinds and number of questions asked for, grouped by topic.
+      const base = { explanation: 'Because.', choices: [], answerIndex: -1, answers: [], pairs: [], keyPoints: [], sampleAnswer: '' };
+      const mixed = [
+        ...Array.from({ length: 4 }, (_, index) => ({ ...base, type: 'multiple-choice', topic: 'Mitosis', question: `What happens in step ${index + 1}?`, choices: ['A', 'B', 'C', 'D'], answerIndex: index % 4 })),
+        ...Array.from({ length: 3 }, (_, index) => ({ ...base, type: 'true-false', topic: 'Mitosis', question: `Statement ${index + 1}.`, answerIndex: index % 2 })),
+        ...Array.from({ length: 3 }, (_, index) => ({ ...base, type: 'essay', topic: 'Cell cycle', question: `Explain idea ${index + 1}.`, keyPoints: ['Growth', 'Repair'], sampleAnswer: 'Cells divide to grow and repair.' })),
+      ];
+      groqAnswer = JSON.stringify({ valid: true, reason: '', title: 'Cell division', topics: ['Mitosis', 'Cell cycle'], questions: mixed });
+      const made = await shop({ rewardId: 'practice-quiz', source: docxRead.body.source, types: ['essay', 'multiple-choice', 'true-false'], count: 10 });
+      assert.equal(made.status, 200, JSON.stringify(made.body));
+      const { output } = made.body.item;
+      assert.deepEqual([output.title, output.topics, output.types, output.questions.length, output.source.kind, output.source.name], ['Cell division', ['Mitosis', 'Cell cycle'], ['multiple-choice', 'true-false', 'essay'], 10, 'file', 'Biology reviewer.docx']);
+      assert.match(asked.at(-1).messages[1].content, /^Questions to write, 10 in all:\n- multiple-choice: 4\n- true-false: 3\n- essay: 3\n\nStudy material \(the text of a file\):\n"""Cells divide by mitosis/);
+      assert.equal(await balance(), quizBefore - 30);
+
+      // The AI checks an essay answer, free; only the account's own essay questions.
+      const check = async (itemId, body, as = headers) => {
+        const response = await fetch(`${aiBase}/api/rewards/items/${itemId}/essay-check`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...as }, body: JSON.stringify(body) });
+        return { status: response.status, body: await response.json() };
+      };
+      groqAnswer = JSON.stringify({ verdict: 'partial', covered: [2], feedback: 'You explained repair. Add growth.' });
+      const essay = await check(made.body.item.id, { index: 7, answer: 'Cells divide so the body can repair wounds.' });
+      assert.deepEqual([essay.status, essay.body.verdict, essay.body.covered, essay.body.feedback], [200, 'partial', [1], 'You explained repair. Add growth.']);
+      assert.match(asked.at(-1).messages[1].content, /The student's answer:\n"""Cells divide so the body can repair wounds\."""$/);
+      assert.equal((await check(made.body.item.id, { index: 0, answer: 'A' })).status, 404, 'not an essay question');
+      const { headers: stranger } = await student('Quiz', 'Stranger');
+      assert.equal((await check(made.body.item.id, { index: 7, answer: 'Mine?' }, stranger)).status, 404, "another account's quiz");
+      assert.equal(await balance(), quizBefore - 30, 'checking an essay is free');
       assert.equal((await shop({ rewardId: 'study-planner', task: 'Midterm exam', dueDate: '2020-01-01', minutesPerDay: 60 })).status, 400, 'a due date in the past is refused before any charge');
-      assert.equal(await balance(), quizBefore - 15);
+      assert.equal(await balance(), quizBefore - 30);
     } finally {
       aiServer.kill();
       await aiExit;

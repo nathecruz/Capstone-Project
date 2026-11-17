@@ -296,11 +296,13 @@ export async function apiRequest<T>(path: string, options: RequestInit & { timeo
   let response: Response;
   requestsInFlight += 1;
   try {
+    // A file upload (FormData) sets its own Content-Type, with the boundary between its parts.
+    const isUpload = typeof FormData !== 'undefined' && init.body instanceof FormData;
     response = await fetch(`${getApiBaseUrl()}${path}`, {
       ...init,
       signal: init.signal ?? controller.signal,
       headers: {
-        'Content-Type': 'application/json',
+        ...(isUpload ? {} : { 'Content-Type': 'application/json' }),
         ...(init.headers ?? {}),
       },
     });

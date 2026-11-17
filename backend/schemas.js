@@ -68,9 +68,30 @@ export const habitFollowUpSchema = z.object({ label: z.string().trim().min(1).ma
 export const habitInsightSchema = habitFollowUpSchema.extend({ answers: z.array(z.object({ question: z.string().trim().min(1).max(120), answer: z.string().trim().min(1).max(60) }).strict()).min(1).max(3) }).strict();
 // A made reward from the Rewards Shop (services/reward-tools.js) and what it is made from.
 const dateKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const quizTypeSchema = z.enum(['multiple-choice', 'true-false', 'fill-blank', 'identification', 'matching', 'essay']);
+// As POST /api/rewards/quiz-source read it (its word count and whether it was cut may come back too; they are not used).
+const quizSourceSchema = z.object({
+  kind: z.enum(['text', 'file', 'link', 'recording']),
+  name: z.string().trim().max(160).optional(),
+  text: z.string().trim().min(3).max(20000),
+  words: z.number().int().min(0).optional(),
+  truncated: z.boolean().optional(),
+}).strict();
+// The quiz maker's link to read, and an essay answer for the AI to check.
+export const quizLinkSchema = z.object({ url: z.string().trim().min(4).max(2000) }).strict();
+export const essayCheckSchema = z.object({ index: z.number().int().min(0).max(59), answer: z.string().trim().min(1).max(3000) }).strict();
 export const rewardUseSchema = z.discriminatedUnion('rewardId', [
   z.object({ rewardId: z.literal('study-planner'), task: z.string().trim().min(3).max(120), dueDate: dateKeySchema, minutesPerDay: z.number().int().min(15).max(240), timeZone: timeZoneSchema.optional() }).strict(),
-  z.object({ rewardId: z.literal('practice-quiz'), topic: z.string().trim().min(3).max(120), timeZone: timeZoneSchema.optional() }).strict(),
+  // A topic alone (the app before the quiz maker), or material: typed text, or what a file, a link or
+  // a recording was read as (POST /api/rewards/quiz-source); then the kinds and number of questions.
+  z.object({
+    rewardId: z.literal('practice-quiz'),
+    topic: z.string().trim().min(3).max(120).optional(),
+    source: quizSourceSchema.optional(),
+    types: z.array(quizTypeSchema).min(1).max(6).optional(),
+    count: z.union([z.literal(10), z.literal(20), z.literal(30)]).optional(),
+    timeZone: timeZoneSchema.optional(),
+  }).strict(),
   z.object({ rewardId: z.literal('weekly-report'), timeZone: timeZoneSchema.optional() }).strict(),
   z.object({ rewardId: z.literal('certificate'), timeZone: timeZoneSchema.optional() }).strict(),
 ]);

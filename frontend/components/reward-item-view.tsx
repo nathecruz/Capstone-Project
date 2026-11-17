@@ -1,13 +1,13 @@
 // A made reward from the Rewards Shop, opened from My Rewards: an AI study or work plan (with a way
-// to turn it into a habit), a practice quiz to answer, a weekly report, or a certificate with its
-// public link to open, share or delete.
+// to turn it into a habit), a weekly report, or a certificate with its public link to open, share
+// or delete. A practice quiz opens in its own player (app/practice-quiz.tsx).
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { openBrowserAsync } from 'expo-web-browser';
-import React, { useState } from 'react';
+import React from 'react';
 import { Pressable, Share, Text, View } from 'react-native';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
-import type { Certificate, PracticeQuiz, RewardItem, StudyPlan, WeeklyReport } from '@/utils/rewards-client';
+import type { Certificate, RewardItem, StudyPlan, WeeklyReport } from '@/utils/rewards-client';
 
 const dayLabel = (dateKey: string) => new Date(`${dateKey}T00:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
@@ -56,52 +56,6 @@ function PlanView({ plan }: { plan: StudyPlan }) {
         <Ionicons name="add-circle" size={18} color={themeColor('#FFFFFF')} />
         <Text style={styles.primaryText}>Make it a habit this week</Text>
       </Pressable>
-    </View>
-  );
-}
-
-function QuizView({ quiz, showAnswers }: { quiz: PracticeQuiz; showAnswers: boolean }) {
-  const styles = useThemedStyles(themedStyles);
-  const themeColor = useThemeColor();
-  const [picked, setPicked] = useState<Record<number, number>>({});
-  const [revealAll, setRevealAll] = useState(showAnswers);
-  const answered = Object.keys(picked).length;
-  const score = quiz.questions.filter((question, index) => picked[index] === question.answerIndex).length;
-  return (
-    <View style={styles.body}>
-      <View style={styles.quizTop}>
-        <Text style={styles.meta}>{answered === quiz.questions.length ? `Score: ${score} of ${quiz.questions.length}` : `${answered} of ${quiz.questions.length} answered`}</Text>
-        <Pressable onPress={() => { setPicked({}); setRevealAll(false); }} accessibilityRole="button" hitSlop={8}><Text style={styles.link}>Retake</Text></Pressable>
-        <Pressable onPress={() => setRevealAll((value) => !value)} accessibilityRole="button" hitSlop={8}><Text style={styles.link}>{revealAll ? 'Hide answers' : 'Show all answers'}</Text></Pressable>
-      </View>
-      {quiz.questions.map((question, index) => {
-        const choice = picked[index];
-        const shown = revealAll || choice !== undefined;
-        return (
-          <View key={question.question} style={styles.question}>
-            <Text style={styles.questionText}>{index + 1}. {question.question}</Text>
-            {question.choices.map((text, choiceIndex) => {
-              const right = shown && choiceIndex === question.answerIndex;
-              const wrong = choice === choiceIndex && choiceIndex !== question.answerIndex;
-              return (
-                <Pressable
-                  key={text}
-                  style={[styles.choice, right && styles.choiceRight, wrong && styles.choiceWrong]}
-                  onPress={() => setPicked((current) => (current[index] === undefined ? { ...current, [index]: choiceIndex } : current))}
-                  disabled={choice !== undefined}
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: choice !== undefined, selected: choice === choiceIndex }}
-                  accessibilityLabel={`${text}${right ? ', correct answer' : wrong ? ', wrong' : ''}`}
-                >
-                  <Text style={[styles.choiceText, right && styles.choiceTextRight, wrong && styles.choiceTextWrong]}>{String.fromCharCode(65 + choiceIndex)}. {text}</Text>
-                  {right ? <Ionicons name="checkmark-circle" size={16} color={themeColor('#2E8F5E')} /> : wrong ? <Ionicons name="close-circle" size={16} color={themeColor('#C2412F')} /> : null}
-                </Pressable>
-              );
-            })}
-            {shown && question.explanation ? <Text style={styles.explanation}>{question.explanation}</Text> : null}
-          </View>
-        );
-      })}
     </View>
   );
 }
@@ -156,10 +110,10 @@ function CertificateView({ certificate, url }: { certificate: Certificate; url: 
   );
 }
 
-/** One made reward; `isFaculty` shows a quiz's answers from the start (for use in class). */
-export function RewardItemView({ item, isFaculty = false }: { item: RewardItem; isFaculty?: boolean }) {
+/** One made reward (a practice quiz is taken in app/practice-quiz.tsx, so it shows nothing here). */
+export function RewardItemView({ item }: { item: RewardItem }) {
   if (item.rewardId === 'study-planner') return <PlanView plan={item.output} />;
-  if (item.rewardId === 'practice-quiz') return <QuizView quiz={item.output} showAnswers={isFaculty} />;
+  if (item.rewardId === 'practice-quiz') return null;
   if (item.rewardId === 'weekly-report') return <ReportView report={item.output} />;
   return <CertificateView certificate={item.output} url={item.url} />;
 }
@@ -183,17 +137,6 @@ const themedStyles = createThemedStyles({
   secondary: { minHeight: 46, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: '#DCD3F5' },
   secondaryText: { fontSize: 14, fontWeight: '800', color: '#5B42D8' },
   pressed: { opacity: 0.8 },
-  quizTop: { flexDirection: 'row', alignItems: 'center', gap: 14, flexWrap: 'wrap' },
-  link: { fontSize: 13, fontWeight: '800', color: '#5B42D8' },
-  question: { gap: 8, padding: 12, borderRadius: 16, backgroundColor: '#F7F5FC' },
-  questionText: { fontSize: 15, lineHeight: 21, fontWeight: '800', color: '#24212D' },
-  choice: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 12, borderWidth: 1, borderColor: '#E3DEF0', backgroundColor: '#FFFFFF' },
-  choiceRight: { borderColor: '#8FD3AE', backgroundColor: '#E6F6EE' },
-  choiceWrong: { borderColor: '#F0B3A8', backgroundColor: '#FDECEA' },
-  choiceText: { flex: 1, fontSize: 14, lineHeight: 19, fontWeight: '600', color: '#3B3650' },
-  choiceTextRight: { color: '#1F6B45', fontWeight: '800' },
-  choiceTextWrong: { color: '#9C2F22' },
-  explanation: { fontSize: 13, lineHeight: 19, fontWeight: '600', color: '#5E5872' },
   encouragement: { fontSize: 14, lineHeight: 20, fontWeight: '800', color: '#5B42D8' },
   statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   stat: { flexGrow: 1, minWidth: 120, padding: 12, borderRadius: 14, backgroundColor: '#F4F1FF' },
@@ -202,9 +145,5 @@ const themedStyles = createThemedStyles({
 }, {
   dayRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, padding: 10, borderRadius: 14, backgroundColor: '#25212E' },
   dayBadge: { minWidth: 86, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 10, backgroundColor: '#2A2440', alignItems: 'center' },
-  question: { gap: 8, padding: 12, borderRadius: 16, backgroundColor: '#25212E' },
-  choice: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 12, borderWidth: 1, borderColor: '#3B3647', backgroundColor: '#1D1A24' },
-  choiceRight: { borderColor: '#2E8F5E', backgroundColor: '#1D3028' },
-  choiceWrong: { borderColor: '#9C2F22', backgroundColor: '#3A1F1C' },
   stat: { flexGrow: 1, minWidth: 120, padding: 12, borderRadius: 14, backgroundColor: '#2A2440' },
 });

@@ -81,3 +81,6 @@ export const predictionLimiter = limiter({ limit: 120, message: 'Too many predic
 // script cannot hammer the ledger. One budget is shared by all the token actions of a session.
 export const checkInLimiter = limiter({ limit: 120, message: 'Too many check-ins. Please wait a few minutes and try again.' });
 export const walletLimiter = limiter({ limit: 60, message: 'Too many token actions. Please wait a few minutes and try again.' });
+// Reading a file, a link or a recording for a quiz (and checking an essay) works the server and the AI hard.
+export const quizSourceLimiter = limiter({ limit: 20, message: 'Too many files or links at once. Please wait a few minutes and try again.' });
+export const essayCheckLimiter = limiter({ limit: 40, message: 'Too many answers checked at once. Please wait a few minutes and try again.' });

@@ -176,6 +176,35 @@ export async function generateAiText(prompt, {
   throw lastError ?? Object.assign(new Error('The AI service did not answer in time.'), { name: 'TimeoutError' });
 }
 
+/** Groq's speech-to-text model; GROQ_TRANSCRIPTION_MODEL can name another Whisper model. */
+export const getTranscriptionModel = () => process.env.GROQ_TRANSCRIPTION_MODEL?.trim() || 'whisper-large-v3-turbo';
+
+/**
+ * The words spoken in a recording (MP3, MP4, M4A or WAV, at most 25 MB), as text; null when no AI
+ * key is set. Whisper finds the language itself, so English, Filipino and Taglish all work.
+ */
+export async function transcribeAudio(bytes, { filename, mimeType, timeoutMs = 120_000 } = {}) {
+  const apiKey = getGroqApiKey();
+  if (!apiKey) return null;
+  const form = new FormData();
+  form.append('file', new Blob([bytes], { type: mimeType || 'application/octet-stream' }), filename || 'recording');
+  form.append('model', getTranscriptionModel());
+  form.append('response_format', 'json');
+  form.append('temperature', '0');
+  const response = await fetch(`${GROQ_API_URL}/audio/transcriptions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null);
+    throw Object.assign(new Error(detail?.error?.message || `Groq transcription failed with HTTP ${response.status}.`), { status: response.status });
+  }
+  const result = await response.json().catch(() => null);
+  return typeof result?.text === 'string' ? result.text.trim() : '';
+}
+
 /** Logs whether the Groq key works and which model will answer, without generating anything. */
 export async function verifyAi(log = console) {
   const apiKey = getGroqApiKey();
