@@ -93,9 +93,9 @@ export default function RewardsShopScreen() {
   // The catalog as the shop shows it: the server's names, prices and descriptions.
   const fromServer = (reward: ServerReward): Entry => ({ id: reward.id, title: reward.name, detail: reward.description, cost: reward.cost, kind: reward.made ? 'made' : 'permanent', ...(LOOKS[reward.id] ?? { icon: 'gift-outline', color: '#5B42D8' }) });
   const extras: Record<string, Entry> = {
-    coach: { id: 'coach', title: 'AI Coach', detail: 'Ask the AI Coach on your Profile for advice from your own habits.', cost: 10, costLabel: '10 each answer', kind: 'link', icon: 'chatbubbles-outline', color: '#C2549B' },
+    coach: { id: 'coach', title: 'AI Coach', detail: 'Ask the AI Coach on your Profile for advice from your own habits.', cost: 10, costLabel: '10 tokens an answer', kind: 'link', icon: 'chatbubbles-outline', color: '#C2549B' },
     'streak-freeze': { id: 'streak-freeze', title: 'Streak Freeze', detail: `Covers a day you miss, so your streak stays. ${streakFreeze?.available ?? 0} of ${streakFreeze?.max ?? 2} held.`, cost: streakFreeze?.cost ?? 30, kind: 'freeze', icon: 'snow-outline', color: '#2F86D8' },
-    'buddy-shop': { id: 'buddy-shop', title: "Habi's shop", detail: 'Hats, items and rooms for your Habit Buddy.', cost: 40, costLabel: 'from 40', kind: 'link', icon: 'shirt-outline', color: '#C98A0E' },
+    'buddy-shop': { id: 'buddy-shop', title: "Habi's shop", detail: 'Hats, items and rooms for your Habit Buddy.', cost: 40, costLabel: 'From 40 tokens', kind: 'link', icon: 'shirt-outline', color: '#C98A0E' },
   };
   const entryOf = (id: string): Entry | undefined => {
     if (extras[id]) return extras[id];
@@ -231,7 +231,7 @@ export default function RewardsShopScreen() {
                           ) : (
                             <>
                               <Ionicons name="star" size={12} color={themeColor('#E6A617')} />
-                              <Text style={styles.costText}>{entry.costLabel ?? entry.cost} tokens{entry.kind === 'made' ? ' each time' : ''}</Text>
+                              <Text style={styles.costText}>{entry.costLabel ?? `${entry.cost} tokens${entry.kind === 'made' ? ' each time' : ''}`}</Text>
                             </>
                           )}
                         </View>

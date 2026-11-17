@@ -45,7 +45,14 @@ Proofs are stored with the check-in. An administrator can review them in the Adm
 
 **Rewards.**
 
-- Each check-in earns points and tokens (for up to 6 check-ins a day), and the tokens buy rewards: themes, profile frames, a custom title, items for the Habi buddy, Streak Freezes and AI Coach answers.
+- Each check-in earns points and tokens (for up to 6 check-ins a day). Tokens are spent in one Rewards Shop, and most rewards help with school, work or health [backend/services/reward-tools.js]:
+  - the AI Study & Work Planner, which turns an exam, a project, grading or lesson preparation into a step for each day;
+  - the AI Practice Quiz, five questions on a topic with the answers explained; faculty can use one in class;
+  - the AI Weekly Report, a review of the last 7 days with a plan for the next;
+  - the Certificate of Achievement, a page anyone with its link can open to check the user's check-ins;
+  - the Wellness Pack's guided breaks, Streak Freezes and AI Coach answers.
+
+  Themes, profile frames, a custom title and items for the Habi buddy are there too.
 - Students also compete on leaderboards and can send treats to classmates.
 - Faculty earn and spend tokens the same way on their own **Rewards** screen, as the panel noted. They are never on the student leaderboards, so the two rewards that show only there are not offered to them: the Buddy Showcase and treats for classmates [backend/services/rewards.js, backend/services/token-guide.js].
 
@@ -89,7 +96,7 @@ The panel asked that data cannot be faked. HabitAI does not trust numbers sent b
    These limits affect speed, not correctness. See DEPLOYMENT.md.
 4. **Only Health and Academics habits.** Other kinds of habits are outside the scope.
 5. **Habits last one week**, from their start day to Sunday. Their check-ins stay in the stats, history and streak, but a habit does not carry over to the next week: users add new habits each week or plan them with the AI.
-6. **The AI can be wrong.** Its answers, plans, follow-up questions, tips and the forms it fills in from a description are generated text, so the user checks a filled-in form before saving it. A chat remembers only its last 3 questions and answers, and only until it is closed for a new one. They are not medical, psychological or academic advice. The AI features need the Groq service. When one model reaches its usage limit, another model answers (its answers can be shorter or less specific); when the service is unavailable or every model is at its limit, the features answer from fixed rules instead or report that they are unavailable.
+6. **The AI can be wrong.** Its answers, plans, follow-up questions, tips, the forms it fills in from a description and the plans, quizzes and reports redeemed in the Rewards Shop are generated text, so a quiz's answers should be checked against the lesson, so the user checks a filled-in form before saving it. A chat remembers only its last 3 questions and answers, and only until it is closed for a new one. They are not medical, psychological or academic advice. The AI features need the Groq service. When one model reaches its usage limit, another model answers (its answers can be shorter or less specific); when the service is unavailable or every model is at its limit, the features answer from fixed rules instead or report that they are unavailable.
 7. **The predictions are experimental.** The bundled machine-learning model was trained on generated scenarios, not on real HabitAI data.
    - A model is used in production only after it is retrained on approved, anonymized HabitAI outcomes and passes an independent holdout evaluation (ml-service/README.md).
    - Exporting training data needs at least 10 students with a week of history.
@@ -113,7 +120,7 @@ The panel asked that data cannot be faked. HabitAI does not trust numbers sent b
 
 | Panel note | How HabitAI addresses it |
 | --- | --- |
-| Faculty rewards | Faculty earn tokens and spend them on their own Rewards screen. The student-only leaderboard rewards are not offered to them. |
+| Faculty rewards | Faculty earn tokens and spend them in the Rewards Shop, on rewards that help their work: a plan for grading or lessons, a practice quiz for a class, a weekly report, a certificate and wellness breaks. The student-only leaderboard rewards are not offered to them. |
 | Balance of habits | Habits are limited to Health and Academics. The Habits tab shows the balance and suggests a habit for a missing area, and the AI planner covers both. |
 | Automatic input | Ready-made habits are added in one tap, and a habit described in one sentence fills in the form. The Focus timer and the step counter check the habit in automatically. |
 | Limitations of the system | This document, and Help & Support > What HabitAI can and cannot do in the app. |

@@ -24,12 +24,13 @@ describe('help FAQ', () => {
     expect(closestFaq('What is the weather like?')).toBeNull();
   });
 
-  it('says how tokens are earned and spent, and leaves the prices to the Tokens screen', () => {
+  it('says how tokens are earned and spent in the Rewards Shop, and leaves the prices to the app', () => {
     const earn = findFaq('How do I earn tokens?');
     const spend = findFaq('What can I spend tokens on?');
     expect(earn?.section).toBe('Goals & Rewards');
     expect(earn?.answer).toContain('Tap Tokens on Home');
-    expect(spend?.answer).toContain('Prices are on the Tokens screen.');
+    expect(spend?.answer).toContain('Rewards Shop');
+    expect(spend?.answer).toContain('Prices are in the Rewards Shop and on the Tokens screen.');
     for (const item of [earn, spend]) expect(item?.answer).not.toMatch(/\d/);
     expect(popularQuestions).toContain('How do I earn tokens?');
     // Points and tokens are paid for the first 6 check-ins of a day, not for every one.
