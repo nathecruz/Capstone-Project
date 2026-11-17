@@ -1,7 +1,8 @@
 // Home's rewards as tabs: the daily reward, today's challenges and the weekly quests, one at a time
 // instead of three tall cards in a row. All three stay mounted (only the chosen one shows), so each
 // keeps its own data and live updates, and the tabs can say where something is waiting: the daily
-// reward, or last week's consistency bonus on the Quests tab. 'See all ways' opens the Tokens screen.
+// reward, or last week's consistency bonus on the Quests tab. 'See all ways' opens the Tokens screen,
+// and 'Rewards Shop' is where the tokens are spent.
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useState } from 'react';
@@ -53,6 +54,8 @@ export function RewardsHub({ habits, now }: { habits: Habit[]; now: Date }) {
           Earn tokens every day
           {' · '}
           <Text style={styles.link} onPress={() => router.push('/wallet')} accessibilityRole="link">See all ways</Text>
+          {' · '}
+          <Text style={styles.link} onPress={() => router.push('/rewards-shop')} accessibilityRole="link">Rewards Shop</Text>
         </Text>
       </View>
       <View style={styles.tabs} accessibilityRole="tablist">

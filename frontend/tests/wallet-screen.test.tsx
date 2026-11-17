@@ -192,9 +192,9 @@ describe('Tokens screen', () => {
     expect(router.dismissTo).toHaveBeenLastCalledWith('/(tabs)/habits');
 
     fireEvent.press(screen.getByLabelText('Premium Theme, 200 tokens: 80 more'));
-    expect(router.push).toHaveBeenLastCalledWith('/leaderboards?reward=premium-theme');
+    expect(router.push).toHaveBeenLastCalledWith('/rewards-shop?reward=premium-theme');
     fireEvent.press(screen.getByLabelText('Custom Title, 250 tokens: Owned'));
-    expect(router.push).toHaveBeenLastCalledWith('/leaderboards?reward=custom-title');
+    expect(router.push).toHaveBeenLastCalledWith('/rewards-shop?reward=custom-title');
     fireEvent.press(screen.getByLabelText('Weekly Drop, 150 tokens: Locked'));
     expect(router.push).toHaveBeenLastCalledWith('/buddy');
     fireEvent.press(screen.getByLabelText('Treats for classmates, from 15 tokens: Full'));

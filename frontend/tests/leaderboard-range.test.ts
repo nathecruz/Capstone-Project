@@ -12,7 +12,7 @@ import { leaderboardDateLabel, leaderKey, periodRange, rangeLabel, resetCountdow
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 const mockParams: { reward?: string } = {};
-jest.mock('expo-router', () => ({ router: { push: jest.fn(), back: jest.fn() }, useLocalSearchParams: () => mockParams }));
+jest.mock('expo-router', () => ({ router: { push: jest.fn(), replace: jest.fn(), back: jest.fn() }, useLocalSearchParams: () => mockParams }));
 jest.mock('react-native-safe-area-context', () => {
   const ReactActual = jest.requireActual('react');
   return {
@@ -221,25 +221,17 @@ describe('the Leaderboards screen', () => {
     hidden.unmount();
   });
 
-  it('opens the reward of /leaderboards?reward=<id>: its settings once owned, or what is still missing', async () => {
-    const showcase = { id: 'buddy-showcase', name: 'Buddy Showcase', cost: 300, description: 'Show your Habi', permanent: true };
-    mockCatalog.rewards = [showcase];
+  it('sends an old link to a reward to the Rewards Shop, where rewards are redeemed now', async () => {
     mockParams.reward = 'buddy-showcase';
-    const notYet = render(React.createElement(LeaderboardsScreen));
-    // 120 tokens: not enough to redeem it yet.
-    expect(notYet.getByText('180 more tokens to Buddy Showcase.')).toBeTruthy();
-    expect(notYet.queryByText('Redeem Buddy Showcase?')).toBeNull();
-    expect(notYet.getByText('Your Habi next to your name on the leaderboard')).toBeTruthy();
-    notYet.unmount();
-
-    mockCatalog.owned = ['buddy-showcase'];
-    const owned = render(React.createElement(LeaderboardsScreen));
-    expect(owned.getByText('Showcase settings open')).toBeTruthy();
-    expect(owned.getByText('Showcase settings')).toBeTruthy();
-    owned.unmount();
+    const screen = render(React.createElement(LeaderboardsScreen));
+    await act(async () => undefined);
+    expect(router.replace).toHaveBeenCalledWith('/rewards-shop?reward=buddy-showcase');
+    expect(screen.queryByText('Token Rewards')).toBeNull();
+    fireEvent.press(screen.getByLabelText('Open the Rewards Shop'));
+    expect(router.push).toHaveBeenCalledWith('/rewards-shop');
   });
 
-  it("is faculty's Rewards: their tokens and the shop, without the board or what only shows on it", async () => {
+  it("is faculty's Rewards: their tokens and the way into the shop, without the board", async () => {
     mockContext.isFaculty = true;
     mockCatalog.rewards = [
       { id: 'premium-theme', name: 'Premium Themes', cost: 200, description: 'Seven app colour themes', permanent: true },
@@ -250,9 +242,7 @@ describe('the Leaderboards screen', () => {
     const screen = render(React.createElement(LeaderboardsScreen));
     await act(async () => undefined);
     expect(screen.getByText('Rewards')).toBeTruthy();
-    expect(screen.getByText('Token Rewards')).toBeTruthy();
-    expect(screen.getByText('Premium Themes')).toBeTruthy();
-    expect(screen.getByText('Your title on your profile')).toBeTruthy();
+    expect(screen.getByText('Rewards Shop')).toBeTruthy();
     expect(screen.queryByText('Buddy Showcase')).toBeNull();
     expect(screen.getByText('Leaderboards are for students')).toBeTruthy();
     expect(screen.queryByText('Rankings')).toBeNull();

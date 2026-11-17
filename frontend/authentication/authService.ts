@@ -764,7 +764,8 @@ export const openMysteryBox = (date: string) => authedRequest<{ amount: number; 
   body: JSON.stringify({ date, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }),
 });
 
-export type ServerReward = { id: string; name: string; cost: number; description: string; permanent: boolean };
+/** A reward on sale. `made`: an AI plan, quiz or report, or a certificate, made each time it is redeemed (POST /api/rewards/use). */
+export type ServerReward = { id: string; name: string; cost: number; description: string; permanent: boolean; made?: boolean };
 /** Token rewards on sale, the ones this student owns (Premium Themes, Custom Title) and their title. */
 export const getRewards = () => authedRequest<{ rewards: ServerReward[]; owned: string[]; title: string; frame?: string }>('/api/rewards');
 /** Chooses the frame around the student's photo ('' takes it off); needs the Profile Frames reward. */

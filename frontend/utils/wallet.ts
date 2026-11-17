@@ -112,7 +112,7 @@ export function spendStatus(row: WalletSpendRow, tokens: number) {
  * the Streak Freeze sheet. Null for a target this app does not know yet.
  */
 export function spendTarget(target: string): Href | 'freeze' | null {
-  if (target.startsWith('reward:')) return `/leaderboards?reward=${encodeURIComponent(target.slice('reward:'.length))}`;
+  if (target.startsWith('reward:')) return `/rewards-shop?reward=${encodeURIComponent(target.slice('reward:'.length))}`;
   if (target === 'freeze') return 'freeze';
   if (target === 'buddy') return '/buddy';
   if (target === 'gift') return '/leaderboards';
