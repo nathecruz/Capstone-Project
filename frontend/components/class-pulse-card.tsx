@@ -1,4 +1,5 @@
-// Faculty mode: a shortcut from the app to Class Pulse in the HabitAI Admin Panel.
+// Faculty mode: a shortcut from the app to Class Pulse in the HabitAI Admin Panel, which faculty
+// sign in to with the same email and password as the app (both use the same accounts).
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { Linking, Pressable, Text, View, type StyleProp, type ViewStyle } from 'react-native';
@@ -13,7 +14,8 @@ export function ClassPulseCard({ style }: { style?: StyleProp<ViewStyle> }) {
       <View style={styles.icon}><Ionicons name="pulse" size={20} color={themeColor('#5B42D8')} /></View>
       <View style={styles.copy}>
         <Text style={styles.title}>Your class</Text>
-        <Text style={styles.body}>See how your students are doing with their habits in Class Pulse.</Text>
+        <Text style={styles.body}>How your students are doing with their habits, as a group. No student is named.</Text>
+        <Text style={styles.hint}>Opens the Admin Panel · sign in with this email and password</Text>
       </View>
       <Pressable
         style={styles.button}
@@ -34,6 +36,7 @@ const themedStyles = createThemedStyles({
   copy: { flex: 1 },
   title: { fontSize: 14, fontWeight: '800', color: '#2F2D3C' },
   body: { marginTop: 2, fontSize: 12, lineHeight: 17, fontWeight: '600', color: '#777282' },
+  hint: { marginTop: 4, fontSize: 11, lineHeight: 15, fontWeight: '700', color: '#5B42D8' },
   button: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: '#5B42D8' },
   buttonText: { fontSize: 13, fontWeight: '800', color: '#FFFFFF' },
 });

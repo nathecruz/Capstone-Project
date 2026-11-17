@@ -25,7 +25,8 @@ export default function StatsProgressScreen() {
   const frozenDays = streakFreeze?.frozenDays;
   const keptDays = streakFreeze?.keptDays;
   const history = useMemo(() => historyStats(habits, new Date(), frozenDays, keptDays), [frozenDays, habits, keptDays]);
-  const consistency = history.last30Rate;
+  // Each rate counts a day's due habits the same way, today's included, like the chart and Insights.
+  const consistency = useMemo(() => Math.round(periodShare(recentDayCompletion(habits, 30)) * 100), [habits]);
   const completionHistory = getRecentCompletionHistory(habits, 7);
   const maximumDailyCompletions = Math.max(1, ...completionHistory.map((entry) => entry.count));
   // Each day's share of the habits due that day that were done (not of how many there are now).
@@ -86,7 +87,7 @@ export default function StatsProgressScreen() {
                   {chartSize.width > 0 && chart.points.map((point, index) => <View key={`point-${index}`} style={[styles.point, { left: point.x, top: point.y }]} />)}
                 </View>
                 <View style={styles.labels}>
-                  {dailyCompletion.map((entry, index) => <Text key={entry.dateKey} style={[styles.axisText, styles.label, isDarkMode && styles.darkMutedText, { left: chart.points[index]?.x ?? 0 }]}>{index === dailyCompletion.length - 1 ? 'Today' : entry.label}</Text>)}
+                  {dailyCompletion.map((entry, index) => <Text key={entry.dateKey} numberOfLines={1} style={[styles.axisText, styles.label, isDarkMode && styles.darkMutedText, { left: chart.points[index]?.x ?? 0 }]}>{index === dailyCompletion.length - 1 ? 'Today' : entry.label}</Text>)}
                 </View>
               </View>
             </View>
@@ -95,10 +96,11 @@ export default function StatsProgressScreen() {
             {activeTab === 'Overview' ? (
               <>
                 <View style={styles.summaryGrid}>
-                  <View style={[styles.summaryCard, isDarkMode && styles.darkCard]}>
-                    <Text style={[styles.summaryLabel, isDarkMode && styles.darkMutedText]}>Last 7 Days</Text>
-                    <Text style={[styles.summaryValue, isDarkMode && styles.darkText]}>{history.last7Rate}%</Text>
-                    <View style={styles.miniRing}><View style={[styles.miniRingFill, { transform: [{ rotate: `${Math.round(history.last7Rate * 1.8)}deg` }] }]} /></View>
+                  {/* The last 7 days' rate is in the chart above; perfect days are new here. */}
+                  <View style={[styles.summaryCard, isDarkMode && styles.darkCard]} accessible accessibilityLabel={`${history.perfectDays} perfect day${history.perfectDays === 1 ? '' : 's'}, with every habit due done`}>
+                    <Text style={[styles.summaryLabel, isDarkMode && styles.darkMutedText]}>Perfect Days</Text>
+                    <Text style={[styles.summaryValue, isDarkMode && styles.darkText]}>{history.perfectDays}</Text>
+                    <Ionicons name="sparkles" size={22} color={themeColor('#E0A21B')} />
                   </View>
                   <View style={[styles.summaryCard, isDarkMode && styles.darkCard]}>
                     <Text style={[styles.summaryLabel, isDarkMode && styles.darkMutedText]}>Total Check-ins</Text>
@@ -173,14 +175,12 @@ const themedStyles = createThemedStyles({
   segment: { position: 'absolute', height: 2, backgroundColor: '#5B42D8', transformOrigin: 'left center' },
   point: { position: 'absolute', width: 8, height: 8, borderRadius: 4, backgroundColor: '#5B42D8', marginLeft: -4, marginTop: -4 },
   labels: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 12 },
-  label: { position: 'absolute', width: 32, marginLeft: -16, textAlign: 'center' },
+  label: { position: 'absolute', width: 40, marginLeft: -20, textAlign: 'center' },
   axisText: { fontSize: 8, color: '#8D8998', fontWeight: '600' },
   summaryGrid: { flexDirection: 'row', gap: 12, marginBottom: 12 },
   summaryCard: { flex: 1, minHeight: 116, backgroundColor: '#FFFFFF', borderRadius: 18, padding: 14, shadowColor: '#000000', shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } },
   summaryLabel: { fontSize: 10, color: '#777282', fontWeight: '700', lineHeight: 14 },
   summaryValue: { fontSize: 22, fontWeight: '800', color: '#302B3B', marginTop: 8 },
-  miniRing: { position: 'absolute', right: 14, bottom: 14, width: 40, height: 40, borderRadius: 20, borderWidth: 5, borderColor: '#E8E1FF' },
-  miniRingFill: { position: 'absolute', top: -5, right: -5, width: 40, height: 40, borderRadius: 20, borderWidth: 5, borderColor: '#5B42D8', borderLeftColor: 'transparent', borderBottomColor: 'transparent' },
   smallCard: { flex: 1, minHeight: 84, backgroundColor: '#FFFFFF', borderRadius: 17, padding: 13 },
   smallValue: { fontSize: 16, fontWeight: '800', color: '#302B3B', marginTop: 6 },
   smallLabel: { fontSize: 9, color: '#777282', fontWeight: '600', marginTop: 2 },

@@ -81,8 +81,6 @@ describe('history: badges, milestones and stats', () => {
 
   it('count every habit ever made, and an ended habit only on the days of its week', () => {
     expect(badgeProgress(habits, [], wednesday).find((badge) => badge.id === 'habit-hero')?.current).toBe(3);
-    // This week (Monday to today): only this week's habit was due, done Monday and Tuesday.
-    expect(historyStats([lastWeek, thisWeek], wednesday).thisWeekRate).toBe(100);
     expect(historyStats([lastWeek, thisWeek], wednesday).totalCheckIns).toBe(9);
   });
 

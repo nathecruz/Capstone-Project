@@ -12,7 +12,7 @@ const mockAddHabit = jest.fn();
 const mockUpdateGoals = jest.fn();
 const mockGenerateGoalPlan = jest.fn();
 const mockRouter = { push: jest.fn(), replace: jest.fn(), back: jest.fn() };
-const mockApp: { goals: Goal[]; currentHabits: { id: string; label: string }[] } = { goals: [], currentHabits: [] };
+const mockApp: { goals: Goal[]; currentHabits: { id: string; label: string }[]; isFaculty: boolean } = { goals: [], currentHabits: [], isFaculty: false };
 
 // A getter: the screen is imported (and expo-router mocked) before mockRouter is set.
 jest.mock('expo-router', () => ({ get router() { return mockRouter; } }));
@@ -29,6 +29,7 @@ jest.mock('@/hooks/color-scheme-context', () => ({
     updateGoals: mockUpdateGoals,
     getAppStateSnapshot: jest.fn(),
     syncAppState: jest.fn(),
+    isFaculty: mockApp.isFaculty,
   }),
 }));
 
@@ -87,6 +88,23 @@ describe('Goals screen planner', () => {
     jest.clearAllMocks();
     mockApp.goals = [];
     mockApp.currentHabits = [];
+    mockApp.isFaculty = false;
+  });
+
+  it("offers faculty starters and an example from a teacher's week", () => {
+    mockApp.isFaculty = true;
+    const screen = render(<GoalsScreen />);
+    expect(screen.getByPlaceholderText('Example: I want to finish my grading on time and still get enough sleep.')).toBeTruthy();
+    expect(screen.queryByText('Study better')).toBeNull();
+    expect(screen.getByText('Research and write')).toBeTruthy();
+    fireEvent.press(screen.getByLabelText('Use the example goal: Teach and grade'));
+    expect(screen.getByLabelText('Your goal').props.value).toBe('I want to keep up with lesson preparation and grading without working late every night.');
+  });
+
+  it("offers students a student's starters", () => {
+    const screen = render(<GoalsScreen />);
+    expect(screen.getByText('Study better')).toBeTruthy();
+    expect(screen.queryByText('Teach and grade')).toBeNull();
   });
 
   it('plans this week\'s habits from the history and adds the new ones after one confirmation', async () => {

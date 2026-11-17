@@ -412,7 +412,7 @@ export default function AddScreen() {
         <TextInput
           value={description}
           onChangeText={setDescription}
-          placeholder="e.g., Study 30 minutes on weekdays at 8 PM"
+          placeholder={isFaculty ? 'e.g., Grade papers 30 minutes on weekdays at 4 PM' : 'e.g., Study 30 minutes on weekdays at 8 PM'}
           placeholderTextColor="#A19AAA"
           style={[styles.input, styles.describeInput, dark.input, descriptionFocused && styles.inputFocused, WEB_NO_RING]}
           multiline
@@ -444,7 +444,7 @@ export default function AddScreen() {
         ) : null}
       </View>
       <Text style={[styles.fieldLabel, dark.fieldLabel]}>Habit name</Text>
-      <TextInput value={name} onChangeText={setName} placeholder="e.g., Study for 30 minutes" placeholderTextColor="#A19AAA" style={[styles.input, dark.input, nameFocused && styles.inputFocused, WEB_NO_RING]} maxLength={40} onFocus={() => setNameFocused(true)} onBlur={() => setNameFocused(false)} accessibilityLabel="Habit name" />
+      <TextInput value={name} onChangeText={setName} placeholder={isFaculty ? "e.g., Prepare tomorrow's lesson" : 'e.g., Study for 30 minutes'} placeholderTextColor="#A19AAA" style={[styles.input, dark.input, nameFocused && styles.inputFocused, WEB_NO_RING]} maxLength={40} onFocus={() => setNameFocused(true)} onBlur={() => setNameFocused(false)} accessibilityLabel="Habit name" />
       <Text style={[styles.counter, dark.counter]}>{name.length}/40</Text>
       <Text style={[styles.fieldLabel, dark.fieldLabel]}>Category</Text>
       <View style={styles.categoryGrid}>

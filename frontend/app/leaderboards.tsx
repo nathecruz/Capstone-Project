@@ -5,6 +5,7 @@ import { Pressable, ScrollView, StatusBar, StyleSheet, Text, useWindowDimensions
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { BuddyAvatar } from '@/components/buddy';
+import { ClassPulseCard } from '@/components/class-pulse-card';
 import { ClassmateSheet } from '@/components/classmate-sheet';
 import { FramedAvatar } from '@/components/framed-avatar';
 import { getApiBaseUrl, getAuthenticatedHeaders } from '@/authentication';
@@ -216,11 +217,14 @@ export default function LeaderboardsScreen() {
           </Pressable>
 
           {isFaculty ? (
-            <View style={styles.noCommunityCard}>
-              <Ionicons name="people-outline" size={25} color={themeColor('#5B42D8')} />
-              <Text style={styles.noCommunityTitle}>Leaderboards are for students</Text>
-              <Text style={styles.noCommunityText}>Your habits stay private to you, so you are not ranked. See how your students are doing in Class Pulse on Home.</Text>
-            </View>
+            <>
+              <View style={styles.noCommunityCard}>
+                <Ionicons name="people-outline" size={25} color={themeColor('#5B42D8')} />
+                <Text style={styles.noCommunityTitle}>Leaderboards are for students</Text>
+                <Text style={styles.noCommunityText}>Your habits stay private to you, so you are not ranked. Class Pulse shows how your students are doing.</Text>
+              </View>
+              <ClassPulseCard />
+            </>
           ) : <>
           <View style={styles.podiumHeader}><View style={styles.podiumHeaderCopy}><Text style={styles.sectionKicker}>LEADERBOARD SPOTLIGHT</Text><Text style={styles.sectionTitle}>Top 3 {period}</Text><Text style={styles.sectionSubtitle}>Consistency gets rewarded. Keep climbing!</Text></View><Pressable style={styles.datePill} onPress={() => setDateDropdownOpen((open) => !open)} accessibilityRole="button" accessibilityLabel="Choose leaderboard date" accessibilityState={{ expanded: dateDropdownOpen }}><Ionicons name="calendar-outline" size={12} color={themeColor('#5B42D8')} /><Text style={styles.datePillText}>{liveDate}</Text><Ionicons name={dateDropdownOpen ? 'chevron-up' : 'chevron-down'} size={12} color={themeColor('#5B42D8')} /></Pressable></View>
           {dateDropdownOpen && <View style={styles.dateDropdown}>{(['This Week', 'This Month', 'All Time'] as LeaderboardPeriod[]).map((option) => <Pressable key={option} style={[styles.dateOption, period === option && styles.dateOptionActive]} onPress={() => { setPeriod(option); setDateDropdownOpen(false); }} accessibilityRole="button" accessibilityState={{ selected: period === option }}><View><Text style={[styles.dateOptionTitle, period === option && styles.dateOptionTextActive]}>{option}</Text><Text style={[styles.dateOptionSubtitle, period === option && styles.dateOptionTextActive]}>{getDateLabel(option)}</Text></View>{period === option && <Ionicons name="checkmark-circle" size={16} color={themeColor('#FFFFFF')} />}</Pressable>)}</View>}

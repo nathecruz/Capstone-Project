@@ -61,7 +61,6 @@ export default function HomeScreen() {
       {habits.length > 0 && <WeekStrip habits={habits} />}
       <NextBadgeCard habits={habits} goals={goals} />
       <WeeklyRecapCard habits={habits} now={now} />
-      {isFaculty && <ClassPulseCard />}
       <Pressable style={({ pressed }) => [styles.progressLink, pressed && styles.pressed]} onPress={() => router.push('/progress')} accessibilityRole="button" accessibilityLabel="View habit progress">
         <Text style={styles.progressLinkText}>See all your progress</Text>
         <Ionicons name="arrow-forward" size={16} color={themeColor('#4F2AC8')} />
@@ -107,6 +106,8 @@ export default function HomeScreen() {
             <DeviceRemindersBanner habits={currentHabits} notificationsEnabled={preferences.notificationsEnabled} />
             <StreakRiskBanner habits={currentHabits} now={now} onFreeze={openFreeze} onCheck={(habit) => toggleHabit(habit.id)} />
             <TodayAgenda habits={currentHabits} now={now} onCheck={(habit) => toggleHabit(habit.id)} />
+            {/* Faculty: how their students are doing comes right after their own day. */}
+            {isFaculty && <ClassPulseCard />}
             {/* What to do today comes first; the streak, level, tokens and Habi tiles follow it. */}
             {!isDesktop && tiles}
             {isDesktop && progress}

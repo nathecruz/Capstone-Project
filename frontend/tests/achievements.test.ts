@@ -80,7 +80,7 @@ describe('milestones and history stats', () => {
     expect(rows['perfect-days']).toMatchObject({ current: 5, reached: [1, 5], next: 10 });
   });
 
-  it('use the whole history, and an unfinished today does not lower the rates', () => {
-    expect(historyStats([read, water], now)).toEqual({ totalCheckIns: 15, bestStreak: 10, thisWeekRate: 60, last7Rate: 67, last30Rate: expect.any(Number), perfectDays: 5 });
+  it('use the whole history', () => {
+    expect(historyStats([read, water], now)).toEqual({ totalCheckIns: 15, bestStreak: 10, perfectDays: 5 });
   });
 });

@@ -64,6 +64,7 @@ Proofs are stored with the check-in. An administrator can review them in the Adm
 **Faculty insight.**
 
 - Faculty see students only as a group, in **Class Pulse** in the Admin Panel. No student is ever named.
+- The app links to Class Pulse from Home, right after the faculty member's own habits for the day, and from their Rewards screen. Faculty sign in to the Admin Panel with the same email and password as the app.
 - Any group smaller than the anonymity threshold is hidden. The threshold is 3 students by default, and an administrator can set it from 2 to 20.
 
 ## Data integrity
