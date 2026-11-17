@@ -7,6 +7,7 @@ import HabitsScreen from '@/app/(tabs)/habits';
 import { checkInAction, TodayAgenda } from '@/components/today-agenda';
 import type { Habit } from '@/hooks/app-state/types';
 import { isHabitOpenToday } from '@/utils/engagement';
+import { isHabitMissedYesterday } from '@/utils/habit-visibility';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('expo-router', () => ({ router: { push: jest.fn() } }));
@@ -133,6 +134,16 @@ describe('the Habits tab', () => {
     // The photo habit is checked in with its photo, so only Walk has a focus timer.
     expect(screen.getByLabelText('Start a focus session for Walk')).toBeTruthy();
     expect(screen.queryByLabelText('Start a focus session for Healthy lunch')).toBeNull();
+  });
+
+  it('says a habit is not due today before saying it was missed yesterday', () => {
+    // Due Tuesdays and Thursdays: missed yesterday, and not due this Wednesday.
+    const research = habit({ id: 'research', label: 'Write research', startDate: '2026-10-19', frequency: 'Custom', reminderDays: ['Tue', 'Thu'], meta: 'Selected days • 07:00 PM • Tue, Thu' });
+    expect(isHabitMissedYesterday(research, now)).toBe(true);
+    Object.assign(mockContext, { habits: [research], currentHabits: [research] });
+    render(<HabitsScreen />);
+    expect(screen.getByText('Not due today')).toBeTruthy();
+    expect(screen.queryByText('Missed yesterday')).toBeNull();
   });
 
   it('lists under "To do" only what can still be checked in today', () => {

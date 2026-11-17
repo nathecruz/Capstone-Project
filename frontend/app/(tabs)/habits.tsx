@@ -217,15 +217,17 @@ export default function HabitsScreen() {
                         <Ionicons name="time" size={13} color={themeColor('#C2541E')} />
                         <Text style={[styles.chipText, styles.chipTextLate]}>Late, still open</Text>
                       </View>
+                    ) : !dueIds.has(item.id) ? (
+                      // Today's status first: a habit not due today has nothing to do today, even
+                      // if it was missed yesterday.
+                      <View style={styles.chip}>
+                        <Ionicons name="calendar-outline" size={12} color={themeColor('#6E6887')} />
+                        <Text style={styles.chipText}>Not due today</Text>
+                      </View>
                     ) : missed ? (
                       <View style={[styles.chip, styles.chipMissed]}>
                         <Ionicons name="alert-circle" size={13} color={themeColor('#A0661A')} />
                         <Text style={[styles.chipText, styles.chipTextMissed]}>Missed yesterday</Text>
-                      </View>
-                    ) : !dueIds.has(item.id) ? (
-                      <View style={styles.chip}>
-                        <Ionicons name="calendar-outline" size={12} color={themeColor('#6E6887')} />
-                        <Text style={styles.chipText}>Not due today</Text>
                       </View>
                     ) : (
                       <View style={styles.chip}>

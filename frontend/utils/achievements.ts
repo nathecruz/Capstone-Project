@@ -190,29 +190,15 @@ export function milestones(habits: Habit[], points: number, now = new Date(), fr
 }
 
 /**
- * All-time numbers for the stats screens: total check-ins, the longest account streak and
- * completion rates over recent days (a habit counts only on the days of its week).
+ * All-time numbers for the stats screens: total check-ins, the longest account streak and the
+ * perfect days (a habit counts only on the days of its week). Completion rates over recent days
+ * come from components/week-strip.tsx (periodShare), so every screen counts a day the same way.
  */
 export function historyStats(habits: Habit[], now = new Date(), frozenDays: string[] = [], keptDays: KeptDays = {}) {
   const today = getLocalDateKey(now);
-  const rate = (days: number) => {
-    let due = 0;
-    let done = 0;
-    for (let back = 0; back < days; back += 1) {
-      const totals = dayTotals(habits, shift(today, -back), today);
-      due += totals.due;
-      done += totals.done;
-    }
-    return due ? Math.round((done / due) * 100) : 0;
-  };
-  const [year, month, day] = today.split('-').map(Number);
-  const daysThisWeek = ((new Date(year, month - 1, day).getDay() + 6) % 7) + 1;
   return {
     totalCheckIns: habits.reduce((sum, habit) => sum + habit.completionDates.length, 0),
     bestStreak: longestAccountStreak(habits, today, frozenDays, keptDays),
-    thisWeekRate: rate(daysThisWeek),
-    last7Rate: rate(7),
-    last30Rate: rate(30),
     perfectDays: perfectDayCount(habits, today),
   };
 }

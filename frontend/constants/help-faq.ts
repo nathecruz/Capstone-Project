@@ -36,6 +36,7 @@ export const faqSections: FaqSection[] = [
       { question: 'How do I update my profile information?', answer: 'Open Profile, choose Personal Information, then tap Edit Profile.' },
       { question: 'Can I change my email address?', answer: 'Yes. Edit Personal Information and save the new address. We email a 6-digit code to confirm it.' },
       { question: 'How do I manage notifications?', answer: 'Open Notifications from your Profile settings and adjust your reminders.' },
+      { question: 'What is Faculty mode?', answer: "PSAU faculty use HabitAI for their own habits, with habit ideas for a teacher's day. An administrator sets it for a faculty account. Faculty are not on the student leaderboard, and their tokens buy the same rewards except the Buddy Showcase and treats for classmates. Class Pulse, on Home, shows how your students are doing with their habits as a group and never names a student. It opens in the Admin Panel: sign in there with the same email and password." },
     ],
   },
   {

@@ -55,7 +55,7 @@ export function useChosenTheme(): [AppTheme, (theme: AppTheme) => void] {
 /** Picks the frame around the student's photo (Profile Frames reward). */
 export function FrameSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const styles = useThemedStyles(themedStyles);
-  const { avatarImage, profile } = useAppColorScheme();
+  const { avatarImage, profile, isFaculty } = useAppColorScheme();
   const { frame } = useRewards();
   const [saving, setSaving] = useState('');
   const [error, setError] = useState('');
@@ -80,7 +80,8 @@ export function FrameSheet({ visible, onClose }: { visible: boolean; onClose: ()
             <View style={[styles.icon, styles.frameIcon]}><Ionicons name="person-circle" size={24} color="#FFFFFF" /></View>
             <View style={styles.headerCopy}>
               <Text style={styles.title}>Profile frame</Text>
-              <Text style={styles.subtitle}>Shown on your profile and the leaderboard.</Text>
+              {/* Faculty are not on the leaderboard, so their frame shows only in their own app. */}
+              <Text style={styles.subtitle}>{isFaculty ? 'Shown around your photo on Home and your profile.' : 'Shown on your profile and the leaderboard.'}</Text>
             </View>
           </View>
           <View style={styles.framePreview}>
@@ -101,7 +102,7 @@ export function FrameSheet({ visible, onClose }: { visible: boolean; onClose: ()
           <Pressable style={({ pressed }) => [styles.primary, pressed && styles.pressed]} onPress={onClose} accessibilityRole="button">
             <Text style={styles.primaryText}>Done</Text>
           </Pressable>
-          <Text style={[styles.hintText, styles.centerHint]}>Other students see your frame on the leaderboard.</Text>
+          {!isFaculty && <Text style={[styles.hintText, styles.centerHint]}>Other students see your frame on the leaderboard.</Text>}
         </Pressable>
       </Pressable>
     </Modal>
@@ -207,6 +208,7 @@ export function ShowcaseSheet({ visible, onClose }: { visible: boolean; onClose:
 export function TitleSheet({ current, onClose, onSaved }: { current: string; onClose: () => void; onSaved?: (title: string) => void }) {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
+  const { isFaculty } = useAppColorScheme();
   const [draft, setDraft] = useState(current);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -235,7 +237,7 @@ export function TitleSheet({ current, onClose, onSaved }: { current: string; onC
             <View style={[styles.icon, styles.titleIcon]}><Ionicons name="ribbon" size={24} color="#FFFFFF" /></View>
             <View style={styles.headerCopy}>
               <Text style={styles.title}>Your title</Text>
-              <Text style={styles.subtitle}>Shown under your name on your profile and the leaderboard.</Text>
+              <Text style={styles.subtitle}>{isFaculty ? 'Shown under your name on your profile.' : 'Shown under your name on your profile and the leaderboard.'}</Text>
             </View>
           </View>
           <TextInput

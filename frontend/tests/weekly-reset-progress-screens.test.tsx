@@ -81,6 +81,9 @@ describe('StatsProgressScreen', () => {
     expect(screen.getByText('0 of 1 done today')).toBeTruthy();
     expect(screen.getByText('9')).toBeTruthy();
     expect(screen.getByText('11')).toBeTruthy();
+    // The 7-day rate is in the chart; the card next to the check-ins counts the perfect days.
+    expect(screen.queryByText('Last 7 Days')).toBeNull();
+    expect(screen.getByText('Perfect Days')).toBeTruthy();
   });
 });
 

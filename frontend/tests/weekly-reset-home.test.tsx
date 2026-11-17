@@ -37,7 +37,7 @@ jest.mock('@/components/engagement-cards', () => ({
   StreakRiskBanner: mockCard('StreakRiskBanner'),
   WeeklyRecapCard: mockCard('WeeklyRecapCard'),
 }));
-jest.mock('@/components/class-pulse-card', () => ({ ClassPulseCard: () => null }));
+jest.mock('@/components/class-pulse-card', () => ({ ClassPulseCard: mockCard('ClassPulseCard') }));
 jest.mock('@/components/install-app', () => ({ InstallAppCard: () => null }));
 jest.mock('@/components/streak-freeze-sheet', () => ({ StreakFreezeSheet: () => null }));
 jest.mock('@/components/framed-avatar', () => ({ FramedAvatar: ({ children }: { children?: React.ReactNode }) => children }));
@@ -71,5 +71,18 @@ describe('HomeScreen', () => {
     // (their streak is the account's).
     expect(mockProps.BentoTiles?.habits).toEqual([lastWeek, thisWeek]);
     expect(mockOrder.indexOf('TodayAgenda')).toBeLessThan(mockOrder.indexOf('BentoTiles'));
+    expect(mockOrder).not.toContain('ClassPulseCard');
+  });
+
+  it('shows faculty how their students are doing right after their own day, before the tiles', () => {
+    mockContext.isFaculty = true;
+    mockOrder.length = 0;
+    try {
+      render(<HomeScreen />);
+      expect(mockOrder.indexOf('TodayAgenda')).toBeLessThan(mockOrder.indexOf('ClassPulseCard'));
+      expect(mockOrder.indexOf('ClassPulseCard')).toBeLessThan(mockOrder.indexOf('BentoTiles'));
+    } finally {
+      mockContext.isFaculty = false;
+    }
   });
 });

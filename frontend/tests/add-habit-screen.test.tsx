@@ -49,6 +49,16 @@ describe('the Add screen', () => {
     expect(screen.getByText('Check in by walking 2,000 steps with HabitAI open on your phone.')).toBeTruthy();
   });
 
+  it("gives faculty a teacher's ready-made habits and examples", async () => {
+    mockContext = { ...mockContext, isFaculty: true };
+    render(<AddScreen />);
+    await act(async () => undefined);
+    expect(screen.getByText('Walk 2,000 steps between classes')).toBeTruthy();
+    expect(screen.getByPlaceholderText('e.g., Grade papers 30 minutes on weekdays at 4 PM')).toBeTruthy();
+    expect(screen.getByPlaceholderText("e.g., Prepare tomorrow's lesson")).toBeTruthy();
+    expect(screen.queryByPlaceholderText('e.g., Study for 30 minutes')).toBeNull();
+  });
+
   it('shows the Academics habits, opens on the area the balance card asks for, and never adds one twice', async () => {
     mockParams = { category: 'Academics' };
     mockContext = { ...mockContext, currentHabits: [{ label: 'Study for 30 minutes' }] };

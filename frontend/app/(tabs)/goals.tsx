@@ -40,6 +40,15 @@ const STARTERS: { label: string; icon: keyof typeof Ionicons.glyphMap; prompt: s
   { label: 'Grow my career', icon: 'briefcase-outline', prompt: 'I want to grow in my career by improving my confidence, skills, and professional habits.' },
 ];
 
+/** Faculty's starters: a teacher's week instead of a student's (the rest are the same). */
+const FACULTY_STARTERS: typeof STARTERS = [
+  STARTERS[0],
+  STARTERS[1],
+  { label: 'Teach and grade', icon: 'clipboard-outline', prompt: 'I want to keep up with lesson preparation and grading without working late every night.' },
+  { label: 'Research and write', icon: 'create-outline', prompt: 'I want to make steady progress on my research and writing every week.' },
+  STARTERS[4],
+];
+
 const FOCUS_TARGETS = [
   { value: '3 habits', label: '3 habits' },
   { value: '4 habits', label: '4 habits' },
@@ -221,7 +230,8 @@ export default function GoalsScreen() {
   const themeColor = useThemeColor();
   const appTheme = useAppTheme();
   const showAlert = useAppDialog();
-  const { isDarkMode, getAppStateSnapshot, syncAppState, goals: savedGoals, updateGoals, currentHabits, addHabit } = useAppColorScheme();
+  const { isDarkMode, getAppStateSnapshot, syncAppState, goals: savedGoals, updateGoals, currentHabits, addHabit, isFaculty } = useAppColorScheme();
+  const starters = isFaculty ? FACULTY_STARTERS : STARTERS;
   const categories = useHabitCategories();
   const { width } = useWindowDimensions();
   const [activeTab, setActiveTab] = useState<GoalTab>('Planner');
@@ -473,7 +483,7 @@ export default function GoalsScreen() {
                     onChangeText={setGoalInput}
                     maxLength={500}
                     multiline
-                    placeholder="Example: I want to get fit and sleep better while keeping up with my classes."
+                    placeholder={isFaculty ? 'Example: I want to finish my grading on time and still get enough sleep.' : 'Example: I want to get fit and sleep better while keeping up with my classes.'}
                     placeholderTextColor={themeColor('#8A8397')}
                     style={[styles.textInput, inputFocused && styles.textInputFocused, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null]}
                     onFocus={() => setInputFocused(true)}
@@ -490,7 +500,7 @@ export default function GoalsScreen() {
 
                   <Text style={styles.subheading}>Need an idea?</Text>
                   <View style={styles.starters}>
-                    {STARTERS.map((starter) => (
+                    {starters.map((starter) => (
                       <Pressable key={starter.label} style={({ pressed }) => [styles.starter, pressed && styles.pressed]} onPress={() => setGoalInput(starter.prompt)} accessibilityRole="button" accessibilityLabel={`Use the example goal: ${starter.label}`}>
                         <Ionicons name={starter.icon} size={15} color={themeColor('#5B42D8')} />
                         <Text style={styles.starterText}>{starter.label}</Text>
