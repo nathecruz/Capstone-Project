@@ -13,7 +13,7 @@
     "backup": "node scripts/backup-db.js",
     "ml:export": "node scripts/export-ml-training-data.js",
     "test": "node --test test/services.test.js test/groq.test.js test/habit-analysis.test.js test/forecast.test.js test/web-push-reminders.test.js test/web-push-clock.test.js test/engagement.test.js test/planner.test.js test/weekly-habits.test.js test/account-day.test.js test/weekly-bonus.test.js test/token-guide.test.js test/api.test.js",
-    "test:unit": "node --test test/services.test.js test/groq.test.js test/habit-analysis.test.js test/forecast.test.js test/web-push-reminders.test.js test/web-push-clock.test.js test/engagement.test.js test/planner.test.js test/weekly-habits.test.js test/account-day.test.js test/weekly-bonus.test.js test/token-guide.test.js test/habit-rules.test.js test/habit-follow-up.test.js test/state-sync.test.js test/vapid-keys.test.js test/habit-parse.test.js test/reward-tools.test.js"
+    "test:unit": "node --test test/services.test.js test/groq.test.js test/habit-analysis.test.js test/forecast.test.js test/web-push-reminders.test.js test/web-push-clock.test.js test/engagement.test.js test/planner.test.js test/weekly-habits.test.js test/account-day.test.js test/weekly-bonus.test.js test/token-guide.test.js test/habit-rules.test.js test/habit-follow-up.test.js test/state-sync.test.js test/vapid-keys.test.js test/habit-parse.test.js test/reward-tools.test.js test/quiz-sources.test.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -21,9 +21,11 @@
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
     "express-rate-limit": "^8.7.0",
+    "fflate": "^0.8.3",
     "multer": "^2.4.0",
     "nodemailer": "^10.0.10",
     "pg": "^8.23.0",
+    "unpdf": "^2.2.1",
     "web-push": "^3.6.7",
     "zod": "^4.6.5"
   }

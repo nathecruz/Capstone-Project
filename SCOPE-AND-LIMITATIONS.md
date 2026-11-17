@@ -47,7 +47,7 @@ Proofs are stored with the check-in. An administrator can review them in the Adm
 
 - Each check-in earns points and tokens (for up to 6 check-ins a day). Tokens are spent in one Rewards Shop, and most rewards help with school, work or health [backend/services/reward-tools.js]:
   - the AI Study & Work Planner, which turns an exam, a project, grading or lesson preparation into a step for each day;
-  - the AI Practice Quiz, five questions on a topic with the answers explained; faculty can use one in class;
+  - the AI Practice Quiz, made from a file (PDF, DOCX or PPTX), a link (a web page or a YouTube video's captions), typed text or a topic, or a recording (MP3, MP4, M4A or WAV, turned into text by the AI service), about 1,500 words at most. It has 10, 20 or 30 questions in the kinds chosen (multiple choice, true or false, fill in the blank, identification, matching type, essay; at most 5 essays and 5 matching sets), grouped by topic and taken one at a time; the AI checks essays against their key points. Faculty see the answer key, to use a quiz in class;
   - the AI Weekly Report, a review of the last 7 days with a plan for the next;
   - the Certificate of Achievement, a page anyone with its link can open to check the user's check-ins;
   - the Wellness Pack's guided breaks, Streak Freezes and AI Coach answers.
@@ -97,25 +97,26 @@ The panel asked that data cannot be faked. HabitAI does not trust numbers sent b
    These limits affect speed, not correctness. See DEPLOYMENT.md.
 4. **Only Health and Academics habits.** Other kinds of habits are outside the scope.
 5. **Habits last one week**, from their start day to Sunday. Their check-ins stay in the stats, history and streak, but a habit does not carry over to the next week: users add new habits each week or plan them with the AI.
-6. **The AI can be wrong.** Its answers, plans, follow-up questions, tips, the forms it fills in from a description and the plans, quizzes and reports redeemed in the Rewards Shop are generated text, so a quiz's answers should be checked against the lesson, so the user checks a filled-in form before saving it. A chat remembers only its last 3 questions and answers, and only until it is closed for a new one. They are not medical, psychological or academic advice. The AI features need the Groq service. When one model reaches its usage limit, another model answers (its answers can be shorter or less specific); when the service is unavailable or every model is at its limit, the features answer from fixed rules instead or report that they are unavailable.
-7. **The predictions are experimental.** The bundled machine-learning model was trained on generated scenarios, not on real HabitAI data.
+6. **What a quiz can be made from has limits.** A quiz uses about the first 1,500 words. A scanned PDF (pictures of pages, no text) cannot be read. A link opens only a public web page (not one behind a sign-in), and a YouTube video only through its captions. A recording can be up to 25 MB and is turned into text by the AI service, which can mishear words. Typed answers allow a small typo; an essay is judged by the AI, or by the student when the AI is unavailable.
+7. **The AI can be wrong.** Its answers, plans, follow-up questions, tips, the forms it fills in from a description and the plans, quizzes and reports redeemed in the Rewards Shop are generated text, so a quiz's answers should be checked against the lesson, so the user checks a filled-in form before saving it. A chat remembers only its last 3 questions and answers, and only until it is closed for a new one. They are not medical, psychological or academic advice. The AI features need the Groq service. When one model reaches its usage limit, another model answers (its answers can be shorter or less specific); when the service is unavailable or every model is at its limit, the features answer from fixed rules instead or report that they are unavailable.
+8. **The predictions are experimental.** The bundled machine-learning model was trained on generated scenarios, not on real HabitAI data.
    - A model is used in production only after it is retrained on approved, anonymized HabitAI outcomes and passes an independent holdout evaluation (ml-service/README.md).
    - Exporting training data needs at least 10 students with a week of history.
    - Until then, forecasts come from the rules-based formula, and the app labels them as estimates.
-8. **Some features are Android only.** These are the step counter, the home-screen widget, and reminders scheduled on the phone itself. HabitAI is distributed as an Android app; iPhone users use the web app.
+9. **Some features are Android only.** These are the step counter, the home-screen widget, and reminders scheduled on the phone itself. HabitAI is distributed as an Android app; iPhone users use the web app.
    - On the web and on iPhone, reminders come as web notifications. They need internet, notification permission and HTTPS, and on iPhone the app must be added to the Home Screen. A computer gets them only while its browser is running.
    - Web notifications can be delayed by the browser or the phone's operating system.
    - The Android background sync runs only with internet, about every hour, and Android may run it later to save battery. Until it runs, or until the user opens HabitAI, a habit changed on another device keeps its old reminders on the phone.
    - Battery savers of some phone makers can remove an app's reminders when it is swiped away. Turning off battery optimization for HabitAI avoids this.
-9. **Faculty cannot see individual students.**
+10. **Faculty cannot see individual students.**
    - Class Pulse shows only group numbers, so faculty cannot review a particular student's habits or proofs.
    - Proof photos can be opened only by administrators.
    - Faculty are not ranked on any leaderboard.
-10. **Data is kept for a limited time.**
+11. **Data is kept for a limited time.**
     - Proof photos are deleted after 14 days. The record that a check-in was proven stays. The deployment can change the period to anywhere from 1 to 365 days with `PROOF_PHOTO_RETENTION_DAYS`.
     - Issue-report attachments are cleared 30 days after the report is closed, and after 180 days at most.
-11. **The interface is mainly in English.** A Tagalog translation covers the main navigation and settings. The AI answers in the language the user writes in (English, Filipino or Taglish).
-12. **Habits created before proofs were introduced** kept plain tap check-ins until their week ended. All habits created after that require proof.
+12. **The interface is mainly in English.** A Tagalog translation covers the main navigation and settings. The AI answers in the language the user writes in (English, Filipino or Taglish).
+13. **Habits created before proofs were introduced** kept plain tap check-ins until their week ended. All habits created after that require proof.
 
 ## The panel's notes and where they are addressed
 

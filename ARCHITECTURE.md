@@ -95,7 +95,7 @@ flowchart TB
 | Sync | `GET /api/app-state[?since=]`, `PUT /api/app-state`, `GET/PUT /api/habit-completions` |
 | Habits | `GET /api/habit-categories`, `POST /api/habit/predict` |
 | Notifications | `GET /api/notifications`, `PATCH /api/notifications/:id`, `/api/web-push/*` |
-| Gamification | `GET /api/rewards`, `POST /api/rewards/redeem` (rewards kept for good), `POST /api/rewards/use` (a plan, quiz, report or certificate, made when redeemed; refunded when it cannot be made), `GET /api/rewards/items`, `DELETE /api/rewards/items/:id`, `GET /certificates/:code` (public, no scripts), `GET /api/leaderboard`, `POST /api/leaderboard/sync` |
+| Gamification | `GET /api/rewards`, `POST /api/rewards/redeem` (rewards kept for good), `POST /api/rewards/use` (a plan, quiz, report or certificate, made when redeemed; refunded when it cannot be made), `POST /api/rewards/quiz-source` (a quiz's file, link or recording read as text, free), `GET /api/rewards/items`, `DELETE /api/rewards/items/:id`, `POST /api/rewards/items/:id/essay-check`, `GET /certificates/:code` (public, no scripts), `GET /api/leaderboard`, `POST /api/leaderboard/sync` |
 | Tokens | `GET /api/wallet/summary`, `GET /api/wallet/history`, `GET /api/weekly-bonus`, `POST /api/weekly-bonus/claim`, `POST /api/buddy/items` (shop and weekly drop), `POST /api/buddy/gifts` |
 | AI | `POST /api/insights/assistant` (modes `assistant`, `coach`, `support`; with the chat's last turns as `history`), `POST /api/goals/generate`, `POST /api/habit/parse` (Describe your habit), `POST /api/habit/follow-up` |
 | Support | `POST /api/support/reports`, `POST /api/support/suggestions` |

@@ -4,17 +4,32 @@
 // in the account's My Rewards (reward_items) until it is deleted; a certificate's public page shows
 // only while it is kept.
 import crypto from 'node:crypto';
+import path from 'node:path';
+import multer from 'multer';
 import { query, withTransaction } from '../db/client.js';
-import { certificateLimiter, walletLimiter } from '../http/rate-limits.js';
+import { certificateLimiter, essayCheckLimiter, quizSourceLimiter, walletLimiter } from '../http/rate-limits.js';
 import { parse } from '../lib/http.js';
-import { rewardUseSchema } from '../schemas.js';
+import { essayCheckSchema, quizLinkSchema, rewardUseSchema } from '../schemas.js';
 import { requireAuth } from '../services/accounts.js';
 import { dateKeyInZone } from '../services/ai-context.js';
 import { forAudience, forLanguage } from '../services/ai-prompts.js';
 import { refreshSnapshot } from '../services/app-state-store.js';
-import { generateAiText, isAiConfigured } from '../services/groq.js';
+import { generateAiText, isAiConfigured, transcribeAudio } from '../services/groq.js';
+import {
+  DOCUMENT_BYTES,
+  RECORDING_BYTES,
+  SourceError,
+  SOURCE_WORDS,
+  clipWords,
+  fileKind,
+  isRecordingKind,
+  readLink,
+  textFromDocument,
+  wordsOf,
+} from '../services/quiz-sources.js';
 import {
   AI_MADE_REWARDS,
+  ESSAY_CHECK_SYSTEM,
   MAX_DUE_DAYS,
   PRACTICE_QUIZ_SYSTEM,
   STUDY_PLANNER_SYSTEM,
@@ -23,9 +38,13 @@ import {
   certificateHtml,
   certificateNotFoundHtml,
   certificateStats,
+  essayCheckJsonSchema,
+  essayCheckPrompt,
   planDays,
   practiceQuizJsonSchema,
   practiceQuizPrompt,
+  quizRequest,
+  readEssayCheck,
   readPracticeQuiz,
   readStudyPlan,
   readWeeklyReport,
@@ -40,6 +59,9 @@ import { getWallet, refundSpend, spendTokens } from '../services/wallet.js';
 import { loadAiContext, loadSavedState } from './ai.js';
 
 const DEFAULT_TIME_ZONE = 'Asia/Manila';
+// A file for a quiz is read in memory, never written to disk; a recording may be the biggest.
+const quizFileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: RECORDING_BYTES, files: 1, fields: 2, parts: 4 } }).single('file');
+const MIN_SOURCE_WORDS = 20;
 /** How many made rewards My Rewards lists, newest first. */
 const ITEMS_LISTED = 40;
 
@@ -65,14 +87,22 @@ function itemView(request, row) {
   };
 }
 
-/** Asks the AI twice at most for JSON its reader accepts; null when it gives none. */
-async function writeWithAi(prompt, { system, schema, maxOutputTokens, read }) {
+/**
+ * Asks the AI twice at most for JSON its reader accepts; null when it gives none. Both tries end
+ * within `budgetMs`, before the app stops waiting (75 s): a second try needs 15 s left.
+ */
+async function writeWithAi(prompt, { system, schema, maxOutputTokens, read, budgetMs = 65_000, attemptMs = 40_000, timeoutMs }) {
+  const deadline = Date.now() + budgetMs;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const result = read(await generateAiText(prompt, { system, schema, maxOutputTokens, temperature: 0.4 }));
+    const remaining = deadline - Date.now();
+    if (attempt > 0 && remaining < 15_000) break;
+    const budget = Math.min(attemptMs, remaining);
+    const result = read(await generateAiText(prompt, { system, schema, maxOutputTokens, temperature: 0.4, budgetMs: budget, ...(timeoutMs ? { timeoutMs: Math.min(timeoutMs, budget) } : {}) }));
     if (result) return result;
   }
   return null;
 }
+
 
 /**
  * Makes the reward. Returns { output, title } once made, { refused } when the AI says the input
@@ -91,11 +121,15 @@ async function makeReward(rewardId, input, { session, today, timeZone }) {
     return plan && { output: plan, title: plan.title };
   }
   if (rewardId === 'practice-quiz') {
-    const quiz = await writeWithAi(practiceQuizPrompt(input.topic), {
+    const request = quizRequest(input);
+    // A long quiz takes a while to write: one try can use most of the time.
+    const quiz = await writeWithAi(practiceQuizPrompt(request), {
       system: instructions(PRACTICE_QUIZ_SYSTEM),
-      schema: practiceQuizJsonSchema,
-      maxOutputTokens: 1600,
-      read: (text) => readPracticeQuiz(text, input.topic),
+      schema: practiceQuizJsonSchema(request.plan.total),
+      maxOutputTokens: request.plan.total * 190 + 500,
+      read: (text) => readPracticeQuiz(text, request),
+      attemptMs: 55_000,
+      timeoutMs: 55_000,
     });
     if (quiz?.valid === false) return { refused: quiz.reason };
     return quiz && { output: quiz.quiz, title: quiz.quiz.title };
@@ -133,6 +167,9 @@ export default function registerRewardToolRoutes(app) {
     if (AI_MADE_REWARDS.includes(reward.id) && !isAiConfigured()) return response.status(503).json({ ok: false, message: 'The AI service is not configured on the server.' });
     if (reward.id === 'study-planner' && (details.dueDate < today || details.dueDate > shiftDate(today, MAX_DUE_DAYS))) {
       return response.status(400).json({ ok: false, message: `Choose a due date from today to ${MAX_DUE_DAYS} days from now.` });
+    }
+    if (reward.id === 'practice-quiz' && !details.topic && !details.source) {
+      return response.status(400).json({ ok: false, message: 'Add a topic, notes, a file, a link or a recording first.' });
     }
     if (reward.id === 'certificate' && !(await certificateStats({ query }, session.userId)).checkIns) {
       return response.status(409).json({ ok: false, message: 'A certificate shows your check-ins: check in a habit first.' });
@@ -195,6 +232,90 @@ export default function registerRewardToolRoutes(app) {
     const deleted = await query('DELETE FROM reward_items WHERE id=$1 AND user_id=$2', [String(request.params.id).slice(0, 80), session.userId]);
     if (!deleted.rowCount) return response.status(404).json({ ok: false, message: 'Not found.' });
     response.json({ ok: true });
+  });
+
+  // The quiz maker reads a file (PDF, DOCX, PPTX), a recording (MP3, MP4, M4A, WAV) or a link, and
+  // answers with its text (at most SOURCE_WORDS words) for the student to check before the quiz is
+  // made. Nothing is charged and nothing is kept: the file is read in memory.
+  app.post('/api/rewards/quiz-source', quizSourceLimiter, async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const answer = (kind, name, text) => response.json({ ok: true, source: { kind, name, ...clipWords(text, SOURCE_WORDS) } });
+    try {
+      if (!request.is('multipart/form-data')) {
+        const input = parse(quizLinkSchema, request, response);
+        if (!input) return;
+        const page = await readLink(input.url);
+        if (wordsOf(page.text) < MIN_SOURCE_WORDS) throw new SourceError('This page has too little text for a quiz. Try another page, or paste the text.');
+        return answer('link', page.name, page.text);
+      }
+
+      const uploaded = await new Promise((resolve) => {
+        quizFileUpload(request, response, (error) => resolve(error ? { error } : { file: request.file }));
+      });
+      if (uploaded.error?.code === 'LIMIT_FILE_SIZE') throw new SourceError('This file is over 25 MB. Choose a smaller one.', 413);
+      if (uploaded.error || !uploaded.file) throw new SourceError(uploaded.error ? 'The file could not be uploaded. Try again.' : 'Choose a file first.', 400);
+      const { file } = uploaded;
+      const name = path.basename(String(file.originalname ?? '')).replace(/[\u0000-\u001f]/g, '').slice(0, 120) || 'File';
+      const kind = fileKind(name, file.buffer);
+      if (!kind) throw new SourceError('Choose a PDF, DOCX or PPTX file, or an MP3, MP4, M4A or WAV recording.', 400);
+
+      if (isRecordingKind(kind)) {
+        if (!isAiConfigured()) throw new SourceError('Recordings cannot be read right now. Paste the text instead.', 503);
+        let text = '';
+        try {
+          text = (await transcribeAudio(file.buffer, { filename: name, mimeType: file.mimetype })) ?? '';
+        } catch (error) {
+          logError('transcription', error);
+          throw new SourceError(error?.status === 413 ? 'This recording is too long for the AI. Try a shorter part of it.' : 'The recording could not be turned into text right now. Try again later, or paste the text.', 502);
+        }
+        if (wordsOf(text) < MIN_SOURCE_WORDS) throw new SourceError('Too few words could be heard in this recording for a quiz.');
+        return answer('recording', name, text);
+      }
+
+      if (file.size > DOCUMENT_BYTES) throw new SourceError('Documents can be up to 10 MB. Choose a smaller file.', 413);
+      const text = await textFromDocument(kind, file.buffer);
+      if (text === null) throw new SourceError('This file could not be read. Try saving it again as PDF or DOCX.');
+      if (wordsOf(text) < MIN_SOURCE_WORDS) {
+        throw new SourceError(kind === 'pdf' ? 'This PDF has no text HabitAI can read (it may be scanned pages). Try another file, or paste the text.' : 'This file has too little text for a quiz.');
+      }
+      return answer('file', name, text);
+    } catch (error) {
+      if (error instanceof SourceError) return response.status(error.status).json({ ok: false, message: error.message });
+      logError('quiz-source', error);
+      return response.status(500).json({ ok: false, message: 'This could not be read right now. Try again, or paste the text.' });
+    }
+  });
+
+  // The AI checks an essay answer of a practice quiz against its key points (free: the quiz was paid for).
+  app.post('/api/rewards/items/:id/essay-check', essayCheckLimiter, async (request, response) => {
+    const session = await requireAuth(request, response);
+    if (!session) return;
+    const input = parse(essayCheckSchema, request, response);
+    if (!input) return;
+    const row = (await query(
+      "SELECT output_json AS output FROM reward_items WHERE id=$1 AND user_id=$2 AND reward_id='practice-quiz'",
+      [String(request.params.id).slice(0, 80), session.userId],
+    )).rows[0];
+    const question = row?.output?.questions?.[input.index];
+    if (question?.type !== 'essay' || !Array.isArray(question.keyPoints)) return response.status(404).json({ ok: false, message: 'Not found.' });
+    if (!isAiConfigured()) return response.status(503).json({ ok: false, message: 'The AI check is not available right now. Compare your answer with the key points.' });
+    const saved = await loadSavedState(session.userId).catch(() => ({ language: null }));
+    let check = null;
+    try {
+      check = await writeWithAi(essayCheckPrompt({ ...question, answer: input.answer }), {
+        system: forLanguage(ESSAY_CHECK_SYSTEM, saved.language),
+        schema: essayCheckJsonSchema,
+        maxOutputTokens: 400,
+        read: (text) => readEssayCheck(text, question.keyPoints.length),
+        budgetMs: 30_000,
+        attemptMs: 20_000,
+      });
+    } catch (error) {
+      logError('essay-check', error);
+    }
+    if (!check) return response.status(502).json({ ok: false, message: 'The AI could not check this answer right now. Compare it with the key points.' });
+    response.json({ ok: true, ...check });
   });
 
   // A certificate's public page: anyone with its link can open it, to check it or print it.

@@ -34,7 +34,8 @@ const SECTIONS: { title: string; items: string[] }[] = [
       'To give AI guidance: when you ask the AI Coach or assistants, your question, the chat\'s last few questions and answers (so a follow-up question makes sense) and a summary of your habits and check-ins (without your name or email) are sent to Groq, our AI provider, to generate the answer. The help assistant gets only the chat, not your habits.',
       'To plan your goals: when you use the AI goal planner, your text and your recent habit history are sent to Groq, without your name or email. The history covers the habits of your last 4 weeks (names, categories, schedules and reminder times), how often you checked in and at what time of day, their forecasts from our prediction model, and your streak. It is used only to make your plan and this week\'s habits.',
       'To help you start a new habit: when you describe one for HabitAI to fill in the form, your description is sent to Groq, without your name or email, to read the habit from it. When you add one, its name, category and proof and your answers to its follow-up questions are sent to Groq the same way, to ask one more question about it and give you a tip.',
-      'To make the rewards you redeem: an AI plan\'s task and due date, a quiz\'s topic, or for a weekly report a summary of your last 7 days of habits, are sent to Groq without your name or email. A certificate shows your full name and your check-in counts to anyone with its link, until you delete it in My Rewards.',
+      'To make the rewards you redeem: an AI plan\'s task and due date, or for a weekly report a summary of your last 7 days of habits, are sent to Groq without your name or email. A certificate shows your full name and your check-in counts to anyone with its link, until you delete it in My Rewards.',
+      'To make an AI Practice Quiz from what you choose: a file you upload (PDF, DOCX or PPTX) is read on our server and not kept; a link is opened by our server; a recording is sent to Groq to be turned into text. Up to about 1,500 words of that text, or the text or topic you type, are sent to Groq without your name or email to write the quiz, and kept with the quiz in My Rewards until you delete it. An essay answer you ask the AI to check is sent to Groq the same way.',
       'To keep accounts secure and to answer support requests.',
       'For research on the app\'s effect on student habits: PSAU faculty only see aggregated, anonymized statistics. Groups too small to hide individuals are combined or withheld.',
     ],
@@ -45,7 +46,7 @@ const SECTIONS: { title: string; items: string[] }[] = [
       'You can see all of your data in the app.',
       'Other students only see your first name and last initial on leaderboards, and you can hide yourself in Settings & Preferences.',
       'Authorized HabitAI administrators can view account and support details to manage accounts and help you, and the proofs of your check-ins, including their photos, to keep the study\'s data honest. Their actions, including opening a photo, are logged. Faculty never see your photos.',
-      'Service providers that host or process data for us: Neon (database), Render/Vercel (app hosting), Groq (AI answers) and Brevo (email delivery). We do not sell your data.',
+      'Service providers that host or process data for us: Neon (database), Render/Vercel (app hosting), Groq (AI answers, and recordings turned into text) and Brevo (email delivery). We do not sell your data.',
     ],
   },
   {

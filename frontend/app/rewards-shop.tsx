@@ -5,8 +5,8 @@
 // are kept for good and used from their card. Prices and names come from the server's catalog.
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { redeemReward, type ServerReward } from '@/authentication';
@@ -17,7 +17,7 @@ import { useAppDialog } from '@/components/ui/app-dialog';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { loadRewards, markRewardOwned, useRewards } from '@/hooks/use-rewards';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
-import { deleteRewardItem, getRewardItems, redeemMadeReward, type RewardItem, type RewardRequest } from '@/utils/rewards-client';
+import { deleteRewardItem, getRewardItems, redeemMadeReward, rememberRewardItem, type RewardItem, type RewardRequest } from '@/utils/rewards-client';
 
 type Kind = 'made' | 'permanent' | 'freeze' | 'link';
 type Entry = { id: string; title: string; detail: string; cost: number; kind: Kind; icon: keyof typeof Ionicons.glyphMap; color: string; costLabel?: string };
@@ -72,7 +72,8 @@ export default function RewardsShopScreen() {
   const [toast, setToast] = useState('');
   const [linkHandled, setLinkHandled] = useState(false);
 
-  useEffect(() => {
+  // My Rewards loads each time the shop is shown, so a quiz made or deleted meanwhile is right.
+  useFocusEffect(useCallback(() => {
     let active = true;
     void getRewardItems().then((result) => {
       if (!active) return;
@@ -82,7 +83,7 @@ export default function RewardsShopScreen() {
     return () => {
       active = false;
     };
-  }, []);
+  }, []));
 
   useEffect(() => {
     if (!toast) return;
@@ -115,6 +116,7 @@ export default function RewardsShopScreen() {
     else if (entry.kind === 'freeze') setSheet('freeze');
     else if (owned(entry)) openKept(entry);
     else if (tokens < entry.cost) setToast(`${entry.cost - tokens} more tokens for ${entry.title}. Check in your habits to earn them.`);
+    else if (entry.id === 'practice-quiz') router.push('/quiz-maker');
     else if (entry.kind === 'made') setMaking(entry);
     else setConfirm(entry);
   };
@@ -148,6 +150,15 @@ export default function RewardsShopScreen() {
     setMaking(null);
     setTab('mine');
     setViewing(item);
+  };
+  // A practice quiz opens in the quiz player, one question at a time.
+  const openItem = (item: RewardItem) => {
+    if (item.rewardId !== 'practice-quiz') {
+      setViewing(item);
+      return;
+    }
+    rememberRewardItem(item);
+    router.push({ pathname: '/practice-quiz', params: { id: item.id } });
   };
 
   const remove = (item: RewardItem) => {
@@ -259,7 +270,7 @@ export default function RewardsShopScreen() {
               {itemsFailed ? <Text style={styles.empty}>Could not load them. Open this screen again to retry.</Text> : null}
               {items?.length === 0 && !itemsFailed ? <Text style={styles.empty}>Nothing yet. Redeem a plan, a quiz, a report or a certificate in the Shop.</Text> : null}
               {items?.map((item) => (
-                <Pressable key={item.id} style={({ pressed }) => [styles.itemRow, pressed && styles.pressed]} onPress={() => setViewing(item)} accessibilityRole="button" accessibilityLabel={`Open ${KIND_LABEL[item.rewardId]}: ${item.title}`}>
+                <Pressable key={item.id} style={({ pressed }) => [styles.itemRow, pressed && styles.pressed]} onPress={() => openItem(item)} accessibilityRole="button" accessibilityLabel={`Open ${KIND_LABEL[item.rewardId]}: ${item.title}`}>
                   <View style={[styles.iconSmall, { backgroundColor: `${LOOKS[item.rewardId].color}1F` }]}><Ionicons name={LOOKS[item.rewardId].icon} size={18} color={themeColor(LOOKS[item.rewardId].color)} /></View>
                   <View style={styles.cardCopy}>
                     <Text style={styles.itemTitle} numberOfLines={2}>{item.title}</Text>
@@ -321,7 +332,7 @@ export default function RewardsShopScreen() {
                   <Text style={styles.viewTitle}>{viewing.title}</Text>
                 </View>
               </View>
-              <RewardItemView item={viewing} isFaculty={isFaculty} />
+              <RewardItemView item={viewing} />
               <Pressable style={styles.deleteRow} onPress={() => remove(viewing)} accessibilityRole="button">
                 <Ionicons name="trash-outline" size={16} color={themeColor('#C2412F')} />
                 <Text style={styles.deleteText}>Delete</Text>
@@ -341,14 +352,14 @@ export default function RewardsShopScreen() {
 }
 
 /**
- * What a made reward is made from, then redeeming it: a task and a due date for a plan, a topic for
- * a quiz, nothing more for a report or a certificate. The server charges, makes it and keeps it.
+ * What a made reward is made from, then redeeming it: a task and a due date for a plan, nothing more
+ * for a report or a certificate (a quiz has its own screen, app/quiz-maker.tsx). The server charges,
+ * makes it and keeps it.
  */
 function MakeSheet({ entry, tokens, isFaculty, onClose, onMade, onWallet }: { entry: Entry; tokens: number; isFaculty: boolean; onClose: () => void; onMade: (item: RewardItem) => void; onWallet: (wallet: { tokens?: number; tokenHistory?: object[] }) => void }) {
   const styles = useThemedStyles(themedStyles);
   const themeColor = useThemeColor();
   const [task, setTask] = useState('');
-  const [topic, setTopic] = useState('');
   const [dueDate, setDueDate] = useState(() => inDays(7));
   const [pickerOpen, setPickerOpen] = useState(false);
   const [minutes, setMinutes] = useState(60);
@@ -357,12 +368,9 @@ function MakeSheet({ entry, tokens, isFaculty, onClose, onMade, onWallet }: { en
 
   const request: RewardRequest | null = entry.id === 'study-planner'
     ? (task.trim().length >= 3 ? { rewardId: 'study-planner', task: task.trim(), dueDate, minutesPerDay: minutes } : null)
-    : entry.id === 'practice-quiz'
-      ? (topic.trim().length >= 3 ? { rewardId: 'practice-quiz', topic: topic.trim() } : null)
-      : entry.id === 'weekly-report' ? { rewardId: 'weekly-report' } : { rewardId: 'certificate' };
+    : entry.id === 'weekly-report' ? { rewardId: 'weekly-report' } : { rewardId: 'certificate' };
   const intro: Record<string, string> = {
     'study-planner': isFaculty ? 'Grading, lesson preparation, research or any big task: the AI splits it into a step for each day until it is due.' : 'An exam, a project or any big task: the AI splits it into a step for each day until it is due.',
-    'practice-quiz': isFaculty ? 'Five multiple-choice questions on a lesson topic, with the answers explained, to use in class.' : 'Five multiple-choice questions on what you are studying, with the answers explained.',
     'weekly-report': 'The AI reads your last 7 days of check-ins: what went well, what slipped, and three steps for the week ahead.',
     certificate: 'A certificate with your check-ins, active days and streak. Anyone with its link can open it to check it, until you delete it.',
   };
@@ -418,12 +426,6 @@ function MakeSheet({ entry, tokens, isFaculty, onClose, onMade, onWallet }: { en
                     </Pressable>
                   ))}
                 </View>
-              </>
-            )}
-            {entry.id === 'practice-quiz' && (
-              <>
-                <Text style={styles.label}>Topic</Text>
-                <TextInput value={topic} onChangeText={setTopic} placeholder="e.g., Photosynthesis, Fractions, Philippine history" placeholderTextColor="#A19AAA" style={styles.input} maxLength={120} accessibilityLabel="Topic" />
               </>
             )}
 

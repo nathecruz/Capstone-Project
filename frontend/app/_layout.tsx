@@ -185,6 +185,8 @@ function RootNavigator() {
         <Stack.Screen name="buddy" options={{ headerShown: false }} />
         <Stack.Screen name="rewards-shop" options={{ headerShown: false }} />
         <Stack.Screen name="wellness" options={{ headerShown: false }} />
+        <Stack.Screen name="quiz-maker" options={{ headerShown: false }} />
+        <Stack.Screen name="practice-quiz" options={{ headerShown: false }} />
         <Stack.Screen name="wallet" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>

@@ -1,7 +1,8 @@
 // The Rewards Shop (app/rewards-shop.tsx): rewards that help with school, work and health, redeemed
-// in one place. A made reward (a quiz here) is made by the server and opens in My Rewards; one kept
-// for good (the Wellness Pack) is confirmed, then opened; a certificate opens its link and can be
-// deleted. The Wellness Pack's routines run step by step once it is unlocked.
+// in one place. A made reward (a plan here) is made by the server and opens in My Rewards; the AI
+// Practice Quiz has its own maker and player; one kept for good (the Wellness Pack) is confirmed,
+// then opened; a certificate opens its link and can be deleted. The Wellness Pack's routines run
+// step by step once it is unlocked.
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { router } from 'expo-router';
@@ -9,11 +10,16 @@ import { openBrowserAsync } from 'expo-web-browser';
 import RewardsShopScreen from '@/app/rewards-shop';
 import WellnessScreen from '@/app/wellness';
 import { redeemReward, type ServerReward } from '@/authentication';
-import { deleteRewardItem, getRewardItems, redeemMadeReward, type RewardItem } from '@/utils/rewards-client';
+import { deleteRewardItem, getRewardItems, redeemMadeReward, rememberRewardItem, type RewardItem } from '@/utils/rewards-client';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 let mockParams: Record<string, string> = {};
-jest.mock('expo-router', () => ({ router: { push: jest.fn(), replace: jest.fn(), back: jest.fn() }, useLocalSearchParams: () => mockParams }));
+jest.mock('expo-router', () => ({
+  router: { push: jest.fn(), replace: jest.fn(), back: jest.fn() },
+  useLocalSearchParams: () => mockParams,
+  // The shop loads My Rewards each time it is shown: here, once when it opens.
+  useFocusEffect: (effect: () => void | (() => void)) => jest.requireActual('react').useEffect(effect, []),
+}));
 jest.mock('expo-web-browser', () => ({ openBrowserAsync: jest.fn(async () => undefined) }));
 jest.mock('react-native-safe-area-context', () => {
   const ReactActual = jest.requireActual('react');
@@ -25,7 +31,7 @@ jest.mock('@/components/streak-freeze-sheet', () => ({ StreakFreezeSheet: () => 
 const mockDialog = jest.fn();
 jest.mock('@/components/ui/app-dialog', () => ({ useAppDialog: () => mockDialog }));
 jest.mock('@/authentication', () => ({ redeemReward: jest.fn() }));
-jest.mock('@/utils/rewards-client', () => ({ redeemMadeReward: jest.fn(), getRewardItems: jest.fn(async () => []), deleteRewardItem: jest.fn(async () => true) }));
+jest.mock('@/utils/rewards-client', () => ({ redeemMadeReward: jest.fn(), getRewardItems: jest.fn(async () => []), deleteRewardItem: jest.fn(async () => true), rememberRewardItem: jest.fn() }));
 let mockContext: Record<string, unknown>;
 jest.mock('@/hooks/color-scheme-context', () => ({ useAppColorScheme: () => mockContext }));
 const mockMarkOwned = jest.fn();
@@ -85,31 +91,28 @@ describe('the Rewards Shop', () => {
     expect(screen.getByText('80 more tokens for Premium Themes. Check in your habits to earn them.')).toBeTruthy();
   });
 
-  it('makes a practice quiz on a topic and opens it in My Rewards, ready to answer', async () => {
-    jest.mocked(redeemMadeReward).mockResolvedValueOnce({ ok: true, item: quizItem, wallet: { tokens: 105, tokenHistory: [] } });
+  it('makes a practice quiz in the quiz maker, and opens a kept one in the quiz player', async () => {
+    jest.mocked(getRewardItems).mockResolvedValueOnce([quizItem]);
     render(<RewardsShopScreen />);
     await settle();
     fireEvent.press(screen.getByLabelText('Redeem AI Practice Quiz for 15 tokens'));
-    expect(screen.getByLabelText('Redeem for 15 tokens').props.accessibilityState).toMatchObject({ disabled: true });
-    fireEvent.changeText(screen.getByLabelText('Topic'), 'Photosynthesis');
-    await act(async () => { fireEvent.press(screen.getByLabelText('Redeem for 15 tokens')); });
-    expect(redeemMadeReward).toHaveBeenCalledWith({ rewardId: 'practice-quiz', topic: 'Photosynthesis' });
-    expect(mockContext.applyWallet).toHaveBeenCalledWith({ tokens: 105, tokenHistory: [] });
-    expect(screen.getByText('1. What does chlorophyll absorb?')).toBeTruthy();
-    fireEvent.press(screen.getByText('B. Water'));
-    expect(screen.getByLabelText('Light, correct answer')).toBeTruthy();
-    expect(screen.getByText('It absorbs light.')).toBeTruthy();
-    expect(screen.getByText('Score: 0 of 1')).toBeTruthy();
+    expect(router.push).toHaveBeenLastCalledWith('/quiz-maker');
+    expect(redeemMadeReward).not.toHaveBeenCalled();
+    fireEvent.press(screen.getByText('My Rewards'));
+    fireEvent.press(screen.getByLabelText('Open Quiz: Photosynthesis'));
+    expect(rememberRewardItem).toHaveBeenCalledWith(quizItem);
+    expect(router.push).toHaveBeenLastCalledWith({ pathname: '/practice-quiz', params: { id: 'item-1' } });
   });
 
   it('shows why a reward could not be made, with the tokens given back', async () => {
-    jest.mocked(redeemMadeReward).mockResolvedValueOnce({ ok: false, refunded: true, message: 'Try a subject you are studying. Your 15 tokens were returned.', wallet: { tokens: 120 } });
+    jest.mocked(redeemMadeReward).mockResolvedValueOnce({ ok: false, refunded: true, message: 'AI Study & Work Planner is unavailable right now. Your 30 tokens were returned.', wallet: { tokens: 120 } });
     render(<RewardsShopScreen />);
     await settle();
-    fireEvent.press(screen.getByLabelText('Redeem AI Practice Quiz for 15 tokens'));
-    fireEvent.changeText(screen.getByLabelText('Topic'), 'asdf qwer');
-    await act(async () => { fireEvent.press(screen.getByText('Redeem for 15 tokens')); });
-    expect(screen.getByText('Try a subject you are studying. Your 15 tokens were returned.')).toBeTruthy();
+    fireEvent.press(screen.getByLabelText('Redeem AI Study & Work Planner for 30 tokens'));
+    fireEvent.changeText(screen.getByLabelText('What is it?'), 'Biology midterm exam');
+    await act(async () => { fireEvent.press(screen.getByText('Redeem for 30 tokens')); });
+    expect(redeemMadeReward).toHaveBeenCalledWith(expect.objectContaining({ rewardId: 'study-planner', task: 'Biology midterm exam', minutesPerDay: 60 }));
+    expect(screen.getByText('AI Study & Work Planner is unavailable right now. Your 30 tokens were returned.')).toBeTruthy();
     expect(mockContext.applyWallet).toHaveBeenCalledWith({ tokens: 120 });
   });
 
