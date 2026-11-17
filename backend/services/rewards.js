@@ -1,12 +1,21 @@
-// Token rewards that do something: Premium Themes (app colour themes), a Custom Title shown on the
-// profile and the leaderboard, Profile Frames, and the Buddy Showcase (the student's Habi next to
-// their name on the leaderboard; students only, as faculty are not on it). Rewards that only took
-// tokens (or doubled other features) were retired and what students paid for them was refunded.
+// Token rewards, all sold in the app's Rewards Shop. Most of them help with school, work or health:
+// the AI Study & Work Planner, the AI Practice Quiz, the AI Weekly Report and the Certificate of
+// Achievement are made when they are redeemed (services/reward-tools.js; the tokens come back when
+// one cannot be made), and the Wellness Pack unlocks guided breaks for good. The looks are Premium
+// Themes (app colour themes), a Custom Title shown on the profile and the leaderboard, Profile
+// Frames, and the Buddy Showcase (the student's Habi next to their name on the leaderboard;
+// students only, as faculty are not on it). Rewards that only took tokens (or doubled other
+// features) were retired and what students paid for them was refunded.
 
 export const RETIRED_REWARDS = ['plant-buddy', 'kindness-boost', 'habit-swap', 'mystery-box', 'xp-booster', 'grace-day'];
 
 // In the order the AI help assistant names them (services/token-guide.js economyGuide).
 export const REAL_REWARDS = {
+  'study-planner': { name: 'AI Study & Work Planner', cost: 30, description: 'Turn an exam, a project or any big task into a day-by-day plan you can follow' },
+  'practice-quiz': { name: 'AI Practice Quiz', cost: 15, description: 'Five questions on a topic you are studying, with the answers explained' },
+  'weekly-report': { name: 'AI Weekly Report', cost: 25, description: 'A review of your last 7 days: what went well, what slipped, and a plan for the week ahead' },
+  'certificate': { name: 'Certificate of Achievement', cost: 100, description: 'A certificate of your check-ins and streak, with a link anyone can open to check it' },
+  'wellness-pack': { name: 'Wellness Pack', cost: 120, description: 'Four guided breaks to use any time: box breathing, a desk stretch, an eye break and a mindful minute' },
   'premium-theme': { name: 'Premium Themes', cost: 200, description: 'Seven app colour themes: Ocean, Sunset, Forest, Midnight, Rose, Amber and Berry' },
   'profile-frames': { name: 'Profile Frames', cost: 180, description: 'Eight frames for your photo: Gold, Neon, Leaf, Fire, Aqua, Galaxy, Blossom and Royal' },
   'custom-title': { name: 'Custom Title', cost: 250, description: 'Your own title under your name on your profile and the leaderboard' },
@@ -16,14 +25,21 @@ export const REAL_REWARDS = {
 /** The frames the Profile Frames reward unlocks ('' is no frame). */
 export const PROFILE_FRAMES = ['gold', 'neon', 'leaf', 'fire', 'aqua', 'galaxy', 'blossom', 'royal'];
 
-/** Rewards bought once and kept. */
-export const PERMANENT_REWARDS = new Set(Object.keys(REAL_REWARDS));
+/** Rewards made when they are redeemed (services/reward-tools.js), each time anew: POST /api/rewards/use. */
+export const MADE_REWARDS = new Set(['study-planner', 'practice-quiz', 'weekly-report', 'certificate']);
+
+/** Rewards bought once and kept: POST /api/rewards/redeem. */
+export const PERMANENT_REWARDS = new Set(Object.keys(REAL_REWARDS).filter((id) => !MADE_REWARDS.has(id)));
 
 /** Rewards only students can use: the Buddy Showcase shows on the student leaderboard, which has no faculty. */
 export const STUDENT_REWARDS = new Set(['buddy-showcase']);
 
-/** What a reward does for faculty, where it differs: they are not on the leaderboard. */
-const FACULTY_DESCRIPTIONS = { 'custom-title': 'Your own title under your name on your profile' };
+/** What a reward does for faculty, where it differs: they teach, and they are not on the leaderboard. */
+const FACULTY_DESCRIPTIONS = {
+  'custom-title': 'Your own title under your name on your profile',
+  'study-planner': 'Turn grading, lesson preparation, research or any big task into a day-by-day plan',
+  'practice-quiz': 'Five questions on a lesson topic, with the answers explained, to use in class',
+};
 
 /** Retires the rewards that did nothing and refunds their redemptions (once per redemption). */
 export async function retireRewards(db, now = Date.now()) {
@@ -62,6 +78,8 @@ export async function getRewards(db, userId, { faculty = false } = {}) {
       ...(faculty && FACULTY_DESCRIPTIONS[row.id] ? { description: FACULTY_DESCRIPTIONS[row.id] } : {}),
       cost: Number(row.cost),
       permanent: PERMANENT_REWARDS.has(row.id),
+      // Made each time it is redeemed (an AI plan, a quiz, a report or a certificate).
+      ...(MADE_REWARDS.has(row.id) ? { made: true } : {}),
     })),
     owned: owned.rows.map((row) => row.rewardId).filter((id) => PERMANENT_REWARDS.has(id)),
     title: user.rows[0]?.title ?? '',

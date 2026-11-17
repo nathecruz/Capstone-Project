@@ -89,6 +89,8 @@ export async function ensureNeonSchema({ log = () => {} } = {}) {
   // Token rewards that did nothing are retired and refunded; the real rewards' names, prices and
   // descriptions are kept current (now with the Buddy Showcase), so a new key re-syncs them.
   await runOnce('token-rewards-real-2026-12', () => withTransaction((connection) => retireRewards(connection)));
+  // The Rewards Shop's helpful rewards: their names, prices and descriptions synced once more.
+  await runOnce('token-rewards-helpful-2026-11', () => withTransaction((connection) => retireRewards(connection)));
   await runOnce('email-verification-backfill', () => query('UPDATE users SET email_verified_at = created_at WHERE email_verified_at IS NULL'));
 
   // Accounts created with a single full name get a first and last name once; students can correct them in the app.

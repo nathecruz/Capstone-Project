@@ -871,7 +871,10 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
 
     const catalog = await request('/api/rewards', { headers });
     assert.equal(catalog.response.status, 200, JSON.stringify(catalog.body));
-    assert.deepEqual(catalog.body.rewards.map((reward) => [reward.id, reward.cost, reward.permanent]), [['profile-frames', 180, true], ['premium-theme', 200, true], ['custom-title', 250, true], ['buddy-showcase', 300, true]], 'only rewards that do something are on sale');
+    assert.deepEqual(catalog.body.rewards.map((reward) => [reward.id, reward.cost, reward.permanent]), [
+      ['practice-quiz', 15, false], ['weekly-report', 25, false], ['study-planner', 30, false], ['certificate', 100, false], ['wellness-pack', 120, true],
+      ['profile-frames', 180, true], ['premium-theme', 200, true], ['custom-title', 250, true], ['buddy-showcase', 300, true],
+    ], 'only rewards that do something are on sale');
     assert.deepEqual({ owned: catalog.body.owned, title: catalog.body.title }, { owned: [], title: '' });
     assert.equal((await request('/api/rewards/redeem', { method: 'POST', headers, body: JSON.stringify({ rewardId: 'grace-day', rewardName: 'Grace Day', tokenCost: 620 }) })).response.status, 400, 'retired rewards cannot be bought');
 
@@ -1330,6 +1333,30 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
       assert.deepEqual(data.habits.map((habit) => habit.reminderTimes), [['06:00 AM', '11:58 PM']]);
       assert.ok(['open', 'missed', 'done'].includes(data.habits[0].checkInToday), JSON.stringify(data.habits[0]));
       assert.match(data.localTime, /^\d{2}:\d{2} (AM|PM)$/);
+
+      // A practice quiz from the Rewards Shop: charged, made and kept; given back when the AI cannot make it.
+      const shop = async (body) => {
+        const response = await fetch(`${aiBase}/api/rewards/use`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+        return { status: response.status, body: await response.json() };
+      };
+      await grant(userId, 40, 'quiz-grant');
+      const quizBefore = await balance();
+      const questions = Array.from({ length: 5 }, (_, index) => ({ question: `Question ${index + 1}?`, choices: ['A', 'B', 'C', 'D'], answerIndex: index % 4, explanation: 'Because.' }));
+      groqAnswer = JSON.stringify({ valid: true, reason: '', title: 'Photosynthesis', questions });
+      const quiz = await shop({ rewardId: 'practice-quiz', topic: 'Photosynthesis' });
+      assert.equal(quiz.status, 200, JSON.stringify(quiz.body));
+      assert.deepEqual([quiz.body.item.rewardId, quiz.body.item.title, quiz.body.item.output.questions.length], ['practice-quiz', 'Photosynthesis', 5]);
+      assert.match(asked.at(-1).messages[1].content, /^Topic of the quiz:\n"""Photosynthesis"""$/);
+      assert.equal(await balance(), quizBefore - 15);
+      groqAnswer = JSON.stringify({ valid: false, reason: 'Try a subject you are studying.' });
+      const refused = await shop({ rewardId: 'practice-quiz', topic: 'asdf qwer' });
+      assert.deepEqual([refused.status, refused.body.refunded, refused.body.message], [422, true, 'Try a subject you are studying. Your 15 tokens were returned.']);
+      groqAnswer = 'not json';
+      const unmade = await shop({ rewardId: 'practice-quiz', topic: 'Fractions' });
+      assert.deepEqual([unmade.status, unmade.body.message], [502, 'AI Practice Quiz is unavailable right now. Your 15 tokens were returned.']);
+      assert.equal(await balance(), quizBefore - 15, 'what could not be made was given back');
+      assert.equal((await shop({ rewardId: 'study-planner', task: 'Midterm exam', dueDate: '2020-01-01', minutesPerDay: 60 })).status, 400, 'a due date in the past is refused before any charge');
+      assert.equal(await balance(), quizBefore - 15);
     } finally {
       aiServer.kill();
       await aiExit;
@@ -1530,6 +1557,48 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     // (Every photo of these tests is that old 15 days from now.)
     assert.ok(await prunePhotoProofs(db, 14, Date.now() + 15 * 86_400_000) >= 1);
     assert.deepEqual(await proofRow('water'), { kind: 'photo', minutes: null, steps: null, bytes: null, photoType: null });
+  });
+
+  await t.test('the Rewards Shop makes a certificate anyone can check, and charges nothing for what cannot be made', async () => {
+    const { headers, userId } = await student('Cert', 'Holder');
+    const use = (body) => request('/api/rewards/use', { method: 'POST', headers, body: JSON.stringify(body) });
+    const balance = async () => (await db.query('SELECT COALESCE(SUM(amount),0)::int AS sum FROM token_transactions WHERE user_id=$1', [userId])).rows[0].sum;
+    const catalog = await request('/api/rewards', { headers });
+    assert.deepEqual(catalog.body.rewards.filter((reward) => reward.made).map((reward) => reward.id).sort(), ['certificate', 'practice-quiz', 'study-planner', 'weekly-report']);
+    assert.ok(catalog.body.rewards.some((reward) => reward.id === 'wellness-pack' && reward.permanent));
+
+    // No certificate without a check-in, no AI reward without the AI, and no charge for either.
+    await grant(userId, 300, 'shop-grant');
+    assert.equal((await use({ rewardId: 'certificate' })).response.status, 409);
+    assert.equal((await use({ rewardId: 'practice-quiz', topic: 'Photosynthesis' })).response.status, 503);
+    assert.equal(await balance(), 300);
+    // A made reward is not bought the old way.
+    assert.equal((await request('/api/rewards/redeem', { method: 'POST', headers, body: JSON.stringify({ rewardId: 'certificate', rewardName: 'Certificate of Achievement', tokenCost: 100 }) })).response.status, 400);
+
+    await checkInOn(userId, 'habit-1', today);
+    const made = await use({ rewardId: 'certificate', timeZone: 'UTC' });
+    assert.equal(made.response.status, 200, JSON.stringify(made.body));
+    const { item } = made.body;
+    assert.deepEqual([made.body.tokens, item.rewardId, item.output.checkIns, item.output.name, item.output.role], [200, 'certificate', 1, 'Cert Holder', 'Student']);
+    assert.match(item.code, /^[A-HJ-NP-Z2-9]{10}$/);
+    assert.ok(item.url.endsWith(`/certificates/${item.code}`));
+    // Its page opens for anyone (no session), and allows no scripts.
+    const page = await fetch(`${baseUrl}/certificates/${item.code.toLowerCase()}`);
+    const html = await page.text();
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get('content-security-policy'), /^default-src 'none'; style-src 'unsafe-inline'/);
+    assert.ok(html.includes('Cert Holder') && html.includes(`Certificate ${item.code}`));
+    // My Rewards lists it; once deleted, its page is gone.
+    assert.deepEqual((await request('/api/rewards/items', { headers })).body.items.map((entry) => entry.id), [item.id]);
+    assert.equal((await request(`/api/rewards/items/${item.id}`, { method: 'DELETE', headers })).response.status, 200);
+    assert.equal((await fetch(`${baseUrl}/certificates/${item.code}`)).status, 404);
+    assert.equal((await fetch(`${baseUrl}/certificates/not-a-code`)).status, 404);
+
+    // The Wellness Pack is kept once bought.
+    const wellness = await request('/api/rewards/redeem', { method: 'POST', headers, body: JSON.stringify({ rewardId: 'wellness-pack', rewardName: 'Wellness Pack', tokenCost: 120 }) });
+    assert.equal(wellness.response.status, 200, JSON.stringify(wellness.body));
+    assert.ok((await request('/api/rewards', { headers })).body.owned.includes('wellness-pack'));
+    assert.equal(await balance(), 80);
   });
 
   await t.test('a described habit is read into the habit form, by the rules without the AI', async () => {
@@ -1963,11 +2032,11 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const facultySummary = await summaryFor(day, faculty.headers);
     assert.equal(facultySummary.response.status, 200, JSON.stringify(facultySummary.body));
     const facultyTargets = facultySummary.body.spend.map((row) => row.target);
-    assert.deepEqual(facultyTargets.filter((target) => target !== 'buddy'), ['freeze', 'reward:profile-frames', 'reward:premium-theme', 'reward:custom-title', 'coach']);
+    assert.deepEqual(facultyTargets.filter((target) => target !== 'buddy'), ['freeze', 'reward:practice-quiz', 'reward:weekly-report', 'reward:study-planner', 'reward:certificate', 'reward:wellness-pack', 'reward:profile-frames', 'reward:premium-theme', 'reward:custom-title', 'coach']);
     assert.equal(facultySummary.body.spend.find((row) => row.id === 'custom-title').detail, 'Your own title under your name on your profile', 'not on the leaderboard');
     assert.deepEqual((await request('/api/wallet/history', { headers: faculty.headers })).body, { ok: true, items: [], nextCursor: null, totals: { earned: 0, spent: 0, balance: 0 } });
     const facultyRewards = (await request('/api/rewards', { headers: faculty.headers })).body;
-    assert.deepEqual(facultyRewards.rewards.map((reward) => reward.id), ['profile-frames', 'premium-theme', 'custom-title']);
+    assert.deepEqual(facultyRewards.rewards.map((reward) => reward.id), ['practice-quiz', 'weekly-report', 'study-planner', 'certificate', 'wellness-pack', 'profile-frames', 'premium-theme', 'custom-title']);
     await grant(faculty.userId, 600, 'faculty-grant');
     const redeemAs = (asHeaders, rewardId, rewardName, tokenCost) => request('/api/rewards/redeem', { method: 'POST', headers: asHeaders, body: JSON.stringify({ rewardId, rewardName, tokenCost }) });
     const showcase = await redeemAs(faculty.headers, 'buddy-showcase', 'Buddy Showcase', 300);
@@ -2021,16 +2090,18 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     // What to spend on, against the balance.
     const drop = dropForWeek(weekStart);
     const spend = Object.fromEntries(summary.spend.map((row) => [row.id, row]));
-    assert.deepEqual(summary.spend.map((row) => row.target), ['freeze', 'buddy', 'buddy', 'reward:profile-frames', 'reward:premium-theme', 'reward:custom-title', 'reward:buddy-showcase', 'gift', 'coach']);
+    assert.deepEqual(summary.spend.map((row) => row.target), ['freeze', 'buddy', 'buddy', 'reward:practice-quiz', 'reward:weekly-report', 'reward:study-planner', 'reward:certificate', 'reward:wellness-pack', 'reward:profile-frames', 'reward:premium-theme', 'reward:custom-title', 'reward:buddy-showcase', 'gift', 'coach']);
     assert.deepEqual([spend['streak-freeze'].status, spend['streak-freeze'].held, spend['streak-freeze'].max, spend['streak-freeze'].cost], ['ready', 1, 2, 30]);
     assert.deepEqual([spend['buddy-shop'].status, spend['buddy-shop'].cost, spend['buddy-shop'].from], ['ready', 40, true]);
     assert.deepEqual([spend['weekly-drop'].status, spend['weekly-drop'].cost, spend['weekly-drop'].detail], ['locked', 150, `${drop.emoji} ${drop.name} · finish 2 of 3 quests (0/2)`]);
     assert.deepEqual([spend['profile-frames'].status, spend['profile-frames'].short, spend['buddy-showcase'].cost], ['short', 180 - balance, 300]);
     assert.deepEqual([spend['treat-gift'].status, spend['treat-gift'].detail], ['ready', '3 of 3 left today']);
     assert.deepEqual([spend.coach.status, spend.coach.detail], ['ready', `Enough for ${Math.floor(balance / 10)} answers`]);
-    assert.equal(summary.affordable, 4, 'the freeze, a Habi item, a treat and the AI Coach');
+    assert.equal(summary.affordable, 4 + [15, 25, 30, 100, 120].filter((cost) => cost <= balance).length, 'the freeze, a Habi item, a treat, the AI Coach and the Rewards Shop rewards the balance covers');
     const perDay = Math.round(earned / 7);
-    assert.deepEqual([summary.pace, summary.nextGoal], [{ perDay }, { id: 'profile-frames', title: 'Profile Frames', cost: 180, short: 180 - balance, days: Math.ceil((180 - balance) / perDay) }]);
+    // Saved for: the cheapest reward kept for good that the balance does not cover yet.
+    const goal = balance < 120 ? { id: 'wellness-pack', title: 'Wellness Pack', cost: 120 } : { id: 'profile-frames', title: 'Profile Frames', cost: 180 };
+    assert.deepEqual([summary.pace, summary.nextGoal], [{ perDay }, { ...goal, short: goal.cost - balance, days: Math.ceil((goal.cost - balance) / perDay) }]);
 
     // The daily reward and the box are counted once they are taken.
     assert.equal((await request('/api/daily-claim', { method: 'POST', headers, body: JSON.stringify({ date: today, timeZone: 'UTC' }) })).response.status, 200);
@@ -2062,7 +2133,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     // A new student: nothing earned yet, so no pace and no days to the first goal.
     const fresh = (await request(`/api/wallet/summary?date=${today}&timeZone=UTC`, { headers })).body;
     assert.deepEqual([fresh.balance, fresh.affordable, fresh.today.canStillEarn, fresh.streak.days, fresh.pace.perDay], [0, 0, 2 + 20, 0, 0], JSON.stringify(fresh));
-    assert.deepEqual(fresh.nextGoal, { id: 'profile-frames', title: 'Profile Frames', cost: 180, short: 180, days: null });
+    assert.deepEqual(fresh.nextGoal, { id: 'wellness-pack', title: 'Wellness Pack', cost: 120, short: 120, days: null });
     assert.deepEqual((await request('/api/wallet/history', { headers })).body, { ok: true, items: [], nextCursor: null, totals: { earned: 0, spent: 0, balance: 0 } });
 
     // 130 rows, two to a millisecond (so a page can end between two rows of the same time), every

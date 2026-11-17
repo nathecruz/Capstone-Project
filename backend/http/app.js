@@ -6,6 +6,7 @@ import registerAppStateRoutes from '../routes/app-state.js';
 import registerAuthRoutes from '../routes/auth.js';
 import registerEngagementRoutes from '../routes/engagement.js';
 import registerGamificationRoutes from '../routes/gamification.js';
+import registerRewardToolRoutes from '../routes/reward-tools.js';
 import registerHabitRoutes from '../routes/habits.js';
 import registerHealthRoutes from '../routes/health.js';
 import registerNotificationRoutes from '../routes/notifications.js';
@@ -60,6 +61,7 @@ export function createApp() {
   registerNotificationRoutes(app);
   registerSupportRoutes(app);
   registerGamificationRoutes(app);
+  registerRewardToolRoutes(app);
   registerEngagementRoutes(app);
   registerWalletRoutes(app);
   registerAiRoutes(app);

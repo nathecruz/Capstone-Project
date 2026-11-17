@@ -1,45 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, StatusBar, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Pressable, ScrollView, StatusBar, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppDialog } from '@/components/ui/app-dialog';
 import { BuddyAvatar } from '@/components/buddy';
 import { ClassmateSheet } from '@/components/classmate-sheet';
 import { FramedAvatar } from '@/components/framed-avatar';
-import { FrameSheet, ShowcaseSheet, ThemeSheet, TitleSheet } from '@/components/reward-sheets';
-import { StreakFreezeSheet } from '@/components/streak-freeze-sheet';
-import { getApiBaseUrl, getAuthenticatedHeaders, redeemReward } from '@/authentication';
+import { getApiBaseUrl, getAuthenticatedHeaders } from '@/authentication';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { getCachedBuddy, useBuddy } from '@/hooks/use-buddy';
-import { loadRewards, markRewardOwned, useRewards } from '@/hooks/use-rewards';
+import { useRewards } from '@/hooks/use-rewards';
 import { createThemedStyles, useThemeColor, useThemedStyles } from '@/hooks/use-themed-styles';
 import { classmateBuddy, showcaseLookOf } from '@/utils/buddy';
 import { leaderboardDateLabel, leaderKey, resetCountdownText, type Leader, type LeaderboardPeriod, type LeaderboardRange } from '@/utils/leaderboard-range';
 
-// Every reward here does something. 'permanent' ones (from the server's catalog) are bought once
-// and then opened from their card; Streak Freeze and Buddy Outfits have their own screens.
-type Reward = {
-  id: string;
-  title: string;
-  detail: string;
-  description?: string;
-  cost: number;
-  icon: keyof typeof Ionicons.glyphMap;
-  color: string;
-  kind: 'permanent' | 'freeze' | 'shop';
-};
-
-const REWARD_LOOKS: Record<string, { detail: string; icon: keyof typeof Ionicons.glyphMap; color: string; action: string }> = {
-  'premium-theme': { detail: 'Seven colour themes for the whole app', icon: 'color-palette-outline', color: '#EEE5FF', action: 'Choose theme' },
-  'custom-title': { detail: 'Your title on your profile and the leaderboard', icon: 'ribbon-outline', color: '#FBE3F1', action: 'Edit title' },
-  'profile-frames': { detail: 'Eight frames for your profile photo', icon: 'person-circle-outline', color: '#FFF3D6', action: 'Choose frame' },
-  'buddy-showcase': { detail: 'Your Habi next to your name on the leaderboard', icon: 'paw-outline', color: '#E3F6EA', action: 'Showcase settings' },
-};
-type RewardSheet = 'theme' | 'title' | 'frame' | 'showcase';
-/** Which sheet a bought reward opens. */
-const REWARD_SHEET: Record<string, RewardSheet> = { 'premium-theme': 'theme', 'custom-title': 'title', 'profile-frames': 'frame', 'buddy-showcase': 'showcase' };
-const BUDDY_SHOP_FROM = 40;
 const SHOWCASE_ID = 'buddy-showcase';
 /**
  * The screen is the students' Leaderboards and faculty's Rewards: the same tokens and shop, but
@@ -50,11 +25,6 @@ const HEADERS = {
   student: { eyebrow: 'COMMUNITY', title: 'Leaderboards', subtitle: 'A little friendly competition goes a long way.', icon: 'trophy', info: 'Complete habits to earn points and tokens. Redeem tokens for rewards.' },
   faculty: { eyebrow: 'YOUR REWARDS', title: 'Rewards', subtitle: 'Spend the tokens your check-ins earn.', icon: 'gift', info: 'Check in your habits to earn tokens, then spend them here. Leaderboards are for students, so faculty are not ranked.' },
 } as const;
-/** What a reward does for faculty, where it differs (they are not on the leaderboard). */
-const FACULTY_DETAILS: Record<string, string> = { 'custom-title': 'Your title on your profile' };
-/** How far apart the reward cards are along their row (a card's width and the gap). */
-const REWARD_CARD_STEP = 160;
-
 type Spotlight = Leader & { tone: 'gold' | 'silver' | 'bronze' };
 type LeaderboardSort = 'points-desc' | 'points-asc' | 'rank';
 /** The board of one period: the server's label ('Oct 26 - Nov 1') and range (null for All Time and older servers). */
@@ -70,11 +40,8 @@ export default function LeaderboardsScreen() {
   const [sortDropdownOpen, setSortDropdownOpen] = useState(false);
   const [showAllRankings, setShowAllRankings] = useState(false);
   const [deviceDate, setDeviceDate] = useState(() => new Date());
-  const [openSheet, setOpenSheet] = useState<'freeze' | RewardSheet | null>(null);
   // The classmate whose card is open (tapped on the podium or in the standings).
   const [classmate, setClassmate] = useState<Leader | null>(null);
-  const [pendingReward, setPendingReward] = useState<Reward | null>(null);
-  const [redeeming, setRedeeming] = useState(false);
   const [toast, setToast] = useState('');
   const [leaderboardStatus, setLeaderboardStatus] = useState<'idle' | 'loading' | 'connected' | 'unavailable'>('idle');
   const [refreshKey, setRefreshKey] = useState(0);
@@ -83,13 +50,16 @@ export default function LeaderboardsScreen() {
   const [boardTimeZone, setBoardTimeZone] = useState<string | null>(null);
   // The student's own row (name and avatar) is saved once per visit, not on every period switch.
   const syncRef = useRef<Promise<void> | null>(null);
-  const { tokens, applyWallet, points, profile, preferences, isFaculty, streakFreeze } = useAppColorScheme();
+  const { tokens, points, profile, preferences, isFaculty } = useAppColorScheme();
+  // Whether the student owns the Buddy Showcase (their Habi on their own row).
   const catalog = useRewards();
   // The student's own buddy: its catalog draws classmates' Habis, and its treats are what they can send.
   const { buddy: ownBuddy } = useBuddy(!isFaculty && !getCachedBuddy());
+  // Rewards are redeemed in the Rewards Shop: an old link to one here opens it there.
   const { reward: linkedReward } = useLocalSearchParams<{ reward?: string }>();
-  const [linkOpened, setLinkOpened] = useState<string | null>(null);
-  const rewardRowRef = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (linkedReward) router.replace(`/rewards-shop?reward=${encodeURIComponent(linkedReward)}`);
+  }, [linkedReward]);
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const compact = width < 375;
@@ -203,84 +173,10 @@ export default function LeaderboardsScreen() {
   const pointsSortIndicator = sortMode === 'points-desc' ? ' ↓' : sortMode === 'points-asc' ? ' ↑' : '';
   const visibleRankingCount = showAllRankings ? sortedLeaders.length : Math.min(5, sortedLeaders.length);
 
-  // --- Token rewards -------------------------------------------------------
-  // Names and prices come from the server's catalog, so a redeem always matches what it charges.
-  const freezeCost = streakFreeze?.cost ?? 30;
-  const freezesHeld = streakFreeze?.available ?? 0;
-  const freezeMax = streakFreeze?.max ?? 2;
-  const rewards = useMemo<Reward[]>(() => {
-    const permanent = catalog.rewards.filter((reward) => reward.permanent && REWARD_LOOKS[reward.id] && !(isFaculty && reward.id === SHOWCASE_ID)).map((reward) => ({
-      id: reward.id,
-      title: reward.name,
-      description: reward.description,
-      cost: reward.cost,
-      kind: 'permanent' as const,
-      ...REWARD_LOOKS[reward.id],
-      ...(isFaculty && FACULTY_DETAILS[reward.id] ? { detail: FACULTY_DETAILS[reward.id] } : {}),
-    }));
-    return [
-      { id: 'streak-freeze', title: 'Streak Freeze', detail: 'Saves your streaks on a day you miss', cost: freezeCost, icon: 'snow-outline', color: '#DDF0FF', kind: 'freeze' },
-      { id: 'buddy-shop', title: 'Buddy Outfits', detail: 'Hats and items for your Habit Buddy', cost: BUDDY_SHOP_FROM, icon: 'shirt-outline', color: '#FFF0C9', kind: 'shop' },
-      ...permanent,
-    ];
-  }, [catalog.rewards, freezeCost, isFaculty]);
-  const isOwned = (reward: Reward) => reward.kind === 'permanent' && catalog.owns(reward.id);
-  const nextGoal = rewards.find((reward) => reward.kind === 'permanent' && !isOwned(reward) && tokens < reward.cost);
-
-  const openReward = (reward: Reward) => {
-    if (reward.kind === 'freeze') setOpenSheet('freeze');
-    else if (reward.kind === 'shop') router.push('/buddy');
-    else if (isOwned(reward)) setOpenSheet(REWARD_SHEET[reward.id] ?? null);
-    else setPendingReward(reward);
-  };
-
-  // /leaderboards?reward=<id> opens that reward once the catalog and the student's wallet are loaded
-  // (once per visit): its sheet when owned, the redeem confirmation when affordable, otherwise how
-  // many tokens are missing.
-  const linked = linkedReward && linkOpened !== linkedReward && profile.fullName.trim() ? rewards.find((entry) => entry.id === linkedReward) : undefined;
-  if (linked) {
-    setLinkOpened(linked.id);
-    if (linked.kind === 'freeze') setOpenSheet('freeze');
-    else if (linked.kind === 'permanent' && isOwned(linked)) setOpenSheet(REWARD_SHEET[linked.id] ?? null);
-    else if (linked.kind === 'permanent' && tokens >= linked.cost) setPendingReward(linked);
-    else if (linked.kind === 'permanent') setToast(`${linked.cost - tokens} more tokens to ${linked.title}.`);
-  }
-
-  // The linked reward's card is scrolled into view along the row.
-  useEffect(() => {
-    const index = rewards.findIndex((reward) => reward.id === linkOpened);
-    if (index > 0) rewardRowRef.current?.scrollTo({ x: index * REWARD_CARD_STEP, animated: true });
-  }, [linkOpened, rewards]);
-
   // A classmate's Habi next to their name (Buddy Showcase).
   const leaderBuddy = (leader: Leader, size: number) => (leader.buddy ? (
     <BuddyAvatar buddy={classmateBuddy(leader.buddy, ownBuddy, leader.isYou ? 'Your Habi' : `${leader.name}'s Habi`)} checkIns={leader.buddy.checkIns} mood="happy" size={size} />
   ) : null);
-
-  const confirmRedeem = async () => {
-    const reward = pendingReward;
-    if (!reward || redeeming) return;
-    // Re-validate at commit time: balance may have changed while the sheet was
-    // open, and this also absorbs a double tap on the confirm button.
-    if (tokens < reward.cost || isOwned(reward)) {
-      setPendingReward(null);
-      setToast('That reward is no longer available.');
-      return;
-    }
-    setRedeeming(true);
-    const result = await redeemReward(reward);
-    setRedeeming(false);
-    setPendingReward(null);
-    if (result.ok) {
-      // The server deducted the tokens; show its balance and history, then let them use it.
-      if ('tokens' in result) applyWallet(result as { tokens?: number; tokenHistory?: object[]; points?: number });
-      markRewardOwned(reward.id);
-      setToast(`${reward.title} unlocked!`);
-      setOpenSheet(REWARD_SHEET[reward.id] ?? null);
-    } else {
-      setToast(result.message || 'Redeem failed. Your tokens were not spent.');
-    }
-  };
 
   const header = HEADERS[isFaculty ? 'faculty' : 'student'];
 
@@ -308,91 +204,16 @@ export default function LeaderboardsScreen() {
             <View style={styles.giftWrap}><View style={styles.giftGlow} /><Ionicons name="gift" size={54} color={themeColor('#FFD75A')} /></View>
           </View>
 
-          {/* ---------------- Token rewards ---------------- */}
-          <View style={styles.rewardsSection}>
-            <View style={styles.sectionHeading}>
-              <View style={styles.sectionHeadingCopy}>
-                <Text style={styles.sectionKicker}>REDEEM YOUR TOKENS</Text>
-                <Text style={styles.sectionTitle}>Token Rewards</Text>
-                <Text style={styles.sectionSubtitle}>Spend them on things you will actually use.</Text>
-              </View>
+          {/* Tokens are spent in the Rewards Shop. */}
+          <Pressable style={({ pressed }) => [styles.shopBanner, pressed && styles.claimButtonPressed]} onPress={() => router.push('/rewards-shop')} accessibilityRole="button" accessibilityLabel="Open the Rewards Shop">
+            <View style={styles.shopIcon}><Ionicons name="gift" size={24} color={themeColor('#5B42D8')} /></View>
+            <View style={styles.shopCopy}>
+              <Text style={styles.sectionKicker}>REDEEM YOUR TOKENS</Text>
+              <Text style={styles.shopTitle}>Rewards Shop</Text>
+              <Text style={styles.sectionSubtitle}>Study plans, practice quizzes, wellness breaks, certificates and more.</Text>
             </View>
-
-            {nextGoal && (
-              <View style={styles.nextGoalRow}>
-                <Ionicons name="flag-outline" size={13} color={themeColor('#5B42D8')} />
-                <Text style={styles.nextGoalText}>
-                  {nextGoal.cost - tokens} tokens to {nextGoal.title}
-                </Text>
-              </View>
-            )}
-
-            <ScrollView
-              ref={rewardRowRef}
-              horizontal
-              showsHorizontalScrollIndicator
-              contentContainerStyle={styles.rewardRow}
-              accessibilityLabel="Token rewards, scroll sideways for more"
-            >
-              {rewards.map((reward) => {
-                const owned = isOwned(reward);
-                const freezesFull = reward.kind === 'freeze' && freezesHeld >= freezeMax;
-                const affordable = tokens >= reward.cost;
-                // Owned rewards, the freeze sheet and the buddy shop always open; the rest need the tokens.
-                const enabled = owned || reward.kind !== 'permanent' || affordable;
-                const progress = Math.min(100, Math.round((tokens / reward.cost) * 100));
-                const status = owned
-                  ? 'Yours to keep'
-                  : reward.kind === 'freeze'
-                    ? `${freezesHeld} of ${freezeMax} held`
-                    : affordable ? (reward.kind === 'shop' ? 'Ready to shop' : 'Ready to redeem') : `${tokens} / ${reward.cost}`;
-                const action = owned
-                  ? REWARD_LOOKS[reward.id]?.action ?? 'Open'
-                  : reward.kind === 'freeze'
-                    ? freezesFull ? 'View' : 'Get one'
-                    : reward.kind === 'shop' ? 'Open shop' : affordable ? 'Redeem' : `${reward.cost - tokens} more`;
-                return (
-                  <View key={reward.id} style={[styles.rewardCard, { backgroundColor: themeColor(reward.color, 'backgroundColor') }]}>
-                    {owned && <View style={styles.ownedTag}><Ionicons name="checkmark-circle" size={11} color={themeColor('#2E9D5C')} /><Text style={styles.ownedTagText}>Owned</Text></View>}
-                    <View style={styles.rewardIcon}>
-                      <Ionicons name={reward.icon} size={29} color={themeColor(reward.kind === 'freeze' ? '#2F86D8' : '#5B42D8')} />
-                    </View>
-                    <Text style={styles.rewardTitle}>{reward.title}</Text>
-                    <Text style={styles.rewardDetail}>{reward.detail}</Text>
-                    <View style={styles.rewardCostPill}>
-                      <Ionicons name="star" size={12} color={themeColor('#E6A617')} />
-                      <Text style={styles.rewardCost}>{reward.kind === 'shop' ? `from ${reward.cost}` : reward.cost} tokens{reward.kind === 'freeze' ? ' each' : ''}</Text>
-                    </View>
-
-                    {/* Track always renders so the card height never jumps. */}
-                    <View style={styles.rewardProgressTrack}>
-                      {reward.kind === 'permanent' && !owned && !affordable && <View style={[styles.rewardProgressFill, { width: `${progress}%` }]} />}
-                    </View>
-                    <Text style={styles.rewardProgressLabel}>{status}</Text>
-
-                    <Pressable
-                      disabled={!enabled}
-                      style={({ pressed }) => [styles.claimButton, owned && styles.claimButtonOwned, !enabled && styles.claimButtonDisabled, pressed && styles.claimButtonPressed]}
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled: !enabled }}
-                      accessibilityLabel={owned ? `${reward.title}: ${action}` : reward.kind === 'permanent' ? (affordable ? `Redeem ${reward.title} for ${reward.cost} tokens` : `${reward.title} locked, needs ${reward.cost - tokens} more tokens`) : `${reward.title}: ${action}`}
-                      onPress={() => openReward(reward)}
-                    >
-                      <Text style={[styles.claimText, owned && styles.claimTextOwned, !enabled && styles.claimTextDisabled]}>{action}</Text>
-                      {enabled && <Ionicons name="arrow-forward" size={14} color={themeColor(owned ? '#5B42D8' : '#FFFFFF')} />}
-                    </Pressable>
-                  </View>
-                );
-              })}
-            </ScrollView>
-
-            {catalog.status === 'error' && (
-              <Pressable style={styles.rewardsRetry} onPress={() => void loadRewards()} accessibilityRole="button">
-                <Ionicons name="refresh" size={13} color={themeColor('#5B42D8')} />
-                <Text style={styles.rewardsFootnote}>Could not load Premium Themes and Custom Title. Tap to retry.</Text>
-              </Pressable>
-            )}
-          </View>
+            <Ionicons name="chevron-forward" size={20} color={themeColor('#5B42D8')} />
+          </Pressable>
 
           {isFaculty ? (
             <View style={styles.noCommunityCard}>
@@ -425,49 +246,17 @@ export default function LeaderboardsScreen() {
         </View>
       )}
 
-      {/* Redeem confirmation */}
-      <Modal visible={Boolean(pendingReward)} transparent animationType="fade" onRequestClose={() => setPendingReward(null)}>
-        <View style={styles.confirmOverlay}>
-          <Pressable style={styles.confirmBackdrop} onPress={() => setPendingReward(null)} accessibilityLabel="Cancel redeem" />
-          {pendingReward && (
-            <View style={styles.confirmCard}>
-              <View style={[styles.confirmIcon, { backgroundColor: themeColor(pendingReward.color, 'backgroundColor') }]}>
-                <Ionicons name={pendingReward.icon} size={30} color={themeColor('#5B42D8')} />
-              </View>
-              <Text style={styles.confirmTitle}>Redeem {pendingReward.title}?</Text>
-              <Text style={styles.confirmDetail}>{pendingReward.description ?? pendingReward.detail}</Text>
-              <View style={styles.confirmMath}>
-                <View style={styles.confirmMathRow}><Text style={styles.confirmMathLabel}>Balance</Text><Text style={styles.confirmMathValue}>{tokens}</Text></View>
-                <View style={styles.confirmMathRow}><Text style={styles.confirmMathLabel}>Cost</Text><Text style={[styles.confirmMathValue, styles.confirmMathCost]}>-{pendingReward.cost}</Text></View>
-                <View style={styles.confirmMathDivider} />
-                <View style={styles.confirmMathRow}><Text style={styles.confirmMathLabelStrong}>Remaining</Text><Text style={styles.confirmMathValueStrong}>{tokens - pendingReward.cost}</Text></View>
-              </View>
-              <Text style={styles.confirmNote}>
-                One-time purchase. Yours to keep.
-              </Text>
-              <Pressable style={[styles.confirmButton, redeeming && styles.confirmButtonBusy]} disabled={redeeming} onPress={confirmRedeem} accessibilityRole="button">
-                <Text style={styles.confirmButtonText}>{redeeming ? 'Redeeming...' : `Redeem for ${pendingReward.cost}`}</Text>
-              </Pressable>
-              <Pressable style={styles.cancelButton} onPress={() => setPendingReward(null)} accessibilityRole="button">
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </Pressable>
-            </View>
-          )}
-        </View>
-      </Modal>
-
-      <StreakFreezeSheet visible={openSheet === 'freeze'} onClose={() => setOpenSheet(null)} />
-      <ThemeSheet visible={openSheet === 'theme'} onClose={() => setOpenSheet(null)} />
-      <FrameSheet visible={openSheet === 'frame'} onClose={() => { setOpenSheet(null); setRefreshKey((key) => key + 1); }} />
-      <ShowcaseSheet visible={openSheet === 'showcase'} onClose={() => { setOpenSheet(null); setRefreshKey((key) => key + 1); }} />
       {classmate && <ClassmateSheet leader={classmate} period={leaderboard.period} onClose={() => setClassmate(null)} onSent={setToast} />}
-      {openSheet === 'title' && <TitleSheet current={catalog.title} onClose={() => setOpenSheet(null)} onSaved={(title) => { setToast(title ? `Your title is now "${title}".` : 'Title removed.'); setRefreshKey((key) => key + 1); }} />}
 
     </SafeAreaView>
   );
 }
 
 const themedStyles = createThemedStyles({
+  shopBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderRadius: 22, backgroundColor: '#F4F1FF', borderWidth: 1, borderColor: '#E6E0FB', marginBottom: 18 },
+  shopIcon: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
+  shopCopy: { flex: 1, minWidth: 0, gap: 2 },
+  shopTitle: { fontSize: 18, fontWeight: '900', color: '#24212D' },
   screen: { flex: 1, backgroundColor: '#F7F8FF' },
   content: { paddingTop: 8 }, container: { width: '100%', maxWidth: 920, alignSelf: 'center', paddingHorizontal: 14 }, compactContainer: { paddingHorizontal: 10 },
   headerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 8 }, backButton: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', elevation: 3 }, headerCopy: { flex: 1 }, eyebrow: { color: '#5B42D8', fontSize: 9, fontWeight: '900', letterSpacing: 1.2, marginBottom: 2 }, headerTitle: { fontSize: 24, color: '#1F1C26', fontWeight: '900' }, headerSubtitle: { fontSize: 11, color: '#6A6573', marginTop: 2 }, headerActions: { alignItems: 'center', gap: 8 }, trophyBadge: { width: 42, height: 42, borderRadius: 14, backgroundColor: '#FFF4CF', alignItems: 'center', justifyContent: 'center' }, infoButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },

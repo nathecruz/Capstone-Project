@@ -237,6 +237,20 @@ CREATE TABLE IF NOT EXISTS reward_redemptions (
   redeemed_at BIGINT NOT NULL
 );
 
+-- What a made reward produced (services/reward-tools.js): an AI plan, quiz or report, or a
+-- certificate, whose code opens its public page (/certificates/:code) until it is deleted.
+CREATE TABLE IF NOT EXISTS reward_items (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  reward_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  input_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  output_json JSONB NOT NULL,
+  code TEXT UNIQUE,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS reward_items_user_created_idx ON reward_items(user_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS habit_completions (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   habit_id TEXT NOT NULL,

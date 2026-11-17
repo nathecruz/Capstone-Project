@@ -27,14 +27,14 @@ type MenuItem = { key: TranslationKey; icon: keyof typeof Ionicons.glyphMap; rou
 const settings: readonly MenuItem[] = [
   { key: 'statsProgress', icon: 'stats-chart-outline', route: '/stats-progress', group: 'progress', color: '#3564D8', tint: '#E8EEFF' },
   { key: 'leaderboards', icon: 'trophy-outline', route: '/leaderboards', group: 'progress', color: '#C98A0E', tint: '#FFF4D9' },
+  // The Rewards Shop: where tokens are spent, by students and faculty.
+  { key: 'rewards', icon: 'gift-outline', route: '/rewards-shop', group: 'progress', color: '#5B42D8', tint: '#EEE9FF' },
   { key: 'activityHistory', icon: 'time-outline', route: '/activity-history', group: 'progress', color: '#5B42D8', tint: '#EEE9FF' },
   { key: 'achievementsBadges', icon: 'ribbon-outline', route: '/achievements', group: 'progress', color: '#C2549B', tint: '#FCE7F1' },
   { key: 'personalInformation', icon: 'person-outline', route: '/personal-information', group: 'account', color: '#5B42D8', tint: '#EEE9FF' },
   { key: 'settingsPreferences', icon: 'settings-outline', route: '/settings-preferences', group: 'account', color: '#4A4458', tint: '#F0EEF5' },
   { key: 'helpSupport', icon: 'help-circle-outline', route: '/help-support', group: 'account', color: '#2E9D5C', tint: '#E3F6EC' },
 ];
-/** Faculty's Rewards (their tokens and the shop): the leaderboard screen, without the board. */
-const FACULTY_REWARDS: MenuItem = { key: 'rewards', icon: 'gift-outline', route: '/leaderboards', group: 'progress', color: '#C98A0E', tint: '#FFF4D9' };
 
 export default function ProfileScreen() {
   const styles = useThemedStyles(themedStyles);
@@ -46,8 +46,8 @@ export default function ProfileScreen() {
   const [frameOpen, setFrameOpen] = useState(false);
   // `streak` is the account streak (days in a row with a check-in, across weeks), `bestStreak` its longest run.
   const { isDarkMode, avatarImage, setAvatarImage, habits, goals, profile, points, tokens, applyWallet, t, isFaculty, streakFreeze, streak, bestStreak } = useAppColorScheme();
-  // Faculty mode: no student leaderboards. The same screen is their Rewards (tokens and the shop).
-  const menuItems = isFaculty ? settings.map((item) => (item.key === 'leaderboards' ? FACULTY_REWARDS : item)) : settings;
+  // Faculty mode: no student leaderboards; their tokens are spent in the Rewards Shop like students'.
+  const menuItems = isFaculty ? settings.filter((item) => item.key !== 'leaderboards') : settings;
   // The student's real place on the All Time leaderboard (it used to be a fixed "#24, Top 8%").
   const [rankInfo, setRankInfo] = useState<{ rank: number; total: number } | null>(null);
   useEffect(() => {

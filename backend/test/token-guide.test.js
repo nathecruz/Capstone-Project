@@ -9,7 +9,7 @@ import { CHALLENGE_REWARDS } from '../services/daily-challenges.js';
 import { DAILY_CLAIM_REWARDS } from '../services/daily-claims.js';
 import { MYSTERY_MAX, MYSTERY_MIN, MYSTERY_REWARDS } from '../services/mystery-box.js';
 import { QUEST_REWARDS } from '../services/quests.js';
-import { REAL_REWARDS } from '../services/rewards.js';
+import { MADE_REWARDS, REAL_REWARDS } from '../services/rewards.js';
 import { STREAK_FREEZE_COST, STREAK_FREEZE_MAX } from '../services/streak-freeze.js';
 import { canStillEarnToday, EARN_ROWS, economyGuide, nextGoal, pacePerDay, spendRows, streakGoal, tokenFlow } from '../services/token-guide.js';
 import { COACH_TOKEN_COST, PAID_CHECK_INS_PER_DAY, STREAK_MILESTONE_BONUS, TOKENS_PER_CHECK_IN } from '../services/wallet.js';
@@ -19,8 +19,9 @@ const DAY_MS = 86_400_000;
 const NOW = Date.parse('2026-10-28T04:00:00Z');
 const user = 'u1';
 const DROP = dropForWeek('2026-10-26');
-// The catalog as getRewards returns it: by cost, all of them kept once bought.
-const REWARDS = Object.entries(REAL_REWARDS).map(([id, reward]) => ({ id, name: reward.name, cost: reward.cost, description: reward.description, permanent: true })).sort((a, b) => a.cost - b.cost);
+// The catalog as getRewards returns it: by cost; the looks and the Wellness Pack are kept once
+// bought, a plan, quiz, report or certificate is made each time.
+const REWARDS = Object.entries(REAL_REWARDS).map(([id, reward]) => ({ id, name: reward.name, cost: reward.cost, description: reward.description, permanent: !MADE_REWARDS.has(id) })).sort((a, b) => a.cost - b.cost);
 const BABY_ITEMS = BUDDY_ITEMS.filter((item) => item.stage === 'baby').map((item) => item.id);
 
 /** getBuddy's answer: counted check-ins, the items bought and this week's drop with its quests. */
@@ -70,7 +71,10 @@ test('the spend rows are the prices the server sells at, each with where it open
     ['treat-gift', Math.min(...BUDDY_TREATS.map((treat) => treat.cost)), true, 'gift'],
     ['coach', COACH_TOKEN_COST, false, 'coach'],
   ]);
-  assert.deepEqual(rows.filter((row) => row.target.startsWith('reward:')).map((row) => [row.id, row.cost]), [['profile-frames', 180], ['premium-theme', 200], ['custom-title', 250], ['buddy-showcase', 300]]);
+  assert.deepEqual(rows.filter((row) => row.target.startsWith('reward:')).map((row) => [row.id, row.cost]), [
+    ['practice-quiz', 15], ['weekly-report', 25], ['study-planner', 30], ['certificate', 100], ['wellness-pack', 120],
+    ['profile-frames', 180], ['premium-theme', 200], ['custom-title', 250], ['buddy-showcase', 300],
+  ]);
   assert.deepEqual([rows[0].held, rows[0].max, rows[0].cost, rows.at(-1).cost, DROP_COST], [0, 2, 30, 10, 150]);
 });
 
@@ -80,9 +84,13 @@ test('faculty have no treats for classmates to buy (only students send them)', (
 });
 
 test('a spend row is owned, ready, short by what is missing, locked or full', () => {
-  // Token Rewards: owned once bought, else ready or short against the raw balance.
-  const rewards = rowsFor({ balance: 200, owned: ['premium-theme'] }).filter((row) => row.target.startsWith('reward:'));
-  assert.deepEqual(rewards.map((row) => [row.id, ...statusOf(row)]), [['profile-frames', 'ready', null], ['premium-theme', 'owned', null], ['custom-title', 'short', 50], ['buddy-showcase', 'short', 100]]);
+  // Token Rewards: owned once bought, else ready or short against the raw balance. A made reward
+  // (a plan, quiz, report or certificate) is never owned: it can be redeemed again.
+  const rewards = rowsFor({ balance: 200, owned: ['premium-theme', 'certificate'] }).filter((row) => row.target.startsWith('reward:'));
+  assert.deepEqual(rewards.map((row) => [row.id, ...statusOf(row)]), [
+    ['practice-quiz', 'ready', null], ['weekly-report', 'ready', null], ['study-planner', 'ready', null], ['certificate', 'ready', null], ['wellness-pack', 'ready', null],
+    ['profile-frames', 'ready', null], ['premium-theme', 'owned', null], ['custom-title', 'short', 50], ['buddy-showcase', 'short', 100],
+  ]);
 
   // Streak Freeze: full at 2 held, whatever the balance.
   assert.deepEqual(statusOf(rowOf({ balance: 500, freezes: freezesHeld(2) }, 'streak-freeze')), ['full', null]);
@@ -162,15 +170,16 @@ test("the week's flow sums the rows since Monday by kind, so earned minus spent 
   assert.deepEqual(flow, { earned: 25, spent: 55, bySource: { 'check-in': 5, 'weekly-bonus': 10, refund: 10 }, bySink: { freeze: 30, coach: 10, 'buddy-treat': 15 } });
 });
 
-test('the next goal is the cheapest reward not yet affordable, then the drop, then a Habi item, with the days at this pace', () => {
+test('the next goal is the cheapest reward kept for good not yet affordable, then the drop, then a Habi item, with the days at this pace', () => {
   const goal = (balance, { owned = [], buddy = buddyAt(), perDay = 30 } = {}) => nextGoal({ balance, rewards: REWARDS, owned, buddy, perDay });
-  assert.deepEqual(goal(100), { id: 'profile-frames', title: 'Profile Frames', cost: 180, short: 80, days: 3 });
+  assert.deepEqual(goal(10), { id: 'wellness-pack', title: 'Wellness Pack', cost: 120, short: 110, days: 4 }, 'a made reward is redeemed when needed, not saved for');
+  assert.deepEqual(goal(130), { id: 'profile-frames', title: 'Profile Frames', cost: 180, short: 50, days: 2 });
   assert.deepEqual(goal(190), { id: 'premium-theme', title: 'Premium Themes', cost: 200, short: 10, days: 1 }, 'Profile Frames is already affordable');
   const allRewards = REWARDS.map((reward) => reward.id);
   assert.deepEqual(goal(100, { owned: allRewards, perDay: 0 }), { id: DROP.id, title: `${DROP.name} (Weekly Drop)`, cost: DROP_COST, short: 50, days: null }, 'no pace: no days');
   assert.deepEqual(goal(30, { owned: allRewards, buddy: buddyAt({ owned: [DROP.id] }), perDay: 4 }), { id: 'cap', title: 'Cap', cost: 40, short: 10, days: 3 });
   assert.equal(goal(1000, { owned: allRewards }), null, 'everything left is affordable');
-  assert.deepEqual(goal(-20, { perDay: 25 }), { id: 'profile-frames', title: 'Profile Frames', cost: 180, short: 200, days: 8 }, 'a debt is part of what is missing');
+  assert.deepEqual(goal(-20, { perDay: 25 }), { id: 'wellness-pack', title: 'Wellness Pack', cost: 120, short: 140, days: 6 }, 'a debt is part of what is missing');
 });
 
 test('the streak shows the next milestone bonus and how many days are left', () => {
@@ -187,5 +196,5 @@ test('the AI help assistant gets the same token facts', () => {
     assert.ok(guide.includes(text), text);
   }
   // With today's constants, exactly the line of the plan.
-  assert.equal(guide, "- Tokens: each check-in gives 5 tokens (up to 6 paid check-ins a day); also the daily reward (2 to 15), daily challenges (5 to 15), the mystery box (3 to 20, after the first check-in), weekly quests (15 to 20), the Monday consistency bonus (10, 20 or 30) and streak milestones (15 to 500). Spend them on Premium Themes 200, Profile Frames 180, Custom Title 250, Buddy Showcase 300, Habi shop items 40 to 500 and the weekly drop 150, treats for classmates 15 to 50, Streak Freeze 30 (hold up to 2) and AI Coach answers 10 each. The Tokens screen (tap Tokens on Home) lists all of them.");
+  assert.equal(guide, "- Tokens: each check-in gives 5 tokens (up to 6 paid check-ins a day); also the daily reward (2 to 15), daily challenges (5 to 15), the mystery box (3 to 20, after the first check-in), weekly quests (15 to 20), the Monday consistency bonus (10, 20 or 30) and streak milestones (15 to 500). Spend them on AI Study & Work Planner 30, AI Practice Quiz 15, AI Weekly Report 25, Certificate of Achievement 100, Wellness Pack 120, Premium Themes 200, Profile Frames 180, Custom Title 250, Buddy Showcase 300, Habi shop items 40 to 500 and the weekly drop 150, treats for classmates 15 to 50, Streak Freeze 30 (hold up to 2) and AI Coach answers 10 each. The Tokens screen (tap Tokens on Home) lists all of them.");
 });
