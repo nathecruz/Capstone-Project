@@ -61,7 +61,7 @@ export function weeklyQuests(allHabits, doneByDate, today) {
   }
   const checkInTarget = habits.length >= 3 ? 12 : habits.length === 2 ? 8 : 5;
   const rotating = [
-    { id: 'challenge-days', title: 'Finish the daily challenge on 3 days', icon: 'trophy', target: 3, progress: challengeDays },
+    { id: 'challenge-days', title: 'Do the "Finish habits" quest on 3 days', icon: 'trophy', target: 3, progress: challengeDays },
     { id: 'active-days', title: 'Check in on 5 different days', icon: 'calendar', target: 5, progress: activeDays },
     { id: 'every-habit', title: 'Check in on every habit at least once', icon: 'grid', target: habits.length, progress: habitsDone.size },
   ][((weekNumber(weekStart) % 3) + 3) % 3];

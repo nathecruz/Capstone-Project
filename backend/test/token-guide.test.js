@@ -53,7 +53,7 @@ test('the earn rows are the constants the server pays with', () => {
   assert.deepEqual(EARN_ROWS, [
     { id: 'check-in', title: 'Check in a habit', amount: '+5', detail: 'Up to 6 paid check-ins a day' },
     { id: 'daily-claim', title: 'Daily reward', amount: '+2 to +15', detail: 'Open HabitAI every day: 2, 3, 4, 5, 6, 8 and 15 over 7 days in a row' },
-    { id: 'challenge', title: 'Daily challenges', amount: '+5 to +15', detail: '3 a day, paid when you finish them' },
+    { id: 'challenge', title: 'Daily quests', amount: '+5 to +15', detail: '3 a day, paid when you finish them, and +10 more for all 3' },
     { id: 'mystery', title: 'Mystery box', amount: '+3 to +20', detail: 'Once a day after your first check-in' },
     { id: 'quest', title: 'Weekly quests', amount: '+15 to +20', detail: '3 a week, new every Monday' },
     { id: 'weekly-bonus', title: 'Weekly consistency bonus', amount: '+10 / +20 / +30', detail: "Do 60%, 75% or 90% of last week's check-ins, claim on Monday" },
@@ -133,16 +133,19 @@ test('a spend row is owned, ready, short by what is missing, locked or full', ()
   for (const balance of [-20, 0, 45, 1000]) assert.ok(rowsFor({ balance }).every((row) => statuses.has(row.status) && (row.status === 'short') === (row.short > 0)), String(balance));
 });
 
-test('what can still be earned today: the unclaimed reward, the paid check-ins left, open challenges and the closed box', () => {
+test('what can still be earned today: the unclaimed reward, the paid check-ins left, open quests, the chest and the closed box', () => {
   const challenges = [{ complete: true, reward: 10 }, { complete: false, reward: 8 }, { complete: false, reward: 6 }];
-  // 4 (daily reward) + 5 x min(6 - 4 paid, 5 open habits) + 8 + 6 + 20 (the box's top prize).
-  assert.equal(canStillEarnToday({ dailyClaim: { claimedToday: false, amount: 4 }, paidToday: 4, openHabits: 5, challenges, mysteryBox: { status: 'ready' } }), 48);
-  assert.equal(canStillEarnToday({ dailyClaim: { claimedToday: false, amount: 4 }, paidToday: 1, openHabits: 2, challenges, mysteryBox: { status: 'locked' } }), 4 + 10 + 14 + 20, 'only the habits still open');
-  assert.equal(canStillEarnToday({ dailyClaim: { claimedToday: true, amount: 4 }, paidToday: 7, openHabits: 3, challenges, mysteryBox: { status: 'opened' } }), 14, 'no paid check-ins left');
+  // 4 (daily reward) + 5 x min(6 - 4 paid, 5 open habits) + 8 + 6 + 10 (the quest chest) + 20 (the box's top prize).
+  assert.equal(canStillEarnToday({ dailyClaim: { claimedToday: false, amount: 4 }, paidToday: 4, openHabits: 5, challenges, mysteryBox: { status: 'ready' } }), 58);
+  assert.equal(canStillEarnToday({ dailyClaim: { claimedToday: false, amount: 4 }, paidToday: 1, openHabits: 2, challenges, mysteryBox: { status: 'locked' } }), 4 + 10 + 14 + 10 + 20, 'only the habits still open');
+  assert.equal(canStillEarnToday({ dailyClaim: { claimedToday: true, amount: 4 }, paidToday: 7, openHabits: 3, challenges, mysteryBox: { status: 'opened' } }), 24, 'no paid check-ins left');
   assert.equal(canStillEarnToday({ dailyClaim: { claimedToday: true, amount: 15 }, paidToday: 0, openHabits: 0, challenges: [], mysteryBox: { status: 'opened' } }), 0);
-  // A challenge that can no longer be finished today (before 10 AM, but it is past 10) is not offered.
+  // A quest that can no longer be finished today (before 10 AM, but it is past 10) is not offered, nor is the chest.
   const late = [{ complete: false, reward: 5, reachable: false }, { complete: false, reward: 10, reachable: true }];
   assert.equal(canStillEarnToday({ dailyClaim: { claimedToday: true, amount: 4 }, paidToday: 2, openHabits: 1, challenges: late, mysteryBox: { status: 'opened' } }), 5 + 10);
+  // Every quest done: the chest was paid, nothing of it is left.
+  const done = [{ complete: true, reward: 10, reachable: true }, { complete: true, reward: 5, reachable: true }];
+  assert.equal(canStillEarnToday({ dailyClaim: { claimedToday: true, amount: 4 }, paidToday: 6, openHabits: 0, challenges: done, mysteryBox: { status: 'opened' } }), 0);
 });
 
 test('the pace counts what was earned in the last 7 days, without refunds, a day on average', () => {
@@ -196,5 +199,5 @@ test('the AI help assistant gets the same token facts', () => {
     assert.ok(guide.includes(text), text);
   }
   // With today's constants, exactly the line of the plan.
-  assert.equal(guide, "- Tokens: each check-in gives 5 tokens (up to 6 paid check-ins a day); also the daily reward (2 to 15), daily challenges (5 to 15), the mystery box (3 to 20, after the first check-in), weekly quests (15 to 20), the Monday consistency bonus (10, 20 or 30) and streak milestones (15 to 500). Spend them on AI Study & Work Planner 30, AI Practice Quiz 15, AI Weekly Report 25, Certificate of Achievement 100, Wellness Pack 120, Premium Themes 200, Profile Frames 180, Custom Title 250, Buddy Showcase 300, Habi shop items 40 to 500 and the weekly drop 150, treats for classmates 15 to 50, Streak Freeze 30 (hold up to 2) and AI Coach answers 10 each. The Tokens screen (tap Tokens on Home) lists all of them.");
+  assert.equal(guide, "- Tokens: each check-in gives 5 tokens (up to 6 paid check-ins a day); also the daily reward (2 to 15), daily quests (5 to 15 each, plus 10 from the quest chest for finishing all 3), the mystery box (3 to 20, after the first check-in), weekly quests (15 to 20), the Monday consistency bonus (10, 20 or 30) and streak milestones (15 to 500). Spend them on AI Study & Work Planner 30, AI Practice Quiz 15, AI Weekly Report 25, Certificate of Achievement 100, Wellness Pack 120, Premium Themes 200, Profile Frames 180, Custom Title 250, Buddy Showcase 300, Habi shop items 40 to 500 and the weekly drop 150, treats for classmates 15 to 50, Streak Freeze 30 (hold up to 2) and AI Coach answers 10 each. The Tokens screen (tap Tokens on Home) lists all of them.");
 });

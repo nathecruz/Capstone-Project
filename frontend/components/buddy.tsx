@@ -1,11 +1,13 @@
-// Habit Buddy pieces: the avatar (the hamster with what it wears and how it feels) and the Home card.
+// Habit Buddy pieces: the avatar (Habi in 3D, with what it wears and how it feels) and the Home card.
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Animated, Easing, Platform, Pressable, Text, View } from 'react-native';
+import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Habit } from '@/hooks/app-state/types';
 import { useAppColorScheme } from '@/hooks/color-scheme-context';
 import { useBuddy } from '@/hooks/use-buddy';
+import { useReduceMotion } from '@/hooks/use-reduce-motion';
 import { createThemedStyles, useThemedStyles } from '@/hooks/use-themed-styles';
 import { buddyCatalog, buddyGrowth, buddyMood, MOOD_FACE, ROOM_LOOK, type Buddy, type BuddyMood } from '@/utils/buddy';
 
@@ -18,15 +20,51 @@ const STAGE_LOOK = [
   { background: '#FFE3EF', ring: '#F28DB8' },
 ];
 
+/**
+ * Habi in 3D (rendered by tools/buddy-3d): a loop for each mood, and a cheer played once when it is
+ * tapped or gets something new. The stills are each loop's first frame, for small avatars (a long
+ * leaderboard would otherwise play dozens of animations) and for Reduce Motion.
+ */
+const LOOPS: Record<BuddyMood | 'cheer', number> = {
+  happy: require('@/assets/buddy/habi-happy.webp'),
+  ecstatic: require('@/assets/buddy/habi-ecstatic.webp'),
+  sleepy: require('@/assets/buddy/habi-sleepy.webp'),
+  hungry: require('@/assets/buddy/habi-hungry.webp'),
+  sad: require('@/assets/buddy/habi-sad.webp'),
+  cheer: require('@/assets/buddy/habi-cheer.webp'),
+};
+const STILLS: Record<BuddyMood, number> = {
+  happy: require('@/assets/buddy/habi-happy-still.webp'),
+  ecstatic: require('@/assets/buddy/habi-ecstatic-still.webp'),
+  sleepy: require('@/assets/buddy/habi-sleepy-still.webp'),
+  hungry: require('@/assets/buddy/habi-hungry-still.webp'),
+  sad: require('@/assets/buddy/habi-sad-still.webp'),
+};
+/** How long the cheer plays (tools/buddy-3d/render.mjs). */
+export const CHEER_MS = 1200;
+/** Avatars smaller than this show a still Habi. */
+const ANIMATED_FROM = 60;
+
+// Where things sit on Habi, as shares of its picture: the top of its head (hats), its right paw
+// (what it holds), its chest (scarves, ties, medals) and its feet (it grows and hops from there).
+const HEAD_TOP = 0.19;
+const PAW = { x: 0.74, y: 0.6 };
+const CHEST_Y = 0.67;
+const FEET = '50% 87%';
+/** Accessories worn at the neck; the others are pinned at Habi's side, like a badge. */
+const NECK_ITEMS = new Set(['scarf', 'necktie', 'drop-sports-medal', 'drop-ribbon']);
+
 // Shop items and weekly drops are drawn the same way.
 const itemEmoji = (buddy: Buddy | null, id: string) => (id ? buddyCatalog(buddy).find((item) => item.id === id)?.emoji ?? '' : '');
+const useNativeDriver = Platform.OS !== 'web';
 
 /**
- * The hamster with its stage, outfit, room and mood; it bobs gently, more when happy, slowly when
- * sleepy. Champs sparkle and Legends glow gold. Small ones (next to names on the leaderboard) keep
- * still and leave out the mood bubble, so a long board does not run dozens of animations.
+ * Habi with its stage, outfit, room and mood: a 3D hamster that moves as it feels (it bounces when
+ * thrilled, nods off when sleepy) and bobs gently. Each time `cheer` goes up it hops and waves.
+ * Champs sparkle and Legends glow gold. Small ones (next to names on the leaderboard) keep still
+ * and leave out the mood bubble.
  */
-export function BuddyAvatar({ buddy, checkIns, mood, size = 120 }: { buddy: Buddy | null; checkIns: number; mood: BuddyMood; size?: number }) {
+export function BuddyAvatar({ buddy, checkIns, mood, size = 120, cheer = 0 }: { buddy: Buddy | null; checkIns: number; mood: BuddyMood; size?: number; cheer?: number }) {
   const styles = useThemedStyles(themedStyles);
   const { index } = buddyGrowth(checkIns, buddy?.stages);
   const look = STAGE_LOOK[index] ?? STAGE_LOOK[0];
@@ -34,32 +72,73 @@ export function BuddyAvatar({ buddy, checkIns, mood, size = 120 }: { buddy: Budd
   const legend = index >= 4;
   const champ = index >= 3;
   const small = size < 40;
+  const still = useReduceMotion();
+  const animated = size >= ANIMATED_FROM && !still;
   const [bob] = useState(() => new Animated.Value(0));
+  const [hop] = useState(() => new Animated.Value(0));
+  // A new cheer (a tap, a purchase, a treat) plays the cheer animation once, then the mood's loop.
+  const [seenCheer, setSeenCheer] = useState(cheer);
+  const [cheering, setCheering] = useState(false);
+  if (cheer !== seenCheer) {
+    setSeenCheer(cheer);
+    if (cheer > seenCheer && animated) setCheering(true);
+  }
   useEffect(() => {
-    if (mood === 'sad' || small) {
+    if (mood === 'sad' || small || still) {
       bob.setValue(0);
       return;
     }
     const duration = mood === 'sleepy' ? 2400 : mood === 'ecstatic' ? 600 : 1300;
     const loop = Animated.loop(Animated.sequence([
-      Animated.timing(bob, { toValue: 1, duration, easing: Easing.inOut(Easing.sin), useNativeDriver: Platform.OS !== 'web' }),
-      Animated.timing(bob, { toValue: 0, duration, easing: Easing.inOut(Easing.sin), useNativeDriver: Platform.OS !== 'web' }),
+      Animated.timing(bob, { toValue: 1, duration, easing: Easing.inOut(Easing.sin), useNativeDriver }),
+      Animated.timing(bob, { toValue: 0, duration, easing: Easing.inOut(Easing.sin), useNativeDriver }),
     ]));
     loop.start();
     return () => loop.stop();
-  }, [bob, mood, small]);
-  const lift = mood === 'ecstatic' ? -8 : -4;
+  }, [bob, mood, small, still]);
+  useEffect(() => {
+    if (!cheering) return;
+    hop.setValue(0);
+    const jump = Animated.timing(hop, { toValue: 1, duration: 700, easing: Easing.linear, useNativeDriver });
+    jump.start();
+    const done = setTimeout(() => setCheering(false), CHEER_MS);
+    return () => {
+      jump.stop();
+      clearTimeout(done);
+    };
+  }, [cheering, cheer, hop]);
+
+  const lift = size * (mood === 'ecstatic' ? 0.06 : 0.03);
+  // A crouch, a hop with a stretch, and a squashy landing.
+  const hopY = hop.interpolate({ inputRange: [0, 0.15, 0.5, 0.8, 1], outputRange: [0, size * 0.025, -size * 0.14, 0, 0] });
+  const squashX = hop.interpolate({ inputRange: [0, 0.15, 0.5, 0.8, 0.9, 1], outputRange: [1, 1.07, 0.95, 1.06, 0.98, 1] });
+  const squashY = hop.interpolate({ inputRange: [0, 0.15, 0.5, 0.8, 0.9, 1], outputRange: [1, 0.9, 1.06, 0.93, 1.02, 1] });
+  // A little bigger at each stage, growing up from its feet.
+  const grow = 1 + index * 0.05;
+  const motion = {
+    transformOrigin: FEET,
+    transform: [
+      { translateY: Animated.add(bob.interpolate({ inputRange: [0, 1], outputRange: [0, -lift] }), hopY) },
+      { scaleX: Animated.multiply(squashX, grow) },
+      { scaleY: Animated.multiply(squashY, grow) },
+    ],
+  };
   const head = itemEmoji(buddy, buddy?.head ?? '');
   const hand = itemEmoji(buddy, buddy?.hand ?? '');
-  const accessory = itemEmoji(buddy, buddy?.accessory ?? '');
+  const accessoryId = buddy?.accessory ?? '';
+  const accessory = itemEmoji(buddy, accessoryId);
+  const hat = size * 0.28;
+  const held = size * 0.22;
+  const worn = size * 0.2;
+  const picture = !animated ? STILLS[mood] : cheering ? LOOPS.cheer : LOOPS[mood];
   return (
     <View style={{ width: size, height: size }} accessible accessibilityLabel={`${buddy?.name ?? 'Your buddy'}, feeling ${mood}`}>
       {legend && <View style={[styles.circle, styles.glow, { width: size * 1.12, height: size * 1.12, borderRadius: size * 0.56, left: -size * 0.06, top: -size * 0.06 }]} />}
       <View style={[styles.circle, { width: size, height: size, borderRadius: size / 2, backgroundColor: room?.background ?? look.background, borderColor: legend ? '#E9B526' : look.ring, borderWidth: Math.max(3, size * (legend ? 0.05 : 0.035)) }]}>
         {room && size >= 60 && (
           <>
-            <Text style={[styles.decor, { fontSize: size * 0.2, left: size * 0.08, bottom: size * 0.1 }]}>{room.decor[0]}</Text>
-            <Text style={[styles.decor, { fontSize: size * 0.15, right: size * 0.12, top: size * 0.12 }]}>{room.decor[1]}</Text>
+            <Text style={[styles.decor, { fontSize: size * 0.2, left: size * 0.06, bottom: size * 0.12 }]}>{room.decor[0]}</Text>
+            <Text style={[styles.decor, { fontSize: size * 0.15, right: size * 0.1, top: size * 0.12 }]}>{room.decor[1]}</Text>
           </>
         )}
       </View>
@@ -69,11 +148,21 @@ export function BuddyAvatar({ buddy, checkIns, mood, size = 120 }: { buddy: Budd
           <Text style={[styles.sparkle, { fontSize: size * 0.11, right: -size * 0.04, bottom: size * 0.2 }]}>{legend ? '🌟' : '✨'}</Text>
         </>
       )}
-      <Animated.View style={[styles.body, { transform: [{ translateY: bob.interpolate({ inputRange: [0, 1], outputRange: [0, lift] }) }, { scale: 0.82 + index * 0.05 }] }]}>
-        <Text style={{ fontSize: size * 0.52, lineHeight: size * 0.62 }}>🐹</Text>
-        {head ? <Text style={[styles.head, { fontSize: size * 0.26, top: -size * 0.13 }]}>{head}</Text> : null}
-        {hand ? <Text style={[styles.hand, { fontSize: size * 0.22, right: -size * 0.12, bottom: -size * 0.02 }]}>{hand}</Text> : null}
-        {accessory ? <Text style={[styles.accessory, { fontSize: size * 0.2, left: -size * 0.12, bottom: size * 0.02 }]}>{accessory}</Text> : null}
+      <Animated.View style={[StyleSheet.absoluteFill, motion]} pointerEvents="none">
+        <Image
+          key={cheering ? `cheer-${cheer}` : 'loop'}
+          source={picture}
+          placeholder={STILLS[mood]}
+          contentFit="contain"
+          style={StyleSheet.absoluteFill}
+          accessible={false}
+          testID="buddy-picture"
+        />
+        {head ? <Text style={[styles.item, { fontSize: hat, lineHeight: hat * 1.15, top: size * HEAD_TOP - hat * 0.92 }]}>{head}</Text> : null}
+        {hand ? <Text style={[styles.item, { fontSize: held, lineHeight: held * 1.15, left: size * PAW.x - held * 0.35, top: size * PAW.y - held * 0.8 }]}>{hand}</Text> : null}
+        {accessory ? (
+          <Text style={[styles.item, { fontSize: worn, lineHeight: worn * 1.15 }, NECK_ITEMS.has(accessoryId) ? { top: size * CHEST_Y - worn * 0.55 } : { left: size * 0.16, top: size * 0.62 }]}>{accessory}</Text>
+        ) : null}
       </Animated.View>
       {!small && (
         <View style={[styles.moodBubble, { width: size * 0.3, height: size * 0.3, borderRadius: size * 0.15 }]}>
@@ -117,10 +206,8 @@ const themedStyles = createThemedStyles({
   glow: { backgroundColor: '#F9D65C', opacity: 0.45 },
   decor: { position: 'absolute' },
   sparkle: { position: 'absolute' },
-  body: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
-  head: { position: 'absolute', alignSelf: 'center' },
-  hand: { position: 'absolute' },
-  accessory: { position: 'absolute' },
+  // What Habi wears or holds: centred unless placed (left), over its picture.
+  item: { position: 'absolute', alignSelf: 'center', textAlign: 'center' },
   moodBubble: { position: 'absolute', right: -2, top: -2, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', shadowColor: '#201444', shadowOpacity: 0.12, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
   card: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#FFFFFF', borderRadius: 20, padding: 14, shadowColor: '#201444', shadowOpacity: 0.06, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
   pressed: { opacity: 0.9, transform: [{ scale: 0.99 }] },

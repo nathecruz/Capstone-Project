@@ -9,7 +9,7 @@ import { isPastHabitDeadline } from './completion-date.js';
 import { habitProof } from './habit-rules.js';
 import { hasHabitEnded } from './habit-week.js';
 import { syncWeeklyQuests } from './quests.js';
-import { syncDailyChallenges } from './daily-challenges.js';
+import { challengeReach, syncDailyChallenges } from './daily-challenges.js';
 import { getFrozenDays, getKeptDays } from './streak-freeze.js';
 import { awardAccountStreakMilestones, awardCheckIn, paidCheckIns, PAID_CHECK_INS_PER_DAY, revokeCheckIn } from './wallet.js';
 
@@ -98,7 +98,8 @@ export async function setCheckIn(connection, { userId, habitId, date, timeZone, 
   };
   const updatedAt = Math.max(now, Number(saved.updatedAt) + 1);
   await syncNormalizedState(userId, state, updatedAt, connection, now);
-  const dailyChallenges = await syncDailyChallenges(connection, userId, date, timeZone || 'UTC', now);
+  // Each challenge also says whether it can still be finished today (habits past their last reminder time cannot).
+  const dailyChallenges = await syncDailyChallenges(connection, userId, date, timeZone || 'UTC', now, challengeReach(state.habits, date, timeZone || 'UTC', now));
   await syncWeeklyQuests(connection, userId, date, now);
   const serverState = await buildServerState(userId, state, connection);
   await saveUserAppState(userId, serverState, updatedAt, connection);

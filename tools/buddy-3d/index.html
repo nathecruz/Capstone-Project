@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Habi 3D</title>
+  <script type="importmap">
+    { "imports": { "three": "./node_modules/three/build/three.module.js", "three/addons/": "./node_modules/three/examples/jsm/" } }
+  </script>
+  <style>html, body { margin: 0; background: transparent; } canvas { display: block; }</style>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+  <script type="module">
+    import { createStage } from './buddy-scene.js';
+
+    const size = Number(new URLSearchParams(location.search).get('size') || 768);
+    const canvas = document.getElementById('stage');
+    const stage = createStage(canvas, size);
+    // render.mjs asks for each frame: Habi in `mood` at `t` (0 to 1), as a PNG data URL.
+    window.renderFrame = (mood, t) => {
+      stage.render(mood, t);
+      return canvas.toDataURL('image/png');
+    };
+    window.ready = true;
+  </script>
+</body>
+</html>

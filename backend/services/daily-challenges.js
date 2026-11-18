@@ -1,7 +1,11 @@
-// Daily challenges: three a day. "Finish N habits" every day, plus two that rotate from a pool
-// (check in before 10 AM, twice before noon, bounce back after a miss, keep every streak alive,
-// have a perfect day), picked so that each one makes sense for the student's habits that day.
-// The server works them out from the check-ins and pays them in tokens; the app shows its answer.
+// Daily quests (called challenges in the code): three a day. "Finish N habits" every day, plus two
+// that rotate from a pool (check in before 10 AM, twice before noon, bounce back after a miss, keep
+// every streak alive, have a perfect day), picked so that each one makes sense for the student's
+// habits that day. Finishing all three opens the day's quest chest (DAILY_CHEST_BONUS), and days in
+// a row with the chest opened are the quest streak. The server works them out from the check-ins
+// and pays them in tokens; the app shows its answer.
+import { periodResetsAt } from '../lib/http.js';
+import { isPastHabitDeadline } from './completion-date.js';
 import { isHabitActiveOn } from './habit-week.js';
 import { getFrozenDays } from './streak-freeze.js';
 import { computeStreak, habitFromRow, habitSchedule, isScheduledDay } from './streaks.js';
@@ -13,6 +17,8 @@ export const ROTATING_CHALLENGES = ['early-bird', 'comeback', 'streak-keeper', '
 export const DAILY_CHALLENGE_COUNT = 3;
 /** Tokens for each challenge. */
 export const CHALLENGE_REWARDS = { finish: DAILY_CHALLENGE_BONUS, 'early-bird': 5, 'two-by-noon': 6, comeback: 8, 'streak-keeper': 8, 'perfect-day': 15 };
+/** Tokens for finishing all of the day's challenges: the quest chest. */
+export const DAILY_CHEST_BONUS = 10;
 
 function shiftDay(dateKey, days) {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -110,6 +116,33 @@ export function minuteOfDay(time, timeZone = 'UTC') {
   }
 }
 
+/**
+ * `reach` for dailyChallenges at `now`: the minute of the day, and whether a habit is past its last
+ * reminder time (`stateHabits`: the app state's habits, which have the reminder times).
+ */
+export function challengeReach(stateHabits, date, timeZone = 'UTC', now = Date.now()) {
+  const byId = new Map((Array.isArray(stateHabits) ? stateHabits : []).map((habit) => [String(habit?.id), habit]));
+  return { minute: minuteOfDay(now, timeZone), isClosed: (habit) => isPastHabitDeadline(byId.get(habit.id), date, timeZone, new Date(now)) };
+}
+
+/** challengeReach from the account's latest app state. */
+export async function loadChallengeReach(db, userId, date, timeZone = 'UTC', now = Date.now()) {
+  const saved = await db.query(`SELECT state_json->'habits' AS habits FROM user_app_state WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 1`, [userId]);
+  return challengeReach(saved.rows[0]?.habits, date, timeZone, now);
+}
+
+/**
+ * The quest chest of a day's challenges: its bonus, whether it is open (every challenge done) and,
+ * when the challenges say so, whether it can still be opened today.
+ */
+export function dailyChest(challenges) {
+  const complete = challenges.length > 0 && challenges.every((challenge) => challenge.complete);
+  const chest = { reward: DAILY_CHEST_BONUS, complete };
+  return challenges.some((challenge) => 'reachable' in challenge)
+    ? { ...chest, reachable: complete || (challenges.length > 0 && challenges.every((challenge) => challenge.complete || challenge.reachable)) }
+    : chest;
+}
+
 /** Works out the student's challenges for `date` from the database (`reach`: as for dailyChallenges). */
 export async function getDailyChallenges(db, userId, date, timeZone = 'UTC', reach = null) {
   const rows = (await db.query('SELECT id, label, meta, frequency, start_date, active_until, reminder_days FROM habits WHERE user_id=$1', [userId])).rows;
@@ -136,12 +169,43 @@ export async function getDailyChallenges(db, userId, date, timeZone = 'UTC', rea
   return dailyChallenges({ habits, doneToday, doneYesterday, streaksBefore, today: date, reach });
 }
 
-// "Finish N habits" keeps the id and label it had before there were three challenges.
+// "Finish N habits" keeps the id it had before there were three challenges.
 const tokenId = (userId, date, id) => (id === 'finish' ? `${userId}:token:challenge:${date}` : `${userId}:token:daily:${date}:${id}`);
+const chestId = (userId, date) => `${userId}:token:daily:${date}:chest`;
+const CHEST_MARK = ':token:daily:';
+// For LIKE patterns: an id's own % or _ must not act as a wildcard.
+const escapeLike = (value) => String(value).replace(/[\\%_]/g, '\\$&');
 
-/** Pays (or takes back) today's challenge bonuses after a check-in. Call inside the check-in transaction. */
-export async function syncDailyChallenges(db, userId, date, timeZone = 'UTC', now = Date.now()) {
-  const challenges = await getDailyChallenges(db, userId, date, timeZone);
+/** Days in a row before `date` (yesterday back) on which the quest chest was opened. */
+export async function dailyQuestStreak(db, userId, date) {
+  const rows = await db.query(
+    "SELECT id FROM token_transactions WHERE user_id=$1 AND id LIKE $2 ESCAPE '\\'",
+    [userId, `${escapeLike(userId)}${CHEST_MARK}%:chest`],
+  );
+  const opened = new Set(rows.rows.map((row) => String(row.id).slice(String(row.id).indexOf(CHEST_MARK) + CHEST_MARK.length).split(':')[0]));
+  let streak = 0;
+  for (let day = shiftDay(date, -1); opened.has(day); day = shiftDay(day, -1)) streak += 1;
+  return streak;
+}
+
+/**
+ * Today's daily quests as the app shows them (GET /api/daily-challenges): the challenges with
+ * whether each can still be finished, the quest chest, the quest streak before today and when
+ * the day (and so the quests) resets, as epoch ms.
+ */
+export async function getDailyQuests(db, userId, date, timeZone = 'UTC', now = Date.now()) {
+  const reach = await loadChallengeReach(db, userId, date, timeZone, now);
+  const [challenges, streak] = await Promise.all([getDailyChallenges(db, userId, date, timeZone, reach), dailyQuestStreak(db, userId, date)]);
+  return { challenges, chest: dailyChest(challenges), streak, resetsAt: periodResetsAt({ end: date }, timeZone) };
+}
+
+/**
+ * Pays (or takes back) today's challenge bonuses and the quest chest after a check-in. Call inside
+ * the check-in transaction. With `reach` (challengeReach) each challenge also says whether it can
+ * still be finished today.
+ */
+export async function syncDailyChallenges(db, userId, date, timeZone = 'UTC', now = Date.now(), reach = null) {
+  const challenges = await getDailyChallenges(db, userId, date, timeZone, reach);
   const paid = new Set(challenges.filter((challenge) => challenge.complete).map((challenge) => challenge.id));
   for (const id of ['finish', ...ROTATING_CHALLENGES]) {
     const challenge = challenges.find((entry) => entry.id === id);
@@ -149,11 +213,20 @@ export async function syncDailyChallenges(db, userId, date, timeZone = 'UTC', no
       // Listed just above the check-in that completed it.
       await db.query(
         'INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING',
-        [tokenId(userId, date, id), userId, challenge.reward, id === 'finish' ? 'Daily challenge' : `Daily challenge: ${challenge.title}`, new Date(now).toISOString(), now + 1],
+        [tokenId(userId, date, id), userId, challenge.reward, id === 'finish' ? 'Daily quest' : `Daily quest: ${challenge.title}`, new Date(now).toISOString(), now + 1],
       );
     } else {
       await db.query('DELETE FROM token_transactions WHERE id=$1', [tokenId(userId, date, id)]);
     }
+  }
+  if (dailyChest(challenges).complete) {
+    // Listed above the quest that opened it.
+    await db.query(
+      'INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING',
+      [chestId(userId, date), userId, DAILY_CHEST_BONUS, 'Daily quests: quest chest', new Date(now).toISOString(), now + 2],
+    );
+  } else {
+    await db.query('DELETE FROM token_transactions WHERE id=$1', [chestId(userId, date)]);
   }
   return challenges;
 }

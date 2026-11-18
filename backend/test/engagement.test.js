@@ -9,7 +9,7 @@ import { daysToFreeze, STREAK_FREEZE_COST, STREAK_FREEZE_MAX } from '../services
 import { CHECK_IN_CAP_FROM, countedDaySql, countedOnDay, crossedStreakMilestones, PAID_CHECK_INS_PER_DAY, STREAK_MILESTONE_BONUS } from '../services/wallet.js';
 import { computeStreak } from '../services/streaks.js';
 import { doneActionSecret, getWebPushDoneUrl, localDateIn, makeDoneToken, readDoneToken } from '../services/web-push-actions.js';
-import { dailyChallenges, minuteOfDay, ROTATING_CHALLENGES } from '../services/daily-challenges.js';
+import { challengeReach, DAILY_CHEST_BONUS, dailyChallenges, dailyChest, minuteOfDay, ROTATING_CHALLENGES } from '../services/daily-challenges.js';
 
 const daily = (id) => ({ id, frequency: 'Daily', startDate: '2026-09-01', reminderDays: [], meta: 'Daily • Anytime' });
 const done = (entries) => new Map(Object.entries(entries).map(([date, ids]) => [date, new Set(ids)]));
@@ -255,4 +255,18 @@ test('daily challenges: finish N every day, plus two extras that fit the student
   assert.deepEqual([reachable('perfect-day', 20 * 60, { closed: [] }), reachable('perfect-day', 20 * 60)], [true, false], 'd can no longer be done');
   // The time of a check-in in the student's own time zone.
   assert.equal(minuteOfDay(Date.UTC(2026, 9, 4, 1, 30), 'Asia/Manila'), 9 * 60 + 30);
+
+  // The quest chest opens once every quest is done; while one can no longer be finished, not today.
+  assert.equal(DAILY_CHEST_BONUS, 10);
+  assert.deepEqual(dailyChest(two), { reward: 10, complete: true });
+  assert.deepEqual(dailyChest([]), { reward: 10, complete: false }, 'no quests, no chest');
+  assert.deepEqual(dailyChest([{ complete: true, reachable: true }, { complete: false, reachable: true }]), { reward: 10, complete: false, reachable: true });
+  assert.deepEqual(dailyChest([{ complete: true, reachable: true }, { complete: false, reachable: false }]), { reward: 10, complete: false, reachable: false });
+  // What can still be done, from the app state's habits: the minute in the account's zone and the
+  // habits past their last reminder time (only on that day).
+  const noon = Date.UTC(2026, 9, 4, 4, 0);
+  const reach = challengeReach([{ id: 'a', reminderEnabled: true, reminderTimes: ['9:00 AM'] }, { id: 'b', reminderEnabled: true, reminderTimes: ['3:00 PM'] }, { id: 'c' }], today, 'Asia/Manila', noon);
+  assert.equal(reach.minute, 12 * 60);
+  assert.deepEqual(['a', 'b', 'c', 'gone'].map((id) => reach.isClosed({ id })), [true, false, false, false]);
+  assert.equal(challengeReach(null, today, 'Asia/Manila', noon).isClosed({ id: 'a' }), false, 'no saved habits: nothing is closed');
 });

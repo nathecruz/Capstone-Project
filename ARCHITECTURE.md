@@ -152,7 +152,8 @@ erDiagram
   what it is (`tokenKind` in `wallet.js`, mirrored in `admin-panel/server/src/lib/token-kinds.js`).
   - +5 per check-in (id unique per habit and day, so it cannot be earned twice), for the first 6
     check-ins of an account day from 2026-10-26; −5 when a paid check-in is undone.
-  - Daily reward, challenges, mystery box, weekly quests, streak milestones and the Monday
+  - Daily reward, daily quests (`:token:challenge:<date>` and `:token:daily:<date>:<id>`, and the
+    quest chest `:token:daily:<date>:chest`), mystery box, weekly quests, streak milestones and the Monday
     weekly bonus (`:token:week:<weekStart>`, 10/20/30 at 60/75/90% of last week's due check-ins).
   - Spends are `:token:spend:<kind>:<uuid>`: rewards, Habi items and the weekly drop, treats,
     treat gifts, streak freezes and AI Coach answers (10, refunded when the AI fails).

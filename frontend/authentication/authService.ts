@@ -798,10 +798,17 @@ export async function getLiveVersions(): Promise<Result<{ versions: Record<strin
   }
 }
 
-export type DailyChallenge = { id: string; title: string; icon: string; target: number; progress: number; reward: number; date: string; complete: boolean };
+/** A daily quest (a challenge, as the server calls it). `reachable` false: it can no longer be finished today. */
+export type DailyChallenge = { id: string; title: string; icon: string; target: number; progress: number; reward: number; date: string; complete: boolean; reachable?: boolean };
+/** The quest chest: its bonus for finishing every daily quest, whether it is open and whether it still can be today. */
+export type DailyQuestChest = { reward: number; complete: boolean; reachable?: boolean };
 export type DailyClaim = { date: string; day: number; claimedToday: boolean; amount: number; rewards: number[]; alreadyClaimed?: boolean };
-/** Today's three challenges and their progress, as the server counts (and pays) them. */
-export const getDailyChallenges = (date: string) => authedRequest<{ challenges: DailyChallenge[] }>(`/api/daily-challenges?${todayQuery(date)}`);
+/**
+ * Today's three daily quests and their progress, as the server counts (and pays) them, with the
+ * quest chest, the quest streak before today (days in a row with the chest opened) and when the
+ * quests reset (epoch ms). An older server sends only the quests.
+ */
+export const getDailyChallenges = (date: string) => authedRequest<{ challenges: DailyChallenge[]; chest?: DailyQuestChest; streak?: number; resetsAt?: number }>(`/api/daily-challenges?${todayQuery(date)}`);
 /** The 7-day daily claim calendar for `date` (the device's today). */
 export const getDailyClaim = (date: string) => authedRequest<DailyClaim>(`/api/daily-claim?${todayQuery(date)}`);
 /** Claims today's reward (once a day); the server picks the day of the calendar and pays it. */

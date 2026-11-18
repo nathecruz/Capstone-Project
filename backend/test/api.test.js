@@ -108,8 +108,9 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
   };
   await waitUntilUp(baseUrl, () => serverErrors);
 
-  /** Tokens from the rotating daily challenges (not "Finish N habits") in an answer's history. */
-  const extraDailyTokens = (body) => body.tokenHistory.filter((item) => item.label.startsWith('Daily challenge: ')).reduce((sum, item) => sum + item.amount, 0);
+  /** Tokens from the rotating daily quests (not "Finish N habits") and the quest chest in an answer's history. */
+  const QUEST_CHEST = 'Daily quests: quest chest';
+  const extraDailyTokens = (body) => body.tokenHistory.filter((item) => item.label.startsWith('Daily quest: ') || item.label === QUEST_CHEST).reduce((sum, item) => sum + item.amount, 0);
   // The test habits are proven with a photo (appState below), so a check-in carries this one unless
   // the test sends its own `proof`, or `proof: null` to send none (services/check-in-proof.js).
   const PHOTO_PROOF = { photo: Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(2048, 7)]).toString('base64'), type: 'image/jpeg' };
@@ -348,8 +349,8 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(done.response.status, 200, JSON.stringify(done.body));
     assert.equal(done.body.points, 20);
     assert.equal(done.body.tokens, 5 + extraDailyTokens(done.body), '"Finish 2 habits" is not done yet: 1 of the 2 habits due today');
-    assert.ok(!done.body.tokenHistory.some((item) => item.label === 'Daily challenge'));
-    assert.equal(done.body.tokenHistory.find((item) => !item.label.startsWith('Daily challenge')).label, 'Completed Read');
+    assert.ok(!done.body.tokenHistory.some((item) => item.label === 'Daily quest'));
+    assert.equal(done.body.tokenHistory.find((item) => !item.label.startsWith('Daily quest')).label, 'Completed Read');
     assert.equal(done.body.habit.streak, 1);
 
     const repeat = await request('/api/habit-completions', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ habitId: 'habit-1', date: today, completed: true, timeZone: 'UTC' }) });
@@ -372,9 +373,12 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(proven.response.status, 200, JSON.stringify(proven.body));
     // Paid again: 5 and each of today's challenges it completed.
     const challenges = (await request(`/api/daily-challenges?date=${today}&timeZone=UTC`, { headers: authHeaders })).body.challenges;
-    const paidChallenges = proven.body.tokenHistory.filter((item) => item.label.startsWith('Daily challenge'));
+    const paidChallenges = proven.body.tokenHistory.filter((item) => item.label.startsWith('Daily quest') && item.label !== QUEST_CHEST);
     assert.deepEqual(paidChallenges.map((item) => item.amount).sort(), challenges.filter((challenge) => challenge.complete).map((challenge) => challenge.reward).sort(), JSON.stringify(challenges));
-    assert.equal(proven.body.tokens, 5 + paidChallenges.reduce((sum, item) => sum + item.amount, 0));
+    // And the quest chest, when that check-in finished every one of today's quests.
+    const chest = proven.body.tokenHistory.filter((item) => item.label === QUEST_CHEST).reduce((sum, item) => sum + item.amount, 0);
+    assert.equal(chest, challenges.every((challenge) => challenge.complete) ? 10 : 0);
+    assert.equal(proven.body.tokens, 5 + paidChallenges.reduce((sum, item) => sum + item.amount, 0) + chest);
     stateUpdatedAt = proven.body.updatedAt;
 
     const unchanged = await request(`/api/app-state?since=${stateUpdatedAt}`, { headers: authHeaders });
@@ -529,7 +533,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     const questBonus = weeklyQuests([{ id: 'prep', frequency: 'Daily', startDate: '2026-01-01', reminderDays: [], meta: '' }], new Map([[today, new Set(['prep'])]]), today)
       .filter((quest) => quest.complete).reduce((sum, quest) => sum + quest.reward, 0);
     assert.equal(checkIn.body.tokens, 15 + questBonus + extraDailyTokens(checkIn.body), '+5 for the check-in, +10 for "Finish 1 habit", and any other challenge or weekly quest it completes');
-    assert.deepEqual(checkIn.body.tokenHistory.filter((item) => !item.label.startsWith('Weekly quest') && !item.label.startsWith('Daily challenge: ')).slice(0, 2).map((item) => item.label), ['Daily challenge', "Completed Prepare tomorrow's lesson"]);
+    assert.deepEqual(checkIn.body.tokenHistory.filter((item) => !item.label.startsWith('Weekly quest') && !item.label.startsWith('Daily quest: ') && item.label !== QUEST_CHEST).slice(0, 2).map((item) => item.label), ['Daily quest', "Completed Prepare tomorrow's lesson"]);
     const undone = await request('/api/habit-completions', { method: 'PUT', headers: facultyHeaders, body: JSON.stringify({ habitId: 'prep', date: today, completed: false, timeZone: 'UTC' }) });
     assert.equal(undone.body.tokens, 0, 'an undo also takes the challenge bonus back');
     const again = await request('/api/habit-completions', { method: 'PUT', headers: facultyHeaders, body: JSON.stringify({ habitId: 'prep', date: today, completed: true, timeZone: 'UTC' }) });
@@ -902,7 +906,7 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal(board.body.leaders.find((leader) => leader.isYou).title, 'Early Riser', 'shown on the leaderboard');
   });
 
-  await t.test('daily claim, daily challenges and profile frames', async () => {
+  await t.test('daily claim, daily quests and profile frames', async () => {
     const password = 'Juniper!Coast6!Lantern2!Moss';
     await request('/api/auth/register', { method: 'POST', body: JSON.stringify({ ...registration, firstName: 'Dani', lastName: 'Cruz', username: 'dani_cruz', email: 'dani@example.com', password, privacyConsent: true }) });
     await db.query('UPDATE users SET email_verified_at = 1 WHERE email = $1', ['dani@example.com']);
@@ -930,23 +934,39 @@ test('API integration against PostgreSQL', { skip: testDatabaseUrl ? false : 'se
     assert.equal((await dayAfter(7, 1)).day, 1, 'a new calendar after day 7');
     assert.equal((await dayAfter(3, 2)).day, 1, 'a missed day starts again at day 1');
 
-    // Daily challenges: "Finish N habits" plus two that fit; each check-in pays the ones it completes.
+    // Daily quests: "Finish N habits" plus two that fit; each check-in pays the ones it completes, and
+    // finishing all of them opens the quest chest.
     await request('/api/app-state', { method: 'PUT', headers, body: JSON.stringify({ ...appState, habits: [{ ...appState.habits[0], id: 'one', label: 'One' }, { ...appState.habits[0], id: 'two', label: 'Two' }] }) });
     const challenges = await request(`/api/daily-challenges?date=${today}&timeZone=UTC`, { headers });
     assert.equal(challenges.response.status, 200, JSON.stringify(challenges.body));
-    assert.deepEqual(challenges.body.challenges[0], { id: 'finish', title: 'Finish 2 habits today', icon: 'trophy', target: 2, progress: 0, reward: 10, date: today, complete: false });
+    assert.deepEqual(challenges.body.challenges[0], { id: 'finish', title: 'Finish 2 habits today', icon: 'trophy', target: 2, progress: 0, reward: 10, date: today, complete: false, reachable: true });
     assert.equal(challenges.body.challenges.length, 3);
+    assert.deepEqual(challenges.body.chest, { reward: 10, complete: false, reachable: challenges.body.challenges.every((challenge) => challenge.reachable) });
+    assert.equal(challenges.body.streak, 0);
+    const midnight = Date.parse(`${today}T00:00:00Z`) + 86_400_000;
+    assert.equal(challenges.body.resetsAt, midnight, 'the quests reset at the next midnight of the account day');
     await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'one', date: today, completed: true, timeZone: 'UTC' }) });
     const both = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'two', date: today, completed: true, timeZone: 'UTC' }) });
     assert.equal(both.body.dailyChallenges[0].complete, true);
+    assert.ok(both.body.dailyChallenges.every((challenge) => typeof challenge.reachable === 'boolean'), 'a check-in also says which quests can still be finished');
     for (const challenge of both.body.dailyChallenges) {
-      const label = challenge.id === 'finish' ? 'Daily challenge' : `Daily challenge: ${challenge.title}`;
+      const label = challenge.id === 'finish' ? 'Daily quest' : `Daily quest: ${challenge.title}`;
       const paid = both.body.tokenHistory.filter((item) => item.label === label);
       assert.deepEqual(paid.map((item) => item.amount), challenge.complete ? [challenge.reward] : [], label);
     }
+    const allDone = both.body.dailyChallenges.every((challenge) => challenge.complete);
+    assert.deepEqual(both.body.tokenHistory.filter((item) => item.label === QUEST_CHEST).map((item) => item.amount), allDone ? [10] : []);
     const undo = await request('/api/habit-completions', { method: 'PUT', headers, body: JSON.stringify({ habitId: 'two', date: today, completed: false, timeZone: 'UTC' }) });
     assert.equal(undo.body.dailyChallenges[0].complete, false);
-    assert.ok(!undo.body.tokenHistory.some((item) => item.label === 'Daily challenge'), 'an undo takes the bonus back');
+    assert.ok(!undo.body.tokenHistory.some((item) => item.label === 'Daily quest'), 'an undo takes the bonus back');
+    assert.ok(!undo.body.tokenHistory.some((item) => item.label === QUEST_CHEST), 'and closes the chest again');
+    // The quest streak: days in a row before today with the chest opened.
+    const dayBefore = (days) => new Date(Date.parse(`${today}T00:00:00Z`) - days * 86_400_000).toISOString().slice(0, 10);
+    for (const days of [1, 2, 4]) {
+      await db.query("INSERT INTO token_transactions(id,user_id,amount,label,transaction_date,created_at) VALUES($1,$2,10,'Daily quests: quest chest',$3,$4)", [`${userId}:token:daily:${dayBefore(days)}:chest`, userId, new Date().toISOString(), Date.now()]);
+    }
+    assert.equal((await request(`/api/daily-challenges?date=${today}&timeZone=UTC`, { headers })).body.streak, 2, 'yesterday and the day before (a gap ends it)');
+    await db.query("DELETE FROM token_transactions WHERE user_id=$1 AND id LIKE '%:chest'", [userId]);
 
     // Profile Frames: bought once, then a frame is chosen and shown on the leaderboard.
     assert.equal((await request('/api/rewards/frame', { method: 'PUT', headers, body: JSON.stringify({ frame: 'gold' }) })).response.status, 403);

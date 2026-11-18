@@ -1,8 +1,9 @@
-// Habit Buddy: the mascot that grows with every check-in. It gives tips from the student's own
+// Habit Buddy: the 3D mascot that grows with every check-in. It gives tips from the student's own
 // check-ins, shows how its week went, and wears items and lives in rooms bought with tokens (the
 // server checks prices, stages and the balance). Each week one limited item, the weekly drop, is
 // for sale once 2 of the week's quests are done. Treats classmates sent today sit in its room, and
-// with Buddy Showcase it can be shown on the leaderboard. Tap the buddy to hear its tips.
+// with Buddy Showcase it can be shown on the leaderboard. Tap the buddy to hear its tips (it hops
+// and waves).
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
@@ -203,7 +204,8 @@ export default function BuddyScreen() {
 
         <View style={styles.hero}>
           <Pressable onPress={pet} accessibilityRole="button" accessibilityLabel={`Pet ${name}`} style={styles.avatarWrap}>
-            <BuddyAvatar buddy={buddy} checkIns={checkIns} mood={mood} size={170} />
+            {/* Habi hops and waves when petted, and when it gets a new item or a treat. */}
+            <BuddyAvatar buddy={buddy} checkIns={checkIns} mood={mood} size={170} cheer={pets + burst} />
             {gifts.length > 0 && (
               <View style={styles.giftRow} pointerEvents="none" accessible accessibilityLabel={`Treats from classmates today: ${gifts.map((gift) => gift.emoji).join(' ')}`}>
                 {gifts.map((gift, index) => <Text key={`${gift.treatId}-${index}`} style={styles.giftEmoji}>{gift.emoji}</Text>)}

@@ -9,7 +9,7 @@ import { accountStreakRun } from './account-streak.js';
 import { BUDDY_ITEMS, BUDDY_STAGES, BUDDY_TREATS, buddyStageIndex, DROP_COST, getBuddy } from './buddy.js';
 import { GIFTS_PER_DAY, giftsSentOn } from './buddy-gifts.js';
 import { isPastHabitDeadline } from './completion-date.js';
-import { CHALLENGE_REWARDS, DAILY_CHALLENGE_COUNT, getDailyChallenges, minuteOfDay } from './daily-challenges.js';
+import { CHALLENGE_REWARDS, DAILY_CHALLENGE_COUNT, DAILY_CHEST_BONUS, dailyChest, getDailyChallenges, minuteOfDay } from './daily-challenges.js';
 import { DAILY_CLAIM_REWARDS, getDailyClaim } from './daily-claims.js';
 import { isHabitActiveOn, weekEndKey } from './habit-week.js';
 import { getMysteryBox, MYSTERY_MAX, MYSTERY_REWARDS } from './mystery-box.js';
@@ -50,7 +50,7 @@ const TREAT_COST = lowest(BUDDY_TREATS.map((treat) => treat.cost));
 export const EARN_ROWS = [
   { id: 'check-in', title: 'Check in a habit', amount: `+${TOKENS_PER_CHECK_IN}`, detail: `Up to ${PAID_CHECK_INS_PER_DAY} paid check-ins a day` },
   { id: 'daily-claim', title: 'Daily reward', amount: plusRange(DAILY_CLAIM_REWARDS), detail: `Open HabitAI every day: ${listOf(DAILY_CLAIM_REWARDS)} over ${DAILY_CLAIM_REWARDS.length} days in a row` },
-  { id: 'challenge', title: 'Daily challenges', amount: plusRange(CHALLENGE_AMOUNTS), detail: `${DAILY_CHALLENGE_COUNT} a day, paid when you finish them` },
+  { id: 'challenge', title: 'Daily quests', amount: plusRange(CHALLENGE_AMOUNTS), detail: `${DAILY_CHALLENGE_COUNT} a day, paid when you finish them, and +${DAILY_CHEST_BONUS} more for all ${DAILY_CHALLENGE_COUNT}` },
   { id: 'mystery', title: 'Mystery box', amount: plusRange(MYSTERY_AMOUNTS), detail: 'Once a day after your first check-in' },
   { id: 'quest', title: 'Weekly quests', amount: plusRange(QUEST_AMOUNTS), detail: `${QUEST_AMOUNTS.length} a week, new every Monday` },
   {
@@ -65,7 +65,7 @@ export const EARN_ROWS = [
 /** The token facts for the AI help assistant (services/ai-prompts.js APP_GUIDE), from the same constants. */
 export function economyGuide() {
   const rewards = Object.values(REAL_REWARDS).map((reward) => `${reward.name} ${reward.cost}`).join(', ');
-  return `- Tokens: each check-in gives ${TOKENS_PER_CHECK_IN} tokens (up to ${PAID_CHECK_INS_PER_DAY} paid check-ins a day); also the daily reward (${range(DAILY_CLAIM_REWARDS)}), daily challenges (${range(CHALLENGE_AMOUNTS)}), the mystery box (${range(MYSTERY_AMOUNTS)}, after the first check-in), weekly quests (${range(QUEST_AMOUNTS)}), the Monday consistency bonus (${listOf(WEEKLY_BONUS_TIERS.map((tier) => tier.amount), 'or')}) and streak milestones (${range(MILESTONE_AMOUNTS)}). `
+  return `- Tokens: each check-in gives ${TOKENS_PER_CHECK_IN} tokens (up to ${PAID_CHECK_INS_PER_DAY} paid check-ins a day); also the daily reward (${range(DAILY_CLAIM_REWARDS)}), daily quests (${range(CHALLENGE_AMOUNTS)} each, plus ${DAILY_CHEST_BONUS} from the quest chest for finishing all ${DAILY_CHALLENGE_COUNT}), the mystery box (${range(MYSTERY_AMOUNTS)}, after the first check-in), weekly quests (${range(QUEST_AMOUNTS)}), the Monday consistency bonus (${listOf(WEEKLY_BONUS_TIERS.map((tier) => tier.amount), 'or')}) and streak milestones (${range(MILESTONE_AMOUNTS)}). `
     + `Spend them on ${rewards}, Habi shop items ${range(BUDDY_ITEMS.map((item) => item.cost))} and the weekly drop ${DROP_COST}, treats for classmates ${range(BUDDY_TREATS.map((treat) => treat.cost))}, Streak Freeze ${STREAK_FREEZE_COST} (hold up to ${STREAK_FREEZE_MAX}) and AI Coach answers ${COACH_TOKEN_COST} each. `
     + 'The Tokens screen (tap Tokens on Home) lists all of them.';
 }
@@ -157,13 +157,16 @@ const stillOpen = (entry) => !entry.complete && entry.reachable !== false;
 /**
  * The most that can still be earned today: the daily reward if it is not claimed, +5 for each habit
  * due today, not done and not past its last reminder time (`openHabits`, up to the paid check-ins
- * left), the challenges that can still be finished today and, while the mystery box is not opened,
- * its top prize (a new habit's check-in can still unlock it).
+ * left), the challenges that can still be finished today, the quest chest while all of them still
+ * can be and, while the mystery box is not opened, its top prize (a new habit's check-in can still
+ * unlock it).
  */
 export function canStillEarnToday({ dailyClaim, paidToday, openHabits, challenges, mysteryBox }) {
   const checkIns = TOKENS_PER_CHECK_IN * Math.min(Math.max(0, PAID_CHECK_INS_PER_DAY - paidToday), openHabits);
   const unfinished = challenges.filter(stillOpen).reduce((sum, challenge) => sum + challenge.reward, 0);
-  return (dailyClaim.claimedToday ? 0 : dailyClaim.amount) + checkIns + unfinished + (mysteryBox.status === 'opened' ? 0 : MYSTERY_MAX);
+  const chest = dailyChest(challenges);
+  const chestLeft = !chest.complete && chest.reachable !== false && challenges.length ? chest.reward : 0;
+  return (dailyClaim.claimedToday ? 0 : dailyClaim.amount) + checkIns + unfinished + chestLeft + (mysteryBox.status === 'opened' ? 0 : MYSTERY_MAX);
 }
 
 /** Tokens earned a day over the last 7 days (rounded): the positive rows since then, refunds left out. `rows`: [{ id, label, amount, createdAt }]. */
@@ -224,6 +227,15 @@ function progressOf(list) {
   return { done: done.length, total: list.length, earned: rewards(done), available: rewards(list.filter(stillOpen)) };
 }
 
+/** The day's challenges as progressOf counts them, with the quest chest in what was earned and what is left. */
+function questProgressOf(challenges) {
+  const progress = progressOf(challenges);
+  const chest = dailyChest(challenges);
+  if (!challenges.length) return progress;
+  if (chest.complete) return { ...progress, earned: progress.earned + chest.reward };
+  return chest.reachable === false ? progress : { ...progress, available: progress.available + chest.reward };
+}
+
 /**
  * The Tokens screen for the account day `day` ({ today, timeZone }, services/account-day.js): the
  * API's wallet summary without `ok`. The week is Monday to Sunday of `today`, from 00:00 Monday in
@@ -277,7 +289,7 @@ export async function getWalletSummary(db, userId, { today, timeZone }, { facult
       checkIns: { paid: paidToday, limit: PAID_CHECK_INS_PER_DAY, perCheckIn: TOKENS_PER_CHECK_IN, earned: paidToday * TOKENS_PER_CHECK_IN },
       // Tomorrow is the next day of the calendar when today is claimed.
       dailyClaim: { claimed: dailyClaim.claimedToday, day: dailyClaim.day, amount: dailyClaim.amount, tomorrowAmount: DAILY_CLAIM_REWARDS[dailyClaim.day % DAILY_CLAIM_REWARDS.length] },
-      challenges: progressOf(challenges),
+      challenges: questProgressOf(challenges),
       mysteryBox,
       canStillEarn: canStillEarnToday({ dailyClaim, paidToday, openHabits, challenges, mysteryBox }),
     },
