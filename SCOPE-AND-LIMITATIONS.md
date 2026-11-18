@@ -53,6 +53,8 @@ Proofs are stored with the check-in. An administrator can review them in the Adm
   - the Wellness Pack's guided breaks, Streak Freezes and AI Coach answers.
 
   Themes, profile frames, a custom title and items for the Habi buddy are there too.
+- **Daily quests.** Each day has three quests that pay tokens when finished: a number of habits to finish, and two that fit the user's habits that day (an early check-in, bouncing back after a miss, keeping streaks, a perfect day). Finishing all three opens the quest chest (10 more tokens), and days in a row with it opened make a quest streak. A quest that can no longer be done that day is shown as missed [backend/services/daily-challenges.js].
+- **Habi, the Habit Buddy,** is a 3D hamster that grows with check-ins and shows the user's day in its mood, with a short animation for each mood. The animations are rendered ahead of time from a 3D model [tools/buddy-3d], so no 3D engine runs on the phone; with Reduce Motion on, Habi stays still.
 - Students also compete on leaderboards and can send treats to classmates.
 - Faculty earn and spend tokens the same way on their own **Rewards** screen, as the panel noted. They are never on the student leaderboards, so the two rewards that show only there are not offered to them: the Buddy Showcase and treats for classmates [backend/services/rewards.js, backend/services/token-guide.js].
 

@@ -21,7 +21,7 @@ import { AppThemeContext, DarkModeContext } from './dark-mode-context';
 import { adjustBuddyCheckIns, getCachedBuddy, reloadBuddy, syncBuddyCheckIns } from './use-buddy';
 import { loadRewards } from './use-rewards';
 import { emitLive, setUnreadCount } from '@/utils/live-events';
-import { getKnownChallenges, loadDailyChallenges, publishDailyChallenges } from './use-daily-challenges';
+import { getKnownChallenges, getKnownChestReward, loadDailyChallenges, publishDailyChallenges } from './use-daily-challenges';
 import { reloadWeeklyBonus } from './use-weekly-bonus';
 import { reloadWallet } from './use-wallet';
 import { isAppTheme } from './use-themed-styles';
@@ -905,20 +905,29 @@ export function ColorSchemeProvider({ children }: { children: React.ReactNode })
         if (!celebrated.current.has(capNotice) && activeEmailRef.current) {
           void AsyncStorage.setItem(`${TOKEN_CAP_SHOWN_KEY_PREFIX}${activeEmailRef.current}`, dateKey).catch(() => undefined);
         }
-        celebrate({ id: capNotice, kind: 'info', icon: 'wallet-outline', title: 'Daily token limit reached', message: `You have earned tokens for ${result.paidCheckInsLimit ?? 6} check-ins today. This one still counts for your streak, challenges and quests.` });
+        celebrate({ id: capNotice, kind: 'info', icon: 'wallet-outline', title: 'Daily token limit reached', message: `You have earned tokens for ${result.paidCheckInsLimit ?? 6} check-ins today. This one still counts for your streak and quests.` });
       }
       const latest = latestCheckInAnswerRef.current;
       if (latest.email !== email || !result.updatedAt || result.updatedAt >= latest.updatedAt) {
         latestCheckInAnswerRef.current = { email, updatedAt: result.updatedAt ?? latest.updatedAt };
         applyWallet(result);
       }
-      // Daily challenges as the server counted them: announce any this check-in completed.
+      // Daily quests as the server counted them: announce any this check-in completed, or the quest
+      // chest when it finished the last of them (one celebration for both).
       if (result.dailyChallenges) {
         const known = getKnownChallenges();
+        const chestReward = getKnownChestReward();
         publishDailyChallenges(result.dailyChallenges);
         if (completed) {
-          for (const challenge of result.dailyChallenges.filter((item) => item.complete && !known.some((before) => before.id === item.id && before.complete))) {
-            celebrate({ id: `challenge:${challenge.date}:${challenge.id}`, kind: 'challenge', icon: challenge.icon, title: 'Challenge complete!', message: `${challenge.title}: +${challenge.reward} tokens.` });
+          const finished = result.dailyChallenges.filter((item) => item.complete && !known.some((before) => before.id === item.id && before.complete));
+          const chestOpened = chestReward > 0 && finished.length > 0 && result.dailyChallenges.every((item) => item.complete);
+          if (chestOpened) {
+            const tokens = finished.reduce((sum, item) => sum + item.reward, chestReward);
+            celebrate({ id: `quest-chest:${finished[0].date}`, kind: 'challenge', icon: 'gift', title: 'Quest chest opened!', message: `All ${result.dailyChallenges.length} daily quests done: +${tokens} tokens with the +${chestReward} bonus.` });
+          } else {
+            for (const challenge of finished) {
+              celebrate({ id: `challenge:${challenge.date}:${challenge.id}`, kind: 'challenge', icon: challenge.icon, title: 'Quest complete!', message: `${challenge.title}: +${challenge.reward} tokens.` });
+            }
           }
         }
       }

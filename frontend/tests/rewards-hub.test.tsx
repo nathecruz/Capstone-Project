@@ -66,24 +66,24 @@ describe('RewardsHub', () => {
   it('opens on the daily reward while it waits to be claimed', async () => {
     mockClaim.ready = true;
     const screen = render(<RewardsHub habits={[]} now={monday} />);
-    await waitFor(() => expect(screen.getByLabelText('Daily: Ready to claim')).toBeTruthy());
-    expect(selected(screen, 'Daily: Ready to claim')).toBe(true);
-    expect(selected(screen, 'Challenges: 1/3 done')).toBe(false);
+    await waitFor(() => expect(screen.getByLabelText('Reward: Ready to claim')).toBeTruthy());
+    expect(selected(screen, 'Reward: Ready to claim')).toBe(true);
+    expect(selected(screen, 'Quests: 1/3 today')).toBe(false);
   });
 
-  it('opens on the challenges once the reward is claimed, and switches tabs on a tap', async () => {
+  it('opens on the daily quests once the reward is claimed, and switches tabs on a tap', async () => {
     mockClaim.ready = false;
     const screen = render(<RewardsHub habits={[]} now={monday} />);
-    await waitFor(() => expect(screen.getByLabelText('Daily: Claimed today')).toBeTruthy());
-    expect(selected(screen, 'Challenges: 1/3 done')).toBe(true);
+    await waitFor(() => expect(screen.getByLabelText('Reward: Claimed today')).toBeTruthy());
+    expect(selected(screen, 'Quests: 1/3 today')).toBe(true);
 
-    fireEvent.press(screen.getByLabelText('Quests: 0/2 done'));
-    expect(selected(screen, 'Quests: 0/2 done')).toBe(true);
-    expect(selected(screen, 'Challenges: 1/3 done')).toBe(false);
-    expect(within(screen.getByLabelText('Quests: 0/2 done')).queryByTestId('quests-waiting-dot')).toBeNull();
+    fireEvent.press(screen.getByLabelText('Weekly: 0/2 this week'));
+    expect(selected(screen, 'Weekly: 0/2 this week')).toBe(true);
+    expect(selected(screen, 'Quests: 1/3 today')).toBe(false);
+    expect(within(screen.getByLabelText('Weekly: 0/2 this week')).queryByTestId('quests-waiting-dot')).toBeNull();
   });
 
-  it("keeps last week's bonus waiting on the Quests tab, with a red dot, after the recap was closed", async () => {
+  it("keeps last week's bonus waiting on the Weekly tab, with a red dot, after the recap was closed", async () => {
     mockClaim.ready = false;
     mockBonus.claimable = true;
     const screen = render(<><WeeklyRecapCard habits={[]} now={monday} /><RewardsHub habits={[]} now={monday} /></>);
@@ -91,10 +91,10 @@ describe('RewardsHub', () => {
     fireEvent.press(screen.getByLabelText('Hide the weekly recap'));
     expect(screen.queryByText('Your week in review')).toBeNull();
 
-    const tab = screen.getByLabelText('Quests: Bonus waiting');
+    const tab = screen.getByLabelText('Weekly: Bonus waiting');
     expect(within(tab).getByTestId('quests-waiting-dot')).toBeTruthy();
     fireEvent.press(tab);
-    expect(selected(screen, 'Quests: Bonus waiting')).toBe(true);
+    expect(selected(screen, 'Weekly: Bonus waiting')).toBe(true);
     expect(screen.getByText("Last week's bonus is waiting: +20")).toBeTruthy();
     expect(screen.getByLabelText("Claim last week's bonus of 20 tokens")).toBeTruthy();
   });
@@ -104,7 +104,7 @@ describe('RewardsHub', () => {
     mockBonus.next = { percent: 75, amount: 20, checkInsNeeded: 14, reachable: true };
     mockBuddy.buddy = { drop: { item: { id: 'drop-umbrella', slot: 'hand', name: 'Umbrella', emoji: '☔', cost: 150, stage: 'kid', drop: true }, weekStart: '2026-10-05', weekEnd: '2026-10-11', questsDone: 0, questsNeeded: 2, unlocked: false, owned: false } };
     const screen = render(<RewardsHub habits={[]} now={monday} />);
-    fireEvent.press(screen.getByLabelText('Quests: 0/2 done'));
+    fireEvent.press(screen.getByLabelText('Weekly: 0/2 this week'));
     expect(await screen.findByText('This week so far: 66% · 14 more check-ins reach 75% (+20)')).toBeTruthy();
     expect(screen.getByText("Unlocks this week's drop: ☔ Umbrella (0/2)")).toBeTruthy();
     expect(screen.queryByText(/bonus is waiting/)).toBeNull();
@@ -120,7 +120,7 @@ describe('RewardsHub', () => {
     mockBonus.claimable = true;
     mockBonus.next = { percent: 90, amount: 30, checkInsNeeded: 18, reachable: false };
     const screen = render(<RewardsHub habits={[]} now={monday} />);
-    fireEvent.press(await screen.findByLabelText('Quests: Bonus waiting'));
+    fireEvent.press(await screen.findByLabelText('Weekly: Bonus waiting'));
     expect(getWeeklyBonus).toHaveBeenCalledWith('2026-10-05');
     expect(screen.getByText("Last week's bonus is waiting: +20")).toBeTruthy();
     expect(screen.queryByText(/This week so far/)).toBeNull();

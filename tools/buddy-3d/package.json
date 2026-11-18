@@ -1,0 +1,13 @@
+{
+  "name": "habitai-buddy-3d",
+  "private": true,
+  "type": "module",
+  "description": "Renders Habi's 3D animations into frontend/assets/buddy. Not part of the app build.",
+  "scripts": {
+    "render": "node render.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0",
+    "three": "0.186.1"
+  }
+}

@@ -9,7 +9,7 @@ describe('help FAQ', () => {
   it('searches topics, questions and answers, ignoring case', () => {
     expect(searchFaq('   ')).toEqual([]);
     expect(searchFaq('STREAK').map((item) => item.question)).toEqual([
-      'What happens when I miss a day?', 'How do streaks work?', 'How do I earn points and badges?', 'How do I earn tokens?', 'What can I spend tokens on?',
+      'What happens when I miss a day?', 'How do streaks work?', 'How do I earn points and badges?', 'How do I earn tokens?', 'How do daily quests work?', 'What can I spend tokens on?',
       'Can I check in a day I missed?', 'Do my habits carry over to next week?',
     ]);
     expect(searchFaq('privacy & data').map((item) => item.section)).toEqual(['Privacy & Data', 'Privacy & Data', 'Privacy & Data']);

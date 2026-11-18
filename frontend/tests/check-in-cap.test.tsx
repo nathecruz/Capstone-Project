@@ -54,7 +54,7 @@ jest.mock('@/authentication/authService', () => ({
 }));
 jest.mock('@/hooks/use-buddy', () => ({ adjustBuddyCheckIns: jest.fn(), getCachedBuddy: jest.fn(() => null), reloadBuddy: jest.fn(), syncBuddyCheckIns: jest.fn() }));
 jest.mock('@/hooks/use-rewards', () => ({ loadRewards: jest.fn() }));
-jest.mock('@/hooks/use-daily-challenges', () => ({ getKnownChallenges: jest.fn(() => []), loadDailyChallenges: jest.fn(), publishDailyChallenges: jest.fn() }));
+jest.mock('@/hooks/use-daily-challenges', () => ({ getKnownChallenges: jest.fn(() => []), getKnownChestReward: jest.fn(() => 0), loadDailyChallenges: jest.fn(), publishDailyChallenges: jest.fn() }));
 jest.mock('@/hooks/app-state/use-habit-reminders', () => ({ useHabitReminders: () => undefined }));
 jest.mock('@/widgets/use-home-widget', () => ({ useHomeWidget: () => undefined }));
 
@@ -126,7 +126,7 @@ describe('the daily token limit', () => {
     await checkIn('read');
     expect(notices(shown())).toEqual([{
       id: `token-cap:${today}`, kind: 'info', icon: 'wallet-outline', title: 'Daily token limit reached',
-      message: 'You have earned tokens for 6 check-ins today. This one still counts for your streak, challenges and quests.',
+      message: 'You have earned tokens for 6 check-ins today. This one still counts for your streak and quests.',
     }]);
     // Habi does not grow on the tap, and its count is the server's (120 points / 20); the wallet is the server's.
     expect(buddyChanges()).toEqual([]);

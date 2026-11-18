@@ -1,7 +1,7 @@
-// Home's rewards as tabs: the daily reward, today's challenges and the weekly quests, one at a time
+// Home's rewards as tabs: the daily reward, today's quests and the weekly quests, one at a time
 // instead of three tall cards in a row. All three stay mounted (only the chosen one shows), so each
 // keeps its own data and live updates, and the tabs can say where something is waiting: the daily
-// reward, or last week's consistency bonus on the Quests tab. 'See all ways' opens the Tokens screen,
+// reward, or last week's consistency bonus on the Weekly tab. 'See all ways' opens the Tokens screen,
 // and 'Rewards Shop' is where the tokens are spent.
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -41,9 +41,9 @@ export function RewardsHub({ habits, now }: { habits: Habit[]; now: Date }) {
   const questsDone = quests.filter((quest) => quest.complete).length;
 
   const tabs: { id: Tab; label: string; icon: keyof typeof Ionicons.glyphMap; status: string; waiting?: boolean }[] = [
-    { id: 'daily', label: 'Daily', icon: 'gift', status: claimReady === true ? 'Ready to claim' : claimReady === false ? 'Claimed today' : '…', waiting: claimReady === true },
-    { id: 'challenges', label: 'Challenges', icon: 'trophy', status: challenges.length ? `${challengesDone}/${challenges.length} done` : 'Today' },
-    { id: 'quests', label: 'Quests', icon: 'flag', status: bonusWaiting ? 'Bonus waiting' : quests.length ? `${questsDone}/${quests.length} done` : 'This week', waiting: bonusWaiting },
+    { id: 'daily', label: 'Reward', icon: 'gift', status: claimReady === true ? 'Ready to claim' : claimReady === false ? 'Claimed today' : '…', waiting: claimReady === true },
+    { id: 'challenges', label: 'Quests', icon: 'trophy', status: !challenges.length ? 'Today' : challengesDone === challenges.length ? 'All done!' : `${challengesDone}/${challenges.length} today` },
+    { id: 'quests', label: 'Weekly', icon: 'flag', status: bonusWaiting ? 'Bonus waiting' : quests.length ? `${questsDone}/${quests.length} this week` : 'This week', waiting: bonusWaiting },
   ];
 
   return (
@@ -81,7 +81,7 @@ export function RewardsHub({ habits, now }: { habits: Habit[]; now: Date }) {
         })}
       </View>
       <View style={tab === 'daily' ? null : styles.hidden}><DailyClaimCard onReadyChange={onReadyChange} /></View>
-      <View style={tab === 'challenges' ? null : styles.hidden}><DailyChallengesCard habitCount={habits.length} /></View>
+      <View style={tab === 'challenges' ? null : styles.hidden}><DailyChallengesCard habits={habits} now={now} /></View>
       <View style={tab === 'quests' ? null : styles.hidden}><WeeklyQuestsCard habits={habits} now={now} /></View>
     </View>
   );

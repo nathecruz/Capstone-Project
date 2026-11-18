@@ -77,7 +77,7 @@ export function initials(name: string) {
 const TOKEN_KIND_LABELS: Record<TokenKind, string> = {
   'check-in': 'Check-ins',
   'daily-claim': 'Daily claim',
-  challenge: 'Daily challenges',
+  challenge: 'Daily quests',
   quest: 'Weekly quests',
   mystery: 'Mystery box',
   streak: 'Streak milestones',

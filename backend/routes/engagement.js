@@ -9,7 +9,7 @@ import { refreshSnapshot } from '../services/app-state-store.js';
 import { getBuddyGifts, GIFTS_PER_DAY, sendBuddyGift } from '../services/buddy-gifts.js';
 import { buyBuddyItem, feedTreat, getBuddy, isBuddyDrop, saveBuddy } from '../services/buddy.js';
 import { setCheckIn } from '../services/check-ins.js';
-import { getDailyChallenges } from '../services/daily-challenges.js';
+import { getDailyQuests } from '../services/daily-challenges.js';
 import { claimDaily, getDailyClaim } from '../services/daily-claims.js';
 import { getLiveVersions } from '../services/live.js';
 import { openMysteryBox } from '../services/mystery-box.js';
@@ -145,14 +145,15 @@ export default function registerEngagementRoutes(app) {
     response.json({ ok: true, ...live });
   });
 
-  // Today's three challenges and their progress (paid by each check-in).
+  // Today's three daily quests and their progress (paid by each check-in), with the quest chest
+  // for finishing all of them, the quest streak and when they reset.
   app.get('/api/daily-challenges', async (request, response) => {
     const session = await requireAuth(request, response);
     if (!session) return;
     const day = await queryDay(request, session.userId);
     if (!day) return response.status(400).json({ ok: false, message: 'Send your today and time zone.' });
-    if (!day.ok) return response.status(409).json(dayClosedBody(day, 'That day is over. Your challenges follow your today.'));
-    response.json({ ok: true, challenges: await getDailyChallenges({ query }, session.userId, day.today, day.timeZone) });
+    if (!day.ok) return response.status(409).json(dayClosedBody(day, 'That day is over. Your quests follow your today.'));
+    response.json({ ok: true, ...await getDailyQuests({ query }, session.userId, day.today, day.timeZone) });
   });
 
   // The daily claim calendar, and claiming today's reward (once a day).
